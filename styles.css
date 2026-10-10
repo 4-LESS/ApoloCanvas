@@ -1,0 +1,1076 @@
+/*
+ * Apolo Canvas 2.0 – Design System (Samsung Notes aesthetic + Obsidian Flexibility)
+ * Tailored for tablet usage (Galaxy Tab S10 horizontal) with 40-44px touch targets.
+ */
+
+:root {
+  --apolo-bg: var(--background-primary, #ffffff);
+  --apolo-bg-alt: var(--background-secondary, #f2f3f5);
+  --apolo-border: var(--background-modifier-border, #dde0e6);
+  --apolo-text: var(--text-normal, #1e2330);
+  --apolo-text-muted: var(--text-muted, #6b7280);
+  --apolo-accent: var(--interactive-accent, #2f6bff);
+  --apolo-accent-hover: var(--interactive-accent-hover, #1f4fd8);
+  --apolo-accent-light: rgba(47, 107, 255, 0.12);
+  --apolo-accent-subtle: rgba(47, 107, 255, 0.06);
+  --apolo-purple: #6c3fd1;
+  --apolo-purple-text: #5b2fc0;
+  --apolo-purple-light: rgba(108, 63, 209, 0.14);
+  --apolo-danger: #c92a2a;
+  --apolo-danger-light: rgba(201, 42, 42, 0.12);
+  --apolo-amber: #d97706;
+  --apolo-amber-bg: #fff1cc;
+  --apolo-shadow-sm: 0 1px 3px rgba(20, 30, 60, 0.12);
+  --apolo-shadow-md: 0 8px 28px rgba(20, 30, 60, 0.18);
+  --apolo-shadow-lg: 0 16px 48px rgba(20, 30, 60, 0.24);
+}
+
+.theme-dark {
+  --apolo-bg: var(--background-primary, #1e2330);
+  --apolo-bg-alt: var(--background-secondary, #161922);
+  --apolo-border: var(--background-modifier-border, #2d3446);
+  --apolo-text: var(--text-normal, #f3f4f6);
+  --apolo-text-muted: var(--text-muted, #9ca3af);
+  --apolo-accent: var(--interactive-accent, #3b82f6);
+  --apolo-accent-hover: var(--interactive-accent-hover, #60a5fa);
+  --apolo-accent-light: rgba(59, 130, 246, 0.2);
+  --apolo-accent-subtle: rgba(59, 130, 246, 0.12);
+  --apolo-purple: #a98bff;
+  --apolo-purple-text: #c4b5fd;
+  --apolo-purple-light: rgba(169, 139, 255, 0.22);
+  --apolo-danger: #ff7a7a;
+  --apolo-danger-light: rgba(255, 122, 122, 0.2);
+  --apolo-amber: #ffd15c;
+  --apolo-amber-bg: #4a3a12;
+  --apolo-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --apolo-shadow-md: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --apolo-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.65);
+}
+
+/* Layer & Canvas Surfaces */
+.apolo-canvas-layer {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 6;
+  overflow: visible;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.apolo-canvas-surface {
+  position: absolute;
+  inset: 0 auto auto 0;
+  display: block;
+}
+
+.apolo-canvas-dry { pointer-events: none; }
+.apolo-canvas-wet { pointer-events: auto; }
+
+.apolo-canvas-readonly,
+.apolo-canvas-layer.is-readonly,
+.apolo-canvas-layer.is-readonly .apolo-canvas-surface,
+.apolo-canvas-layer.is-readonly .apolo-canvas-wet,
+.apolo-canvas-layer.is-readonly .apolo-canvas-dry,
+.apolo-canvas-layer.is-pen-disabled,
+.apolo-canvas-layer.is-pen-disabled .apolo-canvas-surface,
+.apolo-canvas-layer.is-pen-disabled .apolo-canvas-wet,
+.apolo-canvas-layer.is-pen-disabled .apolo-canvas-dry {
+  pointer-events: none !important;
+}
+
+/* ==========================================================================
+   Main Floating Toolbar (8 Snap Positions: 4 corners + 4 edge centers)
+   ========================================================================== */
+.apolo-canvas-toolbar {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 58px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  background: var(--apolo-bg);
+  border: 1px solid var(--apolo-border);
+  border-radius: 29px;
+  box-shadow: var(--apolo-shadow-md);
+  color: var(--apolo-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.apolo-canvas-toolbar * {
+  box-sizing: border-box;
+}
+
+.apolo-canvas-toolbar.is-vertical {
+  flex-direction: column !important;
+  width: 58px !important;
+  height: auto !important;
+  padding: 8px 10px !important;
+  border-radius: 29px !important;
+}
+
+.apolo-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.apolo-canvas-toolbar.is-vertical .apolo-toolbar-group {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.apolo-toolbar-divider {
+  width: 1px;
+  height: 26px;
+  background: var(--apolo-border);
+  margin: 0 6px;
+  flex: 0 0 auto;
+}
+
+.apolo-canvas-toolbar.is-vertical .apolo-toolbar-divider {
+  width: 22px;
+  height: 1px;
+  margin: 4px 0;
+}
+
+/* Base button styling overrides for Obsidian theme safety */
+.apolo-canvas-toolbar button,
+.apolo-toolbar-btn {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  color: var(--apolo-text) !important;
+  font-family: inherit !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
+  position: relative !important;
+  flex-shrink: 0 !important;
+  transition: background-color 0.12s ease, transform 0.1s ease !important;
+}
+
+.apolo-canvas-toolbar.is-vertical .apolo-toolbar-btn {
+  width: 36px !important;
+  height: 36px !important;
+}
+
+.apolo-toolbar-btn:hover {
+  background: var(--apolo-bg-alt) !important;
+}
+
+.apolo-toolbar-btn:active {
+  transform: scale(0.93) !important;
+}
+
+.apolo-toolbar-btn.is-disabled {
+  opacity: 0.35 !important;
+  cursor: default !important;
+  pointer-events: none !important;
+}
+
+/* Grip handle */
+.apolo-toolbar-grip {
+  width: 22px !important;
+  height: 42px !important;
+  cursor: grab !important;
+  touch-action: none !important;
+  color: var(--apolo-text-muted) !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.apolo-canvas-toolbar.is-vertical .apolo-toolbar-grip {
+  width: 36px !important;
+  height: 20px !important;
+}
+
+.apolo-toolbar-grip:active {
+  cursor: grabbing !important;
+}
+
+/* Keyboard Mode Button: active = pen OFF = highlighted in amber */
+.apolo-btn-keyboard.is-active {
+  background: var(--apolo-amber-bg) !important;
+  color: var(--apolo-amber) !important;
+  box-shadow: 0 0 0 1px var(--apolo-amber) !important;
+}
+
+/* Tool Buttons & Triangle indicator on active */
+.apolo-tool-btn.is-active {
+  background: var(--apolo-accent-light) !important;
+  color: var(--apolo-accent) !important;
+}
+
+.apolo-tool-triangle {
+  display: none;
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-bottom: 7px solid var(--apolo-accent);
+}
+
+.apolo-tool-btn.is-active .apolo-tool-triangle {
+  display: block;
+}
+
+/* 4 Favorites Chips */
+.apolo-fav-chip {
+  width: 38px !important;
+  height: 42px !important;
+}
+
+.apolo-canvas-toolbar.is-vertical .apolo-fav-chip {
+  width: 34px !important;
+  height: 34px !important;
+}
+
+.apolo-fav-dot {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.apolo-fav-chip.is-active .apolo-fav-dot {
+  box-shadow: 0 0 0 2px var(--apolo-bg), 0 0 0 4px var(--apolo-accent) !important;
+  transform: scale(1.05);
+}
+
+/* Thickness preset buttons (fino, medio, grueso) */
+.apolo-thickness-btn {
+  width: 36px !important;
+  height: 42px !important;
+}
+
+.apolo-canvas-toolbar.is-vertical .apolo-thickness-btn {
+  width: 32px !important;
+  height: 32px !important;
+}
+
+.apolo-thickness-btn.is-active {
+  background: var(--apolo-accent-light) !important;
+}
+
+.apolo-thickness-btn.is-dimmed {
+  opacity: 0.35 !important;
+  pointer-events: none !important;
+}
+
+.apolo-thickness-dot {
+  display: block;
+  border-radius: 50%;
+  transition: all 0.12s ease;
+}
+
+.apolo-thick-fine .apolo-thickness-dot { width: 5px; height: 5px; }
+.apolo-thick-medium .apolo-thickness-dot { width: 9px; height: 9px; }
+.apolo-thick-thick .apolo-thickness-dot { width: 14px; height: 14px; }
+
+/* Grid button */
+.apolo-grid-btn.is-active {
+  background: var(--apolo-accent-light) !important;
+  color: var(--apolo-accent) !important;
+}
+
+/* Snap Guide Dots during toolbar drag */
+.apolo-snap-dots-container {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+}
+
+.apolo-snap-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--apolo-border);
+  transform: translate(-50%, -50%);
+  opacity: 0.8;
+  transition: transform 0.15s ease, background-color 0.15s ease, width 0.15s ease, height 0.15s ease;
+}
+
+.apolo-snap-dot.is-nearest {
+  width: 22px;
+  height: 22px;
+  background: var(--apolo-accent);
+  opacity: 0.95;
+  box-shadow: 0 0 14px var(--apolo-accent);
+}
+
+/* ==========================================================================
+   Tool Estuche Popover (Pencil Case Card)
+   ========================================================================== */
+.apolo-popover-panel {
+  position: fixed;
+  z-index: 1002;
+  background: var(--apolo-bg);
+  border: 1px solid var(--apolo-border);
+  box-shadow: var(--apolo-shadow-lg);
+  color: var(--apolo-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  box-sizing: border-box;
+}
+
+.apolo-tool-estuche {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  border-radius: 22px;
+  padding: 16px 18px 18px;
+  overflow-y: auto;
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+}
+
+.apolo-estuche-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.apolo-estuche-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.apolo-estuche-icon {
+  color: var(--apolo-accent);
+}
+
+.apolo-estuche-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--apolo-text);
+  margin: 0;
+}
+
+.apolo-estuche-close-btn {
+  background: transparent !important;
+  border: none !important;
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 18px !important;
+  cursor: pointer !important;
+  color: var(--apolo-text-muted) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+}
+
+.apolo-estuche-close-btn:hover {
+  background: var(--apolo-bg-alt) !important;
+  color: var(--apolo-text) !important;
+}
+
+/* Profiles Grid */
+.apolo-profiles-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.apolo-profile-card {
+  text-align: left;
+  border: 1px solid var(--apolo-border);
+  background: var(--apolo-bg);
+  border-radius: 14px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.12s ease;
+  min-height: 80px;
+}
+
+.apolo-profile-card:hover {
+  background: var(--apolo-bg-alt);
+}
+
+.apolo-profile-card.is-active {
+  border: 2px solid var(--apolo-accent);
+  background: var(--apolo-accent-subtle);
+  padding: 9px 11px;
+}
+
+.apolo-profile-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--apolo-text);
+}
+
+.apolo-profile-wave {
+  width: 100%;
+  height: 38px;
+}
+
+/* Shapes Row (5 icons without text) */
+.apolo-shapes-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.apolo-shape-icon-btn {
+  height: 60px;
+  border-radius: 14px;
+  border: 1px solid var(--apolo-border);
+  background: var(--apolo-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--apolo-text);
+  transition: all 0.12s ease;
+  padding: 0;
+}
+
+.apolo-shape-icon-btn:hover {
+  background: var(--apolo-bg-alt);
+}
+
+.apolo-shape-icon-btn.is-active {
+  border: 2px solid var(--apolo-accent);
+  background: var(--apolo-accent-subtle);
+  color: var(--apolo-accent);
+}
+
+/* Eraser Modes */
+.apolo-eraser-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.apolo-eraser-mode-card {
+  text-align: left;
+  border: 1px solid var(--apolo-border);
+  background: var(--apolo-bg);
+  border-radius: 14px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  min-height: 70px;
+}
+
+.apolo-eraser-mode-card:hover {
+  background: var(--apolo-bg-alt);
+}
+
+.apolo-eraser-mode-card.is-active {
+  border: 2px solid var(--apolo-accent);
+  background: var(--apolo-accent-subtle);
+}
+
+.apolo-eraser-mode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--apolo-text);
+}
+
+.apolo-eraser-mode-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--apolo-text-muted);
+}
+
+.apolo-eraser-size-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--apolo-border);
+}
+
+.apolo-eraser-size-wrap {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.apolo-eraser-preview-dot {
+  border-radius: 50%;
+  border: 2px solid var(--apolo-text);
+  box-sizing: border-box;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Sliders */
+.apolo-sliders-list {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.apolo-slider-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.apolo-slider-label {
+  width: 140px;
+  font-weight: 600;
+  color: var(--apolo-text);
+  flex-shrink: 0;
+}
+
+.apolo-slider-track-wrap {
+  flex: 1;
+  position: relative;
+  height: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.apolo-slider-input {
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  accent-color: var(--apolo-accent);
+  cursor: pointer;
+  background: var(--apolo-border);
+  border-radius: 3px;
+  outline: none;
+}
+
+.apolo-slider-value {
+  width: 48px;
+  text-align: right;
+  color: var(--apolo-text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.apolo-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--apolo-text);
+  margin-top: 14px;
+}
+
+/* Colors & HEX */
+.apolo-colors-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.apolo-palette-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  transition: transform 0.12s ease;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+}
+
+.apolo-palette-swatch:hover {
+  transform: scale(1.1);
+}
+
+.apolo-palette-swatch.is-active {
+  box-shadow: 0 0 0 2px var(--apolo-bg), 0 0 0 4px var(--apolo-accent) !important;
+}
+
+.apolo-add-color-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--apolo-bg);
+  border: 1.5px dashed var(--apolo-text-muted);
+  color: var(--apolo-text-muted);
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.apolo-hex-group {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.apolo-hex-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--apolo-text);
+}
+
+.apolo-hex-input {
+  width: 110px;
+  height: 36px;
+  border: 1px solid var(--apolo-border);
+  border-radius: 10px;
+  padding: 0 10px;
+  font-size: 14px;
+  color: var(--apolo-text);
+  background: var(--apolo-bg);
+  box-sizing: border-box;
+  outline: none;
+}
+
+/* Favorites section inside Estuche */
+.apolo-favorites-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--apolo-border);
+}
+
+.apolo-favorites-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apolo-favorite-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.apolo-fav-card-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+}
+
+.apolo-favorite-row-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--apolo-text);
+}
+
+.apolo-fav-action-btn {
+  border: 1px solid var(--apolo-border);
+  background: transparent;
+  color: var(--apolo-text);
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.apolo-fav-action-btn:hover {
+  background: var(--apolo-bg-alt);
+}
+
+/* Toggles */
+.apolo-toggle-row {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.apolo-toggle-row-text {
+  flex: 1;
+}
+
+.apolo-toggle-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--apolo-text);
+}
+
+.apolo-toggle-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--apolo-text-muted);
+}
+
+.apolo-switch-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.apolo-switch-track {
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--apolo-accent);
+  position: relative;
+  display: inline-block;
+  transition: background-color 0.2s ease;
+}
+
+.apolo-switch-btn.is-off .apolo-switch-track {
+  background: #9ca3af;
+}
+
+.theme-dark .apolo-switch-btn.is-off .apolo-switch-track {
+  background: #4b5563;
+}
+
+.apolo-switch-thumb {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s ease;
+}
+
+.apolo-switch-btn.is-off .apolo-switch-thumb {
+  transform: translateX(-18px);
+}
+
+/* ==========================================================================
+   Lasso Floating Selection Bar, Anchor Pill & Style Popover
+   ========================================================================== */
+.apolo-lasso-menu-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1001;
+}
+
+.apolo-selection-floating-menu {
+  position: fixed;
+  z-index: 1002;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--apolo-bg);
+  border: 1px solid var(--apolo-border);
+  border-radius: 24px;
+  box-shadow: var(--apolo-shadow-md);
+  padding: 5px 6px;
+  box-sizing: border-box;
+}
+
+.apolo-selection-action-btn {
+  border: none !important;
+  background: transparent !important;
+  height: 36px !important;
+  padding: 0 12px !important;
+  border-radius: 18px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: var(--apolo-text) !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  transition: background-color 0.12s ease !important;
+}
+
+.apolo-selection-action-btn:hover {
+  background: var(--apolo-bg-alt) !important;
+}
+
+.apolo-selection-action-btn.is-accent-link {
+  background: var(--apolo-purple-light) !important;
+  color: var(--apolo-purple) !important;
+  font-weight: 700 !important;
+}
+
+.apolo-selection-action-btn.is-danger {
+  color: var(--apolo-danger) !important;
+}
+
+.apolo-anchor-pill {
+  position: fixed;
+  z-index: 1002;
+  pointer-events: none;
+  background: var(--apolo-bg-alt);
+  color: var(--apolo-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  border-radius: 10px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.apolo-selection-style-popover {
+  position: fixed;
+  z-index: 1003;
+  pointer-events: auto;
+  width: 280px;
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.apolo-chips-row {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.apolo-style-chip {
+  border: 1px solid var(--apolo-border);
+  background: transparent;
+  color: var(--apolo-text);
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 17px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.apolo-style-chip:hover {
+  background: var(--apolo-bg-alt);
+}
+
+.apolo-selection-link-card {
+  position: fixed;
+  z-index: 1002;
+  pointer-events: auto;
+  width: 300px;
+  border-radius: 16px;
+  padding: 12px 14px;
+}
+
+.apolo-link-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--apolo-purple);
+}
+
+.apolo-link-card-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--apolo-text-muted);
+}
+
+.apolo-link-card-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.apolo-btn-primary {
+  border: none;
+  background: var(--apolo-accent);
+  color: #ffffff;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.apolo-btn-ghost {
+  border: 1px solid var(--apolo-border);
+  background: transparent;
+  color: var(--apolo-text);
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   More Menu Popover
+   ========================================================================== */
+.apolo-more-menu-popover {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  border-radius: 22px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.apolo-more-actions-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.apolo-more-item-btn {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.apolo-more-item-btn:hover {
+  background: var(--apolo-bg-alt);
+}
+
+.apolo-more-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--apolo-text);
+}
+
+.apolo-more-item-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--apolo-text-muted);
+}
+
+.apolo-more-settings-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ==========================================================================
+   Zoom Pill Component
+   ========================================================================== */
+.apolo-zoom-pill {
+  position: fixed;
+  z-index: 998;
+  right: 20px;
+  bottom: 40px;
+  display: flex;
+  align-items: center;
+  background: var(--apolo-bg);
+  border: 1px solid var(--apolo-border);
+  border-radius: 24px;
+  box-shadow: var(--apolo-shadow-md);
+  padding: 2px 6px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.apolo-zoom-btn {
+  border: none !important;
+  background: transparent !important;
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 19px !important;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  color: var(--apolo-text) !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+}
+
+.apolo-zoom-btn:hover {
+  background: var(--apolo-bg-alt) !important;
+}
+
+.apolo-zoom-label {
+  min-width: 48px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--apolo-text);
+  padding: 0 4px;
+}
+
+.apolo-zoom-fit-btn {
+  border: 1px solid var(--apolo-border);
+  background: transparent;
+  color: var(--apolo-text);
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: 4px;
+}
+
+.apolo-zoom-fit-btn:hover {
+  background: var(--apolo-bg-alt);
+}
+
+/* ==========================================================================
+   Toast Notification Component
+   ========================================================================== */
+.apolo-toast {
+  position: fixed;
+  z-index: 1005;
+  left: 50%;
+  bottom: 80px;
+  transform: translateX(-50%) translateY(20px);
+  max-width: min(600px, calc(100vw - 32px));
+  background: var(--apolo-text);
+  color: var(--apolo-bg);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  border-radius: 14px;
+  padding: 10px 18px;
+  box-shadow: var(--apolo-shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.apolo-toast.is-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
