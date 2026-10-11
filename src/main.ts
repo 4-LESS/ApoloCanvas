@@ -104,6 +104,46 @@ export default class ApoloCanvasPlugin extends Plugin {
             if (sectionInfo) {
                 el.dataset.apoloLineStart = String(sectionInfo.lineStart);
                 el.dataset.apoloLineEnd = String(sectionInfo.lineEnd);
+            } else {
+                // Fallback: check closest ancestor with line data
+                const parent = el.closest<HTMLElement>('[data-apolo-line-start]');
+                if (parent) {
+                    el.dataset.apoloLineStart = parent.dataset.apoloLineStart;
+                    el.dataset.apoloLineEnd = parent.dataset.apoloLineEnd;
+                } else {
+                    // Fallback: check nearest preceding sibling with line data
+                    let prev = el.previousElementSibling;
+                    let found = false;
+                    while (prev) {
+                        if (prev instanceof HTMLElement && prev.dataset.apoloLineEnd) {
+                            const end = parseInt(prev.dataset.apoloLineEnd, 10);
+                            el.dataset.apoloLineStart = String(end + 1);
+                            el.dataset.apoloLineEnd = String(end + 1);
+                            found = true;
+                            break;
+                        }
+                        prev = prev.previousElementSibling;
+                    }
+                    if (!found) {
+                        // Fallback: check nearest following sibling with line data
+                        let next = el.nextElementSibling;
+                        while (next) {
+                            if (next instanceof HTMLElement && next.dataset.apoloLineStart) {
+                                const start = parseInt(next.dataset.apoloLineStart, 10);
+                                const approx = String(Math.max(0, start - 1));
+                                el.dataset.apoloLineStart = approx;
+                                el.dataset.apoloLineEnd = approx;
+                                break;
+                            }
+                            next = next.nextElementSibling;
+                        }
+                    }
+                }
+            }
+
+            // Notify active controller on lazy section rendering in Reading mode
+            if (this.mountedMode === 'preview') {
+                this.controller?.onPreviewSectionRendered();
             }
         });
 

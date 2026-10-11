@@ -168,6 +168,7 @@ export class CanvasController {
 
     private lastSavedAt = Date.now();
     private spacerDebounceTimer: number | null = null;
+    private previewReanchorTimer: number | null = null;
     private pendingSpaceMutations: SpaceMutation[] = [];
     private destroyed = false;
 
@@ -778,6 +779,10 @@ export class CanvasController {
             window.removeEventListener('wheel', this.scrollHandler, { capture: true });
         }
         if (this.reanchorTimer !== null) window.clearTimeout(this.reanchorTimer);
+        if (this.previewReanchorTimer !== null) {
+            window.clearTimeout(this.previewReanchorTimer);
+            this.previewReanchorTimer = null;
+        }
         if (this.spacerDebounceTimer !== null) {
             window.clearTimeout(this.spacerDebounceTimer);
             this.spacerDebounceTimer = null;
@@ -1059,10 +1064,21 @@ export class CanvasController {
 
     private getContentGeometry(): { left: number; width: number } {
         const scrollerRect = this.scroller.getBoundingClientRect();
-        const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content')
-            ?? this.scroller.querySelector<HTMLElement>('.markdown-rendered')
-            ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer')
-            ?? this.scroller.querySelector<HTMLElement>('.cm-sizer');
+        const candidateSelectors = [
+            '.cm-content',
+            '.markdown-preview-section',
+            '.markdown-rendered',
+            '.markdown-preview-sizer',
+            '.cm-sizer',
+        ];
+        let contentEl: HTMLElement | null = null;
+        for (const sel of candidateSelectors) {
+            const el = this.scroller.querySelector<HTMLElement>(sel);
+            if (el && el.offsetWidth > 0) {
+                contentEl = el;
+                break;
+            }
+        }
         if (!contentEl) {
             return { left: 0, width: Math.max(1, this.scroller.clientWidth / this.zoom) };
         }
@@ -1091,18 +1107,66 @@ export class CanvasController {
             return 0;
         }
 
+        // 2. Reading mode (preview) anchor resolution
         if (this.options.readonly) {
             const lineMatch = blockId.match(/^line:(\d+)$/);
             if (lineMatch) {
                 const targetLine = parseInt(lineMatch[1], 10);
                 const rendered = Array.from(this.scroller.querySelectorAll<HTMLElement>('[data-apolo-line-start]'));
-                for (const el of rendered) {
-                    const start = parseInt(el.dataset.apoloLineStart || '0', 10);
-                    const end = parseInt(el.dataset.apoloLineEnd || '0', 10);
-                    if (targetLine >= start && targetLine <= end) {
-                        const top = (el.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                        this.blockPositionCache.set(blockId, top);
-                        return top;
+
+                if (rendered.length > 0) {
+                    // Match by anchorText if available
+                    if (anchorText) {
+                        for (const el of rendered) {
+                            if (el.textContent && el.textContent.includes(anchorText)) {
+                                const rect = el.getBoundingClientRect();
+                                const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                                this.blockPositionCache.set(blockId, top);
+                                return top;
+                            }
+                        }
+                    }
+
+                    // Exact match within rendered block with fractional line interpolation
+                    for (const el of rendered) {
+                        const start = parseInt(el.dataset.apoloLineStart || '0', 10);
+                        const end = parseInt(el.dataset.apoloLineEnd || '0', 10);
+                        if (targetLine >= start && targetLine <= end) {
+                            const rect = el.getBoundingClientRect();
+                            const lineOffset = targetLine - start;
+                            const totalLinesInBlock = Math.max(1, end - start + 1);
+                            const lineFraction = lineOffset / totalLinesInBlock;
+                            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom + (rect.height / this.zoom) * lineFraction;
+                            this.blockPositionCache.set(blockId, top);
+                            return top;
+                        }
+                    }
+
+                    // Fallback: nearest rendered block if target section is lazy-unmounted
+                    let closestEl = rendered[0];
+                    let minDistance = Number.POSITIVE_INFINITY;
+                    let closestLine = 0;
+
+                    for (const el of rendered) {
+                        const start = parseInt(el.dataset.apoloLineStart || '0', 10);
+                        const end = parseInt(el.dataset.apoloLineEnd || '0', 10);
+                        const dist = targetLine < start ? start - targetLine : targetLine > end ? targetLine - end : 0;
+                        if (dist < minDistance) {
+                            minDistance = dist;
+                            closestEl = el;
+                            closestLine = targetLine < start ? start : end;
+                        }
+                    }
+
+                    if (closestEl) {
+                        const rect = closestEl.getBoundingClientRect();
+                        const closestTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                        const blockLineCount = Math.max(1, (parseInt(closestEl.dataset.apoloLineEnd || '0') - parseInt(closestEl.dataset.apoloLineStart || '0') + 1));
+                        const avgLineHeight = Math.max(16, (rect.height / this.zoom) / blockLineCount);
+                        const deltaLines = targetLine - closestLine;
+                        const estimatedTop = closestTop + deltaLines * avgLineHeight;
+                        this.blockPositionCache.set(blockId, estimatedTop);
+                        return estimatedTop;
                     }
                 }
             }
@@ -1142,7 +1206,7 @@ export class CanvasController {
         if (lineMatch) {
             const lineNum = parseInt(lineMatch[1], 10);
             const lineCount = Math.max(1, this.editor ? this.editor.lineCount() : 1);
-            const avgLineHeight = this.scroller.scrollHeight / lineCount;
+            const avgLineHeight = this.editor ? (this.scroller.scrollHeight / lineCount) : 26;
             return lineNum * avgLineHeight;
         }
 
@@ -1744,6 +1808,22 @@ export class CanvasController {
             this.persistSoon();
         }
         this.schedulePaint();
+    }
+
+    onPreviewSectionRendered(): void {
+        if (!this.options.readonly) return;
+        this.schedulePreviewReanchor();
+    }
+
+    private schedulePreviewReanchor(): void {
+        if (!this.options.readonly || this.document.elements.length === 0) return;
+        if (this.previewReanchorTimer !== null) {
+            window.clearTimeout(this.previewReanchorTimer);
+        }
+        this.previewReanchorTimer = window.setTimeout(() => {
+            this.previewReanchorTimer = null;
+            this.reanchorPreview();
+        }, 50);
     }
 
     private reanchorPreview(): void {
