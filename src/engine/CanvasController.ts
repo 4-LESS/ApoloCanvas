@@ -96,12 +96,15 @@ export class CanvasController {
     private readonly future: string[] = [];
     private readonly touches = new Map<number, TouchPoint>();
     private singleTouchStartCoords: { x: number; y: number; time: number } | null = null;
+    private lastSingleTouch: { x: number; y: number } | null = null;
+    private singleTouchPanned = false;
 
     // Scroller properties
     private readonly originalScrollerPosition: string;
     private readonly originalScrollerOverflow: string;
     private readonly originalScrollerUserSelect: string;
     private resizeObserver: ResizeObserver | null = null;
+    private sizerObserver: ResizeObserver | null = null;
     private scrollHandler: ((event?: Event) => void) | null = null;
     private lastScrollTop = -1;
     private lastScrollLeft = -1;
@@ -147,10 +150,9 @@ export class CanvasController {
     private readonly predictedPoint: Point = { x: 0, y: 0, pressure: 0, time: 0 };
     private hasPrediction = false;
 
-    // Zoom & Pan
-    private zoom = 1;
-    private panX = 0;
-    private panY = 0;
+    // Zoom & Viewport State (Single Source of Truth: {zoom, scrollLeft, scrollTop})
+    private zoom = 1.0;
+    private lastAppliedZoom = -1;
     private gestureDistance = 0;
     private gestureZoom = 1;
     private gestureWorldX = 0;
@@ -271,6 +273,15 @@ export class CanvasController {
             this.lassoMenu?.updateViewport(this.zoom, this.currentScrollLeft, this.currentScrollTop);
         });
         this.resizeObserver.observe(scroller);
+
+        this.sizerObserver = new ResizeObserver(() => {
+            if (this.zoom > 1.0) {
+                this.applyContentZoom();
+            }
+            this.renderDirty = true;
+            this.schedulePaint();
+        });
+        this.observeSizer();
 
         this.rebuildIndex();
         this.positionLayer();
@@ -492,32 +503,53 @@ export class CanvasController {
             ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
     }
 
+    private observeSizer(): void {
+        const sizer = this.getSizerElement();
+        if (sizer && this.sizerObserver) {
+            this.sizerObserver.disconnect();
+            this.sizerObserver.observe(sizer);
+        }
+    }
+
     private applyContentZoom(): void {
         const sizer = this.getSizerElement();
         if (!sizer) return;
 
         if (this.zoom <= 1.0) {
-            sizer.style.transform = '';
-            sizer.style.transformOrigin = '';
-            sizer.style.marginBottom = '';
-            sizer.style.marginRight = '';
+            if (this.lastAppliedZoom !== 1.0) {
+                sizer.style.transform = '';
+                sizer.style.transformOrigin = '';
+                sizer.style.marginBottom = '';
+                sizer.style.marginRight = '';
+                this.lastAppliedZoom = 1.0;
+            }
         } else {
-            sizer.style.transform = `scale(${this.zoom})`;
-            sizer.style.transformOrigin = '0 0';
+            const transformStr = `scale(${this.zoom})`;
+            if (sizer.style.transform !== transformStr) {
+                sizer.style.transform = transformStr;
+                sizer.style.transformOrigin = '0 0';
+            }
             const baseHeight = sizer.offsetHeight;
             const baseWidth = sizer.offsetWidth;
-            sizer.style.marginBottom = `${Math.round(baseHeight * (this.zoom - 1))}px`;
-            sizer.style.marginRight = `${Math.round(baseWidth * (this.zoom - 1))}px`;
+            const mb = `${Math.round(baseHeight * (this.zoom - 1))}px`;
+            const mr = `${Math.round(baseWidth * (this.zoom - 1))}px`;
+            if (sizer.style.marginBottom !== mb) sizer.style.marginBottom = mb;
+            if (sizer.style.marginRight !== mr) sizer.style.marginRight = mr;
+
+            // Pan horizontal y vertical limitado estrictamente a los bordes
+            const maxScrollX = Math.max(0, Math.round(baseWidth * this.zoom - this.scroller.clientWidth));
+            const maxScrollY = Math.max(0, Math.round(baseHeight * this.zoom - this.scroller.clientHeight));
+            if (this.scroller.scrollLeft > maxScrollX) this.scroller.scrollLeft = maxScrollX;
+            if (this.scroller.scrollTop > maxScrollY) this.scroller.scrollTop = maxScrollY;
+
+            this.lastAppliedZoom = this.zoom;
         }
     }
 
     private setZoomLevel(newZoom: number): void {
-        this.zoom = Math.max(1.0, Math.min(3.0, newZoom));
-        if (this.zoom <= 1.0) {
-            this.zoom = 1.0;
-            this.panX = 0;
-            this.panY = 0;
-        }
+        const clampedZoom = Math.max(1.0, Math.min(3.0, newZoom));
+        if (Math.abs(clampedZoom - this.zoom) < 0.001) return;
+        this.zoom = clampedZoom;
         this.applyContentZoom();
         this.zoomPill?.setZoom(this.zoom);
         this.options.eventBus?.emit('zoom:changed', this.zoom);
@@ -531,7 +563,29 @@ export class CanvasController {
         const currentIdx = levels.findIndex(lvl => Math.abs(lvl - this.zoom) < 0.1);
         let nextIdx = (currentIdx === -1 ? 0 : currentIdx) + dir;
         nextIdx = Math.max(0, Math.min(levels.length - 1, nextIdx));
-        this.setZoomLevel(levels[nextIdx]);
+        const newZoom = levels[nextIdx];
+        if (Math.abs(newZoom - this.zoom) < 0.01) return;
+
+        const oldZoom = this.zoom;
+        const centerX = this.scroller.clientWidth / 2;
+        const centerY = this.scroller.clientHeight / 2;
+        const worldX = (centerX + this.currentScrollLeft) / oldZoom;
+        const worldY = (centerY + this.currentScrollTop) / oldZoom;
+
+        this.setZoomLevel(newZoom);
+
+        if (newZoom > 1.0) {
+            const sizer = this.getSizerElement();
+            const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
+            const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
+            const maxScrollX = Math.max(0, Math.round(baseWidth * newZoom - this.scroller.clientWidth));
+            const maxScrollY = Math.max(0, Math.round(baseHeight * newZoom - this.scroller.clientHeight));
+
+            this.scroller.scrollLeft = Math.max(0, Math.min(maxScrollX, Math.round(worldX * newZoom - centerX)));
+            this.scroller.scrollTop = Math.max(0, Math.min(maxScrollY, Math.round(worldY * newZoom - centerY)));
+        } else {
+            this.scroller.scrollLeft = 0;
+        }
     }
 
     private applyFavorite(index: number): void {
@@ -715,6 +769,7 @@ export class CanvasController {
         }
         if (this.reanchorTimer !== null) window.clearTimeout(this.reanchorTimer);
         this.resizeObserver?.disconnect();
+        this.sizerObserver?.disconnect();
 
         this.canvas.removeEventListener('pointerdown', this.onTouchDown);
         this.canvas.removeEventListener('pointermove', this.onTouchMove);
@@ -767,8 +822,8 @@ export class CanvasController {
         this.points.clear();
         this.predictor.reset();
 
-        const docX = (rawPoint.x - this.panX + this.currentScrollLeft) / this.zoom;
-        const docY = (rawPoint.y - this.panY + this.currentScrollTop) / this.zoom;
+        const docX = (rawPoint.x + this.currentScrollLeft) / this.zoom;
+        const docY = (rawPoint.y + this.currentScrollTop) / this.zoom;
 
         const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
         this.activeContentLeft = contentLeft;
@@ -864,8 +919,8 @@ export class CanvasController {
     }
 
     private pushWorldPoint(point: Point): void {
-        const docX = (point.x - this.panX + this.currentScrollLeft) / this.zoom;
-        const docY = (point.y - this.panY + this.currentScrollTop) / this.zoom;
+        const docX = (point.x + this.currentScrollLeft) / this.zoom;
+        const docY = (point.y + this.currentScrollTop) / this.zoom;
         const previousPressure = this.points.size > 0 ? this.points.getPressure(this.points.size - 1) : 0.5;
         const pressure = point.pressure === undefined || (point.pressure === 0 && this.points.size > 0)
             ? previousPressure
@@ -1623,11 +1678,15 @@ export class CanvasController {
         this.dryCanvas.style.width = `${width}px`;
         this.dryCanvas.style.height = `${height}px`;
 
-        if (this.canvas.width !== Math.round(width * ratio) || this.canvas.height !== Math.round(height * ratio)) {
-            this.canvas.width = Math.round(width * ratio);
-            this.canvas.height = Math.round(height * ratio);
-            this.dryCanvas.width = Math.round(width * ratio);
-            this.dryCanvas.height = Math.round(height * ratio);
+        const maxDim = 4096;
+        const targetW = Math.min(maxDim, Math.round(width * ratio));
+        const targetH = Math.min(maxDim, Math.round(height * ratio));
+
+        if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
+            this.canvas.width = targetW;
+            this.canvas.height = targetH;
+            this.dryCanvas.width = targetW;
+            this.dryCanvas.height = targetH;
             this.renderDirty = true;
         }
     }
@@ -1639,6 +1698,9 @@ export class CanvasController {
 
     private paint(): void {
         if (this.destroyed) return;
+        this.applyContentZoom();
+        this.positionLayer();
+
         const ratio = Math.max(1, window.devicePixelRatio || 1);
         const width = this.scroller.clientWidth;
         const height = this.scroller.clientHeight;
@@ -1657,17 +1719,17 @@ export class CanvasController {
                 0,
                 0,
                 ratio * this.zoom,
-                ratio * (this.panX - sLeft),
-                ratio * (this.panY - sTop),
+                -ratio * sLeft,
+                -ratio * sTop,
             );
 
             if (this.snapGrid) this.paintGrid(this.dryContext, width, height);
 
             const viewport: BoundingBox = {
-                minX: (sLeft - this.panX) / this.zoom,
-                minY: (sTop - this.panY) / this.zoom,
-                maxX: (sLeft + width - this.panX) / this.zoom,
-                maxY: (sTop + height - this.panY) / this.zoom,
+                minX: sLeft / this.zoom,
+                minY: sTop / this.zoom,
+                maxX: (sLeft + width) / this.zoom,
+                maxY: (sTop + height) / this.zoom,
             };
 
             this.index.query(viewport, this.visible);
@@ -1682,8 +1744,8 @@ export class CanvasController {
             0,
             0,
             ratio * this.zoom,
-            ratio * (this.panX - sLeft),
-            ratio * (this.panY - sTop),
+            -ratio * sLeft,
+            -ratio * sTop,
         );
 
         if (this.points.size > 0 && this.activeStart) {
@@ -1698,10 +1760,10 @@ export class CanvasController {
     private paintGrid(context: CanvasRenderingContext2D, width: number, height: number): void {
         const sTop = this.currentScrollTop;
         const sLeft = this.currentScrollLeft;
-        const startX = Math.floor((sLeft - this.panX) / (this.zoom * 12)) * 12;
-        const startY = Math.floor((sTop - this.panY) / (this.zoom * 12)) * 12;
-        const endX = (sLeft - this.panX + width) / this.zoom;
-        const endY = (sTop - this.panY + height) / this.zoom;
+        const startX = Math.floor(sLeft / (this.zoom * 12)) * 12;
+        const startY = Math.floor(sTop / (this.zoom * 12)) * 12;
+        const endX = (sLeft + width) / this.zoom;
+        const endY = (sTop + height) / this.zoom;
 
         context.save();
         context.strokeStyle = '#7d8793';
@@ -1969,15 +2031,19 @@ export class CanvasController {
         this.context.restore();
     }
 
-    // Touch gesture handling (Pinch-to-zoom)
+    // Touch gesture handling (Pinch-to-zoom & 1-finger scrolling)
     private readonly onTouchDown = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch' || !this.input || this.input.shouldRejectTouch() || this.input.hasActivePenStroke) return;
         this.touches.set(event.pointerId, this.localTouch(event));
         if (this.touches.size === 1) {
             this.singleTouchStartCoords = { x: event.clientX, y: event.clientY, time: Date.now() };
+            this.lastSingleTouch = { x: event.clientX, y: event.clientY };
+            this.singleTouchPanned = false;
         } else if (this.touches.size === 2) {
             event.preventDefault();
             this.singleTouchStartCoords = null;
+            this.lastSingleTouch = null;
+            this.singleTouchPanned = false;
             try { this.canvas.setPointerCapture(event.pointerId); } catch { /* best effort */ }
             this.startGesture();
         }
@@ -1986,9 +2052,35 @@ export class CanvasController {
     private readonly onTouchMove = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch' || !this.touches.has(event.pointerId)) return;
         this.touches.set(event.pointerId, this.localTouch(event));
-        if (this.touches.size >= 2) {
+
+        if (this.touches.size === 1 && this.lastSingleTouch) {
+            const dx = event.clientX - this.lastSingleTouch.x;
+            const dy = event.clientY - this.lastSingleTouch.y;
+            this.lastSingleTouch = { x: event.clientX, y: event.clientY };
+
+            if (!this.singleTouchPanned) {
+                const totalDx = Math.abs(event.clientX - (this.singleTouchStartCoords?.x ?? event.clientX));
+                const totalDy = Math.abs(event.clientY - (this.singleTouchStartCoords?.y ?? event.clientY));
+                if (totalDx > 6 || totalDy > 6) {
+                    this.singleTouchPanned = true;
+                }
+            }
+
+            if (this.singleTouchPanned) {
+                event.preventDefault();
+                const sizer = this.getSizerElement();
+                const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
+                const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
+                const maxScrollX = Math.max(0, Math.round(baseWidth * this.zoom - this.scroller.clientWidth));
+                const maxScrollY = Math.max(0, Math.round(baseHeight * this.zoom - this.scroller.clientHeight));
+
+                this.scroller.scrollLeft = Math.max(0, Math.min(maxScrollX, this.scroller.scrollLeft - dx));
+                this.scroller.scrollTop = Math.max(0, Math.min(maxScrollY, this.scroller.scrollTop - dy));
+            }
+        } else if (this.touches.size >= 2) {
             event.preventDefault();
             this.singleTouchStartCoords = null;
+            this.lastSingleTouch = null;
             this.updateGesture();
         }
     };
@@ -1996,8 +2088,12 @@ export class CanvasController {
     private readonly onTouchEnd = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch') return;
         const start = this.singleTouchStartCoords;
+        const wasPanned = this.singleTouchPanned;
         this.singleTouchStartCoords = null;
+        this.lastSingleTouch = null;
+        this.singleTouchPanned = false;
         this.touches.delete(event.pointerId);
+
         if (this.touches.size < 2) {
             this.gestureDistance = 0;
             // On releasing two-finger pinch gesture, re-rasterize dry canvas to zoom * devicePixelRatio
@@ -2006,7 +2102,7 @@ export class CanvasController {
         }
         try { if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId); } catch { /* best effort */ }
 
-        if (start && this.touches.size === 0) {
+        if (start && !wasPanned && this.touches.size === 0) {
             const dx = Math.abs(event.clientX - start.x);
             const dy = Math.abs(event.clientY - start.y);
             const dt = Date.now() - start.time;
@@ -2023,6 +2119,7 @@ export class CanvasController {
 
     private startGesture(): void {
         const points = Array.from(this.touches.values());
+        if (points.length < 2) return;
         const dx = points[1].x - points[0].x;
         const dy = points[1].y - points[0].y;
         this.gestureDistance = Math.max(1, Math.hypot(dx, dy));
@@ -2035,6 +2132,7 @@ export class CanvasController {
 
     private updateGesture(): void {
         const points = Array.from(this.touches.values());
+        if (points.length < 2) return;
         const dx = points[1].x - points[0].x;
         const dy = points[1].y - points[0].y;
         const distance = Math.max(1, Math.hypot(dx, dy));
@@ -2046,10 +2144,18 @@ export class CanvasController {
         this.setZoomLevel(newZoom);
 
         if (newZoom > 1.0) {
-            const targetScrollLeft = Math.max(0, this.gestureWorldX * newZoom - centerX);
-            const targetScrollTop = Math.max(0, this.gestureWorldY * newZoom - centerY);
+            const sizer = this.getSizerElement();
+            const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
+            const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
+            const maxScrollX = Math.max(0, Math.round(baseWidth * newZoom - this.scroller.clientWidth));
+            const maxScrollY = Math.max(0, Math.round(baseHeight * newZoom - this.scroller.clientHeight));
+
+            const targetScrollLeft = Math.max(0, Math.min(maxScrollX, Math.round(this.gestureWorldX * newZoom - centerX)));
+            const targetScrollTop = Math.max(0, Math.min(maxScrollY, Math.round(this.gestureWorldY * newZoom - centerY)));
             this.scroller.scrollLeft = targetScrollLeft;
             this.scroller.scrollTop = targetScrollTop;
+        } else {
+            this.scroller.scrollLeft = 0;
         }
     }
 }
