@@ -85,9 +85,16 @@ export default class ApoloCanvasPlugin extends Plugin {
 
         // Register Reading mode section info post-processor for precise paragraph anchoring
         this.registerMarkdownPostProcessor((el, ctx) => {
-            const spaceEls = el.querySelectorAll<HTMLElement>('.apolo-space, [data-apolo-space], [data-apolo-space-id]');
-            for (let i = 0; i < spaceEls.length; i++) {
-                const s = spaceEls[i];
+            const spaceCandidates: HTMLElement[] = [];
+            if (el.matches?.('.apolo-space, [data-apolo-space], [data-apolo-space-id]')) {
+                spaceCandidates.push(el);
+            }
+            const foundDescendants = el.querySelectorAll<HTMLElement>('.apolo-space, [data-apolo-space], [data-apolo-space-id]');
+            for (let i = 0; i < foundDescendants.length; i++) {
+                spaceCandidates.push(foundDescendants[i]);
+            }
+
+            for (const s of spaceCandidates) {
                 s.addClass('apolo-space-block');
                 const id = s.dataset.apoloSpace || s.dataset.apoloSpaceId;
                 if (id) {
@@ -96,14 +103,30 @@ export default class ApoloCanvasPlugin extends Plugin {
                 }
                 const hMatch = s.style.height || s.getAttribute('style')?.match(/height:\s*(\d+)px/i)?.[1];
                 if (hMatch) {
-                    s.dataset.apoloHeight = String(parseInt(hMatch, 10));
+                    const h = parseInt(hMatch, 10);
+                    s.dataset.apoloHeight = String(h);
+                    s.style.height = `${h}px`;
                 }
+                s.style.width = '100%';
+                s.style.display = 'block';
             }
 
             const sectionInfo = ctx.getSectionInfo(el);
             if (sectionInfo) {
                 el.dataset.apoloLineStart = String(sectionInfo.lineStart);
                 el.dataset.apoloLineEnd = String(sectionInfo.lineEnd);
+
+                // Preserve vertical space for blank lines in source markdown between sections
+                const prev = el.previousElementSibling;
+                if (prev instanceof HTMLElement && prev.dataset.apoloLineEnd) {
+                    const prevEnd = parseInt(prev.dataset.apoloLineEnd, 10);
+                    if (sectionInfo.lineStart > prevEnd + 1) {
+                        const blankCount = sectionInfo.lineStart - prevEnd - 1;
+                        if (blankCount > 0) {
+                            el.style.marginTop = `${blankCount * 24}px`;
+                        }
+                    }
+                }
             } else {
                 // Fallback: check closest ancestor with line data
                 const parent = el.closest<HTMLElement>('[data-apolo-line-start]');

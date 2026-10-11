@@ -1,4 +1,5 @@
 import { App, Editor, Notice, TFile } from 'obsidian';
+import { EditorView } from '@codemirror/view';
 import {
     BoundingBox,
     CanvasElement,
@@ -261,7 +262,6 @@ export class CanvasController {
             this.renderDirty = true;
             this.schedulePaint();
             this.lassoMenu?.updateViewport(this.zoom, this.currentScrollLeft, this.currentScrollTop);
-            if (!this.options.readonly) this.scheduleReanchor();
         };
 
         scroller.addEventListener('scroll', this.scrollHandler, { passive: true });
@@ -764,7 +764,10 @@ export class CanvasController {
     undo(): void { if (!this.options.readonly) this.performUndo(); }
     redo(): void { if (!this.options.readonly) this.performRedo(); }
 
-    onEditorChange(): void { if (!this.options.readonly) this.scheduleReanchor(); }
+    onEditorChange(): void {
+        this.blockPositionCache.clear();
+        if (!this.options.readonly) this.scheduleReanchor();
+    }
 
     async flush(): Promise<void> { await this.persistence.flush(); }
 
@@ -1104,6 +1107,28 @@ export class CanvasController {
             }
             const cached = this.blockPositionCache.get(blockId);
             if (cached !== undefined) return cached;
+
+            // Fallback for Edit mode if widget is currently unmounted by CM virtualization
+            if (this.editor) {
+                const cm = (this.editor as any)?.cm as EditorView | undefined;
+                if (cm && cm.state && cm.state.doc) {
+                    const docStr = cm.state.doc.toString();
+                    const marker = `data-apolo-space="${spaceId}"`;
+                    const markerAlt = `data-apolo-space-id="${spaceId}"`;
+                    let idx = docStr.indexOf(marker);
+                    if (idx === -1) idx = docStr.indexOf(markerAlt);
+                    if (idx !== -1) {
+                        const lineBlock = cm.lineBlockAt(idx);
+                        const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content');
+                        const contentTop = contentEl
+                            ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                            : 0;
+                        const top = contentTop + lineBlock.top;
+                        this.blockPositionCache.set(blockId, top);
+                        return top;
+                    }
+                }
+            }
             return 0;
         }
 
@@ -1142,59 +1167,78 @@ export class CanvasController {
                         }
                     }
 
-                    // Fallback: nearest rendered block if target section is lazy-unmounted
-                    let closestEl = rendered[0];
-                    let minDistance = Number.POSITIVE_INFINITY;
-                    let closestLine = 0;
+                    // Block not directly rendered: find preceding or following rendered block
+                    let prevBlock: HTMLElement | null = null;
+                    let nextBlock: HTMLElement | null = null;
+                    let maxStartBefore = -1;
+                    let minStartAfter = Number.POSITIVE_INFINITY;
 
                     for (const el of rendered) {
                         const start = parseInt(el.dataset.apoloLineStart || '0', 10);
                         const end = parseInt(el.dataset.apoloLineEnd || '0', 10);
-                        const dist = targetLine < start ? start - targetLine : targetLine > end ? targetLine - end : 0;
-                        if (dist < minDistance) {
-                            minDistance = dist;
-                            closestEl = el;
-                            closestLine = targetLine < start ? start : end;
+                        if (end < targetLine && end > maxStartBefore) {
+                            maxStartBefore = end;
+                            prevBlock = el;
+                        }
+                        if (start > targetLine && start < minStartAfter) {
+                            minStartAfter = start;
+                            nextBlock = el;
                         }
                     }
 
-                    if (closestEl) {
-                        const rect = closestEl.getBoundingClientRect();
-                        const closestTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                        const blockLineCount = Math.max(1, (parseInt(closestEl.dataset.apoloLineEnd || '0') - parseInt(closestEl.dataset.apoloLineStart || '0') + 1));
-                        const avgLineHeight = Math.max(16, (rect.height / this.zoom) / blockLineCount);
-                        const deltaLines = targetLine - closestLine;
-                        const estimatedTop = closestTop + deltaLines * avgLineHeight;
+                    if (prevBlock) {
+                        const rect = prevBlock.getBoundingClientRect();
+                        const prevBottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                        const prevEnd = parseInt(prevBlock.dataset.apoloLineEnd || '0', 10);
+                        const deltaLines = targetLine - prevEnd;
+                        const estimatedTop = prevBottom + (deltaLines - 1) * 24;
+                        this.blockPositionCache.set(blockId, estimatedTop);
+                        return estimatedTop;
+                    } else if (nextBlock) {
+                        const rect = nextBlock.getBoundingClientRect();
+                        const nextTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                        const nextStart = parseInt(nextBlock.dataset.apoloLineStart || '0', 10);
+                        const deltaLines = nextStart - targetLine;
+                        const estimatedTop = Math.max(0, nextTop - deltaLines * 24);
                         this.blockPositionCache.set(blockId, estimatedTop);
                         return estimatedTop;
                     }
                 }
             }
         } else if (this.editor) {
+            // 3. Edit mode: CodeMirror 6 exact layout coordinate lookup
             const lineMatch = blockId.match(/^line:(\d+)$/);
             if (lineMatch) {
-                const targetLine = parseInt(lineMatch[1], 10);
-                const lines = this.scroller.querySelectorAll<HTMLElement>('.cm-line');
-                if (lines.length > 0) {
-                    const approxFirst = this.estimatedFirstLine(lines.length);
-                    const relativeIdx = targetLine - approxFirst;
-                    if (relativeIdx >= 0 && relativeIdx < lines.length) {
-                        const lineEl = lines[relativeIdx];
-                        if (lineEl) {
-                            const top = (lineEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                            this.blockPositionCache.set(blockId, top);
-                            return top;
-                        }
-                    }
+                let targetLine = parseInt(lineMatch[1], 10);
+                const cm = (this.editor as any)?.cm as EditorView | undefined;
+                if (cm && cm.state && cm.state.doc) {
+                    // Match by anchorText if line text shifted
                     if (anchorText) {
-                        for (let i = 0; i < lines.length; i++) {
-                            if (lines[i].textContent?.trim() === anchorText) {
-                                const top = (lines[i].getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                                this.blockPositionCache.set(blockId, top);
-                                return top;
+                        const currentLineNum = Math.min(cm.state.doc.lines, Math.max(1, targetLine + 1));
+                        const currentLine = cm.state.doc.line(currentLineNum);
+                        if (currentLine.text.trim() !== anchorText) {
+                            const searchRadius = 40;
+                            const minLine = Math.max(1, currentLineNum - searchRadius);
+                            const maxLine = Math.min(cm.state.doc.lines, currentLineNum + searchRadius);
+                            for (let l = minLine; l <= maxLine; l++) {
+                                if (cm.state.doc.line(l).text.trim() === anchorText) {
+                                    targetLine = l - 1;
+                                    break;
+                                }
                             }
                         }
                     }
+
+                    const clampedLineNum = Math.min(cm.state.doc.lines, Math.max(1, targetLine + 1));
+                    const line = cm.state.doc.line(clampedLineNum);
+                    const lineBlock = cm.lineBlockAt(line.from);
+                    const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content');
+                    const contentTop = contentEl
+                        ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                        : 0;
+                    const top = contentTop + lineBlock.top;
+                    this.blockPositionCache.set(blockId, top);
+                    return top;
                 }
             }
         }
@@ -1247,29 +1291,40 @@ export class CanvasController {
             }
         }
 
-        // 2. Line anchoring fallback
+        // 2. Edit mode: CodeMirror 6 exact layout coordinate lookup
         if (!this.options.readonly && this.editor) {
-            const lines = this.scroller.querySelectorAll<HTMLElement>('.cm-line');
-            if (lines.length > 0) {
-                let best = lines[0];
-                let bestDistance = Number.POSITIVE_INFINITY;
-                let lineNumber = 0;
-                for (let i = 0; i < lines.length; i++) {
-                    const rect = lines[i].getBoundingClientRect();
-                    const lineTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                    const lineBottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                    const delta = Math.max(lineTop - docY, 0, docY - lineBottom);
-                    if (delta < bestDistance) {
-                        best = lines[i];
-                        bestDistance = delta;
-                        lineNumber = i;
+            const cm = (this.editor as any)?.cm as EditorView | undefined;
+            if (cm && cm.state && cm.state.doc) {
+                const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content');
+                const contentTop = contentEl
+                    ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                    : 0;
+                const localY = Math.max(0, docY - contentTop);
+                const lineBlock = cm.lineBlockAtHeight(localY);
+                const line = cm.state.doc.lineAt(lineBlock.from);
+                const lineIndex = line.number - 1; // 0-based
+                let text = line.text.trim();
+                let anchorLine = lineIndex;
+                let blockTop = contentTop + lineBlock.top;
+
+                // If drawing on an empty line, look upwards for nearest preceding line with real text
+                // so we don't anchor with empty text to frontmatter '---'
+                if (!text) {
+                    for (let l = line.number - 1; l >= 1; l--) {
+                        const prevLine = cm.state.doc.line(l);
+                        const prevText = prevLine.text.trim();
+                        if (prevText && prevText !== '---') {
+                            text = prevText;
+                            anchorLine = l - 1;
+                            const prevBlock = cm.lineBlockAt(prevLine.from);
+                            blockTop = contentTop + prevBlock.top;
+                            break;
+                        }
                     }
                 }
-                const text = best.textContent?.trim() ?? '';
-                const globalLine = this.findLineNumber(text, this.estimatedFirstLine(lines.length) + lineNumber);
-                const blockTop = (best.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+
                 return {
-                    blockId: `line:${globalLine}`,
+                    blockId: `line:${anchorLine}`,
                     text,
                     y: blockTop,
                 };
@@ -1533,7 +1588,9 @@ export class CanvasController {
             const rect = blockEl.getBoundingClientRect();
             const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
             const bottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
-            if (pivot >= top - 8 && pivot <= bottom + 8) {
+            const height = Math.max(1, bottom - top);
+            const hitMargin = Math.max(16, (44 - height) / 2);
+            if (pivot >= top - hitMargin && pivot <= bottom + hitMargin) {
                 const currentHeight = parseInt(blockEl.dataset.apoloHeight || String(Math.round(rect.height / this.zoom)), 10);
                 targetSpace = { id: spaceId, height: currentHeight, el: blockEl, top, bottom };
                 break;
@@ -1661,7 +1718,11 @@ export class CanvasController {
             const divTag = `<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${mutation.height}px;"></div>`;
             const lines = content.split('\n');
             const targetLine = Math.max(0, Math.min(lines.length, mutation.targetLine + 1));
-            lines.splice(targetLine, 0, divTag);
+            if (targetLine < lines.length && lines[targetLine].trim() === '') {
+                lines[targetLine] = divTag;
+            } else {
+                lines.splice(targetLine, 0, divTag);
+            }
             return lines.join('\n');
         }
     }
@@ -1834,31 +1895,7 @@ export class CanvasController {
         this.schedulePaint();
     }
 
-    private estimatedFirstLine(visibleLineCount: number): number {
-        if (!this.editor) return 0;
-        const lineCount = this.editor.lineCount();
-        const maxScroll = Math.max(1, this.scroller.scrollHeight - this.scroller.clientHeight);
-        const fraction = Math.max(0, Math.min(1, this.currentScrollTop / maxScroll));
-        return Math.round(fraction * Math.max(0, lineCount - visibleLineCount));
-    }
 
-    private findLineNumber(text: string, approximateLine: number): number {
-        if (!this.editor) return approximateLine;
-        if (!text) return Math.max(0, Math.min(this.editor.lastLine(), approximateLine));
-        let best = Math.max(0, Math.min(this.editor.lastLine(), approximateLine));
-        let bestDistance = Number.POSITIVE_INFINITY;
-        const first = Math.max(0, approximateLine - 96);
-        const last = Math.min(this.editor.lastLine(), approximateLine + 96);
-        for (let line = first; line <= last; line++) {
-            if (this.editor.getLine(line).trim() !== text) continue;
-            const distance = Math.abs(line - approximateLine);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = line;
-            }
-        }
-        return best;
-    }
 
     private get currentScrollTop(): number {
         if (typeof this.options.getScroll === 'function') {
@@ -1923,7 +1960,6 @@ export class CanvasController {
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
         if (this.renderDirty) {
-            this.blockPositionCache.clear();
             this.dryContext.setTransform(1, 0, 0, 1, 0, 0);
             this.dryContext.clearRect(0, 0, this.dryCanvas.width, this.dryCanvas.height);
             this.dryContext.setTransform(
