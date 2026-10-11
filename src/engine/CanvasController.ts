@@ -48,7 +48,6 @@ export interface CanvasControllerOptions {
     readonly?: boolean;
     toolbarSlot?: ToolbarSlot;
     favorites?: PenFavorite[];
-    getScroll?: () => number;
     onPenEnabledChange?: (enabled: boolean) => void;
     onToolbarSlotChange?: (slot: ToolbarSlot) => void;
     onFavoritesChange?: (favorites: PenFavorite[]) => void;
@@ -300,6 +299,7 @@ export class CanvasController {
         this.paint();
 
         if (this.options.readonly) {
+            this.syncPreviewSpacing();
             window.setTimeout(() => this.reanchorPreview(), 60);
             window.setTimeout(() => this.reanchorPreview(), 200);
             window.setTimeout(() => this.reanchorPreview(), 500);
@@ -1140,15 +1140,25 @@ export class CanvasController {
                 const rendered = Array.from(this.scroller.querySelectorAll<HTMLElement>('[data-apolo-line-start]'));
 
                 if (rendered.length > 0) {
-                    // Match by anchorText if available
+                    // Match by anchorText if available (pick nearest to targetLine if multiple occurrences)
                     if (anchorText) {
+                        let bestEl: HTMLElement | null = null;
+                        let minLineDiff = Number.POSITIVE_INFINITY;
                         for (const el of rendered) {
                             if (el.textContent && el.textContent.includes(anchorText)) {
-                                const rect = el.getBoundingClientRect();
-                                const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                                this.blockPositionCache.set(blockId, top);
-                                return top;
+                                const start = parseInt(el.dataset.apoloLineStart || '0', 10);
+                                const diff = Math.abs(start - targetLine);
+                                if (diff < minLineDiff) {
+                                    minLineDiff = diff;
+                                    bestEl = el;
+                                }
                             }
+                        }
+                        if (bestEl) {
+                            const rect = bestEl.getBoundingClientRect();
+                            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                            this.blockPositionCache.set(blockId, top);
+                            return top;
                         }
                     }
 
@@ -1877,7 +1887,7 @@ export class CanvasController {
     }
 
     private schedulePreviewReanchor(): void {
-        if (!this.options.readonly || this.document.elements.length === 0) return;
+        if (!this.options.readonly) return;
         if (this.previewReanchorTimer !== null) {
             window.clearTimeout(this.previewReanchorTimer);
         }
@@ -1887,21 +1897,93 @@ export class CanvasController {
         }, 50);
     }
 
-    private reanchorPreview(): void {
-        if (!this.options.readonly || this.document.elements.length === 0) return;
+    reanchorPreview(): void {
+        if (!this.options.readonly) return;
+        this.syncPreviewSpacing();
+        if (this.document.elements.length === 0) return;
         this.blockPositionCache.clear();
         this.rebuildIndex();
         this.renderDirty = true;
         this.schedulePaint();
     }
 
+    syncPreviewSpacing(): void {
+        if (!this.options.readonly) return;
+        const rendered = Array.from(
+            this.scroller.querySelectorAll<HTMLElement>('[data-apolo-line-start]')
+        );
+        if (rendered.length === 0) return;
 
+        // Keep only top-level blocks to avoid conflicting margins on child and parent
+        const topLevelBlocks = rendered.filter(el => {
+            return !rendered.some(other => other !== el && other.contains(el));
+        });
+
+        topLevelBlocks.sort((a, b) => {
+            const startA = parseInt(a.dataset.apoloLineStart || '0', 10);
+            const startB = parseInt(b.dataset.apoloLineStart || '0', 10);
+            return startA - startB;
+        });
+
+        let lineHeight = 24;
+        if (topLevelBlocks.length > 0) {
+            const computedLh = parseFloat(window.getComputedStyle(topLevelBlocks[0]).lineHeight);
+            if (!Number.isNaN(computedLh) && computedLh > 0) {
+                lineHeight = computedLh;
+            }
+        }
+
+        let firstContentLine = 0;
+        try {
+            const cache = this.options.app.metadataCache.getFileCache(this.file);
+            if (cache?.frontmatterPosition) {
+                firstContentLine = cache.frontmatterPosition.end.line + 1;
+            }
+        } catch {
+            // ignore
+        }
+
+        for (let i = 0; i < topLevelBlocks.length; i++) {
+            const current = topLevelBlocks[i];
+            const currentStart = parseInt(current.dataset.apoloLineStart || '0', 10);
+
+            if (i === 0) {
+                const leadingBlankLines = currentStart - firstContentLine;
+                if (leadingBlankLines > 0) {
+                    current.style.marginTop = `${leadingBlankLines * lineHeight}px`;
+                } else {
+                    current.style.marginTop = '';
+                }
+            } else {
+                const prev = topLevelBlocks[i - 1];
+                const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                const blankLines = currentStart - prevEnd - 1;
+
+                if (blankLines > 0) {
+                    current.style.marginTop = `${blankLines * lineHeight}px`;
+                } else {
+                    current.style.marginTop = '';
+                }
+            }
+        }
+
+        if (topLevelBlocks.length > 0) {
+            const lastBlock = topLevelBlocks[topLevelBlocks.length - 1];
+            const lastBlockEnd = parseInt(lastBlock.dataset.apoloLineEnd || lastBlock.dataset.apoloLineStart || '0', 10);
+            void this.options.app.vault.cachedRead(this.file).then(content => {
+                if (this.destroyed) return;
+                const totalLines = content.split('\n').length;
+                const trailingBlankLines = totalLines - lastBlockEnd - 1;
+                if (trailingBlankLines > 0) {
+                    lastBlock.style.marginBottom = `${trailingBlankLines * lineHeight}px`;
+                } else {
+                    lastBlock.style.marginBottom = '';
+                }
+            }).catch(() => { /* ignore */ });
+        }
+    }
 
     private get currentScrollTop(): number {
-        if (typeof this.options.getScroll === 'function') {
-            const val = this.options.getScroll();
-            if (typeof val === 'number' && !Number.isNaN(val)) return val;
-        }
         return this.scroller.scrollTop;
     }
 

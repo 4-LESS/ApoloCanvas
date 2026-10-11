@@ -165,9 +165,7 @@ export default class ApoloCanvasPlugin extends Plugin {
             }
 
             // Notify active controller on lazy section rendering in Reading mode
-            if (this.mountedMode === 'preview') {
-                this.controller?.onPreviewSectionRendered();
-            }
+            this.controller?.onPreviewSectionRendered();
         });
 
         // Status bar item (Desktop + Mobile fallback)
@@ -420,12 +418,6 @@ export default class ApoloCanvasPlugin extends Plugin {
                 app: this.app,
                 viewContainer: view.contentEl,
                 readonly: mode !== 'source',
-                getScroll: () => {
-                    if (mode === 'preview') {
-                        return (view as any).previewMode?.getScroll?.() ?? scroller.scrollTop;
-                    }
-                    return scroller.scrollTop;
-                },
                 onPenEnabledChange: (enabled: boolean) => {
                     this.settings.penInputEnabled = enabled;
                     void this.saveSettings();
@@ -444,6 +436,10 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.mountedScroller = scroller;
         this.mountedFilePath = file.path;
         this.mountedMode = mode;
+
+        if (mode === 'preview') {
+            this.controller.syncPreviewSpacing();
+        }
 
         requestAnimationFrame(() => {
             if (this.controller && this.mountedScroller === scroller && this.mountedMode === mode) {
