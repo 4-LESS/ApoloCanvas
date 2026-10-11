@@ -64,6 +64,14 @@ interface TouchPoint {
     y: number;
 }
 
+interface SpaceMutation {
+    id: string;
+    height: number;
+    isNew: boolean;
+    remove: boolean;
+    targetLine: number;
+}
+
 /**
  * High-performance engineering canvas controller.
  * Manages the double-buffered rendering motor, 120Hz input loop, spatial indexing,
@@ -159,6 +167,8 @@ export class CanvasController {
     private gestureWorldY = 0;
 
     private lastSavedAt = Date.now();
+    private spacerDebounceTimer: number | null = null;
+    private pendingSpaceMutations: SpaceMutation[] = [];
     private destroyed = false;
 
     constructor(
@@ -768,6 +778,11 @@ export class CanvasController {
             window.removeEventListener('wheel', this.scrollHandler, { capture: true });
         }
         if (this.reanchorTimer !== null) window.clearTimeout(this.reanchorTimer);
+        if (this.spacerDebounceTimer !== null) {
+            window.clearTimeout(this.spacerDebounceTimer);
+            this.spacerDebounceTimer = null;
+            void this.flushSpaceMutations();
+        }
         this.resizeObserver?.disconnect();
         this.sizerObserver?.disconnect();
 
@@ -1060,6 +1075,22 @@ export class CanvasController {
     private getBlockTop(blockId: string, anchorText?: string): number {
         const scrollerRect = this.scroller.getBoundingClientRect();
 
+        // 1. Space block anchor: direct element match in both Live Preview & Reading mode
+        if (blockId.startsWith('space:')) {
+            const spaceId = blockId.slice(6);
+            const spaceEl = this.scroller.querySelector<HTMLElement>(
+                `[data-apolo-space-id="${spaceId}"], [data-apolo-space="${spaceId}"]`
+            );
+            if (spaceEl) {
+                const top = (spaceEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                this.blockPositionCache.set(blockId, top);
+                return top;
+            }
+            const cached = this.blockPositionCache.get(blockId);
+            if (cached !== undefined) return cached;
+            return 0;
+        }
+
         if (this.options.readonly) {
             const lineMatch = blockId.match(/^line:(\d+)$/);
             if (lineMatch) {
@@ -1132,6 +1163,27 @@ export class CanvasController {
 
     private anchorAt(docY: number): Anchor {
         const scrollerRect = this.scroller.getBoundingClientRect();
+
+        // 1. Check if docY falls inside any apolo-space block (both Live Preview & Reading mode)
+        const spaceBlocks = Array.from(
+            this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]')
+        );
+        for (const blockEl of spaceBlocks) {
+            const spaceId = blockEl.dataset.apoloSpaceId || blockEl.dataset.apoloSpace;
+            if (!spaceId) continue;
+            const rect = blockEl.getBoundingClientRect();
+            const blockTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            const blockBottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            if (docY >= blockTop && docY <= blockBottom) {
+                return {
+                    blockId: `space:${spaceId}`,
+                    text: '',
+                    y: blockTop,
+                };
+            }
+        }
+
+        // 2. Line anchoring fallback
         if (!this.options.readonly && this.editor) {
             const lines = this.scroller.querySelectorAll<HTMLElement>('.cm-line');
             if (lines.length > 0) {
@@ -1396,78 +1448,158 @@ export class CanvasController {
         this.schedulePaint();
     }
 
-    private findApoloSpaceBlockNearLine(targetLine: number): { startLine: number; endLine: number; height: number; id: string } | null {
-        if (!this.editor) return null;
-        const lineCount = this.editor.lineCount();
-        const checkStart = Math.max(0, targetLine - 4);
-        const checkEnd = Math.min(lineCount - 1, targetLine + 4);
-
-        for (let l = checkStart; l <= checkEnd; l++) {
-            const lineText = this.editor.getLine(l);
-            if (lineText.trim().startsWith('```apolo-space')) {
-                for (let end = l + 1; end <= Math.min(lineCount - 1, l + 10); end++) {
-                    const endText = this.editor.getLine(end);
-                    if (endText.trim() === '```') {
-                        let height = 200;
-                        let id = `space-${Date.now()}`;
-                        for (let k = l + 1; k < end; k++) {
-                            const content = this.editor.getLine(k);
-                            const hMatch = content.match(/height:\s*(\d+)/i);
-                            if (hMatch) height = parseInt(hMatch[1], 10);
-                            const idMatch = content.match(/id:\s*([^\s\n\r]+)/i);
-                            if (idMatch) id = idMatch[1];
-                        }
-                        return { startLine: l, endLine: end, height, id };
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
     private insertSpace(points: Point[]): void {
         if (points.length < 2) return;
         const dy = points[points.length - 1].y - points[0].y;
-        if (Math.abs(dy) < 4) return;
-        const pivot = Math.min(points[0].y, points[points.length - 1].y);
+        if (Math.abs(dy) < 6) return;
+        const pivot = points[0].y;
 
         this.recordHistory();
 
-        if (this.editor && !this.options.readonly) {
-            const anchor = this.anchorAt(pivot);
-            const targetLine = anchor ? parseInt(anchor.blockId.replace('line:', ''), 10) : this.editor.lastLine();
-            const existingBlock = this.findApoloSpaceBlockNearLine(targetLine);
-
-            if (existingBlock) {
-                const newHeight = Math.max(0, existingBlock.height + Math.round(dy));
-                if (newHeight <= 20 && dy < 0) {
-                    this.editor.replaceRange('', { line: existingBlock.startLine, ch: 0 }, { line: existingBlock.endLine + 1, ch: 0 });
-                } else {
-                    const clampedHeight = Math.max(20, Math.min(2000, newHeight));
-                    const replacement = `\`\`\`apolo-space\nheight: ${clampedHeight}\nid: ${existingBlock.id}\n\`\`\``;
-                    const endLineLen = this.editor.getLine(existingBlock.endLine).length;
-                    this.editor.replaceRange(replacement, { line: existingBlock.startLine, ch: 0 }, { line: existingBlock.endLine, ch: endLineLen });
-                }
-            } else if (dy >= 20) {
-                const safeLine = Math.max(0, Math.min(this.editor.lastLine(), targetLine));
-                const lineContent = this.editor.getLine(safeLine);
-                const blockText = `\n\`\`\`apolo-space\nheight: ${Math.round(dy)}\nid: space-${Date.now()}\n\`\`\`\n`;
-                this.editor.replaceRange(blockText, { line: safeLine, ch: lineContent.length });
-            }
-        }
-
         const { width: contentWidth } = this.getContentGeometry();
-        const dv = dy / contentWidth;
-        for (const element of this.document.elements) {
-            const b = this.getElementDocBounds(element);
-            if (b.minY >= pivot) {
-                this.shiftElementNormalized(element, 0, dv);
+
+        // 1. Check if the pivot touch is inside an existing apolo-space block
+        const spaceBlocks = Array.from(this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]'));
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        let targetSpace: { id: string; height: number; el: HTMLElement; top: number; bottom: number } | null = null;
+
+        for (const blockEl of spaceBlocks) {
+            const spaceId = blockEl.dataset.apoloSpaceId || blockEl.dataset.apoloSpace;
+            if (!spaceId) continue;
+            const rect = blockEl.getBoundingClientRect();
+            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            const bottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            if (pivot >= top - 8 && pivot <= bottom + 8) {
+                const currentHeight = parseInt(blockEl.dataset.apoloHeight || String(Math.round(rect.height / this.zoom)), 10);
+                targetSpace = { id: spaceId, height: currentHeight, el: blockEl, top, bottom };
+                break;
             }
         }
-        this.rebuildIndex();
-        this.persistSoon();
-        this.schedulePaint();
-        this.toast?.show(`Espacio insertado: ${dy > 0 ? '+' : ''}${Math.round(dy)} px`);
+
+        let effectiveShift = 0;
+        let mutation: SpaceMutation | null = null;
+
+        if (targetSpace) {
+            // Modifying existing space block
+            const newHeight = Math.max(0, targetSpace.height + Math.round(dy));
+            effectiveShift = newHeight - targetSpace.height;
+
+            if (newHeight <= 10 && dy < 0) {
+                // Remove space block
+                mutation = { id: targetSpace.id, height: 0, isNew: false, remove: true, targetLine: 0 };
+                targetSpace.el.remove();
+            } else {
+                const clampedH = Math.max(20, Math.min(3000, newHeight));
+                mutation = { id: targetSpace.id, height: clampedH, isNew: false, remove: false, targetLine: 0 };
+                targetSpace.el.style.height = `${clampedH}px`;
+                targetSpace.el.dataset.apoloHeight = String(clampedH);
+            }
+        } else if (dy >= 20) {
+            // Creating a new space block
+            const newId = `space-${Date.now()}`;
+            const newHeight = Math.round(dy);
+            effectiveShift = newHeight;
+
+            let targetLine = 0;
+            if (this.editor) {
+                const anchor = this.anchorAt(pivot);
+                if (anchor.blockId.startsWith('line:')) {
+                    targetLine = parseInt(anchor.blockId.slice(5), 10);
+                } else {
+                    targetLine = this.editor.lastLine();
+                }
+            }
+            mutation = { id: newId, height: newHeight, isNew: true, remove: false, targetLine };
+        }
+
+        if (mutation) {
+            // 2. Shift elements below the pivot (preserving local anchors inside the space block being modified)
+            if (effectiveShift !== 0) {
+                const dv = effectiveShift / contentWidth;
+                for (const element of this.document.elements) {
+                    if (targetSpace && element.blockId === `space:${targetSpace.id}`) continue;
+
+                    const b = this.getElementDocBounds(element);
+                    if (b.minY >= pivot) {
+                        this.shiftElementNormalized(element, 0, dv);
+                    }
+                }
+                this.rebuildIndex();
+            }
+
+            // 3. Debounced write to markdown file via vault.process
+            this.queueSpaceMutation(mutation);
+            this.persistSoon();
+            this.schedulePaint();
+            this.toast?.show(`Espacio: ${effectiveShift > 0 ? '+' : ''}${Math.round(effectiveShift)} px`);
+        }
+    }
+
+    private queueSpaceMutation(mutation: SpaceMutation): void {
+        this.pendingSpaceMutations.push(mutation);
+        if (this.spacerDebounceTimer !== null) {
+            window.clearTimeout(this.spacerDebounceTimer);
+        }
+        this.spacerDebounceTimer = window.setTimeout(() => {
+            this.spacerDebounceTimer = null;
+            void this.flushSpaceMutations();
+        }, 300);
+    }
+
+    private async flushSpaceMutations(): Promise<void> {
+        const mutations = [...this.pendingSpaceMutations];
+        this.pendingSpaceMutations = [];
+        if (mutations.length === 0) return;
+
+        try {
+            await this.options.app.vault.process(this.file, (content) => {
+                let updated = content;
+                for (const mut of mutations) {
+                    updated = this.applySpaceMutationToMarkdown(updated, mut);
+                }
+                return updated;
+            });
+        } catch (err) {
+            console.error('[ApoloCanvas] Error updating space block via vault.process:', err);
+        }
+    }
+
+    private applySpaceMutationToMarkdown(content: string, mutation: SpaceMutation): string {
+        if (mutation.remove) {
+            // Remove <div ... data-apolo-space="id" ...></div>
+            const divRegex = new RegExp(`[\\r\\n]*<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*><\\/div>`, 'gi');
+            let res = content.replace(divRegex, '');
+            // Also remove codeblock if present
+            const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*${mutation.id}[\\s\\S]*?\`\`\``, 'gi');
+            res = res.replace(codeBlockRegex, '');
+            return res;
+        }
+
+        if (!mutation.isNew) {
+            // Update existing block
+            // 1. Try HTML div
+            const divRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*style=["'][^"']*height:\\s*)\\d+px([^"']*["'][^>]*><\\/div>)`, 'i');
+            if (divRegex.test(content)) {
+                return content.replace(divRegex, `$1${mutation.height}px$2`);
+            }
+            const generalDiv = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*><\\/div>`, 'i');
+            if (generalDiv.test(content)) {
+                return content.replace(generalDiv, `<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${mutation.height}px;"></div>`);
+            }
+            // 2. Try codeblock
+            const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*${mutation.id}[\\s\\S]*?)\`\`\``, 'i');
+            if (codeBlockRegex.test(content)) {
+                return content.replace(codeBlockRegex, `\`\`\`apolo-space\nheight: ${mutation.height}\nid: ${mutation.id}\n\`\`\``);
+            }
+            return `${content}\n<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${mutation.height}px;"></div>\n`;
+        } else {
+            // Insert new block as <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
+            const divTag = `<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${mutation.height}px;"></div>`;
+            const lines = content.split('\n');
+            const targetLine = Math.max(0, Math.min(lines.length, mutation.targetLine + 1));
+            lines.splice(targetLine, 0, divTag);
+            return lines.join('\n');
+        }
     }
 
     private testAnchorDisplacement(): void {
@@ -1749,8 +1881,13 @@ export class CanvasController {
         );
 
         if (this.points.size > 0 && this.activeStart) {
-            this.paintActive();
-            if (this.tool === 'lasso') this.paintLasso();
+            if (this.tool === 'spacer') {
+                this.paintSpacer();
+            } else if (this.tool === 'lasso') {
+                this.paintLasso();
+            } else {
+                this.paintActive();
+            }
         }
 
         if (this.selection.length) this.paintSelection();
@@ -1983,6 +2120,56 @@ export class CanvasController {
             for (let i = 1; i < this.points.size; i++) this.context.lineTo(this.points.getX(i), this.points.getY(i));
             this.context.stroke();
         }
+        this.context.restore();
+    }
+
+    private paintSpacer(): void {
+        if (!this.activeStart || this.points.size === 0) return;
+        const currentY = this.points.getY(this.points.size - 1);
+        const startY = this.activeStart.y;
+        const dy = currentY - startY;
+
+        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
+        const scrollerW = this.scroller.clientWidth / this.zoom;
+        const x1 = Math.max(0, contentLeft - 20);
+        const x2 = Math.min(scrollerW, contentLeft + contentWidth + 20);
+
+        this.context.save();
+
+        // Start pivot line (gray dashed)
+        this.context.strokeStyle = '#8B949E';
+        this.context.lineWidth = 1.5 / this.zoom;
+        this.context.setLineDash([4 / this.zoom, 4 / this.zoom]);
+        this.context.beginPath();
+        this.context.moveTo(x1, startY);
+        this.context.lineTo(x2, startY);
+        this.context.stroke();
+
+        // End line (blue solid)
+        this.context.strokeStyle = '#2F6BFF';
+        this.context.lineWidth = 2 / this.zoom;
+        this.context.setLineDash([]);
+        this.context.beginPath();
+        this.context.moveTo(x1, currentY);
+        this.context.lineTo(x2, currentY);
+        this.context.stroke();
+
+        // Tinted region between pivot and currentY
+        const minY = Math.min(startY, currentY);
+        const h = Math.abs(dy);
+        this.context.fillStyle = dy >= 0 ? 'rgba(47, 107, 255, 0.08)' : 'rgba(239, 68, 68, 0.08)';
+        this.context.fillRect(x1, minY, x2 - x1, h);
+
+        // Height badge at center
+        const midX = (x1 + x2) / 2;
+        const midY = (startY + currentY) / 2;
+        const text = `${dy >= 0 ? '+' : ''}${Math.round(dy)} px`;
+        this.context.font = `600 ${Math.round(13 / this.zoom)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        this.context.fillStyle = '#2F6BFF';
+        this.context.textAlign = 'center';
+        this.context.textBaseline = 'middle';
+        this.context.fillText(text, midX, midY);
+
         this.context.restore();
     }
 

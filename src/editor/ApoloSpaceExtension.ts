@@ -15,8 +15,9 @@ export class ApoloSpaceWidget extends WidgetType {
 
     toDOM(): HTMLElement {
         const div = document.createElement('div');
-        div.className = 'apolo-space-block apolo-space-widget';
+        div.className = 'apolo-space-block apolo-space-widget apolo-space';
         div.dataset.apoloSpaceId = this.id;
+        div.dataset.apoloSpace = this.id;
         div.dataset.apoloHeight = String(this.height);
         div.style.height = `${this.height}px`;
         div.style.width = '100%';
@@ -31,33 +32,72 @@ export class ApoloSpaceWidget extends WidgetType {
     }
 }
 
-function parseApoloSpaceBlock(text: string): { height: number; id: string } {
+export function parseApoloSpaceHtml(html: string): { height: number; id: string } | null {
+    const idMatch = html.match(/data-apolo-space(?:-id)?=["']([^"']+)["']/i);
+    const heightMatch = html.match(/height:\s*(\d+)px/i);
+    if (!idMatch && !heightMatch) return null;
+    const id = idMatch ? idMatch[1] : `space-${Date.now()}`;
+    const height = heightMatch ? Math.max(20, Math.min(3000, parseInt(heightMatch[1], 10))) : 200;
+    return { height, id };
+}
+
+export function parseApoloSpaceBlock(text: string): { height: number; id: string } {
     const heightMatch = text.match(/height:\s*(\d+)/i);
-    const height = heightMatch ? Math.max(20, Math.min(2000, parseInt(heightMatch[1], 10))) : 200;
-    const idMatch = text.match(/id:\s*([^\s\n\r]+)/i);
+    const height = heightMatch ? Math.max(20, Math.min(3000, parseInt(heightMatch[1], 10))) : 200;
+    const idMatch = text.match(/id:\s*([^\s\n\r"']+)/i);
     const id = idMatch ? idMatch[1] : '';
     return { height, id };
+}
+
+interface SpaceDecorationItem {
+    from: number;
+    to: number;
+    height: number;
+    id: string;
 }
 
 function buildApoloSpaceDecorations(view: EditorView): DecorationSet {
     const builder = new RangeSetBuilder<Decoration>();
     const doc = view.state.doc;
     const text = doc.toString();
+    const items: SpaceDecorationItem[] = [];
 
-    // Regex to match ```apolo-space ... ``` blocks
-    const regex = /```apolo-space\b([\s\S]*?)```/g;
+    // 1. Match HTML div blocks: <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
+    const htmlRegex = /<div\s+[^>]*data-apolo-space(?:-id)?=["'][^"']+["'][^>]*>\s*<\/div>/gi;
     let match: RegExpExecArray | null;
+    while ((match = htmlRegex.exec(text)) !== null) {
+        const parsed = parseApoloSpaceHtml(match[0]);
+        if (parsed) {
+            items.push({
+                from: match.index,
+                to: match.index + match[0].length,
+                height: parsed.height,
+                id: parsed.id,
+            });
+        }
+    }
 
-    while ((match = regex.exec(text)) !== null) {
-        const from = match.index;
-        const to = from + match[0].length;
-        const { height, id } = parseApoloSpaceBlock(match[1]);
+    // 2. Match ```apolo-space ... ``` codeblocks (backward compatibility)
+    const codeRegex = /```apolo-space\b([\s\S]*?)```/gi;
+    while ((match = codeRegex.exec(text)) !== null) {
+        const parsed = parseApoloSpaceBlock(match[1]);
+        items.push({
+            from: match.index,
+            to: match.index + match[0].length,
+            height: parsed.height,
+            id: parsed.id,
+        });
+    }
 
+    // Sort items monotonically by start position as required by RangeSetBuilder
+    items.sort((a, b) => a.from - b.from);
+
+    for (const item of items) {
         builder.add(
-            from,
-            to,
+            item.from,
+            item.to,
             Decoration.replace({
-                widget: new ApoloSpaceWidget(height, id),
+                widget: new ApoloSpaceWidget(item.height, item.id),
                 block: true,
             }),
         );

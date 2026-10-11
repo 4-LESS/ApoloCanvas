@@ -85,6 +85,21 @@ export default class ApoloCanvasPlugin extends Plugin {
 
         // Register Reading mode section info post-processor for precise paragraph anchoring
         this.registerMarkdownPostProcessor((el, ctx) => {
+            const spaceEls = el.querySelectorAll<HTMLElement>('.apolo-space, [data-apolo-space], [data-apolo-space-id]');
+            for (let i = 0; i < spaceEls.length; i++) {
+                const s = spaceEls[i];
+                s.addClass('apolo-space-block');
+                const id = s.dataset.apoloSpace || s.dataset.apoloSpaceId;
+                if (id) {
+                    s.dataset.apoloSpaceId = id;
+                    s.dataset.apoloSpace = id;
+                }
+                const hMatch = s.style.height || s.getAttribute('style')?.match(/height:\s*(\d+)px/i)?.[1];
+                if (hMatch) {
+                    s.dataset.apoloHeight = String(parseInt(hMatch, 10));
+                }
+            }
+
             const sectionInfo = ctx.getSectionInfo(el);
             if (sectionInfo) {
                 el.dataset.apoloLineStart = String(sectionInfo.lineStart);
