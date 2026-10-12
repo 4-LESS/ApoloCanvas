@@ -6,6 +6,8 @@ import {
     BoxRegistry,
     apoloSpaceField,
     boxRegistryUpdateEffect,
+    parseApoloSpaceBlock,
+    applySpaceMutationToMarkdown,
     type BoxWidgetSnapshot,
 } from '../src/editor/ApoloSpaceExtension.ts';
 import { InputManager } from '../src/engine/input/InputManager.ts';
@@ -117,7 +119,7 @@ describe('Code Review Fixes Verification', () => {
     });
 
     describe('Issue 4: Pen Hover Watchdog Timeout', () => {
-        test('Pen hover state resets automatically after 500ms timeout if pointerleave is dropped', async () => {
+        test('Pen hover state resets automatically after cooldown timeout if pointerleave is dropped', async () => {
             // Mock DOM element
             const target = {
                 style: { touchAction: '', userSelect: '' },
@@ -137,10 +139,35 @@ describe('Code Review Fixes Verification', () => {
 
             assert.strictEqual(input.isPenActive, true, 'Pen must be active on hover enter');
 
-            // Wait 550ms for the watchdog timeout to fire
-            await new Promise((resolve) => setTimeout(resolve, 550));
+            // Wait default cooldown (400ms) + buffer for the watchdog timeout to fire
+            await new Promise((resolve) => setTimeout(resolve, 450));
 
-            assert.strictEqual(input.isPenActive, false, 'Hover state must reset after 500ms of inactivity');
+            assert.strictEqual(input.isPenActive, false, 'Hover state must reset after cooldown timeout of inactivity');
+            input.destroy();
+        });
+
+        test('Pen hover watchdog uses configured palmRejectionCooldownMs', async () => {
+            const target = {
+                style: { touchAction: '', userSelect: '' },
+                addEventListener: () => {},
+                removeEventListener: () => {},
+                getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+            } as unknown as HTMLElement;
+
+            const customCooldown = 150;
+            const input = new InputManager(target, { palmRejectionCooldownMs: customCooldown });
+
+            (input as any).handleEnter({
+                pointerType: 'pen',
+                clientX: 100,
+                clientY: 100,
+            } as PointerEvent);
+
+            assert.strictEqual(input.isPenActive, true, 'Pen must be active on hover enter');
+
+            await new Promise((resolve) => setTimeout(resolve, customCooldown + 40));
+
+            assert.strictEqual(input.isPenActive, false, 'Hover state must reset after custom cooldownMs of inactivity');
             input.destroy();
         });
 
@@ -215,7 +242,7 @@ describe('Code Review Fixes Verification', () => {
             input.destroy();
         });
 
-        test('passThroughPointerEvent dispatches pointerdown without stealing focus', () => {
+        test('passThroughPointerEvent dispatches pointerdown and pointerup sequence without stealing focus, and triggers click', () => {
             const target = {
                 style: { touchAction: '', userSelect: '' },
                 addEventListener: () => {},
@@ -226,15 +253,18 @@ describe('Code Review Fixes Verification', () => {
 
             const input = new InputManager(target);
 
-            let dispatchedEvent: PointerEvent | null = null;
+            const dispatchedEvents: Event[] = [];
             let focusCalled = false;
+            let clickCalled = false;
 
             const mockUnderlying = {
                 tagName: 'BUTTON',
                 classList: { contains: () => false },
                 focus: () => { focusCalled = true; },
+                click: () => { clickCalled = true; },
+                closest: () => mockUnderlying,
                 dispatchEvent: (ev: Event) => {
-                    dispatchedEvent = ev as PointerEvent;
+                    dispatchedEvents.push(ev);
                     return true;
                 },
             };
@@ -259,10 +289,12 @@ describe('Code Review Fixes Verification', () => {
                 } as PointerEvent);
 
                 assert.strictEqual(focusCalled, false, 'Focus must NOT be stolen from editor');
-                assert.ok(dispatchedEvent);
-                assert.strictEqual((dispatchedEvent as any).type, 'pointerdown');
-                assert.strictEqual((dispatchedEvent as any).clientX, 120);
-                assert.strictEqual((dispatchedEvent as any).clientY, 240);
+                assert.strictEqual(dispatchedEvents.length, 2, 'Must dispatch both pointerdown and pointerup');
+                assert.strictEqual((dispatchedEvents[0] as any).type, 'pointerdown');
+                assert.strictEqual((dispatchedEvents[1] as any).type, 'pointerup');
+                assert.strictEqual((dispatchedEvents[0] as any).clientX, 120);
+                assert.strictEqual((dispatchedEvents[0] as any).clientY, 240);
+                assert.strictEqual(clickCalled, true, 'Click must be triggered on interactive buttons');
             } finally {
                 (globalThis as any).document = originalDoc;
                 input.destroy();
@@ -369,6 +401,49 @@ describe('Code Review Fixes Verification', () => {
             assert.ok(preservedDoc);
             assert.strictEqual(preservedDoc.elements.length, 1);
             assert.strictEqual(preservedDoc.elements[0].id, 'strokeA1');
+        });
+    });
+
+    describe('Issue 10: Markdown Block ID Parsing and Regex Escaping', () => {
+        test('parseApoloSpaceBlock parses unquoted, double-quoted, and single-quoted IDs with spaces', () => {
+            const raw1 = 'height: 180\nid: box-standard\n';
+            const parsed1 = parseApoloSpaceBlock(raw1);
+            assert.strictEqual(parsed1.id, 'box-standard');
+            assert.strictEqual(parsed1.height, 180);
+
+            const raw2 = 'height: 220\nid: "box with spaces and dots.v1"\n';
+            const parsed2 = parseApoloSpaceBlock(raw2);
+            assert.strictEqual(parsed2.id, 'box with spaces and dots.v1');
+            assert.strictEqual(parsed2.height, 220);
+
+            const raw3 = "height: 300\nid: 'single-quoted-id [special]'\n";
+            const parsed3 = parseApoloSpaceBlock(raw3);
+            assert.strictEqual(parsed3.id, 'single-quoted-id [special]');
+            assert.strictEqual(parsed3.height, 300);
+        });
+
+        test('applySpaceMutationToMarkdown safely handles IDs containing regex special characters', () => {
+            const specialId = 'box.test[1]+v2*special?';
+            const initialDoc = [
+                '# Heading',
+                `<div class="apolo-space" data-apolo-space="${specialId}" style="height:150px;"></div>`,
+                'Content text',
+            ].join('\n');
+
+            // Update height
+            const updated = applySpaceMutationToMarkdown(initialDoc, {
+                id: specialId,
+                height: 350,
+            });
+            assert.ok(updated.includes('height:350px'));
+            assert.ok(updated.includes(specialId));
+
+            // Remove block
+            const removed = applySpaceMutationToMarkdown(updated, {
+                id: specialId,
+                type: 'delete',
+            });
+            assert.ok(!removed.includes(specialId), 'Block with regex characters must be safely removed without RegExp errors');
         });
     });
 });

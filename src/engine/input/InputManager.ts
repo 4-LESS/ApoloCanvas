@@ -43,7 +43,7 @@ export class InputManager {
         this.resetPenHoverTimeout = setTimeout(() => {
             this.isPenHovering = false;
             this.resetPenHoverTimeout = null;
-        }, 500) as unknown as number;
+        }, this.cooldownMs) as unknown as number;
     }
 
     private clearPenHover(): void {
@@ -239,23 +239,27 @@ export class InputManager {
             : Boolean(underlying && typeof (underlying as any).dispatchEvent === 'function');
 
         if (isHtmlEl && underlying) {
-            let pointerEvent: Event;
-            if (typeof PointerEvent !== 'undefined') {
-                pointerEvent = new PointerEvent('pointerdown', {
-                    clientX: event.clientX,
-                    clientY: event.clientY,
-                    screenX: event.screenX,
-                    screenY: event.screenY,
-                    button: event.button,
-                    buttons: event.buttons,
-                    pointerId: event.pointerId,
-                    pointerType: event.pointerType,
-                    isPrimary: event.isPrimary,
-                    bubbles: true,
-                    cancelable: true,
-                });
-            } else {
-                const ce = new CustomEvent('pointerdown', { bubbles: true, cancelable: true });
+            const createEvent = (type: string): Event => {
+                if (typeof PointerEvent !== 'undefined') {
+                    try {
+                        return new PointerEvent(type, {
+                            clientX: event.clientX,
+                            clientY: event.clientY,
+                            screenX: event.screenX,
+                            screenY: event.screenY,
+                            button: event.button,
+                            buttons: event.buttons,
+                            pointerId: event.pointerId,
+                            pointerType: event.pointerType,
+                            isPrimary: event.isPrimary,
+                            bubbles: true,
+                            cancelable: true,
+                        });
+                    } catch {
+                        // Fallback if PointerEvent constructor fails with non-standard options
+                    }
+                }
+                const ce = new CustomEvent(type, { bubbles: true, cancelable: true });
                 Object.assign(ce, {
                     clientX: event.clientX,
                     clientY: event.clientY,
@@ -267,9 +271,20 @@ export class InputManager {
                     pointerType: event.pointerType,
                     isPrimary: event.isPrimary,
                 });
-                pointerEvent = ce;
+                return ce;
+            };
+
+            underlying.dispatchEvent(createEvent('pointerdown'));
+            underlying.dispatchEvent(createEvent('pointerup'));
+
+            if (event.button === 0) {
+                const clickable = typeof (underlying as any).closest === 'function'
+                    ? ((underlying as any).closest('button, a, input, [role="button"], .clickable-icon') ?? underlying)
+                    : underlying;
+                if (clickable && typeof (clickable as any).click === 'function') {
+                    (clickable as any).click();
+                }
             }
-            underlying.dispatchEvent(pointerEvent);
         }
     }
 

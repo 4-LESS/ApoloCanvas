@@ -115,20 +115,18 @@ export class ApoloSpaceWidget extends WidgetType {
     }
 
     updateDOM(dom: HTMLElement): boolean {
-        const sidecarHeight = BoxRegistry.getHeight(this.id);
-        const effectiveHeight = Math.max(120, sidecarHeight ?? this.snapshot.height);
+        const effectiveHeight = this.snapshot.height;
         dom.style.setProperty('height', `${effectiveHeight}px`, 'important');
         dom.style.setProperty('min-height', `${effectiveHeight}px`, 'important');
         dom.dataset.apoloHeight = String(effectiveHeight);
-        dom.dataset.apoloGrid = (BoxRegistry.isGridVisible(this.id) ?? this.snapshot.gridVisible) ? 'true' : 'false';
-        dom.dataset.apoloGridStyle = BoxRegistry.getGridStyle(this.id) ?? this.snapshot.gridStyle;
-        dom.dataset.apoloBgTheme = BoxRegistry.getBgTheme(this.id) ?? this.snapshot.bgTheme;
-        dom.dataset.apoloAccent = BoxRegistry.getAccentColor(this.id) ?? this.snapshot.accentColor;
-        dom.dataset.apoloBorder = (BoxRegistry.isBorderOutline(this.id) ?? this.snapshot.borderOutline) ? 'true' : 'false';
-        dom.dataset.apoloSnap = (BoxRegistry.isSnapActive(this.id) ?? this.snapshot.snapActive) ? 'true' : 'false';
-        const customBg = BoxRegistry.getCustomBgColor(this.id) ?? this.snapshot.customBgColor;
-        if (customBg) {
-            dom.style.setProperty('background-color', customBg, 'important');
+        dom.dataset.apoloGrid = this.snapshot.gridVisible ? 'true' : 'false';
+        dom.dataset.apoloGridStyle = this.snapshot.gridStyle;
+        dom.dataset.apoloBgTheme = this.snapshot.bgTheme;
+        dom.dataset.apoloAccent = this.snapshot.accentColor;
+        dom.dataset.apoloBorder = this.snapshot.borderOutline ? 'true' : 'false';
+        dom.dataset.apoloSnap = this.snapshot.snapActive ? 'true' : 'false';
+        if (this.snapshot.customBgColor) {
+            dom.style.setProperty('background-color', this.snapshot.customBgColor, 'important');
         } else {
             dom.style.removeProperty('background-color');
         }
@@ -173,9 +171,13 @@ export function parseApoloSpaceHtml(html: string): { height: number; id: string 
 export function parseApoloSpaceBlock(text: string): { height: number; id: string } {
     const heightMatch = text.match(/height:\s*(\d+)/i);
     const height = heightMatch ? Math.max(20, Math.min(3000, parseInt(heightMatch[1], 10))) : 200;
-    const idMatch = text.match(/id:\s*([^\s\n\r"']+)/i);
-    const id = idMatch ? idMatch[1] : '';
+    const idMatch = text.match(/id:\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s\n\r"']+))/i);
+    const id = idMatch ? (idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '').trim() : '';
     return { height, id };
+}
+
+function escapeRegExp(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export interface SpaceMutation {
@@ -191,13 +193,14 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
     const isRemove = !!mutation.remove || mutation.type === 'delete';
     const isNew = !!mutation.isNew || mutation.type === 'insert';
     const height = mutation.height ?? 240;
+    const safeId = escapeRegExp(mutation.id);
 
     if (isRemove) {
         // Remove <div ... data-apolo-space="id" ...></div>
-        const divRegex = new RegExp(`[\\r\\n]*<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*><\\/div>`, 'gi');
+        const divRegex = new RegExp(`[\\r\\n]*<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*><\\/div>`, 'gi');
         let res = content.replace(divRegex, '');
         // Also remove codeblock if present
-        const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*${mutation.id}[\\s\\S]*?\`\`\``, 'gi');
+        const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*["']?${safeId}["']?[\\s\\S]*?\`\`\``, 'gi');
         res = res.replace(codeBlockRegex, '');
         return res;
     }
@@ -205,21 +208,21 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
     if (!isNew) {
         // Update existing block
         // 1. Try HTML div with data-h
-        const dataHRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*data-h=["'])\\d+(["'][^>]*><\\/div>)`, 'i');
+        const dataHRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*data-h=["'])\\d+(["'][^>]*><\\/div>)`, 'i');
         if (dataHRegex.test(content)) {
             return content.replace(dataHRegex, `$1${height}$2`);
         }
         // 2. Try HTML div with style height
-        const divRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*style=["'][^"']*height:\\s*)\\d+px([^"']*["'][^>]*><\\/div>)`, 'i');
+        const divRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*style=["'][^"']*height:\\s*)\\d+px([^"']*["'][^>]*><\\/div>)`, 'i');
         if (divRegex.test(content)) {
             return content.replace(divRegex, `$1${height}px$2`);
         }
-        const generalDiv = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*><\\/div>`, 'i');
+        const generalDiv = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*><\\/div>`, 'i');
         if (generalDiv.test(content)) {
             return content.replace(generalDiv, `<div data-apolo-space="${mutation.id}" data-h="${height}"></div>`);
         }
         // 2. Try codeblock
-        const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*${mutation.id}[\\s\\S]*?)\`\`\``, 'i');
+        const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*["']?${safeId}["']?[\\s\\S]*?)\`\`\``, 'i');
         if (codeBlockRegex.test(content)) {
             return content.replace(codeBlockRegex, `\`\`\`apolo-space\nheight: ${height}\nid: ${mutation.id}\n\`\`\``);
         }
@@ -331,7 +334,7 @@ export const apoloSpaceField = StateField.define<DecorationSet>({
     },
     update(decorations: DecorationSet, tr): DecorationSet {
         const hasBoxEffect = tr.effects.some((e) => e.is(boxRegistryUpdateEffect));
-        if (tr.docChanged || tr.reconfigured || (tr as any).viewportChanged || hasBoxEffect) {
+        if (tr.docChanged || tr.reconfigured || hasBoxEffect) {
             return buildApoloSpaceDecorations(tr.state);
         }
         return decorations.map(tr.changes);
@@ -345,7 +348,7 @@ export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(
         private unsubscribe: (() => void) | null = null;
         private lastViewportFrom = -1;
         private lastViewportTo = -1;
-        private scheduledDispatch = false;
+        private rafId: any = null;
 
         constructor(view: EditorView) {
             this.view = view;
@@ -366,10 +369,12 @@ export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(
         }
 
         private requestSync(): void {
-            if (this.scheduledDispatch) return;
-            this.scheduledDispatch = true;
-            queueMicrotask(() => {
-                this.scheduledDispatch = false;
+            if (this.rafId !== null) return;
+            const schedule = typeof requestAnimationFrame === 'function'
+                ? requestAnimationFrame
+                : (cb: () => void) => setTimeout(cb, 16);
+            this.rafId = schedule(() => {
+                this.rafId = null;
                 if (this.view.dom.isConnected) {
                     this.view.dispatch({
                         effects: boxRegistryUpdateEffect.of(),
@@ -379,6 +384,13 @@ export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(
         }
 
         destroy(): void {
+            if (this.rafId !== null) {
+                const cancel = typeof cancelAnimationFrame === 'function'
+                    ? cancelAnimationFrame
+                    : (id: any) => clearTimeout(id);
+                cancel(this.rafId);
+                this.rafId = null;
+            }
             if (this.unsubscribe) {
                 this.unsubscribe();
                 this.unsubscribe = null;
