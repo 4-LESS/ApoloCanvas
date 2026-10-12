@@ -66,7 +66,8 @@ export class ApoloSpaceWidget extends WidgetType {
         div.dataset.apoloHeight = String(effectiveHeight);
         div.dataset.apoloGrid = (BoxRegistry.isGridVisible(this.id) ?? this.snapshot.gridVisible) ? 'true' : 'false';
         div.dataset.apoloGridStyle = BoxRegistry.getGridStyle(this.id) ?? this.snapshot.gridStyle;
-        div.dataset.apoloBgTheme = BoxRegistry.getBgTheme(this.id) ?? this.snapshot.bgTheme;
+        const effectiveBgTheme = BoxRegistry.getBgTheme(this.id) ?? this.snapshot.bgTheme;
+        div.dataset.apoloBgTheme = effectiveBgTheme;
         div.dataset.apoloAccent = BoxRegistry.getAccentColor(this.id) ?? this.snapshot.accentColor;
         div.dataset.apoloBorder = (BoxRegistry.isBorderOutline(this.id) ?? this.snapshot.borderOutline) ? 'true' : 'false';
         div.dataset.apoloSnap = (BoxRegistry.isSnapActive(this.id) ?? this.snapshot.snapActive) ? 'true' : 'false';
@@ -89,6 +90,14 @@ export class ApoloSpaceWidget extends WidgetType {
         const customBg = BoxRegistry.getCustomBgColor(this.id) ?? this.snapshot.customBgColor;
         if (customBg) {
             div.style.setProperty('background-color', customBg, 'important');
+        } else if (effectiveBgTheme === 'pitch-black') {
+            div.style.setProperty('background-color', '#000000', 'important');
+        } else if (effectiveBgTheme === 'graphite') {
+            div.style.setProperty('background-color', '#27272a', 'important');
+        } else if (effectiveBgTheme === 'transparent') {
+            div.style.setProperty('background-color', 'transparent', 'important');
+        } else {
+            div.style.removeProperty('background-color');
         }
         div.style.setProperty('height', `${effectiveHeight}px`, 'important');
         div.style.setProperty('min-height', `${effectiveHeight}px`, 'important');
@@ -137,8 +146,8 @@ export class ApoloSpaceWidget extends WidgetType {
         dom.style.setProperty('min-height', `${effectiveHeight}px`, 'important');
         dom.dataset.apoloHeight = String(effectiveHeight);
         dom.dataset.apoloGrid = this.snapshot.gridVisible ? 'true' : 'false';
-        dom.dataset.apoloGridStyle = this.snapshot.gridStyle;
-        dom.dataset.apoloBgTheme = this.snapshot.bgTheme;
+        const effectiveBgTheme = (this.snapshot.bgTheme as BoxBgTheme) || BoxRegistry.getBgTheme(this.id);
+        dom.dataset.apoloBgTheme = effectiveBgTheme;
         dom.dataset.apoloAccent = this.snapshot.accentColor;
         dom.dataset.apoloBorder = this.snapshot.borderOutline ? 'true' : 'false';
         dom.dataset.apoloSnap = this.snapshot.snapActive ? 'true' : 'false';
@@ -158,8 +167,15 @@ export class ApoloSpaceWidget extends WidgetType {
             });
         }
 
-        if (this.snapshot.customBgColor) {
-            dom.style.setProperty('background-color', this.snapshot.customBgColor, 'important');
+        const customBg = this.snapshot.customBgColor ?? BoxRegistry.getCustomBgColor(this.id);
+        if (customBg) {
+            dom.style.setProperty('background-color', customBg, 'important');
+        } else if (effectiveBgTheme === 'pitch-black') {
+            dom.style.setProperty('background-color', '#000000', 'important');
+        } else if (effectiveBgTheme === 'graphite') {
+            dom.style.setProperty('background-color', '#27272a', 'important');
+        } else if (effectiveBgTheme === 'transparent') {
+            dom.style.setProperty('background-color', 'transparent', 'important');
         } else {
             dom.style.removeProperty('background-color');
         }
@@ -354,7 +370,7 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
             if (parsed.gridStyle !== undefined) {
                 BoxRegistry.setGridStyle(parsed.id, parsed.gridStyle);
             }
-            if (parsed.bgTheme !== undefined) {
+            if (parsed.bgTheme !== undefined && parsed.bgTheme !== 'default') {
                 BoxRegistry.setBgTheme(parsed.id, parsed.bgTheme);
             }
             if (parsed.accentColor !== undefined) {
@@ -382,7 +398,7 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
             if (parsed.gridStyle !== undefined) {
                 BoxRegistry.setGridStyle(parsed.id, parsed.gridStyle);
             }
-            if (parsed.bgTheme !== undefined) {
+            if (parsed.bgTheme !== undefined && parsed.bgTheme !== 'default') {
                 BoxRegistry.setBgTheme(parsed.id, parsed.bgTheme);
             }
             if (parsed.accentColor !== undefined) {

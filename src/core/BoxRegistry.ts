@@ -78,18 +78,24 @@ export class BoxRegistry {
 
     static setDefaultBgTheme(theme: BoxBgTheme): void {
         this.defaultBgTheme = theme;
+        this.notifyChange();
+    }
+
+    static getDefaultBgTheme(): BoxBgTheme {
+        return this.defaultBgTheme;
     }
 
     static updateAllBgThemes(theme: BoxBgTheme): void {
         this.defaultBgTheme = theme;
-        for (const boxId of this.heights.keys()) {
+        const allBoxes = new Set([...this.heights.keys(), ...this.bgThemes.keys()]);
+        for (const boxId of allBoxes) {
             this.bgThemes.set(boxId, theme);
         }
         this.notifyChange();
     }
 
     static getKnownBoxIds(): string[] {
-        return Array.from(this.heights.keys());
+        return Array.from(new Set([...this.heights.keys(), ...this.bgThemes.keys()]));
     }
 
     static setBgTheme(boxId: string, theme: BoxBgTheme): void {
@@ -99,7 +105,11 @@ export class BoxRegistry {
     }
 
     static getBgTheme(boxId: string): BoxBgTheme {
-        return this.bgThemes.get(boxId) ?? this.defaultBgTheme;
+        const val = this.bgThemes.get(boxId);
+        if (!val || val === 'default') {
+            return this.defaultBgTheme;
+        }
+        return val;
     }
 
     static setCustomBgColor(boxId: string, color: string): void {
@@ -143,6 +153,7 @@ export class BoxRegistry {
     }
 
     static clear(): void {
+        this.defaultBgTheme = 'default';
         this.heights.clear();
         this.gridVisible.clear();
         this.snapActive.clear();

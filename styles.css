@@ -1120,11 +1120,11 @@
   transition: none !important;
 }
 
-.theme-dark .apolo-space,
-.theme-dark .apolo-space-block,
-.theme-dark .apolo-space-widget,
-.theme-dark [data-apolo-space],
-.theme-dark [data-apolo-space-id] {
+.theme-dark .apolo-space:not([data-apolo-bg-theme="pitch-black"]):not([data-apolo-bg-theme="graphite"]):not([data-apolo-bg-theme="transparent"]),
+.theme-dark .apolo-space-block:not([data-apolo-bg-theme="pitch-black"]):not([data-apolo-bg-theme="graphite"]):not([data-apolo-bg-theme="transparent"]),
+.theme-dark .apolo-space-widget:not([data-apolo-bg-theme="pitch-black"]):not([data-apolo-bg-theme="graphite"]):not([data-apolo-bg-theme="transparent"]),
+.theme-dark [data-apolo-space]:not([data-apolo-bg-theme="pitch-black"]):not([data-apolo-bg-theme="graphite"]):not([data-apolo-bg-theme="transparent"]),
+.theme-dark [data-apolo-space-id]:not([data-apolo-bg-theme="pitch-black"]):not([data-apolo-bg-theme="graphite"]):not([data-apolo-bg-theme="transparent"]) {
   background-color: #1f1f21 !important;
   border: none !important;
   border-left: 4px solid var(--apolo-accent-stripe, #a98bff) !important;
@@ -1220,7 +1220,15 @@
 [data-apolo-bg-theme="pitch-black"],
 .apolo-space[data-apolo-bg-theme="pitch-black"],
 .apolo-space-widget[data-apolo-bg-theme="pitch-black"],
-.apolo-space-block[data-apolo-bg-theme="pitch-black"] {
+.apolo-space-block[data-apolo-bg-theme="pitch-black"],
+.theme-dark [data-apolo-bg-theme="pitch-black"],
+.theme-dark .apolo-space[data-apolo-bg-theme="pitch-black"],
+.theme-dark .apolo-space-widget[data-apolo-bg-theme="pitch-black"],
+.theme-dark .apolo-space-block[data-apolo-bg-theme="pitch-black"],
+.theme-light [data-apolo-bg-theme="pitch-black"],
+.theme-light .apolo-space[data-apolo-bg-theme="pitch-black"],
+.theme-light .apolo-space-widget[data-apolo-bg-theme="pitch-black"],
+.theme-light .apolo-space-block[data-apolo-bg-theme="pitch-black"] {
   background-color: #000000 !important;
 }
 
@@ -1229,7 +1237,15 @@
 .apolo-space-widget[data-apolo-bg-theme="graphite"],
 .apolo-space-block[data-apolo-bg-theme="graphite"],
 [data-apolo-bg-theme="elevated"],
-.apolo-space[data-apolo-bg-theme="elevated"] {
+.apolo-space[data-apolo-bg-theme="elevated"],
+.theme-dark [data-apolo-bg-theme="graphite"],
+.theme-dark .apolo-space[data-apolo-bg-theme="graphite"],
+.theme-dark .apolo-space-widget[data-apolo-bg-theme="graphite"],
+.theme-dark .apolo-space-block[data-apolo-bg-theme="graphite"],
+.theme-light [data-apolo-bg-theme="graphite"],
+.theme-light .apolo-space[data-apolo-bg-theme="graphite"],
+.theme-light .apolo-space-widget[data-apolo-bg-theme="graphite"],
+.theme-light .apolo-space-block[data-apolo-bg-theme="graphite"] {
   background-color: #27272a !important;
 }
 
@@ -1250,7 +1266,15 @@
 [data-apolo-bg-theme="transparent"],
 .apolo-space[data-apolo-bg-theme="transparent"],
 .apolo-space-widget[data-apolo-bg-theme="transparent"],
-.apolo-space-block[data-apolo-bg-theme="transparent"] {
+.apolo-space-block[data-apolo-bg-theme="transparent"],
+.theme-dark [data-apolo-bg-theme="transparent"],
+.theme-dark .apolo-space[data-apolo-bg-theme="transparent"],
+.theme-dark .apolo-space-widget[data-apolo-bg-theme="transparent"],
+.theme-dark .apolo-space-block[data-apolo-bg-theme="transparent"],
+.theme-light [data-apolo-bg-theme="transparent"],
+.theme-light .apolo-space[data-apolo-bg-theme="transparent"],
+.theme-light .apolo-space-widget[data-apolo-bg-theme="transparent"],
+.theme-light .apolo-space-block[data-apolo-bg-theme="transparent"] {
   background-color: transparent !important;
 }
 

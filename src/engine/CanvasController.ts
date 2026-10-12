@@ -680,6 +680,18 @@ export class CanvasController {
                 el.dataset.apoloGrid = value !== 'none' ? 'true' : 'false';
             } else if (key === 'bgTheme') {
                 el.dataset.apoloBgTheme = String(value);
+                const customBg = BoxRegistry.getCustomBgColor(boxId);
+                if (customBg) {
+                    el.style.setProperty('background-color', customBg, 'important');
+                } else if (value === 'pitch-black') {
+                    el.style.setProperty('background-color', '#000000', 'important');
+                } else if (value === 'graphite') {
+                    el.style.setProperty('background-color', '#27272a', 'important');
+                } else if (value === 'transparent') {
+                    el.style.setProperty('background-color', 'transparent', 'important');
+                } else {
+                    el.style.removeProperty('background-color');
+                }
             } else if (key === 'accentColor') {
                 el.dataset.apoloAccent = String(value);
             } else if (key === 'borderOutline') {
@@ -1104,9 +1116,17 @@ export class CanvasController {
                 el.style.setProperty('--apolo-grid-step', `${stepPx}px`);
             }
 
+            const effectiveBgTheme = BoxRegistry.getBgTheme(id);
+            el.dataset.apoloBgTheme = effectiveBgTheme;
             const customBg = BoxRegistry.getCustomBgColor(id);
             if (customBg) {
                 el.style.setProperty('background-color', customBg, 'important');
+            } else if (effectiveBgTheme === 'pitch-black') {
+                el.style.setProperty('background-color', '#000000', 'important');
+            } else if (effectiveBgTheme === 'graphite') {
+                el.style.setProperty('background-color', '#27272a', 'important');
+            } else if (effectiveBgTheme === 'transparent') {
+                el.style.setProperty('background-color', 'transparent', 'important');
             } else {
                 el.style.removeProperty('background-color');
             }

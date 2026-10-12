@@ -5,7 +5,7 @@ import { CanvasController } from './engine/CanvasController';
 import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue';
 import { DEFAULT_FAVORITES } from './ui/theme';
 import { openLocalGraph } from './ui/LinkSuggestModal';
-import { apoloSpaceExtension, BoxRegistry } from './editor/ApoloSpaceExtension';
+import { apoloSpaceExtension, BoxRegistry, boxRegistryUpdateEffect } from './editor/ApoloSpaceExtension';
 
 export interface ApoloCanvasSettings {
     defaultPenColor: string;
@@ -157,7 +157,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                     if (s.dataset.apoloGridStyle) {
                         BoxRegistry.setGridStyle(id, s.dataset.apoloGridStyle as BoxGridStyle);
                     }
-                    if (s.dataset.apoloBgTheme) {
+                    if (s.dataset.apoloBgTheme && s.dataset.apoloBgTheme !== 'default') {
                         BoxRegistry.setBgTheme(id, s.dataset.apoloBgTheme as BoxBgTheme);
                     }
                     if (s.dataset.apoloAccent) {
@@ -165,7 +165,8 @@ export default class ApoloCanvasPlugin extends Plugin {
                     }
                     s.dataset.apoloGrid = BoxRegistry.isGridVisible(id) ? 'true' : 'false';
                     s.dataset.apoloGridStyle = BoxRegistry.getGridStyle(id);
-                    s.dataset.apoloBgTheme = BoxRegistry.getBgTheme(id);
+                    const effectiveBgTheme = BoxRegistry.getBgTheme(id);
+                    s.dataset.apoloBgTheme = effectiveBgTheme;
                     const density = BoxRegistry.getGridDensity(id);
                     s.dataset.apoloGridDensity = String(density);
                     const updateGridStep = () => {
@@ -183,7 +184,13 @@ export default class ApoloCanvasPlugin extends Plugin {
                     s.dataset.apoloSnap = BoxRegistry.isSnapActive(id) ? 'true' : 'false';
                     const customBg = BoxRegistry.getCustomBgColor(id);
                     if (customBg) {
-                        s.style.backgroundColor = customBg;
+                        s.style.setProperty('background-color', customBg, 'important');
+                    } else if (effectiveBgTheme === 'pitch-black') {
+                        s.style.setProperty('background-color', '#000000', 'important');
+                    } else if (effectiveBgTheme === 'graphite') {
+                        s.style.setProperty('background-color', '#27272a', 'important');
+                    } else if (effectiveBgTheme === 'transparent') {
+                        s.style.setProperty('background-color', 'transparent', 'important');
                     } else {
                         s.style.removeProperty('background-color');
                     }
@@ -675,12 +682,39 @@ export default class ApoloCanvasPlugin extends Plugin {
             this.controller.updateDefaultBoxBgTheme(newTheme);
         }
 
-        // 3. Update all DOM elements in workspace (Reading mode, CM views)
+        // 3. Immediately dispatch boxRegistryUpdateEffect to all open CM6 editor leaves
+        try {
+            this.app.workspace.iterateAllLeaves(leaf => {
+                const cm = (leaf.view as any)?.editor?.cm;
+                if (cm && typeof cm.dispatch === 'function') {
+                    cm.dispatch({
+                        effects: boxRegistryUpdateEffect.of(),
+                    });
+                }
+            });
+        } catch (err) {
+            console.error('[ApoloCanvas] Failed to dispatch update effect to leaves:', err);
+        }
+
+        // 4. Update all DOM elements in workspace (Reading mode, CM views)
         const spaceEls = document.querySelectorAll<HTMLElement>(
             '.apolo-space, .apolo-space-block, .apolo-space-widget, [data-apolo-space], [data-apolo-space-id]'
         );
         for (const el of Array.from(spaceEls)) {
             el.dataset.apoloBgTheme = newTheme;
+            const boxId = el.dataset.apoloSpaceId || el.dataset.apoloSpace;
+            const customBg = boxId ? BoxRegistry.getCustomBgColor(boxId) : null;
+            if (customBg) {
+                el.style.setProperty('background-color', customBg, 'important');
+            } else if (newTheme === 'pitch-black') {
+                el.style.setProperty('background-color', '#000000', 'important');
+            } else if (newTheme === 'graphite') {
+                el.style.setProperty('background-color', '#27272a', 'important');
+            } else if (newTheme === 'transparent') {
+                el.style.setProperty('background-color', 'transparent', 'important');
+            } else {
+                el.style.removeProperty('background-color');
+            }
         }
 
         // 4. Update all vault box persistence files (.apolocanvas/boxes/*.json) retroactively

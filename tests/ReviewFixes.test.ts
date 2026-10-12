@@ -747,6 +747,80 @@ describe('Code Review Fixes Verification', () => {
             assert.strictEqual(BoxRegistry.getAccentColor('box-1'), 'purple');
             assert.strictEqual(BoxRegistry.getAccentColor('box-2'), 'amber');
         });
+
+        test('Live Preview ApoloSpaceWidget updates background styling when defaultBgTheme changes', () => {
+            const prevWindow = (globalThis as any).window;
+            const prevDoc = (globalThis as any).document;
+
+            class MockStyle {
+                private props = new Map<string, string>();
+                setProperty(prop: string, val: string) { this.props.set(prop, val); }
+                getPropertyValue(prop: string) { return this.props.get(prop) || ''; }
+                removeProperty(prop: string) { this.props.delete(prop); }
+            }
+
+            class MockDomElement {
+                style = new MockStyle();
+                dataset: Record<string, string> = {};
+                className = '';
+                clientWidth = 800;
+                offsetWidth = 800;
+                isConnected = true;
+                children: any[] = [];
+                appendChild(c: any) { this.children.push(c); }
+                setAttribute(_k: string, _v: string) {}
+            }
+
+            (globalThis as any).document = {
+                createElement: () => new MockDomElement(),
+                createElementNS: () => new MockDomElement(),
+            };
+            (globalThis as any).window = {
+                requestAnimationFrame: (cb: () => void) => cb(),
+            };
+
+            try {
+                BoxRegistry.clear();
+                // box-default has default theme
+                BoxRegistry.setHeight('box-lp-1', 220);
+                assert.strictEqual(BoxRegistry.getBgTheme('box-lp-1'), 'default');
+
+                const widgetDefault = new ApoloSpaceWidget(220, 'box-lp-1');
+                const dom = widgetDefault.toDOM();
+
+                assert.strictEqual(dom.dataset.apoloBgTheme, 'default');
+                assert.strictEqual(dom.style.getPropertyValue('background-color'), '', 'Default theme without custom color leaves inline background empty for CSS theme');
+
+                // User changes default theme to pitch-black in settings
+                BoxRegistry.updateAllBgThemes('pitch-black');
+                assert.strictEqual(BoxRegistry.getBgTheme('box-lp-1'), 'pitch-black');
+
+                // New decoration rebuild creates widget with pitch-black snapshot
+                const widgetPitchBlack = new ApoloSpaceWidget(220, 'box-lp-1');
+                assert.strictEqual(widgetDefault.eq(widgetPitchBlack), false, 'Widget equality must fail when bgTheme changes so CM6 updates DOM');
+
+                widgetPitchBlack.updateDOM(dom);
+                assert.strictEqual(dom.dataset.apoloBgTheme, 'pitch-black');
+                assert.strictEqual(dom.style.getPropertyValue('background-color'), '#000000', 'Live Preview DOM element must have #000000 inline');
+
+                // User changes default theme to graphite
+                BoxRegistry.updateAllBgThemes('graphite');
+                const widgetGraphite = new ApoloSpaceWidget(220, 'box-lp-1');
+                widgetGraphite.updateDOM(dom);
+                assert.strictEqual(dom.dataset.apoloBgTheme, 'graphite');
+                assert.strictEqual(dom.style.getPropertyValue('background-color'), '#27272a', 'Live Preview DOM element must have #27272a inline');
+
+                // User changes default theme to transparent
+                BoxRegistry.updateAllBgThemes('transparent');
+                const widgetTrans = new ApoloSpaceWidget(220, 'box-lp-1');
+                widgetTrans.updateDOM(dom);
+                assert.strictEqual(dom.dataset.apoloBgTheme, 'transparent');
+                assert.strictEqual(dom.style.getPropertyValue('background-color'), 'transparent', 'Live Preview DOM element must have transparent inline');
+            } finally {
+                (globalThis as any).window = prevWindow;
+                (globalThis as any).document = prevDoc;
+            }
+        });
     });
 });
 
