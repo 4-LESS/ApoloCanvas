@@ -1,7 +1,12 @@
 import { App, Editor, Notice, TFile } from 'obsidian';
 import { EditorView } from '@codemirror/view';
+import { Transaction } from '@codemirror/state';
 import {
     BoundingBox,
+    BoxAccentColor,
+    BoxBgTheme,
+    BoxGridStyle,
+    BoxMetadata,
     CanvasElement,
     EraserMode,
     LassoMode,
@@ -28,11 +33,36 @@ import { EngineEventBus } from '../core/events';
 import { Toolbar } from '../ui/Toolbar';
 import { ToolEstuche } from '../ui/ToolEstuche';
 import { LassoMenu } from '../ui/LassoMenu';
+import { BoxMenu, BoxMenuState } from '../ui/BoxMenu';
 import { MoreMenu } from '../ui/MoreMenu';
 import { ZoomPill } from '../ui/ZoomPill';
 import { Toast } from '../ui/Toast';
 import { LinkSuggestModal, openLocalGraph } from '../ui/LinkSuggestModal';
-import { DEFAULT_FAVORITES, PEN_PROFILES } from '../ui/theme';
+import { DEFAULT_FAVORITES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
+import { calculateNaturalPressureScale, smoothPressure } from './input/PressureCurve';
+import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser';
+import {
+    cleanAnchorText,
+    findBestMatchingLine,
+    findBestMatchingPreviewBlock,
+    PreviewBlockInfo,
+} from './anchoring/SmartAnchor';
+import {
+    applySpaceMutationToMarkdown,
+    BoxRegistry,
+    SpaceMutation,
+} from '../editor/ApoloSpaceExtension';
+import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion';
+import {
+    DocumentContentBounds,
+    isInkAllowedAt,
+    isScreenPointForbidden,
+    sanitizeNormalizedPoint,
+    snapNormalizedPoint,
+    SpaceBlockRegion,
+    DEFAULT_INK_LIMITS,
+    splitStrokeIntoValidRuns,
+} from './anchoring/InkBoundary';
 
 export interface CanvasControllerOptions {
     palmRejectionCooldownMs: number;
@@ -42,6 +72,14 @@ export interface CanvasControllerOptions {
     enabled: boolean;
     enableMouseDrawing: boolean;
     shapeRecognition: boolean;
+    gridDensity?: number;
+    defaultBoxHeight?: number;
+    defaultBoxGridStyle?: BoxGridStyle;
+    defaultBoxGridDensity?: number;
+    defaultBoxBorderOutline?: boolean;
+    defaultBoxBgTheme?: BoxBgTheme;
+    defaultBoxAccentColor?: BoxAccentColor;
+    defaultBoxCustomBgColor?: string;
     eventBus?: EngineEventBus;
     app: App;
     viewContainer?: HTMLElement;
@@ -57,6 +95,7 @@ interface Anchor {
     blockId: string;
     text: string;
     y: number;
+    isBox?: boolean;
 }
 
 interface TouchPoint {
@@ -64,12 +103,9 @@ interface TouchPoint {
     y: number;
 }
 
-interface SpaceMutation {
-    id: string;
-    height: number;
-    isNew: boolean;
-    remove: boolean;
-    targetLine: number;
+interface HistorySnapshot {
+    elements: CanvasElement[];
+    boxHeights?: Record<string, number>;
 }
 
 /**
@@ -82,8 +118,10 @@ export class CanvasController {
     private readonly layer = document.createElement('div');
     private readonly canvas = document.createElement('canvas');
     private readonly dryCanvas = document.createElement('canvas');
+    private readonly highlighterDryCanvas = document.createElement('canvas');
     private readonly context: CanvasRenderingContext2D;
     private readonly dryContext: CanvasRenderingContext2D;
+    private readonly highlighterDryContext: CanvasRenderingContext2D;
 
     // UI Components
     private toolbar: Toolbar | null = null;
@@ -92,6 +130,17 @@ export class CanvasController {
     private moreMenu: MoreMenu | null = null;
     private zoomPill: ZoomPill | null = null;
     private toast: Toast | null = null;
+    private boxMenu: BoxMenu | null = null;
+    private activeHandleDrag: {
+        boxId: string;
+        startY: number;
+        initialHeight: number;
+        minAllowedHeight: number;
+        hasMoved: boolean;
+        pointerId: number;
+        handleEl: HTMLElement;
+        spaceEl: HTMLElement | null;
+    } | null = null;
 
     // Engine Core Subsystems
     private readonly input: InputManager | null = null;
@@ -100,12 +149,14 @@ export class CanvasController {
     private readonly visible: CanvasElement[] = [];
     private readonly recognizer = new ShapeRecognizer();
     private readonly predictor = new Predictor(12, 0.72, 5);
-    private readonly history: string[] = [];
-    private readonly future: string[] = [];
+    private readonly history: HistorySnapshot[] = [];
+    private readonly future: HistorySnapshot[] = [];
     private readonly touches = new Map<number, TouchPoint>();
     private singleTouchStartCoords: { x: number; y: number; time: number } | null = null;
     private lastSingleTouch: { x: number; y: number } | null = null;
     private singleTouchPanned = false;
+    private palmRejectedSingleTouch = false;
+    private lastGestureCenter = { x: 0, y: 0 };
 
     // Scroller properties
     private readonly originalScrollerPosition: string;
@@ -133,11 +184,12 @@ export class CanvasController {
     private penEnabled: boolean;
     private shapeRecognition: boolean;
     private barrelActive = false;
-    private eraserMode: EraserMode = 'reticle';
+    private eraserMode: EraserMode = 'whole';
     private eraserRadius = 18;
     private scribbleToErase = true;
     private lassoMode: LassoMode = 'free';
     private snapGrid = false;
+    private gridDensity = 32;
     private smoothing = 0.6;
     private pressureSensitivity = 0.75;
     private previousPenColor = '#1F4FD8';
@@ -182,9 +234,23 @@ export class CanvasController {
         private readonly options: CanvasControllerOptions,
     ) {
         this.document = documentModel;
+        if (this.document.boxes) {
+            for (const [id, meta] of Object.entries(this.document.boxes)) {
+                BoxRegistry.setHeight(id, meta.height);
+                if (meta.gridVisible !== undefined) BoxRegistry.setGridVisible(id, meta.gridVisible);
+                if (meta.gridStyle !== undefined) BoxRegistry.setGridStyle(id, meta.gridStyle);
+                if (meta.bgTheme !== undefined) BoxRegistry.setBgTheme(id, meta.bgTheme);
+                if (meta.customBgColor !== undefined) BoxRegistry.setCustomBgColor(id, meta.customBgColor);
+                if (meta.accentColor !== undefined) BoxRegistry.setAccentColor(id, meta.accentColor);
+                if (meta.gridDensity !== undefined) BoxRegistry.setGridDensity(id, meta.gridDensity);
+                if (meta.borderOutline !== undefined) BoxRegistry.setBorderOutline(id, meta.borderOutline);
+                if (meta.snapToGrid !== undefined) BoxRegistry.setSnapActive(id, meta.snapToGrid);
+            }
+        }
         this.pageId = pageId;
         this.penEnabled = options.enabled;
         this.shapeRecognition = options.shapeRecognition;
+        this.gridDensity = options.gridDensity ?? 32;
         this.toolbarSlot = options.toolbarSlot ?? 'tc';
         this.favorites = options.favorites && options.favorites.length === 4
             ? [...options.favorites]
@@ -207,6 +273,10 @@ export class CanvasController {
         if (!dryContext) throw new Error('Canvas 2D is unavailable in this Obsidian WebView.');
         this.dryContext = dryContext;
 
+        const highlighterDryContext = this.highlighterDryCanvas.getContext('2d', { alpha: true, desynchronized: true });
+        if (!highlighterDryContext) throw new Error('Canvas 2D is unavailable in this Obsidian WebView.');
+        this.highlighterDryContext = highlighterDryContext;
+
         this.originalScrollerPosition = scroller.style.position;
         this.originalScrollerOverflow = scroller.style.overflow;
         this.originalScrollerUserSelect = scroller.style.userSelect;
@@ -217,7 +287,8 @@ export class CanvasController {
 
         this.canvas.className = 'apolo-canvas-surface apolo-canvas-wet';
         this.dryCanvas.className = 'apolo-canvas-surface apolo-canvas-dry';
-        this.layer.append(this.dryCanvas, this.canvas);
+        this.highlighterDryCanvas.className = 'apolo-canvas-surface apolo-canvas-highlighter apolo-canvas-dry';
+        this.layer.append(this.highlighterDryCanvas, this.dryCanvas, this.canvas);
         scroller.appendChild(this.layer);
 
         // Mount decoupled UI components if not readonly
@@ -228,22 +299,33 @@ export class CanvasController {
             this.initLassoMenu();
             this.initMoreMenu();
             this.initZoomPill();
+            this.initBoxMenu();
 
             this.input = new InputManager(this.canvas, {
                 palmRejectionCooldownMs: options.palmRejectionCooldownMs,
                 enableMouseDrawing: options.enableMouseDrawing,
-                onStrokeStart: (point, barrel) => this.begin(point, barrel),
-                onStrokeMove: (points, barrel) => this.move(points, barrel),
+                shouldAcceptPointer: (event) => this.shouldAcceptDrawingPointer(event),
+                onStrokeStart: (point, barrel, rawEvent) => this.begin(point, barrel, rawEvent),
+                onStrokeMove: (points, barrel, rawEvent) => this.move(points, barrel, rawEvent),
                 onStrokeEnd: (point, barrel, rawEvent) => this.end(point, barrel, rawEvent.timeStamp),
                 onStrokeCancel: () => this.cancel(),
                 onNonDrawingPointerDown: (event) => this.focusEditorAt(event.clientX, event.clientY),
+                onHover: (event) => this.updateCursor(event),
+                onPointerLeave: () => this.resetCursor(),
+                onPenHoverOrContact: () => this.cancelSingleFingerTouch(),
             });
+
+            this.canvas.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
+            window.addEventListener('pointermove', this.onWindowPointerMoveHandleDrag, { passive: false });
+            window.addEventListener('pointerup', this.onWindowPointerUpHandleDrag, { passive: false });
+            window.addEventListener('pointercancel', this.onWindowPointerUpHandleDrag, { passive: false });
 
             this.canvas.addEventListener('pointerdown', this.onTouchDown, { passive: false });
             this.canvas.addEventListener('pointermove', this.onTouchMove, { passive: false });
             this.canvas.addEventListener('pointerup', this.onTouchEnd, { passive: false });
             this.canvas.addEventListener('pointercancel', this.onTouchEnd, { passive: false });
             this.canvas.addEventListener('dblclick', this.onCanvasDblClick);
+            this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
             document.addEventListener('pointerdown', this.onDocumentPointerDown);
         }
 
@@ -257,7 +339,6 @@ export class CanvasController {
 
             this.lastScrollTop = currentTop;
             this.lastScrollLeft = currentLeft;
-            this.positionLayer();
             this.renderDirty = true;
             this.schedulePaint();
             this.lassoMenu?.updateViewport(this.zoom, this.currentScrollLeft, this.currentScrollTop);
@@ -265,7 +346,6 @@ export class CanvasController {
 
         scroller.addEventListener('scroll', this.scrollHandler, { passive: true });
         window.addEventListener('scroll', this.scrollHandler, { capture: true, passive: true });
-        window.addEventListener('wheel', this.scrollHandler, { capture: true, passive: true });
 
         this.resizeObserver = new ResizeObserver(() => {
             this.positionLayer();
@@ -285,6 +365,7 @@ export class CanvasController {
         this.resizeObserver.observe(scroller);
 
         this.sizerObserver = new ResizeObserver(() => {
+            this.syncBoxElements();
             if (this.zoom > 1.0) {
                 this.applyContentZoom();
             }
@@ -292,6 +373,8 @@ export class CanvasController {
             this.schedulePaint();
         });
         this.observeSizer();
+
+        this.syncBoxElements();
 
         this.rebuildIndex();
         this.positionLayer();
@@ -331,6 +414,7 @@ export class CanvasController {
             canUndo: this.history.length > 0,
             canRedo: this.future.length > 0,
             eraserRadius: this.eraserRadius,
+            eraserMode: this.eraserMode,
             onSlotChange: (slot) => {
                 this.toolbarSlot = slot;
                 this.estuche?.updateState({ slot });
@@ -343,6 +427,9 @@ export class CanvasController {
             onSelectTool: (tool) => {
                 this.estuche?.close();
                 this.setTool(tool);
+            },
+            onToggleEraserMode: () => {
+                this.toggleEraserMode();
             },
             onToggleEstuche: (tool) => {
                 if (this.estuche?.isOpen()) {
@@ -375,6 +462,8 @@ export class CanvasController {
                 this.toolbar?.setSnapGrid(this.snapGrid);
                 this.estuche?.updateState({ snapGrid: this.snapGrid });
                 this.moreMenu?.updateState({ snapGrid: this.snapGrid });
+                this.toast?.show(this.snapGrid ? 'Cuadrícula magnética: Activada' : 'Cuadrícula magnética: Desactivada');
+                this.syncBoxElements();
                 this.renderDirty = true;
                 this.schedulePaint();
             },
@@ -385,6 +474,9 @@ export class CanvasController {
                     onlyPen: !this.options.enableMouseDrawing,
                     snapGrid: this.snapGrid,
                 });
+            },
+            onInsertCanvas: () => {
+                void this.insertCanvas();
             },
         });
     }
@@ -420,7 +512,7 @@ export class CanvasController {
                 onUseFavorite: (index) => this.applyFavorite(index),
                 onSaveFavorite: (index) => this.saveFavoriteAt(index),
                 onSelectEraserMode: (mode) => {
-                    this.eraserMode = mode;
+                    this.setEraserMode(mode);
                 },
                 onChangeEraserRadius: (radius) => {
                     this.eraserRadius = radius;
@@ -509,6 +601,522 @@ export class CanvasController {
         });
     }
 
+    private initBoxMenu(): void {
+        this.boxMenu = new BoxMenu({
+            onSetGridStyle: (boxId, style) => {
+                this.updateBoxProperty(boxId, 'gridStyle', style);
+                this.toast?.show(`Rejilla: ${style === 'dots' ? 'Puntos' : style === 'grid' ? 'Cuadrícula' : style === 'ruled' ? 'Rayas' : 'En blanco'}`);
+            },
+            onSetBgTheme: (boxId, theme) => {
+                this.updateBoxProperty(boxId, 'bgTheme', theme);
+                this.toast?.show('Fondo actualizado');
+            },
+            onSetAccentColor: (boxId, accent) => {
+                this.updateBoxProperty(boxId, 'accentColor', accent);
+                this.toast?.show('Acento lateral actualizado');
+            },
+            onSetGridDensity: (boxId, density) => {
+                this.updateBoxProperty(boxId, 'gridDensity', density);
+                const { width: contentWidth } = this.getContentGeometry();
+                if (contentWidth > 0 && density > 0) {
+                    const stepPx = Math.round((contentWidth / density) * 100) / 100;
+                    const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
+                        `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
+                    );
+                    for (const el of Array.from(spaceEls)) {
+                        el.style.setProperty('--apolo-grid-step', `${stepPx}px`);
+                    }
+                }
+                this.toast?.show(`Espaciado: ${density === 40 ? 'Fino' : density === 32 ? 'Normal' : 'Amplio'}`);
+            },
+            onToggleBorderOutline: (boxId, outline) => {
+                this.updateBoxProperty(boxId, 'borderOutline', outline);
+                this.toast?.show(outline ? 'Contorno 1px activado' : 'Contorno 1px desactivado');
+            },
+            onFitHeight: (boxId) => {
+                this.fitBoxHeightToContent(boxId);
+            },
+            onClearContent: (boxId) => {
+                this.clearBoxContent(boxId);
+            },
+            onDeleteBox: (boxId) => {
+                this.deleteBox(boxId);
+            },
+            onExportSvg: () => {
+                this.toast?.show('Exportación SVGcompanion disponible en paso d');
+            },
+        }, document.body);
+    }
+
+    private updateBoxProperty<K extends keyof BoxMetadata>(boxId: string, key: K, value: BoxMetadata[K]): void {
+        if (!this.document.boxes) this.document.boxes = {};
+        if (!this.document.boxes[boxId]) {
+            const h = BoxRegistry.getHeight(boxId) ?? 120;
+            this.document.boxes[boxId] = { height: h, [key]: value };
+        } else {
+            this.document.boxes[boxId][key] = value;
+        }
+
+        if (key === 'gridStyle') {
+            BoxRegistry.setGridStyle(boxId, value as BoxGridStyle);
+        } else if (key === 'bgTheme') {
+            BoxRegistry.setBgTheme(boxId, value as BoxBgTheme);
+        } else if (key === 'accentColor') {
+            BoxRegistry.setAccentColor(boxId, value as BoxAccentColor);
+        } else if (key === 'gridDensity') {
+            BoxRegistry.setGridDensity(boxId, value as number);
+        } else if (key === 'borderOutline') {
+            BoxRegistry.setBorderOutline(boxId, !!value);
+        }
+
+        const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
+            `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
+        );
+        for (const el of Array.from(spaceEls)) {
+            if (key === 'gridStyle') {
+                el.dataset.apoloGridStyle = String(value);
+                el.dataset.apoloGrid = value !== 'none' ? 'true' : 'false';
+            } else if (key === 'bgTheme') {
+                el.dataset.apoloBgTheme = String(value);
+            } else if (key === 'accentColor') {
+                el.dataset.apoloAccent = String(value);
+            } else if (key === 'borderOutline') {
+                el.dataset.apoloBorder = value ? 'true' : 'false';
+            }
+        }
+
+        this.persistSoon();
+    }
+
+    private getBoxMinimumHeight(boxId: string): number {
+        const spaceBlockId = `space:${boxId}`;
+        const geom = this.getElementAnchorGeometry(spaceBlockId);
+
+        let maxDocY = 0;
+        let hasContent = false;
+        for (const el of this.document.elements) {
+            if (el.blockId === spaceBlockId) {
+                hasContent = true;
+                const b = this.getElementDocBounds(el);
+                if (b.maxY > maxDocY) maxDocY = b.maxY;
+            }
+        }
+
+        if (hasContent && maxDocY > geom.originY) {
+            const inkHeight = maxDocY - geom.originY;
+            return Math.max(120, Math.ceil(inkHeight + 24));
+        }
+        return 120;
+    }
+
+    private clearBoxContent(boxId: string): void {
+        const spaceBlockId = `space:${boxId}`;
+        const prevCount = this.document.elements.length;
+        this.recordHistory();
+        this.document.elements = this.document.elements.filter(el => el.blockId !== spaceBlockId);
+        const removed = prevCount - this.document.elements.length;
+        this.rebuildIndex();
+        this.persistSoon();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.toast?.show(`Espacio limpiado (${removed} trazo/s eliminado/s)`);
+    }
+
+    private openBoxMenuFor(boxId: string, anchorEl: HTMLElement): void {
+        const anchorRect = anchorEl.getBoundingClientRect();
+        const meta = this.document.boxes?.[boxId];
+        const state: BoxMenuState = {
+            gridStyle: meta?.gridStyle ?? BoxRegistry.getGridStyle(boxId),
+            bgTheme: meta?.bgTheme ?? BoxRegistry.getBgTheme(boxId),
+            customBgColor: meta?.customBgColor ?? BoxRegistry.getCustomBgColor(boxId),
+            accentColor: meta?.accentColor ?? BoxRegistry.getAccentColor(boxId),
+            gridDensity: meta?.gridDensity ?? BoxRegistry.getGridDensity(boxId),
+            borderOutline: meta?.borderOutline ?? BoxRegistry.isBorderOutline(boxId),
+        };
+        this.boxMenu?.show(boxId, anchorRect, state);
+    }
+
+    private fitBoxHeightToContent(boxId: string): void {
+        this.recordHistory();
+        const spaceBlockId = `space:${boxId}`;
+        const geom = this.getElementAnchorGeometry(spaceBlockId);
+
+        let maxDocY = 0;
+        let hasContent = false;
+        for (const el of this.document.elements) {
+            if (el.blockId === spaceBlockId) {
+                hasContent = true;
+                const b = this.getElementDocBounds(el);
+                if (b.maxY > maxDocY) maxDocY = b.maxY;
+            }
+        }
+
+        let newHeight = 120;
+        if (hasContent && maxDocY > geom.originY) {
+            const inkHeight = maxDocY - geom.originY;
+            newHeight = Math.max(120, Math.ceil(inkHeight + 36));
+        }
+
+        this.applyBoxHeight(boxId, newHeight);
+        this.queueSpaceMutation({ type: 'update', id: boxId, height: newHeight });
+        this.persistSoon();
+        this.toast?.show(`Altura ajustada: ${newHeight} px`);
+    }
+
+    private deleteBox(boxId: string): void {
+        this.queueSpaceMutation({ type: 'delete', id: boxId });
+        const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
+            `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
+        );
+        for (const el of Array.from(spaceEls)) {
+            el.remove();
+        }
+        this.requestCmMeasure();
+        this.persistSoon();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.toast?.show('Espacio eliminado');
+    }
+
+    private applyBoxHeight(boxId: string, newHeight: number): void {
+        const clampedHeight = Math.max(120, Math.min(3000, newHeight));
+        BoxRegistry.setHeight(boxId, clampedHeight);
+        if (!this.document.boxes) this.document.boxes = {};
+        if (!this.document.boxes[boxId]) {
+            this.document.boxes[boxId] = { height: clampedHeight, gridVisible: true };
+        } else {
+            this.document.boxes[boxId].height = clampedHeight;
+        }
+
+        const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
+            `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
+        );
+        for (const el of Array.from(spaceEls)) {
+            el.style.setProperty('height', `${clampedHeight}px`, 'important');
+            el.style.setProperty('min-height', `${clampedHeight}px`, 'important');
+            el.dataset.apoloHeight = String(clampedHeight);
+            const embedParent = el.closest<HTMLElement>('.cm-embed-block');
+            if (embedParent) {
+                embedParent.style.setProperty('min-height', `${clampedHeight}px`, 'important');
+            }
+        }
+
+        this.requestCmMeasure();
+        this.renderDirty = true;
+        this.schedulePaint();
+    }
+
+    private requestCmMeasure(): void {
+        if (this.editor) {
+            const cm = (this.editor as any)?.cm as EditorView | undefined;
+            cm?.requestMeasure();
+        }
+    }
+
+    private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
+        if (typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return;
+        const elements = document.elementsFromPoint(event.clientX, event.clientY);
+
+        // 1. Check if tap is on top-left 3-dots options button
+        const optionsBtn = elements.find(el =>
+            el.classList?.contains('apolo-box-options-btn') ||
+            (el as HTMLElement).closest?.('.apolo-box-options-btn') !== null
+        ) as HTMLElement | undefined;
+
+        // Instant menu dismissal if box menu is open and tap is outside it
+        if (this.boxMenu?.isOpen()) {
+            const isInsideMenu = elements.some(el => this.boxMenu?.container.contains(el));
+            if (!isInsideMenu && !optionsBtn) {
+                this.boxMenu.hide();
+            }
+        }
+
+        if (optionsBtn) {
+            const actualBtn = optionsBtn.classList.contains('apolo-box-options-btn')
+                ? optionsBtn
+                : (optionsBtn.closest('.apolo-box-options-btn') as HTMLElement);
+            event.preventDefault();
+            event.stopPropagation();
+            const boxId = actualBtn.dataset.apoloBoxId
+                || actualBtn.closest('.apolo-space-block')?.getAttribute('data-apolo-space-id')
+                || actualBtn.closest('.apolo-space-block')?.getAttribute('data-apolo-space')
+                || '';
+            if (boxId) {
+                this.openBoxMenuFor(boxId, actualBtn);
+            }
+            return;
+        }
+
+        // 2. Check if tap is on bottom drag handle
+        const handleEl = elements.find(el =>
+            el.classList?.contains('apolo-box-handle') ||
+            (el as HTMLElement).closest?.('.apolo-box-handle') !== null
+        ) as HTMLElement | undefined;
+
+        if (handleEl) {
+            const actualHandle = handleEl.classList.contains('apolo-box-handle')
+                ? handleEl
+                : (handleEl.closest('.apolo-box-handle') as HTMLElement);
+            event.preventDefault();
+            event.stopPropagation();
+            this.startHandleDrag(event, actualHandle);
+        }
+    };
+
+    private startHandleDrag(event: PointerEvent, handleEl: HTMLElement): void {
+        const boxId = handleEl.dataset.apoloHandleId
+            || handleEl.closest('.apolo-space-block')?.getAttribute('data-apolo-space-id')
+            || handleEl.closest('.apolo-space-block')?.getAttribute('data-apolo-space')
+            || '';
+        if (!boxId) return;
+
+        this.recordHistory();
+
+        const spaceEl = handleEl.closest<HTMLElement>('.apolo-space, .apolo-space-block');
+        if (spaceEl) {
+            spaceEl.classList.add('is-resizing');
+        }
+
+        handleEl.classList.add('is-dragging');
+        const currentHeight = BoxRegistry.getHeight(boxId)
+            ?? (handleEl.parentElement ? handleEl.parentElement.offsetHeight : 120);
+
+        const minAllowedHeight = this.getBoxMinimumHeight(boxId);
+
+        this.activeHandleDrag = {
+            boxId,
+            startY: event.clientY,
+            initialHeight: currentHeight,
+            minAllowedHeight,
+            hasMoved: false,
+            pointerId: event.pointerId,
+            handleEl,
+            spaceEl: spaceEl ?? null,
+        };
+
+        try {
+            this.canvas.setPointerCapture(event.pointerId);
+        } catch { /* best effort */ }
+    }
+
+    private readonly onWindowPointerMoveHandleDrag = (event: PointerEvent): void => {
+        if (!this.activeHandleDrag || event.pointerId !== this.activeHandleDrag.pointerId) return;
+        const deltaY = (event.clientY - this.activeHandleDrag.startY) / this.zoom;
+        if (Math.abs(deltaY) > 3) {
+            this.activeHandleDrag.hasMoved = true;
+        }
+
+        if (this.activeHandleDrag.hasMoved) {
+            event.preventDefault();
+            const minH = this.activeHandleDrag.minAllowedHeight;
+            const newHeight = Math.max(minH, Math.min(3000, Math.round(this.activeHandleDrag.initialHeight + deltaY)));
+            this.applyBoxHeight(this.activeHandleDrag.boxId, newHeight);
+        }
+    };
+
+    private readonly onWindowPointerUpHandleDrag = (event: PointerEvent): void => {
+        if (!this.activeHandleDrag || event.pointerId !== this.activeHandleDrag.pointerId) return;
+        const drag = this.activeHandleDrag;
+        this.activeHandleDrag = null;
+        drag.handleEl.classList.remove('is-dragging');
+        if (drag.spaceEl) {
+            drag.spaceEl.classList.remove('is-resizing');
+        }
+
+        try {
+            if (this.canvas.hasPointerCapture(event.pointerId)) {
+                this.canvas.releasePointerCapture(event.pointerId);
+            }
+        } catch { /* best effort */ }
+
+        if (drag.hasMoved) {
+            // Drag completed: commit mutation and persist
+            const finalHeight = BoxRegistry.getHeight(drag.boxId) ?? drag.initialHeight;
+            this.queueSpaceMutation({ type: 'update', id: drag.boxId, height: finalHeight });
+            this.persistSoon();
+        }
+        // Notice: bottom handle is strictly for manual drag; no menu popup on tap
+    };
+
+    private checkAutoScroll(event: PointerEvent): void {
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        const bottomThreshold = scrollerRect.bottom - 60;
+        const topThreshold = scrollerRect.top + 40;
+
+        if (event.clientY > bottomThreshold) {
+            const dist = scrollerRect.bottom - event.clientY;
+            const delta = Math.min(20, Math.max(4, Math.round((60 - dist) / 2)));
+            this.scroller.scrollTop += delta;
+        } else if (event.clientY < topThreshold && this.scroller.scrollTop > 0) {
+            const dist = event.clientY - scrollerRect.top;
+            const delta = Math.min(20, Math.max(4, Math.round((40 - dist) / 2)));
+            this.scroller.scrollTop = Math.max(0, this.scroller.scrollTop - delta);
+        }
+    }
+
+    private checkAutoGrowth(rawPoints: Point[]): void {
+        if (!this.activeAnchor || !this.activeAnchor.blockId.startsWith('space:') || rawPoints.length === 0) return;
+        const spaceId = this.activeAnchor.blockId.slice(6);
+        const boxEl = this.scroller.querySelector<HTMLElement>(
+            `[data-apolo-space-id="${spaceId}"], [data-apolo-space="${spaceId}"]`
+        );
+        if (!boxEl) return;
+
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        const boxTop = this.activeBlockTop > 0
+            ? this.activeBlockTop
+            : (boxEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+        const currentHeight = BoxRegistry.getHeight(spaceId) ?? boxEl.offsetHeight;
+
+        let maxDocY = 0;
+        for (let i = 0; i < rawPoints.length; i++) {
+            const docY = (rawPoints[i].y + this.currentScrollTop) / this.zoom;
+            if (docY > maxDocY) maxDocY = docY;
+        }
+
+        const yInBox = maxDocY - boxTop;
+        const TRIGGER_MARGIN = 40; // Umbral de anticipación en px antes del fondo
+
+        if (yInBox + TRIGGER_MARGIN > currentHeight) {
+            const neededHeight = Math.min(3000, Math.ceil(yInBox + TRIGGER_MARGIN));
+            // Apply continuous growth smoothly when needed increment >= 10px
+            if (neededHeight > currentHeight + 10) {
+                this.applyBoxHeight(spaceId, neededHeight);
+            }
+        }
+    }
+
+    private checkAndFixDuplicateBoxIds(): void {
+        if (!this.editor) return;
+        const cm = (this.editor as any)?.cm as EditorView | undefined;
+        if (!cm || !cm.state || !cm.state.doc) return;
+        const doc = cm.state.doc;
+        const seenIds = new Set<string>();
+        const changes: { from: number; to: number; insert: string }[] = [];
+
+        for (let l = 1; l <= doc.lines; l++) {
+            const line = doc.line(l);
+            const match = line.text.match(/data-apolo-space(?:-id)?=["']([^"']+)["']/i);
+            if (match) {
+                const id = match[1];
+                if (seenIds.has(id)) {
+                    // Duplicate box ID found in editor! Generate clean unique ID
+                    const newId = 'c_' + Math.random().toString(36).slice(2, 8);
+                    const prevH = BoxRegistry.getHeight(id) ?? 280;
+                    BoxRegistry.setHeight(newId, prevH);
+                    BoxRegistry.setGridStyle(newId, BoxRegistry.getGridStyle(id));
+                    BoxRegistry.setBgTheme(newId, BoxRegistry.getBgTheme(id));
+                    BoxRegistry.setAccentColor(newId, BoxRegistry.getAccentColor(id));
+                    BoxRegistry.setGridDensity(newId, BoxRegistry.getGridDensity(id));
+                    BoxRegistry.setBorderOutline(newId, BoxRegistry.isBorderOutline(id));
+
+                    const newLineText = line.text.replace(match[0], `data-apolo-space="${newId}"`);
+                    changes.push({ from: line.from, to: line.to, insert: newLineText });
+                    seenIds.add(newId);
+                } else {
+                    seenIds.add(id);
+                }
+            }
+        }
+
+        if (changes.length > 0) {
+            cm.dispatch({
+                changes,
+                annotations: Transaction.addToHistory.of(false),
+            });
+            cm.requestMeasure();
+        }
+    }
+
+    public syncBoxElements(): void {
+        this.checkAndFixDuplicateBoxIds();
+        const boxEls = this.scroller.querySelectorAll<HTMLElement>(
+            '.apolo-space, .apolo-space-block, .apolo-space-widget, [data-apolo-space], [data-apolo-space-id]'
+        );
+        const isPreview = !!this.options.readonly || !!this.scroller.closest('.markdown-preview-view');
+        for (let i = 0; i < boxEls.length; i++) {
+            const el = boxEls[i];
+            const id = el.dataset.apoloSpace || el.dataset.apoloSpaceId || el.getAttribute('data-apolo-space') || el.getAttribute('data-apolo-space-id');
+            if (!id) continue;
+
+            const sidecarH = BoxRegistry.getHeight(id);
+            const dataH = el.dataset.h ? parseInt(el.dataset.h, 10) : undefined;
+            const h = Math.max(120, sidecarH ?? dataH ?? 120);
+            if (BoxRegistry.getHeight(id) === undefined) {
+                BoxRegistry.setHeight(id, h);
+            }
+
+            el.style.setProperty('height', `${h}px`, 'important');
+            el.style.setProperty('min-height', `${h}px`, 'important');
+            el.style.setProperty('display', 'block', 'important');
+            el.style.setProperty('width', '100%', 'important');
+            el.dataset.apoloHeight = String(h);
+            el.dataset.apoloSpace = id;
+            el.dataset.apoloSpaceId = id;
+            el.dataset.apoloGrid = BoxRegistry.isGridVisible(id) ? 'true' : 'false';
+            el.dataset.apoloGridStyle = BoxRegistry.getGridStyle(id);
+            el.dataset.apoloBgTheme = BoxRegistry.getBgTheme(id);
+            el.dataset.apoloAccent = BoxRegistry.getAccentColor(id);
+            el.dataset.apoloBorder = BoxRegistry.isBorderOutline(id) ? 'true' : 'false';
+            el.dataset.apoloSnap = (BoxRegistry.isSnapActive(id) || this.snapGrid) ? 'true' : 'false';
+
+            const customBg = BoxRegistry.getCustomBgColor(id);
+            if (customBg) {
+                el.style.setProperty('background-color', customBg, 'important');
+            } else {
+                el.style.removeProperty('background-color');
+            }
+
+            const embedWrapper = el.closest<HTMLElement>('.cm-embed-block');
+            if (embedWrapper) {
+                embedWrapper.style.setProperty('min-height', `${h}px`, 'important');
+            }
+
+            const existingHandle = el.querySelector<HTMLElement>('.apolo-box-handle');
+            const existingOptions = el.querySelector<HTMLElement>('.apolo-box-options-btn');
+
+            if (isPreview) {
+                if (existingHandle) existingHandle.remove();
+                if (existingOptions) existingOptions.remove();
+            } else {
+                // 1. Subtle top-left 3-dots button
+                if (!existingOptions) {
+                    const optBtn = document.createElement('button');
+                    optBtn.className = 'apolo-box-options-btn';
+                    optBtn.type = 'button';
+                    optBtn.dataset.apoloBoxId = id;
+                    optBtn.setAttribute('aria-label', 'Opciones del espacio');
+                    const dotsSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    dotsSvg.setAttribute('viewBox', '0 0 24 24');
+                    dotsSvg.setAttribute('width', '16');
+                    dotsSvg.setAttribute('height', '16');
+                    dotsSvg.setAttribute('fill', 'none');
+                    dotsSvg.setAttribute('stroke', 'currentColor');
+                    dotsSvg.setAttribute('stroke-width', '2');
+                    dotsSvg.setAttribute('stroke-linecap', 'round');
+                    dotsSvg.setAttribute('stroke-linejoin', 'round');
+                    dotsSvg.innerHTML = '<circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle><circle cx="5" cy="12" r="1.5"></circle>';
+                    optBtn.appendChild(dotsSvg);
+                    el.appendChild(optBtn);
+                }
+
+                // 2. 44px touch-target bottom resize handle
+                if (!existingHandle) {
+                    const handle = document.createElement('div');
+                    handle.className = 'apolo-box-handle';
+                    handle.dataset.apoloHandleId = id;
+                    handle.setAttribute('role', 'button');
+                    handle.setAttribute('aria-label', 'Redimensionar caja de dibujo');
+
+                    const bar = document.createElement('div');
+                    bar.className = 'apolo-box-handle-bar';
+                    handle.appendChild(bar);
+                    el.appendChild(handle);
+                }
+            }
+        }
+    }
+
     private getSizerElement(): HTMLElement | null {
         return this.scroller.querySelector<HTMLElement>('.cm-sizer')
             ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
@@ -555,6 +1163,11 @@ export class CanvasController {
 
             this.lastAppliedZoom = this.zoom;
         }
+
+        if (this.editor) {
+            const cm = (this.editor as any)?.cm as EditorView | undefined;
+            cm?.requestMeasure?.();
+        }
     }
 
     private setZoomLevel(newZoom: number): void {
@@ -562,12 +1175,45 @@ export class CanvasController {
         if (Math.abs(clampedZoom - this.zoom) < 0.001) return;
         this.zoom = clampedZoom;
         this.applyContentZoom();
+        this.blockPositionCache.clear();
+        this.rebuildIndex();
         this.zoomPill?.setZoom(this.zoom);
         this.options.eventBus?.emit('zoom:changed', this.zoom);
         this.renderDirty = true;
         this.schedulePaint();
         this.lassoMenu?.updateViewport(this.zoom, this.currentScrollLeft, this.currentScrollTop);
     }
+
+    private readonly onWheel = (event: WheelEvent): void => {
+        if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            const factor = event.deltaY < 0 ? 1.08 : 0.92;
+            const newZoom = Math.max(1.0, Math.min(3.0, this.zoom * factor));
+            if (Math.abs(newZoom - this.zoom) < 0.005) return;
+
+            const rect = this.scroller.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            const oldZoom = this.zoom;
+            const worldX = (mouseX + this.currentScrollLeft) / oldZoom;
+            const worldY = (mouseY + this.currentScrollTop) / oldZoom;
+
+            this.setZoomLevel(newZoom);
+
+            if (newZoom > 1.0) {
+                const sizer = this.getSizerElement();
+                const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
+                const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
+                const maxScrollX = Math.max(0, Math.round(baseWidth * newZoom - this.scroller.clientWidth));
+                const maxScrollY = Math.max(0, Math.round(baseHeight * newZoom - this.scroller.clientHeight));
+
+                this.scroller.scrollLeft = Math.max(0, Math.min(maxScrollX, Math.round(worldX * newZoom - mouseX)));
+                this.scroller.scrollTop = Math.max(0, Math.min(maxScrollY, Math.round(worldY * newZoom - mouseY)));
+            } else {
+                this.scroller.scrollLeft = 0;
+            }
+        }
+    };
 
     private stepZoom(dir: number): void {
         const levels = [1.0, 1.25, 1.5, 2.0, 3.0];
@@ -625,15 +1271,35 @@ export class CanvasController {
 
     private applyThicknessPreset(preset: ThicknessPreset): void {
         if (this.tool === 'eraser') {
-            const radii = { fine: 8, medium: 18, thick: 36 };
+            const radii = { fine: 10, medium: 20, thick: 40 };
             this.eraserRadius = radii[preset];
             this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
             this.estuche?.updateState({ eraserRadius: this.eraserRadius });
-            this.toast?.show(`Borrador: ${preset}`);
-        } else {
-            const widths = { fine: 2, medium: 3.5, thick: 6 };
+            const labels = {
+                fine: 'Borrador fino (10 px)',
+                medium: 'Borrador normal (20 px)',
+                thick: 'Borrador grande (40 px)',
+            };
+            this.toast?.show(labels[preset]);
+        } else if (this.tool === 'highlighter') {
+            const widths = { fine: 12, medium: 20, thick: 32 };
             this.setWidth(widths[preset]);
-            this.toast?.show(`Grosor: ${preset} (${widths[preset]} px)`);
+            const labels = {
+                fine: 'Resaltador fino (12 px)',
+                medium: 'Resaltador normal (20 px)',
+                thick: 'Resaltador grueso (32 px)',
+            };
+            this.toast?.show(labels[preset]);
+        } else {
+            // Pen / Bolígrafo: 3 grosores rápidos predefinidos (fino para letra pequeña, normal para texto, grueso para títulos)
+            const widths = { fine: 1.8, medium: 3.2, thick: 6.0 };
+            this.setWidth(widths[preset]);
+            const labels = {
+                fine: 'Grosor fino (letra pequeña - 1.8 px)',
+                medium: 'Grosor normal (texto - 3.2 px)',
+                thick: 'Grosor grueso (títulos - 6 px)',
+            };
+            this.toast?.show(labels[preset]);
         }
     }
 
@@ -687,16 +1353,35 @@ export class CanvasController {
 
     private focusEditorAt(clientX: number, clientY: number): void {
         if (!this.editor) return;
+
+        // 1. Guard against tapping inside any drawing box element or handle
+        if (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function') {
+            const hits = document.elementsFromPoint(clientX, clientY);
+            if (hits.some(el => el.classList?.contains('apolo-space-block') || el.classList?.contains('apolo-box-handle') || el.closest?.('.apolo-space-block') !== null)) {
+                return; // Do NOT refocus or move editor cursor onto the box!
+            }
+        }
+
         try {
             const ed = this.editor as unknown as Record<string, unknown>;
+            let targetPos: { line: number; ch: number } | null = null;
             if (typeof ed.posAtCoords === 'function') {
-                const pos = (ed.posAtCoords as (c: { x: number; y: number }) => unknown)({ x: clientX, y: clientY });
-                if (pos) (this.editor.setCursor as (p: unknown) => void)(pos);
+                const pos = (ed.posAtCoords as (c: { x: number; y: number }) => { line: number; ch: number } | null)({ x: clientX, y: clientY });
+                if (pos) targetPos = pos;
             } else if (ed.cm && typeof (ed.cm as Record<string, unknown>).posAtCoords === 'function') {
-                const offset = ((ed.cm as Record<string, unknown>).posAtCoords as (c: { x: number; y: number }) => unknown)({ x: clientX, y: clientY });
+                const offset = ((ed.cm as Record<string, unknown>).posAtCoords as (c: { x: number; y: number }) => number | null)({ x: clientX, y: clientY });
                 if (typeof offset === 'number' && typeof this.editor.offsetToPos === 'function') {
-                    this.editor.setCursor(this.editor.offsetToPos(offset));
+                    targetPos = this.editor.offsetToPos(offset);
                 }
+            }
+
+            if (targetPos) {
+                // 2. Guard: if the target line is a canvas box tag, do not focus onto it
+                const lineContent = this.editor.getLine(targetPos.line) ?? '';
+                if (lineContent.includes('data-apolo-space') || lineContent.includes('```apolo-space')) {
+                    return;
+                }
+                (this.editor.setCursor as (p: unknown) => void)(targetPos);
             }
         } catch {
             // Coordinate resolution is best-effort
@@ -717,6 +1402,11 @@ export class CanvasController {
     setPenEnabled(enabled: boolean): void {
         if (this.options.readonly) return;
         this.penEnabled = enabled;
+        if (!enabled) {
+            this.resetCursor();
+        } else {
+            this.canvas.style.cursor = 'crosshair';
+        }
         this.updateLayerPointerEvents();
         this.toolbar?.setPenEnabled(enabled);
         this.options.onPenEnabledChange?.(enabled);
@@ -742,23 +1432,56 @@ export class CanvasController {
         const previousTool = this.tool;
         this.tool = tool;
 
-        // Auto color switch when moving between pen and highlighter
+        // Auto color and mode switch when moving between pen and highlighter
         if (tool === 'highlighter' && previousTool !== 'highlighter') {
             this.previousPenColor = this.style.color;
-            this.style.color = '#F5C400';
-            this.style.opacity = 0.35;
+            if (this.style.color === '#111827' || this.style.color === '#1F4FD8' || !this.style.color) {
+                this.style.color = '#F5C400';
+            }
+            this.style.opacity = 0.45;
+            this.style.isHighlighter = true;
+            if (this.style.width < 8) {
+                this.style.width = 20;
+            }
+            this.canvas.classList.add('is-highlighter-mode');
         } else if (previousTool === 'highlighter' && tool === 'pen') {
             this.style.color = this.previousPenColor || '#1F4FD8';
             this.style.opacity = 1.0;
+            this.style.isHighlighter = false;
+            if (this.style.width > 10) {
+                this.style.width = 3.2;
+            }
+            this.canvas.classList.remove('is-highlighter-mode');
         } else if (tool === 'eraser') {
             this.selection = [];
             this.lassoMenu?.hide();
+            this.canvas.classList.remove('is-highlighter-mode');
+        } else {
+            this.canvas.classList.remove('is-highlighter-mode');
         }
 
         this.toolbar?.setTool(tool);
-        this.estuche?.updateState({ tool, color: this.style.color });
+        this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
+        this.estuche?.updateState({ tool, color: this.style.color, width: this.style.width });
         this.options.eventBus?.emit('tool:changed', tool);
         this.schedulePaint();
+    }
+
+    toggleEraserMode(): EraserMode {
+        this.eraserMode = this.eraserMode === 'whole' ? 'reticle' : 'whole';
+        this.toolbar?.setEraserMode(this.eraserMode);
+        this.estuche?.updateState({ eraserMode: this.eraserMode });
+        const label = this.eraserMode === 'whole'
+            ? 'Borrador: Trazo completo (borra líneas enteras)'
+            : 'Borrador: Retícula (corte de trazo)';
+        this.toast?.show(label);
+        return this.eraserMode;
+    }
+
+    setEraserMode(mode: EraserMode): void {
+        this.eraserMode = mode;
+        this.toolbar?.setEraserMode(mode);
+        this.estuche?.updateState({ eraserMode: mode });
     }
 
     undo(): void { if (!this.options.readonly) this.performUndo(); }
@@ -769,7 +1492,46 @@ export class CanvasController {
         if (!this.options.readonly) this.scheduleReanchor();
     }
 
-    async flush(): Promise<void> { await this.persistence.flush(); }
+    cancelSingleFingerTouch(): void {
+        if (this.touches.size === 1) {
+            this.palmRejectedSingleTouch = true;
+            this.singleTouchStartCoords = null;
+            this.lastSingleTouch = null;
+            this.singleTouchPanned = false;
+        }
+    }
+
+    commitActiveStroke(): void {
+        if (!this.activeStart || this.points.size === 0) return;
+        const raw = this.readActivePoints();
+        if (raw.length > 0) {
+            this.recordHistory();
+            this.createStrokeFromPoints(raw);
+            this.rebuildIndex();
+            this.persistSoon();
+        }
+        this.cancel();
+    }
+
+    onFileRenamed(newFile: TFile, oldPath: string): void {
+        if (this.file.path === oldPath || this.document.notePath === oldPath) {
+            (this as any).file = newFile;
+            this.document.notePath = newFile.path;
+            this.persistSoon();
+        }
+    }
+
+    async flush(): Promise<void> {
+        this.commitActiveStroke();
+        this.updateDocumentLayoutHint();
+        this.updateBoxesMetadata();
+        if (this.spacerDebounceTimer !== null) {
+            window.clearTimeout(this.spacerDebounceTimer);
+            this.spacerDebounceTimer = null;
+        }
+        await this.flushSpaceMutations();
+        await this.persistence.flush();
+    }
 
     destroy(): void {
         if (this.destroyed) return;
@@ -779,7 +1541,6 @@ export class CanvasController {
         if (this.scrollHandler) {
             this.scroller.removeEventListener('scroll', this.scrollHandler);
             window.removeEventListener('scroll', this.scrollHandler, { capture: true });
-            window.removeEventListener('wheel', this.scrollHandler, { capture: true });
         }
         if (this.reanchorTimer !== null) window.clearTimeout(this.reanchorTimer);
         if (this.previewReanchorTimer !== null) {
@@ -789,16 +1550,23 @@ export class CanvasController {
         if (this.spacerDebounceTimer !== null) {
             window.clearTimeout(this.spacerDebounceTimer);
             this.spacerDebounceTimer = null;
+        }
+        if (this.pendingSpaceMutations.length > 0) {
             void this.flushSpaceMutations();
         }
         this.resizeObserver?.disconnect();
         this.sizerObserver?.disconnect();
 
+        this.canvas.removeEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true });
+        window.removeEventListener('pointermove', this.onWindowPointerMoveHandleDrag);
+        window.removeEventListener('pointerup', this.onWindowPointerUpHandleDrag);
+        window.removeEventListener('pointercancel', this.onWindowPointerUpHandleDrag);
         this.canvas.removeEventListener('pointerdown', this.onTouchDown);
         this.canvas.removeEventListener('pointermove', this.onTouchMove);
         this.canvas.removeEventListener('pointerup', this.onTouchEnd);
         this.canvas.removeEventListener('pointercancel', this.onTouchEnd);
         this.canvas.removeEventListener('dblclick', this.onCanvasDblClick);
+        this.canvas.removeEventListener('wheel', this.onWheel);
         document.removeEventListener('pointerdown', this.onDocumentPointerDown);
 
         if (this.frame) cancelAnimationFrame(this.frame);
@@ -809,6 +1577,7 @@ export class CanvasController {
         this.moreMenu?.destroy();
         this.zoomPill?.destroy();
         this.toast?.destroy();
+        this.boxMenu?.destroy();
 
         this.layer.remove();
         const sizer = this.getSizerElement();
@@ -831,28 +1600,167 @@ export class CanvasController {
             this.estuche?.container.contains(target) ||
             this.lassoMenu?.container.contains(target) ||
             this.moreMenu?.container.contains(target) ||
-            this.zoomPill?.container.contains(target)
+            this.zoomPill?.container.contains(target) ||
+            this.boxMenu?.container.contains(target)
         ) {
             return;
         }
         this.estuche?.close();
         this.moreMenu?.close();
+        this.boxMenu?.hide();
     };
 
+    private getDocumentContentBounds(): DocumentContentBounds {
+        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
+        const scrollerRect = this.scroller.getBoundingClientRect();
+
+        let contentTop = 0;
+        let contentBottom = 0;
+
+        // Collect any explicit apolo-space blocks
+        const spaceBlocks: SpaceBlockRegion[] = [];
+        const spaceEls = Array.from(
+            this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]')
+        );
+        for (const s of spaceEls) {
+            const rect = s.getBoundingClientRect();
+            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            const bottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            spaceBlocks.push({ top, bottom });
+        }
+
+        if (!this.options.readonly && this.editor) {
+            const cm = (this.editor as any)?.cm as EditorView | undefined;
+            if (cm && cm.state && cm.state.doc) {
+                const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content');
+                const baseTop = contentEl
+                    ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                    : 0;
+
+                // Determine first content line (skipping frontmatter properties)
+                let firstContentLine = 0;
+                try {
+                    const cache = this.options.app.metadataCache.getFileCache(this.file);
+                    if (cache?.frontmatterPosition) {
+                        firstContentLine = cache.frontmatterPosition.end.line + 1;
+                    }
+                } catch { /* ignore */ }
+
+                const firstLineNum = Math.min(cm.state.doc.lines, Math.max(1, firstContentLine + 1));
+                const firstBlock = cm.lineBlockAt(cm.state.doc.line(firstLineNum).from);
+                contentTop = baseTop + firstBlock.top;
+
+                const lastBlock = cm.lineBlockAt(cm.state.doc.line(cm.state.doc.lines).from);
+                contentBottom = baseTop + lastBlock.bottom;
+            }
+        } else {
+            // Reading Mode: use rendered content blocks
+            const rendered = Array.from(
+                this.scroller.querySelectorAll<HTMLElement>('[data-apolo-line-start]')
+            );
+            if (rendered.length > 0) {
+                let firstContentLine = 0;
+                try {
+                    const cache = this.options.app.metadataCache.getFileCache(this.file);
+                    if (cache?.frontmatterPosition) {
+                        firstContentLine = cache.frontmatterPosition.end.line + 1;
+                    }
+                } catch { /* ignore */ }
+
+                let minTop = Number.POSITIVE_INFINITY;
+                let maxBottom = Number.NEGATIVE_INFINITY;
+                for (const el of rendered) {
+                    const start = parseInt(el.dataset.apoloLineStart || '0', 10);
+                    if (start >= firstContentLine) {
+                        const r = el.getBoundingClientRect();
+                        const t = (r.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                        const b = (r.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                        if (t < minTop) minTop = t;
+                        if (b > maxBottom) maxBottom = b;
+                    }
+                }
+                contentTop = Number.isFinite(minTop) ? minTop : 0;
+                contentBottom = Number.isFinite(maxBottom) ? maxBottom : this.scroller.scrollHeight / this.zoom;
+            } else {
+                contentBottom = this.scroller.scrollHeight / this.zoom;
+            }
+        }
+
+        return { contentLeft, contentWidth, contentTop, contentBottom, spaceBlocks };
+    }
+
+    private shouldAcceptDrawingPointer(event: PointerEvent): boolean {
+        if (!this.penEnabled) return false;
+
+        // 1. Check if the screen pointer hit a forbidden DOM element (toolbar, estuche, menus, frontmatter, gutters, interactive controls)
+        if (isScreenPointForbidden(event.clientX, event.clientY)) {
+            return false;
+        }
+
+        // 2. Check if pointer is above the forbidden header boundary (title/properties)
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        const docY = (event.clientY - scrollerRect.top + this.currentScrollTop) / this.zoom;
+        const bounds = this.getDocumentContentBounds();
+        if (bounds.contentTop > 0 && docY < bounds.contentTop - 4) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private updateCursor(event: PointerEvent, isDrawing = false): void {
+        if (!this.penEnabled) {
+            this.canvas.style.cursor = '';
+            return;
+        }
+
+        const isForbidden = !this.shouldAcceptDrawingPointer(event);
+        if (isForbidden) {
+            this.canvas.style.cursor = 'not-allowed';
+        } else {
+            this.canvas.style.cursor = 'crosshair';
+        }
+    }
+
+    private resetCursor(): void {
+        this.canvas.style.cursor = this.penEnabled ? 'crosshair' : '';
+    }
+
     // Drawing input lifecycle (normalized to content column width & anchor block)
-    private begin(rawPoint: Point, barrel: boolean): void {
+    private begin(rawPoint: Point, barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.penEnabled) return;
-        this.points.clear();
-        this.predictor.reset();
+        if (this.boxMenu?.isOpen()) {
+            this.boxMenu.hide();
+        }
+
+        // 1. Check if screen pointer hit a forbidden DOM element
+        const screenX = rawEvent ? rawEvent.clientX : rawPoint.x;
+        const screenY = rawEvent ? rawEvent.clientY : rawPoint.y;
+        if (isScreenPointForbidden(screenX, screenY)) {
+            return;
+        }
 
         const docX = (rawPoint.x + this.currentScrollLeft) / this.zoom;
         const docY = (rawPoint.y + this.currentScrollTop) / this.zoom;
+
+        // 2. For ink drawing tools, forbid drawing above content top (properties / title)
+        const isDrawingTool = this.tool === 'pen' || this.tool === 'highlighter' || this.tool === 'shape';
+        if (isDrawingTool) {
+            const bounds = this.getDocumentContentBounds();
+            const check = isInkAllowedAt(docX, docY, bounds);
+            if (!check.allowed) {
+                return;
+            }
+        }
+
+        this.points.clear();
+        this.predictor.reset();
 
         const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
         this.activeContentLeft = contentLeft;
         this.activeContentWidth = contentWidth;
 
-        this.activeAnchor = this.anchorAt(docY);
+        this.activeAnchor = this.anchorAt(docX, docY);
         this.activeBlockTop = this.activeAnchor.y;
 
         this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
@@ -865,13 +1773,42 @@ export class CanvasController {
         this.barrelActive = barrel;
 
         this.pushWorldPoint(rawPoint);
+
+        if (this.tool === 'eraser' || barrel) {
+            this.recordHistory();
+            const erased = this.eraseAtPoints([this.activeStart]);
+            if (erased) {
+                this.renderDirty = true;
+            }
+        }
+
         this.schedulePaint();
     }
 
-    private move(rawPoints: Point[], barrel: boolean): void {
+    private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
         this.barrelActive = barrel;
         for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
+
+        if (this.tool === 'eraser' || barrel) {
+            const worldPoints = rawPoints.map(p => ({
+                x: (p.x + this.currentScrollLeft) / this.zoom,
+                y: (p.y + this.currentScrollTop) / this.zoom,
+            }));
+            const erased = this.eraseAtPoints(worldPoints);
+            if (erased) {
+                this.renderDirty = true;
+            }
+        }
+
+        if (rawEvent) {
+            this.updateCursor(rawEvent, true);
+            this.checkAutoScroll(rawEvent);
+        }
+
+        if (this.activeAnchor?.blockId.startsWith('space:')) {
+            this.checkAutoGrowth(rawPoints);
+        }
 
         if (this.movingSelection && this.tool === 'lasso' && this.points.size > 1) {
             const last = this.points.get(this.points.size - 1);
@@ -893,17 +1830,25 @@ export class CanvasController {
         if (this.movingSelection && this.tool === 'lasso') {
             this.recordHistory();
             this.movingSelection = false;
+            this.reanchorSelection();
             this.rebuildIndex();
             this.emitSelection();
             this.persistSoon();
             this.toast?.show('Selección reubicada');
+        } else if (this.tool === 'lasso') {
+            this.selectLasso(raw);
+        } else if (this.tool === 'eraser' || barrel) {
+            const endDocPt = {
+                x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
+                y: (rawPoint.y + this.currentScrollTop) / this.zoom,
+            };
+            this.eraseAtPoints([endDocPt]);
+            this.rebuildIndex();
+            this.renderDirty = true;
+            this.persistSoon();
         } else {
             this.recordHistory();
-            if (this.tool === 'eraser' || barrel) {
-                this.erase(raw);
-            } else if (this.tool === 'lasso') {
-                this.selectLasso(raw);
-            } else if (this.tool === 'spacer') {
+            if (this.tool === 'spacer') {
                 this.insertSpace(raw);
             } else if (this.tool === 'shape') {
                 this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
@@ -915,6 +1860,15 @@ export class CanvasController {
                 } else {
                     this.addStroke(raw);
                 }
+            }
+        }
+
+        if (this.activeAnchor?.blockId.startsWith('space:')) {
+            this.checkAutoGrowth([rawPoint]);
+            const spaceId = this.activeAnchor.blockId.slice(6);
+            const finalHeight = BoxRegistry.getHeight(spaceId);
+            if (finalHeight) {
+                this.queueSpaceMutation({ type: 'update', id: spaceId, height: finalHeight });
             }
         }
 
@@ -944,10 +1898,14 @@ export class CanvasController {
     private pushWorldPoint(point: Point): void {
         const docX = (point.x + this.currentScrollLeft) / this.zoom;
         const docY = (point.y + this.currentScrollTop) / this.zoom;
+
         const previousPressure = this.points.size > 0 ? this.points.getPressure(this.points.size - 1) : 0.5;
-        const pressure = point.pressure === undefined || (point.pressure === 0 && this.points.size > 0)
+        const rawPressure = point.pressure === undefined || (point.pressure === 0 && this.points.size > 0)
             ? previousPressure
             : point.pressure;
+        const pressure = this.points.size > 0
+            ? smoothPressure(previousPressure, rawPressure, 0.70)
+            : rawPressure;
         const time = point.time ?? 0;
         this.points.push(docX, docY, pressure, time);
         this.predictor.updateValues(docX, docY, pressure, time);
@@ -972,21 +1930,40 @@ export class CanvasController {
             return;
         }
 
-        const anchor = this.anchorAt(points[0].y);
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        const blockTop = anchor.y;
+        const bounds = this.getDocumentContentBounds();
+        const runs = splitStrokeIntoValidRuns(points, bounds.contentTop, DEFAULT_INK_LIMITS.topMarginPx);
 
-        const flat = new Array<number>(points.length * 4);
+        for (const run of runs) {
+            if (run.length === 0) continue;
+            this.createStrokeFromPoints(run);
+        }
+    }
+
+    private createStrokeFromPoints(validPoints: Point[]): void {
+        const anchor = this.activeAnchor ?? this.anchorAt(validPoints[0].x, validPoints[0].y);
+        const geom = this.getElementAnchorGeometry(anchor.blockId, anchor.text);
+        const isBoxStroke = geom.isBox;
+        const spaceId = anchor.blockId.startsWith('space:') ? anchor.blockId.slice(6) : '';
+        const isBoxSnap = spaceId ? (BoxRegistry.isSnapActive(spaceId) || !!this.document.boxes?.[spaceId]?.snapToGrid) : false;
+        const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
+
+        const flat = new Array<number>(validPoints.length * 4);
         let minU = Number.POSITIVE_INFINITY;
         let maxU = Number.NEGATIVE_INFINITY;
         let minV = Number.POSITIVE_INFINITY;
         let maxV = Number.NEGATIVE_INFINITY;
 
-        for (let i = 0; i < points.length; i++) {
+        for (let i = 0; i < validPoints.length; i++) {
             const offset = i * 4;
-            const pt = points[i];
-            const u = (pt.x - contentLeft) / contentWidth;
-            const v = (pt.y - blockTop) / contentWidth;
+            const pt = validPoints[i];
+            const rawU = (pt.x - geom.originX) / geom.scaleWidth;
+            const rawV = (pt.y - geom.originY) / geom.scaleWidth;
+            let { u, v } = sanitizeNormalizedPoint(rawU, rawV, { isBoxStroke });
+            if (isBoxStroke && (this.snapGrid || isBoxSnap)) {
+                const snapped = snapNormalizedPoint(u, v, boxGridDensity);
+                u = snapped.u;
+                v = snapped.v;
+            }
             flat[offset] = u;
             flat[offset + 1] = v;
             flat[offset + 2] = pt.pressure ?? 0.5;
@@ -997,15 +1974,20 @@ export class CanvasController {
             if (v > maxV) maxV = v;
         }
 
+        const isHl = this.tool === 'highlighter';
         const element: StrokeElement = {
             id: uuid(),
             type: 'stroke',
             timestamp: Date.now(),
-            zIndex: this.document.elements.length,
+            zIndex: isHl ? 0 : this.document.elements.length + 1,
             blockId: anchor.blockId,
             anchorText: anchor.text,
             points: flat,
-            style: { ...this.style },
+            style: {
+                ...this.style,
+                profile: this.penProfileId,
+                isHighlighter: isHl,
+            },
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
         this.document.elements.push(element);
@@ -1032,14 +2014,34 @@ export class CanvasController {
     }
 
     private addShape(start: Point, end: Point, shapeType: ShapeElement['shapeType']): void {
-        const anchor = this.anchorAt(start.y);
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        const blockTop = anchor.y;
+        const bounds = this.getDocumentContentBounds();
+        const forbiddenY = bounds.contentTop > 0 ? bounds.contentTop - DEFAULT_INK_LIMITS.topMarginPx : -Infinity;
+        if (bounds.contentTop > 0 && start.y < forbiddenY && end.y < forbiddenY) {
+            // Entire shape was in forbidden zone: discard
+            return;
+        }
 
-        const startU = (start.x - contentLeft) / contentWidth;
-        const startV = (start.y - blockTop) / contentWidth;
-        const endU = (end.x - contentLeft) / contentWidth;
-        const endV = (end.y - blockTop) / contentWidth;
+        const anchor = this.activeAnchor ?? this.anchorAt(start.x, start.y);
+        const geom = this.getElementAnchorGeometry(anchor.blockId, anchor.text);
+        const isBoxStroke = geom.isBox;
+        const spaceId = anchor.blockId.startsWith('space:') ? anchor.blockId.slice(6) : '';
+        const isBoxSnap = spaceId ? (BoxRegistry.isSnapActive(spaceId) || !!this.document.boxes?.[spaceId]?.snapToGrid) : false;
+        const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
+
+        const rawStartU = (start.x - geom.originX) / geom.scaleWidth;
+        const rawStartV = (start.y - geom.originY) / geom.scaleWidth;
+        const rawEndU = (end.x - geom.originX) / geom.scaleWidth;
+        const rawEndV = (end.y - geom.originY) / geom.scaleWidth;
+
+        let { u: startU, v: startV } = sanitizeNormalizedPoint(rawStartU, rawStartV, { isBoxStroke });
+        let { u: endU, v: endV } = sanitizeNormalizedPoint(rawEndU, rawEndV, { isBoxStroke });
+
+        if (isBoxStroke && (this.snapGrid || isBoxSnap)) {
+            const snStart = snapNormalizedPoint(startU, startV, boxGridDensity);
+            const snEnd = snapNormalizedPoint(endU, endV, boxGridDensity);
+            startU = snStart.u; startV = snStart.v;
+            endU = snEnd.u; endV = snEnd.v;
+        }
 
         const minU = Math.min(startU, endU);
         const maxU = Math.max(startU, endU);
@@ -1069,9 +2071,8 @@ export class CanvasController {
         const scrollerRect = this.scroller.getBoundingClientRect();
         const candidateSelectors = [
             '.cm-content',
-            '.markdown-preview-section',
-            '.markdown-rendered',
             '.markdown-preview-sizer',
+            '.markdown-preview-section',
             '.cm-sizer',
         ];
         let contentEl: HTMLElement | null = null;
@@ -1092,6 +2093,10 @@ export class CanvasController {
     }
 
     private getBlockTop(blockId: string, anchorText?: string): number {
+        const cacheKey = anchorText ? `${blockId}#${anchorText}` : blockId;
+        const cachedEarly = this.blockPositionCache.get(cacheKey);
+        if (cachedEarly !== undefined) return cachedEarly;
+
         const scrollerRect = this.scroller.getBoundingClientRect();
 
         // 1. Space block anchor: direct element match in both Live Preview & Reading mode
@@ -1102,6 +2107,7 @@ export class CanvasController {
             );
             if (spaceEl) {
                 const top = (spaceEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                this.blockPositionCache.set(cacheKey, top);
                 this.blockPositionCache.set(blockId, top);
                 return top;
             }
@@ -1124,6 +2130,7 @@ export class CanvasController {
                             ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
                             : 0;
                         const top = contentTop + lineBlock.top;
+                        this.blockPositionCache.set(cacheKey, top);
                         this.blockPositionCache.set(blockId, top);
                         return top;
                     }
@@ -1140,44 +2147,37 @@ export class CanvasController {
                 const rendered = Array.from(this.scroller.querySelectorAll<HTMLElement>('[data-apolo-line-start]'));
 
                 if (rendered.length > 0) {
-                    // Match by anchorText if available (pick nearest to targetLine if multiple occurrences)
-                    if (anchorText) {
-                        let bestEl: HTMLElement | null = null;
-                        let minLineDiff = Number.POSITIVE_INFINITY;
-                        for (const el of rendered) {
-                            if (el.textContent && el.textContent.includes(anchorText)) {
-                                const start = parseInt(el.dataset.apoloLineStart || '0', 10);
-                                const diff = Math.abs(start - targetLine);
-                                if (diff < minLineDiff) {
-                                    minLineDiff = diff;
-                                    bestEl = el;
-                                }
-                            }
-                        }
-                        if (bestEl) {
-                            const rect = bestEl.getBoundingClientRect();
-                            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-                            this.blockPositionCache.set(blockId, top);
-                            return top;
-                        }
-                    }
+                    const blockInfos: PreviewBlockInfo[] = rendered.map(el => ({
+                        el,
+                        start: parseInt(el.dataset.apoloLineStart || '0', 10),
+                        end: parseInt(el.dataset.apoloLineEnd || '0', 10),
+                        text: el.textContent || '',
+                    }));
 
-                    // Exact match within rendered block with fractional line interpolation
-                    for (const el of rendered) {
-                        const start = parseInt(el.dataset.apoloLineStart || '0', 10);
-                        const end = parseInt(el.dataset.apoloLineEnd || '0', 10);
+                    const bestBlockEl = findBestMatchingPreviewBlock(blockInfos, anchorText || '', targetLine);
+                    if (bestBlockEl) {
+                        const rect = bestBlockEl.getBoundingClientRect();
+                        const start = parseInt(bestBlockEl.dataset.apoloLineStart || '0', 10);
+                        const end = parseInt(bestBlockEl.dataset.apoloLineEnd || '0', 10);
+                        let lineFraction = 0;
                         if (targetLine >= start && targetLine <= end) {
-                            const rect = el.getBoundingClientRect();
                             const lineOffset = targetLine - start;
                             const totalLinesInBlock = Math.max(1, end - start + 1);
-                            const lineFraction = lineOffset / totalLinesInBlock;
-                            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom + (rect.height / this.zoom) * lineFraction;
-                            this.blockPositionCache.set(blockId, top);
-                            return top;
+                            lineFraction = lineOffset / totalLinesInBlock;
                         }
+                        const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom + (rect.height / this.zoom) * lineFraction;
+                        this.blockPositionCache.set(cacheKey, top);
+                        this.blockPositionCache.set(blockId, top);
+                        return top;
                     }
 
-                    // Block not directly rendered: find preceding or following rendered block
+                    // If not currently in DOM (e.g. virtualized/offscreen), reuse previously measured position!
+                    const cachedOffscreen = this.blockPositionCache.get(cacheKey) ?? this.blockPositionCache.get(blockId);
+                    if (cachedOffscreen !== undefined) {
+                        return cachedOffscreen;
+                    }
+
+                    // Fallback if not directly rendered: find preceding or following rendered block
                     let prevBlock: HTMLElement | null = null;
                     let nextBlock: HTMLElement | null = null;
                     let maxStartBefore = -1;
@@ -1202,7 +2202,7 @@ export class CanvasController {
                         const prevEnd = parseInt(prevBlock.dataset.apoloLineEnd || '0', 10);
                         const deltaLines = targetLine - prevEnd;
                         const estimatedTop = prevBottom + (deltaLines - 1) * 24;
-                        this.blockPositionCache.set(blockId, estimatedTop);
+                        this.blockPositionCache.set(cacheKey, estimatedTop);
                         return estimatedTop;
                     } else if (nextBlock) {
                         const rect = nextBlock.getBoundingClientRect();
@@ -1210,7 +2210,7 @@ export class CanvasController {
                         const nextStart = parseInt(nextBlock.dataset.apoloLineStart || '0', 10);
                         const deltaLines = nextStart - targetLine;
                         const estimatedTop = Math.max(0, nextTop - deltaLines * 24);
-                        this.blockPositionCache.set(blockId, estimatedTop);
+                        this.blockPositionCache.set(cacheKey, estimatedTop);
                         return estimatedTop;
                     }
                 }
@@ -1222,20 +2222,12 @@ export class CanvasController {
                 let targetLine = parseInt(lineMatch[1], 10);
                 const cm = (this.editor as any)?.cm as EditorView | undefined;
                 if (cm && cm.state && cm.state.doc) {
-                    // Match by anchorText if line text shifted
+                    // Match by anchorText if line text shifted or changed
                     if (anchorText) {
-                        const currentLineNum = Math.min(cm.state.doc.lines, Math.max(1, targetLine + 1));
-                        const currentLine = cm.state.doc.line(currentLineNum);
-                        if (currentLine.text.trim() !== anchorText) {
-                            const searchRadius = 40;
-                            const minLine = Math.max(1, currentLineNum - searchRadius);
-                            const maxLine = Math.min(cm.state.doc.lines, currentLineNum + searchRadius);
-                            for (let l = minLine; l <= maxLine; l++) {
-                                if (cm.state.doc.line(l).text.trim() === anchorText) {
-                                    targetLine = l - 1;
-                                    break;
-                                }
-                            }
+                        const docLines: string[] = cm.state.doc.toJSON();
+                        const match = findBestMatchingLine(docLines, anchorText, targetLine, 60);
+                        if (match) {
+                            targetLine = match.line;
                         }
                     }
 
@@ -1247,13 +2239,14 @@ export class CanvasController {
                         ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
                         : 0;
                     const top = contentTop + lineBlock.top;
+                    this.blockPositionCache.set(cacheKey, top);
                     this.blockPositionCache.set(blockId, top);
                     return top;
                 }
             }
         }
 
-        const cached = this.blockPositionCache.get(blockId);
+        const cached = this.blockPositionCache.get(cacheKey) ?? this.blockPositionCache.get(blockId);
         if (cached !== undefined) return cached;
 
         const lineMatch = blockId.match(/^line:(\d+)$/);
@@ -1267,22 +2260,49 @@ export class CanvasController {
         return 0;
     }
 
-    private getElementDocBounds(element: CanvasElement): BoundingBox {
+    private getElementAnchorGeometry(blockId: string, anchorText?: string): { originX: number; scaleWidth: number; originY: number; boxHeight: number; isBox: boolean } {
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        if (blockId.startsWith('space:')) {
+            const spaceId = blockId.slice(6);
+            const boxH = BoxRegistry.getHeight(spaceId) ?? 280;
+            const spaceEl = this.scroller.querySelector<HTMLElement>(
+                `[data-apolo-space-id="${spaceId}"], [data-apolo-space="${spaceId}"]`
+            );
+            if (spaceEl) {
+                const rect = spaceEl.getBoundingClientRect();
+                const originX = (rect.left - scrollerRect.left + this.currentScrollLeft) / this.zoom;
+                const scaleWidth = Math.max(1, rect.width / this.zoom);
+                const originY = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+                const elH = Math.max(120, rect.height / this.zoom);
+                return { originX, scaleWidth, originY, boxHeight: elH || boxH, isBox: true };
+            }
+            const cachedTop = this.blockPositionCache.get(blockId);
+            const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
+            return { originX: contentLeft, scaleWidth: contentWidth, originY: cachedTop ?? 0, boxHeight: boxH, isBox: true };
+        }
         const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        const blockTop = this.getBlockTop(element.blockId, element.anchorText);
+        const blockTop = this.getBlockTop(blockId, anchorText);
+        return { originX: contentLeft, scaleWidth: contentWidth, originY: blockTop, boxHeight: 0, isBox: false };
+    }
+
+    private getElementDocBounds(element: CanvasElement): BoundingBox {
+        const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
         const halfWidth = (element.style.width || 2) / 2;
         return {
-            minX: contentLeft + element.bounds.minX * contentWidth - halfWidth,
-            maxX: contentLeft + element.bounds.maxX * contentWidth + halfWidth,
-            minY: blockTop + element.bounds.minY * contentWidth - halfWidth,
-            maxY: blockTop + element.bounds.maxY * contentWidth + halfWidth,
+            minX: geom.originX + element.bounds.minX * geom.scaleWidth - halfWidth,
+            maxX: geom.originX + element.bounds.maxX * geom.scaleWidth + halfWidth,
+            minY: geom.originY + element.bounds.minY * geom.scaleWidth - halfWidth,
+            maxY: geom.originY + element.bounds.maxY * geom.scaleWidth + halfWidth,
         };
     }
 
-    private anchorAt(docY: number): Anchor {
+    private anchorAt(docX: number, docY: number): Anchor {
         const scrollerRect = this.scroller.getBoundingClientRect();
+        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
 
-        // 1. Check if docY falls inside any apolo-space block (both Live Preview & Reading mode)
+        // 1. Check if (docX, docY) falls inside any apolo-space box (both Live Preview & Reading mode).
+        // Strokes starting within the box bounds belong to that box.
+        // Strokes starting in the margins are freehand ink and are NOT assigned to the box.
         const spaceBlocks = Array.from(
             this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]')
         );
@@ -1290,13 +2310,18 @@ export class CanvasController {
             const spaceId = blockEl.dataset.apoloSpaceId || blockEl.dataset.apoloSpace;
             if (!spaceId) continue;
             const rect = blockEl.getBoundingClientRect();
+            const boxLeft = (rect.left - scrollerRect.left + this.currentScrollLeft) / this.zoom;
+            const boxRight = (rect.right - scrollerRect.left + this.currentScrollLeft) / this.zoom;
             const blockTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
             const blockBottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
-            if (docY >= blockTop && docY <= blockBottom) {
+            if (docX >= boxLeft && docX <= boxRight && docY >= blockTop && docY <= blockBottom) {
+                const spaceBlockId = `space:${spaceId}`;
+                this.blockPositionCache.set(spaceBlockId, blockTop);
                 return {
-                    blockId: `space:${spaceId}`,
+                    blockId: spaceBlockId,
                     text: '',
                     y: blockTop,
+                    isBox: true,
                 };
             }
         }
@@ -1333,8 +2358,13 @@ export class CanvasController {
                     }
                 }
 
+                const resBlockId = `line:${anchorLine}`;
+                this.blockPositionCache.set(resBlockId, blockTop);
+                if (text) {
+                    this.blockPositionCache.set(`${resBlockId}#${text}`, blockTop);
+                }
                 return {
-                    blockId: `line:${anchorLine}`,
+                    blockId: resBlockId,
                     text,
                     y: blockTop,
                 };
@@ -1344,34 +2374,52 @@ export class CanvasController {
     }
 
     private erase(points: Point[]): void {
-        const radius = Math.max(12, this.eraserRadius);
+        this.eraseAtPoints(points);
+    }
+
+    private eraseAtPoints(points: Point[]): boolean {
+        if (points.length === 0) return false;
+        const radius = Math.max(10, this.eraserRadius);
         const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
         const kept: CanvasElement[] = [];
+        let modified = false;
 
         for (const element of this.document.elements) {
             const blockTop = this.getBlockTop(element.blockId, element.anchorText);
             if (element.type === 'stroke') {
-                const fragments = this.eraserMode === 'reticle'
-                    ? splitStrokeDoc(element, points, radius, contentLeft, contentWidth, blockTop)
-                    : null;
-                if (fragments) {
-                    kept.push(...fragments);
-                } else if (!strokeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
-                    kept.push(element);
+                if (this.eraserMode === 'reticle') {
+                    const fragments = splitStrokeDoc(element, points, radius, contentLeft, contentWidth, blockTop, uuid);
+                    if (fragments) {
+                        kept.push(...fragments);
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
+                } else {
+                    // Stroke Eraser (whole): touching any part of the stroke erases it entirely!
+                    if (strokeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
                 }
             } else {
-                const b = this.getElementDocBounds(element);
-                const cx = (b.minX + b.maxX) / 2;
-                const cy = (b.minY + b.maxY) / 2;
-                if (!nearPath(points, cx, cy, radius)) {
+                if (shapeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
+                    modified = true;
+                } else {
                     kept.push(element);
                 }
             }
         }
-        this.document.elements = kept;
-        this.selection = [];
-        this.lassoMenu?.hide();
-        this.emitSelection();
+
+        if (modified) {
+            this.document.elements = kept;
+            this.selection = [];
+            this.lassoMenu?.hide();
+            this.emitSelection();
+            this.rebuildIndex();
+        }
+        return modified;
     }
 
     // Lasso selection: supports freeform polygon and rectangular selection
@@ -1577,6 +2625,168 @@ export class CanvasController {
         this.schedulePaint();
     }
 
+    private reanchorSelection(): void {
+        for (const element of this.selection) {
+            const bounds = this.getElementDocBounds(element);
+            const centerX = (bounds.minX + bounds.maxX) / 2;
+            const centerY = (bounds.minY + bounds.maxY) / 2;
+            const newAnchor = this.anchorAt(centerX, centerY);
+
+            if (newAnchor.blockId !== element.blockId) {
+                const oldGeom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
+                const newGeom = this.getElementAnchorGeometry(newAnchor.blockId, newAnchor.text);
+
+                if (element.type === 'stroke') {
+                    for (let i = 0; i < element.points.length; i += 4) {
+                        const docX = oldGeom.originX + element.points[i] * oldGeom.scaleWidth;
+                        const docY = oldGeom.originY + element.points[i + 1] * oldGeom.scaleWidth;
+                        let newU = (docX - newGeom.originX) / newGeom.scaleWidth;
+                        let newV = (docY - newGeom.originY) / newGeom.scaleWidth;
+                        if (newGeom.isBox) {
+                            newU = Math.max(0, Math.min(1, newU));
+                            newV = Math.max(0, newV);
+                        }
+                        element.points[i] = newU;
+                        element.points[i + 1] = newV;
+                    }
+                    let minU = element.points[0];
+                    let maxU = element.points[0];
+                    let minV = element.points[1];
+                    let maxV = element.points[1];
+                    for (let i = 4; i < element.points.length; i += 4) {
+                        minU = Math.min(minU, element.points[i]);
+                        maxU = Math.max(maxU, element.points[i]);
+                        minV = Math.min(minV, element.points[i + 1]);
+                        maxV = Math.max(maxV, element.points[i + 1]);
+                    }
+                    element.bounds = { minX: minU, maxX: maxU, minY: minV, maxY: maxV };
+                } else {
+                    const docStartX = oldGeom.originX + element.startX * oldGeom.scaleWidth;
+                    const docStartY = oldGeom.originY + element.startY * oldGeom.scaleWidth;
+                    const docEndX = oldGeom.originX + element.endX * oldGeom.scaleWidth;
+                    const docEndY = oldGeom.originY + element.endY * oldGeom.scaleWidth;
+
+                    let newStartX = (docStartX - newGeom.originX) / newGeom.scaleWidth;
+                    let newStartY = (docStartY - newGeom.originY) / newGeom.scaleWidth;
+                    let newEndX = (docEndX - newGeom.originX) / newGeom.scaleWidth;
+                    let newEndY = (docEndY - newGeom.originY) / newGeom.scaleWidth;
+
+                    if (newGeom.isBox) {
+                        newStartX = Math.max(0, Math.min(1, newStartX));
+                        newStartY = Math.max(0, newStartY);
+                        newEndX = Math.max(0, Math.min(1, newEndX));
+                        newEndY = Math.max(0, newEndY);
+                    }
+                    element.startX = newStartX;
+                    element.startY = newStartY;
+                    element.endX = newEndX;
+                    element.endY = newEndY;
+                    element.bounds = {
+                        minX: Math.min(newStartX, newEndX),
+                        maxX: Math.max(newStartX, newEndX),
+                        minY: Math.min(newStartY, newEndY),
+                        maxY: Math.max(newStartY, newEndY),
+                    };
+                }
+
+                element.blockId = newAnchor.blockId;
+                element.anchorText = newAnchor.text;
+
+                // If dropped into a box, expand box if needed to accommodate the ink
+                if (newGeom.isBox) {
+                    const boxId = newAnchor.blockId.slice(6);
+                    const inkBottomPx = element.bounds.maxY * newGeom.scaleWidth;
+                    if (inkBottomPx + 36 > newGeom.boxHeight) {
+                        const neededH = Math.max(120, Math.ceil(inkBottomPx + 48));
+                        this.applyBoxHeight(boxId, neededH);
+                        this.queueSpaceMutation({ type: 'update', id: boxId, height: neededH });
+                    }
+                }
+            }
+        }
+    }
+
+    async insertCanvas(heightOverride?: number): Promise<string> {
+        const boxId = 'c_' + Math.random().toString(36).slice(2, 8);
+        const defHeight = heightOverride ?? this.options.defaultBoxHeight ?? 120;
+        const defGridStyle = this.options.defaultBoxGridStyle ?? 'dots';
+        const defGridDensity = this.options.defaultBoxGridDensity ?? 32;
+        const defBorder = this.options.defaultBoxBorderOutline ?? false;
+        const defBgTheme = this.options.defaultBoxBgTheme ?? 'default';
+        const defAccent = this.options.defaultBoxAccentColor ?? 'purple';
+        const defCustomBg = this.options.defaultBoxCustomBgColor ?? '';
+
+        // 1. Register box metadata in sidecar and memory BEFORE editor mutations
+        if (!this.document.boxes) this.document.boxes = {};
+        this.document.boxes[boxId] = {
+            height: defHeight,
+            gridVisible: defGridStyle !== 'none',
+            gridStyle: defGridStyle,
+            bgTheme: defBgTheme,
+            customBgColor: defCustomBg || undefined,
+            accentColor: defAccent,
+            gridDensity: defGridDensity,
+            borderOutline: defBorder,
+        };
+        BoxRegistry.setHeight(boxId, defHeight);
+        BoxRegistry.setGridVisible(boxId, defGridStyle !== 'none');
+        BoxRegistry.setGridStyle(boxId, defGridStyle);
+        BoxRegistry.setBgTheme(boxId, defBgTheme);
+        if (defCustomBg) BoxRegistry.setCustomBgColor(boxId, defCustomBg);
+        BoxRegistry.setAccentColor(boxId, defAccent);
+        BoxRegistry.setGridDensity(boxId, defGridDensity);
+        BoxRegistry.setBorderOutline(boxId, defBorder);
+
+        // 2. Insert into Markdown
+        if (this.editor) {
+            const cursor = this.editor.getCursor?.();
+            const content = this.editor.getValue();
+            const { updatedContent, insertedLine } = insertCanvasIntoMarkdown(
+                content,
+                boxId,
+                defHeight,
+                cursor ? cursor.line : undefined,
+            );
+
+            if (updatedContent !== content) {
+                this.editor.setValue(updatedContent);
+                // Move cursor to line after the new canvas box so Live Preview replaces the block immediately
+                try {
+                    this.editor.setCursor({ line: Math.min(insertedLine + 1, updatedContent.split('\n').length - 1), ch: 0 });
+                } catch { /* best effort */ }
+                this.requestCmMeasure();
+            }
+        } else {
+            await this.options.app.vault.process(this.file, (content) => {
+                const res = insertCanvasIntoMarkdown(content, boxId, defHeight, undefined);
+                return res.updatedContent;
+            });
+        }
+
+        // 3. Clear cache and rebuild index
+        this.blockPositionCache.clear();
+        this.rebuildIndex();
+        this.persistSoon();
+
+        // 4. Activate pen tool
+        this.setPenEnabled(true);
+        this.setTool('pen');
+
+        // Scroll to the new box and apply fluid entrance animation
+        window.setTimeout(() => {
+            const boxEl = this.scroller.querySelector<HTMLElement>(
+                `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
+            );
+            if (boxEl) {
+                boxEl.classList.add('apolo-box-enter');
+                boxEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }, 80);
+
+        this.toast?.show('Canvas insertado');
+        return boxId;
+    }
+
     private insertSpace(points: Point[]): void {
         if (points.length < 2) return;
         const dy = points[points.length - 1].y - points[0].y;
@@ -1585,7 +2795,7 @@ export class CanvasController {
 
         this.recordHistory();
 
-        const { width: contentWidth } = this.getContentGeometry();
+        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
 
         // 1. Check if the pivot touch is inside an existing apolo-space block
         const spaceBlocks = Array.from(this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]'));
@@ -1633,7 +2843,7 @@ export class CanvasController {
 
             let targetLine = 0;
             if (this.editor) {
-                const anchor = this.anchorAt(pivot);
+                const anchor = this.anchorAt(contentLeft + contentWidth / 2, pivot);
                 if (anchor.blockId.startsWith('line:')) {
                     targetLine = parseInt(anchor.blockId.slice(5), 10);
                 } else {
@@ -1644,21 +2854,9 @@ export class CanvasController {
         }
 
         if (mutation) {
-            // 2. Shift elements below the pivot (preserving local anchors inside the space block being modified)
-            if (effectiveShift !== 0) {
-                const dv = effectiveShift / contentWidth;
-                for (const element of this.document.elements) {
-                    if (targetSpace && element.blockId === `space:${targetSpace.id}`) continue;
-
-                    const b = this.getElementDocBounds(element);
-                    if (b.minY >= pivot) {
-                        this.shiftElementNormalized(element, 0, dv);
-                    }
-                }
-                this.rebuildIndex();
-            }
-
-            // 3. Debounced write to markdown file via vault.process
+            this.blockPositionCache.clear();
+            this.rebuildIndex();
+            // 2. Debounced write to markdown file via vault.process
             this.queueSpaceMutation(mutation);
             this.persistSoon();
             this.schedulePaint();
@@ -1682,58 +2880,94 @@ export class CanvasController {
         this.pendingSpaceMutations = [];
         if (mutations.length === 0) return;
 
+        // If in Edit mode, update the active editor via CodeMirror transaction without
+        // polluting the editor's undo history (Transaction.addToHistory.of(false))!
+        if (this.editor) {
+            try {
+                const cm = (this.editor as any)?.cm as EditorView | undefined;
+                if (cm && cm.state && cm.state.doc) {
+                    const doc = cm.state.doc;
+                    const changes: { from: number; to: number; insert: string }[] = [];
+                    for (const mut of mutations) {
+                        const isDelete = !!mut.remove || mut.type === 'delete';
+                        const isInsert = !!mut.isNew || mut.type === 'insert';
+                        if (isInsert) continue;
+
+                        const height = mut.height ?? 240;
+                        const idRegex = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mut.id}["'][^>]*>`, 'i');
+
+                        for (let l = 1; l <= doc.lines; l++) {
+                            const line = doc.line(l);
+                            if (line.text.includes('data-apolo-space') && idRegex.test(line.text)) {
+                                if (isDelete) {
+                                    const from = line.from;
+                                    const to = l < doc.lines ? doc.line(l + 1).from : line.to;
+                                    changes.push({ from, to, insert: '' });
+                                } else {
+                                    const match = line.text.match(idRegex);
+                                    if (match) {
+                                        const oldTag = match[0];
+                                        let newTag = oldTag;
+                                        if (/data-h=["']\d+["']/i.test(newTag)) {
+                                            newTag = newTag.replace(/data-h=["']\d+["']/i, `data-h="${height}"`);
+                                        } else {
+                                            newTag = newTag.replace(/>$/, ` data-h="${height}">`);
+                                        }
+                                        if (/height:\s*\d+px/i.test(newTag)) {
+                                            newTag = newTag.replace(/(height:\s*)\d+px/i, `$1${height}px`);
+                                        }
+                                        if (newTag !== oldTag) {
+                                            const newText = line.text.replace(oldTag, newTag);
+                                            changes.push({ from: line.from, to: line.to, insert: newText });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (changes.length > 0) {
+                        changes.sort((a, b) => a.from - b.from);
+                        cm.dispatch({
+                            changes,
+                            annotations: Transaction.addToHistory.of(false),
+                        });
+                        cm.requestMeasure();
+                    }
+
+                    // Fallback path ONLY for insert type mutations
+                    const insertMutations = mutations.filter(m => !!m.isNew || m.type === 'insert');
+                    if (insertMutations.length > 0) {
+                        const currentDoc = cm.state.doc;
+                        const docStr = currentDoc.toString();
+                        let updated = docStr;
+                        for (const mut of insertMutations) {
+                            updated = applySpaceMutationToMarkdown(updated, mut);
+                        }
+                        if (updated !== docStr) {
+                            cm.dispatch({
+                                changes: { from: 0, to: currentDoc.length, insert: updated },
+                                annotations: Transaction.addToHistory.of(false),
+                            });
+                            cm.requestMeasure();
+                        }
+                    }
+                    return;
+                }
+            } catch (err) {
+                console.error('[ApoloCanvas] Error updating space block via editor transaction:', err);
+            }
+        }
+
         try {
             await this.options.app.vault.process(this.file, (content) => {
                 let updated = content;
                 for (const mut of mutations) {
-                    updated = this.applySpaceMutationToMarkdown(updated, mut);
+                    updated = applySpaceMutationToMarkdown(updated, mut);
                 }
                 return updated;
             });
         } catch (err) {
             console.error('[ApoloCanvas] Error updating space block via vault.process:', err);
-        }
-    }
-
-    private applySpaceMutationToMarkdown(content: string, mutation: SpaceMutation): string {
-        if (mutation.remove) {
-            // Remove <div ... data-apolo-space="id" ...></div>
-            const divRegex = new RegExp(`[\\r\\n]*<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*><\\/div>`, 'gi');
-            let res = content.replace(divRegex, '');
-            // Also remove codeblock if present
-            const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*${mutation.id}[\\s\\S]*?\`\`\``, 'gi');
-            res = res.replace(codeBlockRegex, '');
-            return res;
-        }
-
-        if (!mutation.isNew) {
-            // Update existing block
-            // 1. Try HTML div
-            const divRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*style=["'][^"']*height:\\s*)\\d+px([^"']*["'][^>]*><\\/div>)`, 'i');
-            if (divRegex.test(content)) {
-                return content.replace(divRegex, `$1${mutation.height}px$2`);
-            }
-            const generalDiv = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutation.id}["'][^>]*><\\/div>`, 'i');
-            if (generalDiv.test(content)) {
-                return content.replace(generalDiv, `<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${mutation.height}px;"></div>`);
-            }
-            // 2. Try codeblock
-            const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*${mutation.id}[\\s\\S]*?)\`\`\``, 'i');
-            if (codeBlockRegex.test(content)) {
-                return content.replace(codeBlockRegex, `\`\`\`apolo-space\nheight: ${mutation.height}\nid: ${mutation.id}\n\`\`\``);
-            }
-            return `${content}\n<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${mutation.height}px;"></div>\n`;
-        } else {
-            // Insert new block as <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
-            const divTag = `<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${mutation.height}px;"></div>`;
-            const lines = content.split('\n');
-            const targetLine = Math.max(0, Math.min(lines.length, mutation.targetLine + 1));
-            if (targetLine < lines.length && lines[targetLine].trim() === '') {
-                lines[targetLine] = divTag;
-            } else {
-                lines.splice(targetLine, 0, divTag);
-            }
-            return lines.join('\n');
         }
     }
 
@@ -1754,16 +2988,44 @@ export class CanvasController {
         this.toast?.show('Tinta desplazada +56 px simulando nuevo párrafo arriba');
     }
 
+    private getBoxHeightsSnapshot(): Record<string, number> {
+        const heights: Record<string, number> = {};
+        if (this.document.boxes) {
+            for (const [id, meta] of Object.entries(this.document.boxes)) {
+                heights[id] = meta.height;
+            }
+        }
+        return heights;
+    }
+
+    private restoreBoxHeights(targetHeights: Record<string, number>): void {
+        for (const [boxId, targetH] of Object.entries(targetHeights)) {
+            const currentH = BoxRegistry.getHeight(boxId);
+            if (currentH !== targetH) {
+                this.applyBoxHeight(boxId, targetH);
+                this.queueSpaceMutation({ type: 'update', id: boxId, height: targetH });
+            }
+        }
+    }
+
     private performUndo(): void {
         const snapshot = this.history.pop();
         if (!snapshot) return;
-        this.future.push(JSON.stringify(this.document.elements));
-        this.document.elements = JSON.parse(snapshot) as CanvasElement[];
+        this.future.push({
+            elements: cloneElements(this.document.elements),
+            boxHeights: this.getBoxHeightsSnapshot(),
+        });
+        if (this.future.length > 30) this.future.shift();
+        this.document.elements = cloneElements(snapshot.elements);
+        if (snapshot.boxHeights) {
+            this.restoreBoxHeights(snapshot.boxHeights);
+        }
         this.selection = [];
         this.lassoMenu?.hide();
         this.rebuildIndex();
+        this.renderDirty = true;
+        this.paint();
         this.persistSoon();
-        this.schedulePaint();
         this.toolbar?.setHistory(this.history.length > 0, this.future.length > 0);
         this.options.eventBus?.emit('history:changed', this.history.length > 0, this.future.length > 0);
         this.toast?.show('Deshecho');
@@ -1772,20 +3034,31 @@ export class CanvasController {
     private performRedo(): void {
         const snapshot = this.future.pop();
         if (!snapshot) return;
-        this.history.push(JSON.stringify(this.document.elements));
-        this.document.elements = JSON.parse(snapshot) as CanvasElement[];
+        this.history.push({
+            elements: cloneElements(this.document.elements),
+            boxHeights: this.getBoxHeightsSnapshot(),
+        });
+        if (this.history.length > 30) this.history.shift();
+        this.document.elements = cloneElements(snapshot.elements);
+        if (snapshot.boxHeights) {
+            this.restoreBoxHeights(snapshot.boxHeights);
+        }
         this.selection = [];
         this.lassoMenu?.hide();
         this.rebuildIndex();
+        this.renderDirty = true;
+        this.paint();
         this.persistSoon();
-        this.schedulePaint();
         this.toolbar?.setHistory(this.history.length > 0, this.future.length > 0);
         this.options.eventBus?.emit('history:changed', this.history.length > 0, this.future.length > 0);
         this.toast?.show('Rehecho');
     }
 
     private recordHistory(): void {
-        this.history.push(JSON.stringify(this.document.elements));
+        this.history.push({
+            elements: cloneElements(this.document.elements),
+            boxHeights: this.getBoxHeightsSnapshot(),
+        });
         if (this.history.length > 30) this.history.shift();
         this.future.length = 0;
         this.toolbar?.setHistory(this.history.length > 0, false);
@@ -1804,8 +3077,47 @@ export class CanvasController {
         this.renderDirty = true;
     }
 
+    private updateDocumentLayoutHint(): void {
+        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
+        if (contentWidth > 0) {
+            const anchorTops: Record<string, number> = {};
+            for (const [key, val] of this.blockPositionCache.entries()) {
+                anchorTops[key] = val;
+            }
+            this.document.layoutHint = {
+                contentWidth,
+                contentLeft,
+                updatedAt: Date.now(),
+                anchorTops,
+            };
+        }
+    }
+
+    private updateBoxesMetadata(): void {
+        const spaceBlocks = Array.from(
+            this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]')
+        );
+        if (!this.document.boxes) {
+            this.document.boxes = {};
+        }
+        for (const blockEl of spaceBlocks) {
+            const spaceId = blockEl.dataset.apoloSpaceId || blockEl.dataset.apoloSpace;
+            if (!spaceId) continue;
+            const h = parseInt(blockEl.dataset.apoloHeight || blockEl.style.height || '180', 10);
+            const existing = this.document.boxes[spaceId] || { height: h };
+            existing.height = h;
+            const top = this.blockPositionCache.get(`space:${spaceId}`);
+            if (top !== undefined) {
+                existing.lastTop = top;
+            }
+            this.document.boxes[spaceId] = existing;
+        }
+    }
+
     private persistSoon(): void {
         this.document.updatedAt = Date.now();
+        this.updateDocumentLayoutHint();
+        this.updateBoxesMetadata();
         this.persistence.enqueue(this.document, this.file, this.pageId);
         this.options.eventBus?.emit('save:status', true, this.lastSavedAt);
     }
@@ -1826,54 +3138,74 @@ export class CanvasController {
     private reanchor(): void {
         if (this.options.readonly || !this.editor) return;
         if (this.document.elements.length === 0) return;
-        this.blockPositionCache.clear();
 
         let changed = false;
         const lineCount = this.editor.lineCount();
-
-        const desiredTexts = new Set<string>();
-        for (const element of this.document.elements) {
-            if (element.anchorText) desiredTexts.add(element.anchorText);
+        const allLines: string[] = [];
+        for (let l = 0; l < lineCount; l++) {
+            allLines.push(this.editor.getLine(l));
         }
+        const docText = allLines.join('\n');
+        const cm = (this.editor as any)?.cm as EditorView | undefined;
+        const { width: contentWidth } = this.getContentGeometry();
 
-        if (desiredTexts.size > 0) {
-            const textToLines = new Map<string, number[]>();
-            for (let line = 0; line < lineCount; line++) {
-                const text = this.editor.getLine(line).trim();
-                if (desiredTexts.has(text)) {
-                    let arr = textToLines.get(text);
-                    if (!arr) {
-                        arr = [];
-                        textToLines.set(text, arr);
+        for (const element of this.document.elements) {
+            // Case 1: Line anchor re-matching using SmartAnchor outward search
+            if (element.anchorText && element.blockId.startsWith('line:')) {
+                const match = element.blockId.match(/^line:(\d+)$/);
+                if (match) {
+                    const oldLine = parseInt(match[1], 10);
+                    const best = findBestMatchingLine(allLines, element.anchorText, oldLine, 80);
+                    if (best && best.line !== oldLine) {
+                        element.blockId = `line:${best.line}`;
+                        if (best.confidence > 0.8) {
+                            element.anchorText = allLines[best.line].trim();
+                        }
+                        changed = true;
                     }
-                    arr.push(line);
                 }
             }
 
-            for (const element of this.document.elements) {
-                if (!element.anchorText) continue;
-                const match = element.blockId.match(/^line:(\d+)$/);
-                if (!match) continue;
-                const oldLine = parseInt(match[1], 10);
-                const candidates = textToLines.get(element.anchorText);
-                if (candidates && candidates.length > 0) {
-                    let nearest = candidates[0];
-                    let minDiff = Math.abs(nearest - oldLine);
-                    for (let i = 1; i < candidates.length; i++) {
-                        const diff = Math.abs(candidates[i] - oldLine);
-                        if (diff < minDiff) {
-                            minDiff = diff;
-                            nearest = candidates[i];
+            // Case 2: Space block anchor - handle deleted space block
+            else if (element.blockId.startsWith('space:')) {
+                const spaceId = element.blockId.slice(6);
+                const marker = `data-apolo-space="${spaceId}"`;
+                const markerAlt = `data-apolo-space-id="${spaceId}"`;
+                if (!docText.includes(marker) && !docText.includes(markerAlt)) {
+                    // Space block was deleted from markdown: reanchor to nearest line
+                    const cachedTop = this.blockPositionCache.get(element.blockId);
+                    if (cachedTop !== undefined && cm && cm.state && cm.state.doc) {
+                        const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content');
+                        const scrollerRect = this.scroller.getBoundingClientRect();
+                        const contentTop = contentEl
+                            ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                            : 0;
+                        const localY = Math.max(0, cachedTop - contentTop);
+                        const lineBlock = cm.lineBlockAtHeight(localY);
+                        const line = cm.state.doc.lineAt(lineBlock.from);
+                        const newLine = line.number - 1;
+                        const newLineTop = contentTop + lineBlock.top;
+                        const deltaV = (cachedTop - newLineTop) / contentWidth;
+
+                        element.blockId = `line:${newLine}`;
+                        element.anchorText = line.text.trim();
+                        element.bounds.minY += deltaV;
+                        element.bounds.maxY += deltaV;
+                        if (element.type === 'stroke') {
+                            for (let i = 1; i < element.points.length; i += 4) {
+                                element.points[i] += deltaV;
+                            }
+                        } else {
+                            element.startY += deltaV;
+                            element.endY += deltaV;
                         }
-                    }
-                    if (nearest !== oldLine) {
-                        element.blockId = `line:${nearest}`;
                         changed = true;
                     }
                 }
             }
         }
 
+        this.blockPositionCache.clear();
         this.rebuildIndex();
         if (changed) {
             this.persistSoon();
@@ -1948,21 +3280,28 @@ export class CanvasController {
             const currentStart = parseInt(current.dataset.apoloLineStart || '0', 10);
 
             if (i === 0) {
-                const leadingBlankLines = currentStart - firstContentLine;
-                if (leadingBlankLines > 0) {
-                    current.style.marginTop = `${leadingBlankLines * lineHeight}px`;
-                } else {
-                    current.style.marginTop = '';
+                // Only apply leadingBlankLines if current is actually at the beginning of content!
+                // If currentStart > firstContentLine + 1, preceding blocks are virtualized, NOT blank.
+                if (currentStart <= firstContentLine + 1) {
+                    const leadingBlankLines = currentStart - firstContentLine;
+                    if (leadingBlankLines > 0) {
+                        current.style.marginTop = `${leadingBlankLines * lineHeight}px`;
+                    } else {
+                        current.style.marginTop = '';
+                    }
                 }
             } else {
                 const prev = topLevelBlocks[i - 1];
-                const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
-                const blankLines = currentStart - prevEnd - 1;
+                // Only apply inter-block spacing if prev and current are immediate DOM siblings
+                if (current.previousElementSibling === prev) {
+                    const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                    const blankLines = currentStart - prevEnd - 1;
 
-                if (blankLines > 0) {
-                    current.style.marginTop = `${blankLines * lineHeight}px`;
-                } else {
-                    current.style.marginTop = '';
+                    if (blankLines > 0) {
+                        current.style.marginTop = `${blankLines * lineHeight}px`;
+                    } else {
+                        current.style.marginTop = '';
+                    }
                 }
             }
         }
@@ -1972,9 +3311,11 @@ export class CanvasController {
             const lastBlockEnd = parseInt(lastBlock.dataset.apoloLineEnd || lastBlock.dataset.apoloLineStart || '0', 10);
             void this.options.app.vault.cachedRead(this.file).then(content => {
                 if (this.destroyed) return;
-                const totalLines = content.split('\n').length;
-                const trailingBlankLines = totalLines - lastBlockEnd - 1;
-                if (trailingBlankLines > 0) {
+                const lines = content.split('\n');
+                const trailingSlice = lines.slice(lastBlockEnd + 1);
+                const areAllTrailingBlank = trailingSlice.length > 0 && trailingSlice.every(l => l.trim() === '');
+                if (areAllTrailingBlank) {
+                    const trailingBlankLines = trailingSlice.length;
                     lastBlock.style.marginBottom = `${trailingBlankLines * lineHeight}px`;
                 } else {
                     lastBlock.style.marginBottom = '';
@@ -1991,13 +3332,25 @@ export class CanvasController {
         return this.scroller.scrollLeft;
     }
 
+    private updateGridStepProperty(): void {
+        const { width: contentWidth } = this.getContentGeometry();
+        if (contentWidth > 0 && this.gridDensity > 0) {
+            const stepPx = Math.round((contentWidth / this.gridDensity) * 100) / 100;
+            this.scroller.style.setProperty('--apolo-grid-step', `${stepPx}px`);
+        }
+    }
+
     private positionLayer(): void {
         this.layer.style.top = `${this.currentScrollTop}px`;
         this.layer.style.left = `${this.currentScrollLeft}px`;
+        this.updateGridStepProperty();
+        this.syncBoxElements();
     }
 
     private resize(): void {
         if (this.destroyed) return;
+        this.updateGridStepProperty();
+        this.syncBoxElements();
         const width = Math.max(1, this.scroller.clientWidth);
         const height = Math.max(1, this.scroller.clientHeight);
         const ratio = Math.max(1, window.devicePixelRatio || 1);
@@ -2008,6 +3361,8 @@ export class CanvasController {
         this.canvas.style.height = `${height}px`;
         this.dryCanvas.style.width = `${width}px`;
         this.dryCanvas.style.height = `${height}px`;
+        this.highlighterDryCanvas.style.width = `${width}px`;
+        this.highlighterDryCanvas.style.height = `${height}px`;
 
         const maxDim = 4096;
         const targetW = Math.min(maxDim, Math.round(width * ratio));
@@ -2018,6 +3373,8 @@ export class CanvasController {
             this.canvas.height = targetH;
             this.dryCanvas.width = targetW;
             this.dryCanvas.height = targetH;
+            this.highlighterDryCanvas.width = targetW;
+            this.highlighterDryCanvas.height = targetH;
             this.renderDirty = true;
         }
     }
@@ -2044,27 +3401,35 @@ export class CanvasController {
         if (this.renderDirty) {
             this.dryContext.setTransform(1, 0, 0, 1, 0, 0);
             this.dryContext.clearRect(0, 0, this.dryCanvas.width, this.dryCanvas.height);
-            this.dryContext.setTransform(
-                ratio * this.zoom,
-                0,
-                0,
-                ratio * this.zoom,
-                -ratio * sLeft,
-                -ratio * sTop,
-            );
+            this.highlighterDryContext.setTransform(1, 0, 0, 1, 0, 0);
+            this.highlighterDryContext.clearRect(0, 0, this.highlighterDryCanvas.width, this.highlighterDryCanvas.height);
 
-            if (this.snapGrid) this.paintGrid(this.dryContext, width, height);
+            const m0 = ratio * this.zoom;
+            const m3 = ratio * this.zoom;
+            const m4 = -ratio * sLeft;
+            const m5 = -ratio * sTop;
 
+            this.dryContext.setTransform(m0, 0, 0, m3, m4, m5);
+            this.highlighterDryContext.setTransform(m0, 0, 0, m3, m4, m5);
+
+            const buffer = 200;
             const viewport: BoundingBox = {
-                minX: sLeft / this.zoom,
-                minY: sTop / this.zoom,
-                maxX: (sLeft + width) / this.zoom,
-                maxY: (sTop + height) / this.zoom,
+                minX: (sLeft - buffer) / this.zoom,
+                minY: (sTop - buffer) / this.zoom,
+                maxX: (sLeft + width + buffer) / this.zoom,
+                maxY: (sTop + height + buffer) / this.zoom,
             };
 
             this.index.query(viewport, this.visible);
             this.visible.sort((a, b) => a.zIndex - b.zIndex);
-            for (const element of this.visible) this.paintElement(element, this.dryContext);
+            const isDark = isDarkTheme();
+            for (const element of this.visible) {
+                if (this.isHighlighter(element)) {
+                    this.paintHighlighterStroke(element as StrokeElement, this.highlighterDryContext, isDark);
+                } else {
+                    this.paintElement(element, this.dryContext);
+                }
+            }
             this.renderDirty = false;
         }
 
@@ -2092,36 +3457,18 @@ export class CanvasController {
         this.context.setTransform(1, 0, 0, 1, 0, 0);
     }
 
-    private paintGrid(context: CanvasRenderingContext2D, width: number, height: number): void {
-        const sTop = this.currentScrollTop;
-        const sLeft = this.currentScrollLeft;
-        const startX = Math.floor(sLeft / (this.zoom * 12)) * 12;
-        const startY = Math.floor(sTop / (this.zoom * 12)) * 12;
-        const endX = (sLeft + width) / this.zoom;
-        const endY = (sTop + height) / this.zoom;
-
-        context.save();
-        context.strokeStyle = '#7d8793';
-        context.globalAlpha = 0.12;
-        context.lineWidth = 1 / this.zoom;
-        context.beginPath();
-        for (let x = startX; x <= endX; x += 12) {
-            context.moveTo(x, startY);
-            context.lineTo(x, endY);
-        }
-        for (let y = startY; y <= endY; y += 12) {
-            context.moveTo(startX, y);
-            context.lineTo(endX, y);
-        }
-        context.stroke();
-        context.restore();
-    }
-
     private paintElement(element: CanvasElement, context: CanvasRenderingContext2D): void {
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        const blockTop = this.getBlockTop(element.blockId, element.anchorText);
+        const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
+        const contentLeft = geom.originX;
+        const contentWidth = geom.scaleWidth;
+        const blockTop = geom.originY;
 
         context.save();
+        if (geom.isBox) {
+            context.beginPath();
+            context.rect(contentLeft, blockTop, contentWidth, geom.boxHeight);
+            context.clip();
+        }
 
         // Render purple link halo if element has a WikiLink / URL
         if (element.url) {
@@ -2166,7 +3513,9 @@ export class CanvasController {
                     }
                     context.stroke();
                 } else if (data.length === 4) {
-                    context.lineWidth = element.style.width * pressureScale(data[2], this.pressureSensitivity);
+                    const profileId = element.style.profile || 'fountain';
+                    const scale = calculateNaturalPressureScale(data[2], profileId, this.pressureSensitivity);
+                    context.lineWidth = element.style.width * scale;
                     context.beginPath();
                     context.arc(
                         contentLeft + data[0] * contentWidth,
@@ -2178,8 +3527,11 @@ export class CanvasController {
                     context.fillStyle = element.style.color;
                     context.fill();
                 } else {
+                    const profileId = element.style.profile || 'fountain';
                     for (let i = 4; i < data.length; i += 4) {
-                        context.lineWidth = element.style.width * pressureScale((data[i - 2] + data[i + 2]) / 2, this.pressureSensitivity);
+                        const avgP = (data[i - 2] + data[i + 2]) / 2;
+                        const scale = calculateNaturalPressureScale(avgP, profileId, this.pressureSensitivity);
+                        context.lineWidth = element.style.width * scale;
                         context.beginPath();
                         context.moveTo(contentLeft + data[i - 4] * contentWidth, blockTop + data[i - 3] * contentWidth);
                         context.lineTo(contentLeft + data[i] * contentWidth, blockTop + data[i + 1] * contentWidth);
@@ -2191,6 +3543,95 @@ export class CanvasController {
             this.paintShape(element, context, contentLeft, contentWidth, blockTop);
         }
 
+        context.restore();
+    }
+
+    private isHighlighter(element: CanvasElement): boolean {
+        if (element.type !== 'stroke') return false;
+        if (element.style.isHighlighter) return true;
+        if (element.style.profile === 'hlr' || element.style.profile === 'hlf') return true;
+        if (element.style.opacity <= 0.6 && (element.style.color === '#F5C400' || element.style.width >= 10)) {
+            return true;
+        }
+        return false;
+    }
+
+    private paintHighlighterStroke(
+        element: StrokeElement,
+        context: CanvasRenderingContext2D,
+        isDark: boolean,
+    ): void {
+        const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
+        const contentLeft = geom.originX;
+        const contentWidth = geom.scaleWidth;
+        const blockTop = geom.originY;
+        const data = element.points;
+        if (data.length < 4) return;
+
+        context.save();
+        if (geom.isBox) {
+            context.beginPath();
+            context.rect(contentLeft, blockTop, contentWidth, geom.boxHeight);
+            context.clip();
+        }
+        context.globalCompositeOperation = isDark ? 'screen' : 'multiply';
+        context.strokeStyle = element.style.color;
+        context.lineWidth = element.style.width;
+        context.globalAlpha = element.style.opacity || 0.45;
+        context.lineCap = element.style.lineCap ?? 'round';
+        context.lineJoin = 'round';
+
+        if (data.length === 4) {
+            context.beginPath();
+            context.arc(
+                contentLeft + data[0] * contentWidth,
+                blockTop + data[1] * contentWidth,
+                element.style.width / 2,
+                0,
+                Math.PI * 2,
+            );
+            context.fillStyle = element.style.color;
+            context.fill();
+        } else {
+            // Continuous single-path stroke: prevents internal double-blend cap seams!
+            context.beginPath();
+            context.moveTo(contentLeft + data[0] * contentWidth, blockTop + data[1] * contentWidth);
+            for (let i = 4; i < data.length; i += 4) {
+                context.lineTo(contentLeft + data[i] * contentWidth, blockTop + data[i + 1] * contentWidth);
+            }
+            context.stroke();
+        }
+
+        context.restore();
+    }
+
+    private paintEraserReticle(): void {
+        if (this.points.size === 0) return;
+        const context = this.context;
+        const lastX = this.points.getX(this.points.size - 1);
+        const lastY = this.points.getY(this.points.size - 1);
+        const radius = Math.max(10, this.eraserRadius);
+
+        context.save();
+        context.beginPath();
+        context.arc(lastX, lastY, radius, 0, Math.PI * 2);
+        context.fillStyle = 'rgba(239, 68, 68, 0.12)';
+        context.fill();
+
+        context.strokeStyle = this.eraserMode === 'whole' ? '#EF4444' : '#F97316';
+        context.lineWidth = 1.8 / this.zoom;
+        if (this.eraserMode === 'whole') {
+            context.setLineDash([]);
+            context.stroke();
+
+            context.beginPath();
+            context.arc(lastX, lastY, 2.5 / this.zoom, 0, Math.PI * 2);
+            context.fillStyle = '#EF4444';
+            context.fill();
+        } else {
+            context.setLineDash([4, 4]);
+            context.stroke();
+        }
         context.restore();
     }
 
@@ -2248,46 +3689,149 @@ export class CanvasController {
     }
 
     private paintActive(): void {
+        if (this.tool === 'eraser' || this.barrelActive) {
+            this.paintEraserReticle();
+            return;
+        }
+
         const context = this.context;
+        const bounds = this.getDocumentContentBounds();
+        const forbiddenY = bounds.contentTop > 0 ? bounds.contentTop - DEFAULT_INK_LIMITS.topMarginPx : -Infinity;
+        const isDark = isDarkTheme();
+
         context.save();
+
+        if (this.activeAnchor && this.activeAnchor.blockId.startsWith('space:')) {
+            const geom = this.getElementAnchorGeometry(this.activeAnchor.blockId);
+            context.beginPath();
+            context.rect(geom.originX, geom.originY, geom.scaleWidth, geom.boxHeight);
+            context.clip();
+        }
+
+        if (this.tool === 'highlighter') {
+            context.globalCompositeOperation = isDark ? 'screen' : 'multiply';
+            context.strokeStyle = this.style.color;
+            context.lineWidth = this.style.width;
+            context.globalAlpha = this.style.opacity || 0.45;
+            context.lineCap = this.style.lineCap ?? 'round';
+            context.lineJoin = 'round';
+
+            if (this.points.size === 1) {
+                const isForbidden = bounds.contentTop > 0 && this.points.getY(0) < forbiddenY;
+                if (!isForbidden) {
+                    context.beginPath();
+                    context.arc(this.points.getX(0), this.points.getY(0), this.style.width / 2, 0, Math.PI * 2);
+                    context.fillStyle = this.style.color;
+                    context.fill();
+                }
+            } else if (this.points.size > 1) {
+                context.beginPath();
+                context.moveTo(this.points.getX(0), this.points.getY(0));
+                for (let i = 1; i < this.points.size; i++) {
+                    context.lineTo(this.points.getX(i), this.points.getY(i));
+                }
+                context.stroke();
+            }
+
+            if (this.hasPrediction && this.points.size > 0) {
+                const isPredForbidden = bounds.contentTop > 0 && this.predictedPoint.y < forbiddenY;
+                if (!isPredForbidden) {
+                    context.beginPath();
+                    context.moveTo(this.points.getX(this.points.size - 1), this.points.getY(this.points.size - 1));
+                    context.lineTo(this.predictedPoint.x, this.predictedPoint.y);
+                    context.stroke();
+                }
+            }
+
+            context.restore();
+            return;
+        }
+
+        // Regular Pen / Stylus stroke rendering with natural pressure dynamics
         context.strokeStyle = this.style.color;
         context.lineWidth = this.style.width;
-        context.globalAlpha = this.barrelActive ? 0.75 : this.style.opacity;
+        context.globalAlpha = this.style.opacity;
         context.lineCap = this.style.lineCap ?? 'round';
         context.lineJoin = 'round';
-        if (this.style.pattern === 'dashed') context.setLineDash([8, 6]);
-        else if (this.style.pattern === 'dotted') context.setLineDash([1, 5]);
-        if (this.barrelActive) context.setLineDash([4, 4]);
 
-        context.beginPath();
         if (this.points.size === 1) {
-            context.lineWidth = this.style.width * pressureScale(this.points.getPressure(0), this.pressureSensitivity);
-            context.beginPath();
-            context.arc(this.points.getX(0), this.points.getY(0), context.lineWidth / 2, 0, Math.PI * 2);
-            context.fillStyle = this.style.color;
-            context.fill();
-        } else if (this.style.pattern !== 'solid') {
-            context.lineWidth = this.style.width;
-            context.moveTo(this.points.getX(0), this.points.getY(0));
-            for (let i = 1; i < this.points.size; i++) context.lineTo(this.points.getX(i), this.points.getY(i));
-            context.stroke();
+            const isForbidden = bounds.contentTop > 0 && this.points.getY(0) < forbiddenY;
+            if (isForbidden) {
+                context.strokeStyle = 'rgba(140, 149, 159, 0.45)';
+                context.globalAlpha = 1;
+                context.setLineDash([4, 6]);
+                context.lineWidth = Math.max(1.5, this.style.width);
+                context.beginPath();
+                context.arc(this.points.getX(0), this.points.getY(0), Math.max(1, this.style.width / 2), 0, Math.PI * 2);
+                context.stroke();
+            } else {
+                const scale = calculateNaturalPressureScale(
+                    this.points.getPressure(0),
+                    this.penProfileId,
+                    this.pressureSensitivity,
+                );
+                context.lineWidth = this.style.width * scale;
+                context.beginPath();
+                context.arc(this.points.getX(0), this.points.getY(0), context.lineWidth / 2, 0, Math.PI * 2);
+                context.fillStyle = this.style.color;
+                context.fill();
+            }
         } else {
             for (let i = 1; i < this.points.size; i++) {
-                context.lineWidth = this.style.width * pressureScale((this.points.getPressure(i - 1) + this.points.getPressure(i)) / 2, this.pressureSensitivity);
+                const y0 = this.points.getY(i - 1);
+                const y1 = this.points.getY(i);
+                const isForbidden = bounds.contentTop > 0 && (y0 < forbiddenY || y1 < forbiddenY);
+
+                context.save();
+                if (isForbidden) {
+                    // Fixed semi-transparent gray with wider dash spacing (6px dash, 10px gap)
+                    context.strokeStyle = 'rgba(140, 149, 159, 0.45)';
+                    context.globalAlpha = 1;
+                    context.setLineDash([6, 10]);
+                    context.lineWidth = Math.max(1.5, Math.min(3, this.style.width));
+                } else {
+                    context.strokeStyle = this.style.color;
+                    context.globalAlpha = this.style.opacity;
+                    if (this.style.pattern === 'dashed') {
+                        context.setLineDash([8, 6]);
+                        context.lineWidth = this.style.width;
+                    } else if (this.style.pattern === 'dotted') {
+                        context.setLineDash([1, 5]);
+                        context.lineWidth = this.style.width;
+                    } else {
+                        context.setLineDash([]);
+                        const avgP = (this.points.getPressure(i - 1) + this.points.getPressure(i)) / 2;
+                        const scale = calculateNaturalPressureScale(
+                            avgP,
+                            this.penProfileId,
+                            this.pressureSensitivity,
+                        );
+                        context.lineWidth = this.style.width * scale;
+                    }
+                }
+
                 context.beginPath();
                 context.moveTo(this.points.getX(i - 1), this.points.getY(i - 1));
                 context.lineTo(this.points.getX(i), this.points.getY(i));
                 context.stroke();
+                context.restore();
             }
         }
         context.restore();
 
-        if (this.hasPrediction && this.points.size > 0 && !this.barrelActive) {
+        if (this.hasPrediction && this.points.size > 0) {
             context.save();
-            context.globalAlpha = this.style.opacity * 0.55;
+            const isPredForbidden = bounds.contentTop > 0 && this.predictedPoint.y < forbiddenY;
+            if (isPredForbidden) {
+                context.strokeStyle = 'rgba(140, 149, 159, 0.35)';
+                context.globalAlpha = 1;
+                context.setLineDash([6, 10]);
+            } else {
+                context.strokeStyle = this.style.color;
+                context.globalAlpha = this.style.opacity * 0.55;
+                context.setLineDash([3, 3]);
+            }
             context.lineWidth = this.style.width;
-            context.strokeStyle = this.style.color;
-            context.setLineDash([3, 3]);
             context.beginPath();
             context.moveTo(this.points.getX(this.points.size - 1), this.points.getY(this.points.size - 1));
             context.lineTo(this.predictedPoint.x, this.predictedPoint.y);
@@ -2416,16 +3960,30 @@ export class CanvasController {
         this.context.restore();
     }
 
-    // Touch gesture handling (Pinch-to-zoom & 1-finger scrolling)
+    // Touch gesture handling (Pinch-to-zoom & 2-finger navigation scroll with 1-finger palm rejection)
     private readonly onTouchDown = (event: PointerEvent): void => {
-        if (event.pointerType !== 'touch' || !this.input || this.input.shouldRejectTouch() || this.input.hasActivePenStroke) return;
+        if (event.pointerType !== 'touch') return;
+        const isPenGated = this.input ? this.input.shouldRejectTouch() : false;
         this.touches.set(event.pointerId, this.localTouch(event));
+
         if (this.touches.size === 1) {
-            this.singleTouchStartCoords = { x: event.clientX, y: event.clientY, time: Date.now() };
-            this.lastSingleTouch = { x: event.clientX, y: event.clientY };
-            this.singleTouchPanned = false;
+            if (isPenGated) {
+                // S-Pen is hovering or active: cancel single-finger touch immediately to prevent accidental screen jumping or ghost taps
+                event.preventDefault();
+                this.palmRejectedSingleTouch = true;
+                this.singleTouchStartCoords = null;
+                this.lastSingleTouch = null;
+                this.singleTouchPanned = false;
+            } else {
+                this.palmRejectedSingleTouch = false;
+                this.singleTouchStartCoords = { x: event.clientX, y: event.clientY, time: Date.now() };
+                this.lastSingleTouch = { x: event.clientX, y: event.clientY };
+                this.singleTouchPanned = false;
+            }
         } else if (this.touches.size === 2) {
+            // Two fingers down: navigation gesture (scroll and pinch-to-zoom) is always permitted
             event.preventDefault();
+            this.palmRejectedSingleTouch = false;
             this.singleTouchStartCoords = null;
             this.lastSingleTouch = null;
             this.singleTouchPanned = false;
@@ -2438,29 +3996,36 @@ export class CanvasController {
         if (event.pointerType !== 'touch' || !this.touches.has(event.pointerId)) return;
         this.touches.set(event.pointerId, this.localTouch(event));
 
-        if (this.touches.size === 1 && this.lastSingleTouch) {
-            const dx = event.clientX - this.lastSingleTouch.x;
-            const dy = event.clientY - this.lastSingleTouch.y;
-            this.lastSingleTouch = { x: event.clientX, y: event.clientY };
-
-            if (!this.singleTouchPanned) {
-                const totalDx = Math.abs(event.clientX - (this.singleTouchStartCoords?.x ?? event.clientX));
-                const totalDy = Math.abs(event.clientY - (this.singleTouchStartCoords?.y ?? event.clientY));
-                if (totalDx > 6 || totalDy > 6) {
-                    this.singleTouchPanned = true;
-                }
+        if (this.touches.size === 1) {
+            if (this.palmRejectedSingleTouch) {
+                event.preventDefault();
+                return;
             }
 
-            if (this.singleTouchPanned) {
-                event.preventDefault();
-                const sizer = this.getSizerElement();
-                const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
-                const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
-                const maxScrollX = Math.max(0, Math.round(baseWidth * this.zoom - this.scroller.clientWidth));
-                const maxScrollY = Math.max(0, Math.round(baseHeight * this.zoom - this.scroller.clientHeight));
+            if (this.lastSingleTouch) {
+                const dx = event.clientX - this.lastSingleTouch.x;
+                const dy = event.clientY - this.lastSingleTouch.y;
+                this.lastSingleTouch = { x: event.clientX, y: event.clientY };
 
-                this.scroller.scrollLeft = Math.max(0, Math.min(maxScrollX, this.scroller.scrollLeft - dx));
-                this.scroller.scrollTop = Math.max(0, Math.min(maxScrollY, this.scroller.scrollTop - dy));
+                if (!this.singleTouchPanned) {
+                    const totalDx = Math.abs(event.clientX - (this.singleTouchStartCoords?.x ?? event.clientX));
+                    const totalDy = Math.abs(event.clientY - (this.singleTouchStartCoords?.y ?? event.clientY));
+                    if (totalDx > 6 || totalDy > 6) {
+                        this.singleTouchPanned = true;
+                    }
+                }
+
+                if (this.singleTouchPanned) {
+                    event.preventDefault();
+                    const sizer = this.getSizerElement();
+                    const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
+                    const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
+                    const maxScrollX = Math.max(0, Math.round(baseWidth * this.zoom - this.scroller.clientWidth));
+                    const maxScrollY = Math.max(0, Math.round(baseHeight * this.zoom - this.scroller.clientHeight));
+
+                    this.scroller.scrollLeft = Math.max(0, Math.min(maxScrollX, this.scroller.scrollLeft - dx));
+                    this.scroller.scrollTop = Math.max(0, Math.min(maxScrollY, this.scroller.scrollTop - dy));
+                }
             }
         } else if (this.touches.size >= 2) {
             event.preventDefault();
@@ -2474,10 +4039,15 @@ export class CanvasController {
         if (event.pointerType !== 'touch') return;
         const start = this.singleTouchStartCoords;
         const wasPanned = this.singleTouchPanned;
+        const wasPalmRejected = this.palmRejectedSingleTouch;
         this.singleTouchStartCoords = null;
         this.lastSingleTouch = null;
         this.singleTouchPanned = false;
         this.touches.delete(event.pointerId);
+
+        if (this.touches.size === 0) {
+            this.palmRejectedSingleTouch = false;
+        }
 
         if (this.touches.size < 2) {
             this.gestureDistance = 0;
@@ -2487,12 +4057,27 @@ export class CanvasController {
         }
         try { if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId); } catch { /* best effort */ }
 
+        if (wasPalmRejected) {
+            event.preventDefault();
+            return;
+        }
+
         if (start && !wasPanned && this.touches.size === 0) {
             const dx = Math.abs(event.clientX - start.x);
             const dy = Math.abs(event.clientY - start.y);
             const dt = Date.now() - start.time;
             if (dx < 12 && dy < 12 && dt < 400) {
-                this.focusEditorAt(event.clientX, event.clientY);
+                const hits = typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function'
+                    ? document.elementsFromPoint(event.clientX, event.clientY)
+                    : [];
+                const hitBox = hits.some(el =>
+                    el.classList?.contains('apolo-space-block') ||
+                    el.classList?.contains('apolo-box-handle') ||
+                    el.closest?.('.apolo-space-block') !== null
+                );
+                if (!hitBox) {
+                    this.focusEditorAt(event.clientX, event.clientY);
+                }
             }
         }
     };
@@ -2511,6 +4096,7 @@ export class CanvasController {
         this.gestureZoom = this.zoom;
         const centerX = (points[0].x + points[1].x) / 2;
         const centerY = (points[0].y + points[1].y) / 2;
+        this.lastGestureCenter = { x: centerX, y: centerY };
         this.gestureWorldX = (centerX + this.currentScrollLeft) / this.zoom;
         this.gestureWorldY = (centerY + this.currentScrollTop) / this.zoom;
     }
@@ -2525,22 +4111,35 @@ export class CanvasController {
         const centerY = (points[0].y + points[1].y) / 2;
         if (!this.gestureDistance) this.startGesture();
 
-        const newZoom = Math.max(1.0, Math.min(3.0, (this.gestureZoom * distance) / this.gestureDistance));
-        this.setZoomLevel(newZoom);
+        const deltaX = centerX - this.lastGestureCenter.x;
+        const deltaY = centerY - this.lastGestureCenter.y;
+        this.lastGestureCenter = { x: centerX, y: centerY };
 
-        if (newZoom > 1.0) {
-            const sizer = this.getSizerElement();
-            const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
-            const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
-            const maxScrollX = Math.max(0, Math.round(baseWidth * newZoom - this.scroller.clientWidth));
-            const maxScrollY = Math.max(0, Math.round(baseHeight * newZoom - this.scroller.clientHeight));
+        const sizer = this.getSizerElement();
+        const baseWidth = sizer?.offsetWidth ?? this.scroller.clientWidth;
+        const baseHeight = sizer?.offsetHeight ?? this.scroller.clientHeight;
 
-            const targetScrollLeft = Math.max(0, Math.min(maxScrollX, Math.round(this.gestureWorldX * newZoom - centerX)));
-            const targetScrollTop = Math.max(0, Math.min(maxScrollY, Math.round(this.gestureWorldY * newZoom - centerY)));
+        const distanceRatio = distance / this.gestureDistance;
+        const isPinch = Math.abs(distanceRatio - 1.0) > 0.05;
+        if (isPinch) {
+            const newZoom = Math.max(1.0, Math.min(3.0, (this.gestureZoom * distance) / this.gestureDistance));
+            this.setZoomLevel(newZoom);
+        }
+
+        if (this.zoom > 1.0) {
+            const maxScrollX = Math.max(0, Math.round(baseWidth * this.zoom - this.scroller.clientWidth));
+            const maxScrollY = Math.max(0, Math.round(baseHeight * this.zoom - this.scroller.clientHeight));
+
+            const targetScrollLeft = Math.max(0, Math.min(maxScrollX, Math.round(this.gestureWorldX * this.zoom - centerX)));
+            const targetScrollTop = Math.max(0, Math.min(maxScrollY, Math.round(this.gestureWorldY * this.zoom - centerY)));
             this.scroller.scrollLeft = targetScrollLeft;
             this.scroller.scrollTop = targetScrollTop;
         } else {
-            this.scroller.scrollLeft = 0;
+            // At 1.0 zoom: two-finger scroll navigation
+            const maxScrollX = Math.max(0, this.scroller.scrollWidth - this.scroller.clientWidth);
+            const maxScrollY = Math.max(0, this.scroller.scrollHeight - this.scroller.clientHeight);
+            this.scroller.scrollLeft = Math.max(0, Math.min(maxScrollX, this.scroller.scrollLeft - deltaX));
+            this.scroller.scrollTop = Math.max(0, Math.min(maxScrollY, this.scroller.scrollTop - deltaY));
         }
     }
 }
@@ -2570,98 +4169,8 @@ function boundsOf(points: readonly Point[], padding: number): BoundingBox {
     };
 }
 
-function strokeHitDoc(
-    stroke: StrokeElement,
-    eraser: Point[],
-    radius: number,
-    contentLeft: number,
-    contentWidth: number,
-    blockTop: number,
-): boolean {
-    for (let i = 0; i < stroke.points.length; i += 4) {
-        const x = contentLeft + stroke.points[i] * contentWidth;
-        const y = blockTop + stroke.points[i + 1] * contentWidth;
-        if (nearPath(eraser, x, y, radius)) return true;
-    }
-    return false;
-}
-
-function splitStrokeDoc(
-    stroke: StrokeElement,
-    eraser: Point[],
-    radius: number,
-    contentLeft: number,
-    contentWidth: number,
-    blockTop: number,
-): StrokeElement[] | null {
-    let hit = false;
-    let part: number[] = [];
-    const fragments: StrokeElement[] = [];
-    const flush = (): void => {
-        if (part.length >= 8) {
-            let minU = Number.POSITIVE_INFINITY;
-            let maxU = Number.NEGATIVE_INFINITY;
-            let minV = Number.POSITIVE_INFINITY;
-            let maxV = Number.NEGATIVE_INFINITY;
-            for (let i = 0; i < part.length; i += 4) {
-                const u = part[i];
-                const v = part[i + 1];
-                if (u < minU) minU = u;
-                if (u > maxU) maxU = u;
-                if (v < minV) minV = v;
-                if (v > maxV) maxV = v;
-            }
-            fragments.push({
-                ...stroke,
-                id: uuid(),
-                points: part,
-                zIndex: stroke.zIndex,
-                bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
-            });
-        }
-        part = [];
-    };
-    for (let i = 0; i < stroke.points.length; i += 4) {
-        const u = stroke.points[i];
-        const v = stroke.points[i + 1];
-        const x = contentLeft + u * contentWidth;
-        const y = blockTop + v * contentWidth;
-        if (nearPath(eraser, x, y, radius)) {
-            hit = true;
-            flush();
-        } else {
-            part.push(u, v, stroke.points[i + 2], stroke.points[i + 3]);
-        }
-    }
-    flush();
-    return hit ? fragments : null;
-}
-
 function contains(bounds: BoundingBox, x: number, y: number, padding: number): boolean {
     return x >= bounds.minX - padding && x <= bounds.maxX + padding && y >= bounds.minY - padding && y <= bounds.maxY + padding;
-}
-
-function nearPath(path: Point[], x: number, y: number, radius: number): boolean {
-    for (let i = 0; i < path.length; i++) {
-        if (i === 0) {
-            if (Math.hypot(x - path[i].x, y - path[i].y) <= radius) return true;
-            continue;
-        }
-        const a = path[i - 1];
-        const b = path[i];
-        const vx = b.x - a.x;
-        const vy = b.y - a.y;
-        const length = vx * vx + vy * vy;
-        const t = length ? Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / length)) : 0;
-        if (Math.hypot(x - (a.x + t * vx), y - (a.y + t * vy)) <= radius) return true;
-    }
-    return false;
-}
-
-function pressureScale(pressure: number, sensitivity = 0.75): number {
-    const minScale = Math.max(0.1, 0.5 - sensitivity * 0.4);
-    const maxScale = 0.8 + sensitivity * 0.9;
-    return minScale + Math.max(0, Math.min(1, pressure)) * (maxScale - minScale);
 }
 
 function pointInPolygon(x: number, y: number, polygon: Point[]): boolean {
@@ -2673,4 +4182,23 @@ function pointInPolygon(x: number, y: number, polygon: Point[]): boolean {
         if (crosses) inside = !inside;
     }
     return inside;
+}
+
+export function cloneElements(elements: readonly CanvasElement[]): CanvasElement[] {
+    return elements.map(el => {
+        if (el.type === 'stroke') {
+            return {
+                ...el,
+                points: el.points.slice(),
+                style: { ...el.style },
+                bounds: { ...el.bounds },
+            };
+        } else {
+            return {
+                ...el,
+                style: { ...el.style },
+                bounds: { ...el.bounds },
+            };
+        }
+    });
 }

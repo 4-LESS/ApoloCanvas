@@ -24,6 +24,8 @@ export interface StrokeStyle {
     pattern: StrokePattern;
     opacity: number;
     lineCap?: 'round' | 'square' | 'butt';
+    profile?: PenProfileId;
+    isHighlighter?: boolean;
 }
 
 export type ShapeType = 'line' | 'arrow' | 'rect' | 'rounded-rect' | 'ellipse' | 'triangle';
@@ -86,12 +88,58 @@ export interface ShapeElement extends InkElementBase {
 
 export type CanvasElement = StrokeElement | ShapeElement;
 
+export type BoxGridStyle = 'dots' | 'grid' | 'ruled' | 'none';
+export type BoxBgTheme = 'default' | 'pitch-black' | 'graphite' | 'transparent';
+export type BoxAccentColor = 'purple' | 'blue' | 'emerald' | 'amber' | 'coral' | 'neutral' | 'none';
+
+export interface BoxMetadata {
+    height: number;
+    lastTop?: number;
+    gridVisible?: boolean;
+    gridStyle?: BoxGridStyle;
+    gridDensity?: number; // e.g. 16, 24, 32, 40
+    snapToGrid?: boolean;
+    bgTheme?: BoxBgTheme;
+    customBgColor?: string;
+    accentColor?: BoxAccentColor;
+    borderOutline?: boolean;
+}
+
+export interface LayoutHint {
+    contentWidth: number;
+    contentLeft: number;
+    updatedAt: number;
+    anchorTops?: Record<string, number>;
+}
+
 export interface PageDocument {
     schemaVersion: 1;
     version: number;
     id: string;             // apolo-page-id UUID
     notePath: string;       // Vault path of parent note
     elements: CanvasElement[];
+    boxes?: Record<string, BoxMetadata>;  // Source of truth for box heights and properties
+    layoutHint?: LayoutHint;              // Layout snapshot for offline SVG export
     createdAt: number;
     updatedAt: number;
+}
+
+/** High-performance element cloning for fast undo/redo and persistence snapshots. */
+export function cloneElements(elements: readonly CanvasElement[]): CanvasElement[] {
+    return elements.map(el => {
+        if (el.type === 'stroke') {
+            return {
+                ...el,
+                points: el.points.slice(),
+                style: { ...el.style },
+                bounds: { ...el.bounds },
+            };
+        } else {
+            return {
+                ...el,
+                style: { ...el.style },
+                bounds: { ...el.bounds },
+            };
+        }
+    });
 }

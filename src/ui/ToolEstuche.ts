@@ -1,5 +1,5 @@
 import { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, ToolbarSlot, ToolType } from '../core/types';
-import { ICONS, PEN_PROFILES, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createStrokeWavePreview, createSvg, isDarkTheme, mapInkColorForDark } from './theme';
+import { HIGHLIGHTER_COLOR_NAMES, HIGHLIGHTER_PALETTE, ICONS, PEN_PROFILES, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createStrokeWavePreview, createSvg, isDarkTheme, mapInkColorForDark } from './theme';
 
 export interface ToolEstucheState {
     tool: ToolType;
@@ -507,14 +507,17 @@ export class ToolEstuche {
         swatchesRow.className = 'apolo-colors-row';
 
         const dark = isDarkTheme();
-        for (const col of PRIMARY_PALETTE) {
+        const palette = this.state.tool === 'highlighter' ? HIGHLIGHTER_PALETTE : PRIMARY_PALETTE;
+        const colorNames = this.state.tool === 'highlighter' ? HIGHLIGHTER_COLOR_NAMES : PRIMARY_COLOR_NAMES;
+
+        for (const col of palette) {
             const swatch = document.createElement('button');
             swatch.type = 'button';
             const isActive = this.state.color.toLowerCase() === col.toLowerCase();
             swatch.className = `apolo-palette-swatch ${isActive ? 'is-active' : ''}`;
             swatch.style.background = mapInkColorForDark(col, dark);
-            swatch.setAttribute('aria-label', PRIMARY_COLOR_NAMES[col] || col);
-            swatch.title = PRIMARY_COLOR_NAMES[col] || col;
+            swatch.setAttribute('aria-label', colorNames[col] || col);
+            swatch.title = colorNames[col] || col;
 
             swatch.addEventListener('click', () => {
                 this.state.color = col;

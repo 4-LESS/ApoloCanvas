@@ -1,16 +1,52 @@
-import { App, TFile } from 'obsidian';
-import { CanvasElement, PageDocument, ShapeElement } from '../core/types';
+import type { App, TFile } from 'obsidian';
+import type { CanvasElement, LayoutHint, PageDocument, ShapeElement } from '../core/types.ts';
+import { BoxRegistry } from '../core/BoxRegistry.ts';
 
-/** Debounced, serialized vault writes with a native SVG/Markdown graph companion. */
+export function notePathToKey(notePath: string): string {
+    let hex = '';
+    for (let i = 0; i < notePath.length; i++) {
+        hex += notePath.charCodeAt(i).toString(16).padStart(4, '0');
+    }
+    return hex;
+}
+
+export function keyToNotePath(key: string): string {
+    let result = '';
+    for (let i = 0; i < key.length; i += 4) {
+        result += String.fromCharCode(parseInt(key.slice(i, i + 4), 16));
+    }
+    return result;
+}
+
+export interface BoxRecord {
+    boxId: string;
+    height: number;
+    lastTop?: number;
+    gridVisible?: boolean;
+    updatedAt: number;
+    elements: CanvasElement[];
+}
+
+export interface NoteRecord {
+    notePath: string;
+    updatedAt: number;
+    elements: CanvasElement[];
+    layoutHint?: LayoutHint;
+}
+
+/** Debounced, serialized vault writes with box-by-box and note-level persistence without frontmatter pollution. */
 export class PersistenceQueue {
     private timer: number | null = null;
     private pending: { document: PageDocument; file: TFile; pageId: string } | null = null;
     private chain: Promise<void> = Promise.resolve();
     private debounceMs: number;
     private companionSvgEnabled = true;
+    private readonly app: App;
     private readonly onError?: (error: unknown) => void;
+    private readonly cacheByPageId = new Map<string, PageDocument>();
 
-    constructor(private readonly app: App, debounceMs = 500, onError?: (error: unknown) => void) {
+    constructor(app: App, debounceMs = 500, onError?: (error: unknown) => void) {
+        this.app = app;
         this.debounceMs = debounceMs;
         this.onError = onError;
     }
@@ -18,8 +54,23 @@ export class PersistenceQueue {
     setDebounceMs(value: number): void { this.debounceMs = Math.max(50, value); }
     setCompanionSvgEnabled(value: boolean): void { this.companionSvgEnabled = value; }
 
+    /** Returns the latest in-memory document state for a page, eliminating race conditions on tab switch. */
+    getDocument(pageId: string): PageDocument | null {
+        const cached = this.cacheByPageId.get(pageId);
+        if (cached) {
+            return JSON.parse(JSON.stringify(cached)) as PageDocument;
+        }
+        if (this.pending && this.pending.pageId === pageId) {
+            return JSON.parse(JSON.stringify(this.pending.document)) as PageDocument;
+        }
+        return null;
+    }
+
     enqueue(document: PageDocument, file: TFile, pageId: string): void {
-        this.pending = { document: JSON.parse(JSON.stringify(document)) as PageDocument, file, pageId };
+        const copy = JSON.parse(JSON.stringify(document)) as PageDocument;
+        this.cacheByPageId.set(pageId, copy);
+        this.cacheByPageId.set(file.path, copy);
+        this.pending = { document: copy, file, pageId };
         if (this.timer !== null) window.clearTimeout(this.timer);
         this.timer = window.setTimeout(() => {
             this.timer = null;
@@ -39,17 +90,229 @@ export class PersistenceQueue {
         return this.chain;
     }
 
-    private async persist(document: PageDocument, file: TFile, pageId: string): Promise<void> {
+    /** Loads document without modifying frontmatter: freehand ink by note path and boxes by boxId. */
+    async loadDocumentForNote(file: TFile): Promise<PageDocument> {
+        // 1. Check in-memory cache first to guarantee zero data loss on rapid tab switching
+        const inMemory = this.getDocument(file.path);
+        if (inMemory) {
+            inMemory.notePath = file.path;
+            return inMemory;
+        }
+
         const adapter = this.app.vault.adapter;
-        const folder = '.apolocanvas/data';
-        await ensureDirectory(adapter, '.apolocanvas');
-        await ensureDirectory(adapter, folder);
-        await adapter.write(`${folder}/${pageId}.json`, JSON.stringify(document));
+        let content = '';
+        try {
+            content = await this.app.vault.read(file);
+        } catch {
+            content = '';
+        }
+
+        // 2. Scan box IDs present in the note
+        const boxIds = new Set<string>();
+        const boxRegex = /data-apolo-space(?:-id)?=["']([^"']+)["']/gi;
+        let match: RegExpExecArray | null;
+        while ((match = boxRegex.exec(content)) !== null) {
+            boxIds.add(match[1]);
+        }
+
+        // 3. Load freehand ink
+        const noteKey = notePathToKey(file.path);
+        const noteFile = `.apolocanvas/notes/${noteKey}.json`;
+        let freehandElements: CanvasElement[] = [];
+        let layoutHint: LayoutHint | undefined = undefined;
+
+        if (await adapter.exists(noteFile)) {
+            try {
+                const noteData = JSON.parse(await adapter.read(noteFile)) as NoteRecord;
+                freehandElements = noteData.elements || [];
+                layoutHint = noteData.layoutHint;
+
+                // Silently clean up orphaned strokes older than 30 days without intrusive notifications
+                const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+                const checkTime = Date.now();
+                freehandElements = freehandElements.filter(el => {
+                    if (el.blockId && el.blockId.startsWith('space:')) {
+                        const bId = el.blockId.slice(6);
+                        if (!boxIds.has(bId)) {
+                            const age = checkTime - (el.timestamp || 0);
+                            if (age > THIRTY_DAYS_MS) {
+                                return false;
+                            }
+                        }
+                    }
+                    return true;
+                });
+            } catch (err) {
+                console.error(`[ApoloCanvas] Could not read freehand ink for ${file.path}:`, err);
+            }
+        }
+
+        // 4. Load boxes
+        const boxElements: CanvasElement[] = [];
+        const boxesMeta: Record<string, { height: number; lastTop?: number; gridVisible?: boolean }> = {};
+
+        for (const boxId of boxIds) {
+            const boxFile = `.apolocanvas/boxes/${boxId}.json`;
+            if (await adapter.exists(boxFile)) {
+                try {
+                    const boxData = JSON.parse(await adapter.read(boxFile)) as BoxRecord;
+                    boxesMeta[boxId] = {
+                        height: boxData.height,
+                        lastTop: boxData.lastTop,
+                        gridVisible: boxData.gridVisible,
+                    };
+                    BoxRegistry.setHeight(boxId, boxData.height);
+                    if (boxData.elements) {
+                        boxElements.push(...boxData.elements);
+                    }
+                } catch (err) {
+                    console.error(`[ApoloCanvas] Could not read box ${boxId}:`, err);
+                }
+            }
+        }
+
+        const now = Date.now();
+        const doc: PageDocument = {
+            schemaVersion: 1,
+            version: 1,
+            id: file.path,
+            notePath: file.path,
+            elements: [...freehandElements, ...boxElements],
+            boxes: boxesMeta,
+            layoutHint,
+            createdAt: now,
+            updatedAt: now,
+        };
+        this.cacheByPageId.set(file.path, doc);
+        return doc;
+    }
+
+    /** Discharges pending writes immediately and updates file paths when a note is renamed. */
+    async onFileRenamed(oldPath: string, newFile: TFile): Promise<void> {
+        for (const doc of this.cacheByPageId.values()) {
+            if (doc.notePath === oldPath) {
+                doc.notePath = newFile.path;
+                doc.id = newFile.path;
+            }
+        }
+        if (this.pending && this.pending.file.path === oldPath) {
+            this.pending.file = newFile;
+            this.pending.document.notePath = newFile.path;
+            this.pending.document.id = newFile.path;
+        }
+
+        const adapter = this.app.vault.adapter;
+        const oldNoteFile = `.apolocanvas/notes/${notePathToKey(oldPath)}.json`;
+        const newNoteFile = `.apolocanvas/notes/${notePathToKey(newFile.path)}.json`;
+        try {
+            if (await adapter.exists(oldNoteFile)) {
+                await ensureDirectory(adapter, '.apolocanvas/notes');
+                await adapter.rename(oldNoteFile, newNoteFile);
+            }
+        } catch (e) {
+            console.warn('[ApoloCanvas] Could not rename note storage:', e);
+        }
 
         if (this.companionSvgEnabled) {
+            const oldSvg = companionPath(oldPath);
+            const newSvg = companionPath(newFile.path);
+            try {
+                if (await adapter.exists(oldSvg)) {
+                    await ensureDirectory(adapter, newSvg.slice(0, newSvg.lastIndexOf('/')));
+                    await adapter.rename(oldSvg, newSvg);
+                }
+            } catch (err) {
+                console.warn('[ApoloCanvas] Could not rename companion SVG:', err);
+            }
+        }
+
+        await this.flush();
+    }
+
+    /** Cleans up note storage when a file is deleted. Boxes are kept for 30 days as orphans. */
+    async onFileDeleted(deletedPath: string): Promise<void> {
+        this.cacheByPageId.delete(deletedPath);
+        const adapter = this.app.vault.adapter;
+        const noteFile = `.apolocanvas/notes/${notePathToKey(deletedPath)}.json`;
+        try {
+            if (await adapter.exists(noteFile)) {
+                await adapter.remove(noteFile);
+            }
+        } catch (e) {
+            console.warn('[ApoloCanvas] Could not remove deleted note storage:', e);
+        }
+    }
+
+    private async persist(document: PageDocument, file: TFile, pageId: string): Promise<void> {
+        const adapter = this.app.vault.adapter;
+        await ensureDirectory(adapter, '.apolocanvas');
+        await ensureDirectory(adapter, '.apolocanvas/boxes');
+        await ensureDirectory(adapter, '.apolocanvas/notes');
+
+        // Split elements into boxes and freehand
+        const freehandElements: CanvasElement[] = [];
+        const boxElementsMap = new Map<string, CanvasElement[]>();
+
+        if (document.boxes) {
+            for (const boxId of Object.keys(document.boxes)) {
+                boxElementsMap.set(boxId, []);
+            }
+        }
+
+        for (const el of document.elements) {
+            if (el.blockId && el.blockId.startsWith('space:')) {
+                const boxId = el.blockId.slice(6);
+                let list = boxElementsMap.get(boxId);
+                if (!list) {
+                    list = [];
+                    boxElementsMap.set(boxId, list);
+                }
+                list.push(el);
+            } else {
+                freehandElements.push(el);
+            }
+        }
+
+        // 1. Save freehand ink for this note by note path
+        const noteKey = notePathToKey(file.path);
+        const noteRecord: NoteRecord = {
+            notePath: file.path,
+            updatedAt: Date.now(),
+            elements: freehandElements,
+            layoutHint: document.layoutHint,
+        };
+        await adapter.write(`.apolocanvas/notes/${noteKey}.json`, JSON.stringify(noteRecord));
+
+        // 2. Save each box by boxId
+        for (const [boxId, elements] of boxElementsMap.entries()) {
+            const meta = document.boxes?.[boxId];
+            const boxRecord: BoxRecord = {
+                boxId,
+                height: meta?.height ?? 280,
+                lastTop: meta?.lastTop,
+                gridVisible: meta?.gridVisible ?? true,
+                updatedAt: Date.now(),
+                elements,
+            };
+            await adapter.write(`.apolocanvas/boxes/${boxId}.json`, JSON.stringify(boxRecord));
+        }
+
+        // 3. Companion SVG if enabled
+        if (this.companionSvgEnabled) {
             const svgPath = companionPath(file.path);
-            await ensureDirectory(adapter, svgPath.slice(0, svgPath.lastIndexOf('/')));
+            const folder = svgPath.slice(0, svgPath.lastIndexOf('/'));
+            await ensureDirectory(adapter, folder);
             await adapter.write(svgPath, renderSvg(document));
+
+            // Export standalone companion SVG for each box
+            for (const [boxId, elements] of boxElementsMap.entries()) {
+                const boxMeta = document.boxes?.[boxId];
+                const boxH = boxMeta?.height ?? 280;
+                const boxSvgPath = boxCompanionPath(file.path, boxId);
+                const boxSvgContent = renderBoxSvg(boxId, elements, 800, boxH, boxMeta);
+                await adapter.write(boxSvgPath, boxSvgContent);
+            }
+
             await this.cleanLegacyMarker(file, pageId);
         }
     }
@@ -57,11 +320,15 @@ export class PersistenceQueue {
     private async cleanLegacyMarker(file: TFile, _pageId: string): Promise<void> {
         try {
             const content = await this.app.vault.read(file);
-            if (/<!--\s*apolo-canvas:start/i.test(content)) {
-                const cleaned = content.replace(/<!--\s*apolo-canvas:start:[^>]*-->[\s\S]*?<!--\s*apolo-canvas:end:[^>]*-->\n?/gi, '').trimEnd() + '\n';
-                if (cleaned !== content) {
-                    await this.app.vault.modify(file, cleaned);
-                }
+            let cleaned = content;
+            if (/<!--\s*apolo-canvas:start/i.test(cleaned)) {
+                cleaned = cleaned.replace(/<!--\s*apolo-canvas:start:[^>]*-->[\s\S]*?<!--\s*apolo-canvas:end:[^>]*-->\n?/gi, '').trimEnd() + '\n';
+            }
+            if (/^---\n[\s\S]*?apolo-page-id:[\s\S]*?---\n/m.test(cleaned)) {
+                cleaned = cleaned.replace(/^(\s*apolo-page-id:\s*[^\n\r]*\n)/m, '');
+            }
+            if (cleaned !== content) {
+                await this.app.vault.modify(file, cleaned);
             }
         } catch {
             // Non-critical cleanup
@@ -78,11 +345,43 @@ async function ensureDirectory(adapter: App['vault']['adapter'], path: string): 
     }
 }
 
-function companionPath(notePath: string): string {
+export function companionPath(notePath: string): string {
     const slash = notePath.lastIndexOf('/');
     const folder = slash >= 0 ? notePath.slice(0, slash) : '';
     const basename = (slash >= 0 ? notePath.slice(slash + 1) : notePath).replace(/\.md$/i, '').replace(/[\\/:*?"<>|]/g, '-');
     return `${folder ? `${folder}/` : ''}assets/ink/${basename}.ink.svg`;
+}
+
+export function boxCompanionPath(notePath: string, boxId: string): string {
+    const slash = notePath.lastIndexOf('/');
+    const folder = slash >= 0 ? notePath.slice(0, slash) : '';
+    const basename = (slash >= 0 ? notePath.slice(slash + 1) : notePath).replace(/\.md$/i, '').replace(/[\\/:*?"<>|]/g, '-');
+    return `${folder ? `${folder}/` : ''}assets/ink/${basename}.${boxId}.ink.svg`;
+}
+
+export function renderBoxSvg(
+    boxId: string,
+    elements: CanvasElement[],
+    width = 800,
+    height = 280,
+    meta?: { height?: number; gridStyle?: string; gridDensity?: number },
+): string {
+    const scale = width;
+    let gridDef = '';
+    const gridStyle = meta?.gridStyle ?? BoxRegistry.getGridStyle(boxId);
+    const density = meta?.gridDensity ?? BoxRegistry.getGridDensity(boxId) ?? 32;
+    const step = Math.round((width / density) * 100) / 100;
+
+    if (gridStyle === 'dots') {
+        gridDef = `<pattern id="apolo-grid-${boxId}" width="${step}" height="${step}" patternUnits="userSpaceOnUse"><circle cx="${step / 2}" cy="${step / 2}" r="1.5" fill="rgba(128,128,128,0.3)"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${boxId})"/>`;
+    } else if (gridStyle === 'grid') {
+        gridDef = `<pattern id="apolo-grid-${boxId}" width="${step}" height="${step}" patternUnits="userSpaceOnUse"><path d="M ${step} 0 L 0 0 0 ${step}" fill="none" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${boxId})"/>`;
+    } else if (gridStyle === 'ruled') {
+        gridDef = `<pattern id="apolo-grid-${boxId}" width="100%" height="${step}" patternUnits="userSpaceOnUse"><line x1="0" y1="${step}" x2="100%" y2="${step}" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${boxId})"/>`;
+    }
+
+    const content = elements.map(el => renderElement(el, scale)).join('\n');
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><defs/>${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
 }
 
 function vaultRelativeLink(notePath: string, assetPath: string): string {

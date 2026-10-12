@@ -1,4 +1,4 @@
-import { PenFavorite, PenProfileId, ShapeType, ThicknessPreset, ToolbarSlot, ToolType } from '../core/types';
+import { EraserMode, PenFavorite, PenProfileId, ShapeType, ThicknessPreset, ToolbarSlot, ToolType } from '../core/types';
 import { ICONS, createSvg, isDarkTheme, mapInkColorForDark } from './theme';
 
 export interface ToolbarOptions {
@@ -15,9 +15,11 @@ export interface ToolbarOptions {
     canUndo: boolean;
     canRedo: boolean;
     eraserRadius: number;
+    eraserMode?: EraserMode;
     onSlotChange: (slot: ToolbarSlot) => void;
     onToggleKeyboardMode: () => void;
     onSelectTool: (tool: ToolType) => void;
+    onToggleEraserMode?: () => void;
     onToggleEstuche: (tool: ToolType) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -25,6 +27,7 @@ export interface ToolbarOptions {
     onSelectThickness: (preset: ThicknessPreset) => void;
     onToggleSnapGrid: () => void;
     onToggleMoreMenu: () => void;
+    onInsertCanvas?: () => void;
 }
 
 interface DragState {
@@ -169,10 +172,17 @@ export class Toolbar {
         const kbBtn = document.createElement('button');
         kbBtn.type = 'button';
         kbBtn.className = 'apolo-toolbar-btn apolo-btn-keyboard';
-        kbBtn.setAttribute('aria-label', 'Modo teclado (el lápiz hace de cursor)');
-        kbBtn.title = 'Modo teclado: toca para escribir con el teclado';
+        kbBtn.setAttribute('aria-label', 'Alternar modo lápiz / teclado (Alt+P)');
+        kbBtn.title = 'Alternar modo lápiz / teclado (Alt+P)';
         kbBtn.appendChild(createSvg(ICONS.keyboardMode));
-        kbBtn.addEventListener('click', () => this.options.onToggleKeyboardMode());
+        kbBtn.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+        });
+        kbBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.options.onToggleKeyboardMode();
+        });
         this.keyboardBtn = kbBtn;
         this.updateKeyboardModeVisual();
         this.container.appendChild(kbBtn);
@@ -190,7 +200,6 @@ export class Toolbar {
             { tool: 'eraser', label: 'Borrador', iconD: ICONS.eraser },
             { tool: 'lasso', label: 'Lazo', iconD: ICONS.lasso },
             { tool: 'shape', label: 'Formas', iconD: this.getShapeIcon(this.options.activeShape) },
-            { tool: 'spacer', label: 'Insertar espacio', iconD: ICONS.spacer },
         ];
 
         for (const def of toolDefs) {
@@ -213,11 +222,20 @@ export class Toolbar {
             // Small triangle indicator for openable estuche
             const tri = document.createElement('span');
             tri.className = 'apolo-tool-triangle';
+            tri.title = `Abrir opciones de ${def.label}`;
+            tri.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.options.onToggleEstuche(def.tool);
+            });
             btn.appendChild(tri);
 
             btn.addEventListener('click', () => {
-                if (this.options.activeTool === def.tool && this.options.penEnabled && def.tool !== 'spacer') {
-                    this.options.onToggleEstuche(def.tool);
+                if (this.options.activeTool === def.tool && this.options.penEnabled) {
+                    if (def.tool === 'eraser' && this.options.onToggleEraserMode) {
+                        this.options.onToggleEraserMode();
+                    } else {
+                        this.options.onToggleEstuche(def.tool);
+                    }
                 } else {
                     this.options.onSelectTool(def.tool);
                 }
@@ -226,31 +244,67 @@ export class Toolbar {
             this.toolButtons.set(def.tool, btn);
             toolsGroup.appendChild(btn);
         }
+
+        // Botón "Insertar canvas": un toque inserta caja debajo del cursor y activa el lápiz
+        const insertCanvasBtn = document.createElement('button');
+        insertCanvasBtn.type = 'button';
+        insertCanvasBtn.className = 'apolo-toolbar-btn apolo-tool-btn apolo-insert-canvas-btn';
+        insertCanvasBtn.setAttribute('aria-label', 'Insertar canvas');
+        insertCanvasBtn.title = 'Insertar canvas de dibujo';
+        const canvasIconWrap = document.createElement('span');
+        canvasIconWrap.className = 'apolo-tool-icon-wrap';
+        canvasIconWrap.appendChild(createSvg(ICONS.insertCanvas));
+        insertCanvasBtn.appendChild(canvasIconWrap);
+        insertCanvasBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.options.onInsertCanvas?.();
+        });
+        toolsGroup.appendChild(insertCanvasBtn);
+
         this.container.appendChild(toolsGroup);
         this.updateToolButtonsVisual();
 
         this.container.appendChild(this.createDivider());
 
-        // 4. Undo and Redo
+        // 4. Undo and Redo - instant response on pointerdown with zero latency
         const historyGroup = document.createElement('div');
         historyGroup.className = 'apolo-toolbar-group apolo-history-group';
 
         const undoBtn = document.createElement('button');
         undoBtn.type = 'button';
         undoBtn.className = 'apolo-toolbar-btn';
-        undoBtn.setAttribute('aria-label', 'Deshacer');
-        undoBtn.title = 'Deshacer';
+        undoBtn.setAttribute('aria-label', 'Deshacer (Ctrl+Z)');
+        undoBtn.title = 'Deshacer (Ctrl+Z)';
         undoBtn.appendChild(createSvg(ICONS.undo));
-        undoBtn.addEventListener('click', () => this.options.onUndo());
+        undoBtn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (this.options.canUndo) this.options.onUndo();
+        });
+        undoBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (this.options.canUndo) this.options.onUndo();
+        });
         this.undoBtn = undoBtn;
 
         const redoBtn = document.createElement('button');
         redoBtn.type = 'button';
         redoBtn.className = 'apolo-toolbar-btn';
-        redoBtn.setAttribute('aria-label', 'Rehacer');
-        redoBtn.title = 'Rehacer';
+        redoBtn.setAttribute('aria-label', 'Rehacer (Ctrl+Y / Ctrl+Shift+Z)');
+        redoBtn.title = 'Rehacer (Ctrl+Y / Ctrl+Shift+Z)';
         redoBtn.appendChild(createSvg(ICONS.redo));
-        redoBtn.addEventListener('click', () => this.options.onRedo());
+        redoBtn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (this.options.canRedo) this.options.onRedo();
+        });
+        redoBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (this.options.canRedo) this.options.onRedo();
+        });
         this.redoBtn = redoBtn;
 
         historyGroup.append(undoBtn, redoBtn);
@@ -289,10 +343,10 @@ export class Toolbar {
         thicknessGroup.className = 'apolo-toolbar-group apolo-thickness-group';
         this.thicknessButtons = [];
 
-        const presets: Array<{ id: ThicknessPreset; label: string }> = [
-            { id: 'fine', label: 'Fino' },
-            { id: 'medium', label: 'Medio' },
-            { id: 'thick', label: 'Grueso' },
+        const presets: Array<{ id: ThicknessPreset; label: string; tooltip: string }> = [
+            { id: 'fine', label: 'Fino', tooltip: 'Grosor fino (letra pequeña)' },
+            { id: 'medium', label: 'Normal', tooltip: 'Grosor normal (texto)' },
+            { id: 'thick', label: 'Grueso', tooltip: 'Grosor grueso (títulos)' },
         ];
 
         for (let i = 0; i < presets.length; i++) {
@@ -300,8 +354,8 @@ export class Toolbar {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = `apolo-toolbar-btn apolo-thickness-btn apolo-thick-${preset.id}`;
-            btn.setAttribute('aria-label', `Grosor ${preset.label}`);
-            btn.title = `Grosor ${preset.label}`;
+            btn.setAttribute('aria-label', preset.tooltip);
+            btn.title = preset.tooltip;
 
             const dot = document.createElement('span');
             dot.className = 'apolo-thickness-dot';
@@ -323,8 +377,8 @@ export class Toolbar {
         const gridBtn = document.createElement('button');
         gridBtn.type = 'button';
         gridBtn.className = 'apolo-toolbar-btn apolo-grid-btn';
-        gridBtn.setAttribute('aria-label', 'Cuadrícula magnética');
-        gridBtn.title = 'Cuadrícula magnética';
+        gridBtn.setAttribute('aria-label', 'Cuadrícula magnética (Snap to Grid)');
+        gridBtn.title = 'Cuadrícula magnética (Snap to Grid)';
         gridBtn.appendChild(createSvg(ICONS.grid));
         gridBtn.addEventListener('click', () => this.options.onToggleSnapGrid());
         this.gridBtn = gridBtn;
@@ -368,6 +422,17 @@ export class Toolbar {
             const isActive = penOn && activeTool === tool;
             btn.classList.toggle('is-active', isActive);
             btn.setAttribute('aria-pressed', String(isActive));
+
+            if (tool === 'eraser') {
+                const isWhole = (this.options.eraserMode ?? 'whole') === 'whole';
+                btn.classList.toggle('is-whole-mode', isWhole);
+                btn.classList.toggle('is-reticle-mode', !isWhole);
+                const title = isWhole
+                    ? 'Borrador (Trazo completo) - Clic para alternar a Retícula'
+                    : 'Borrador (Retícula / Píxel) - Clic para alternar a Trazo completo';
+                btn.title = title;
+                btn.setAttribute('aria-label', title);
+            }
         });
     }
 
@@ -397,6 +462,7 @@ export class Toolbar {
 
     private updateThicknessVisual(): void {
         const isEraser = this.options.activeTool === 'eraser';
+        const isHighlighter = this.options.activeTool === 'highlighter';
         const isDimmed = !this.options.penEnabled || this.options.activeTool === 'lasso' || this.options.activeTool === 'spacer';
         const dark = isDarkTheme();
 
@@ -404,7 +470,12 @@ export class Toolbar {
         if (isEraser) {
             const r = this.options.eraserRadius;
             if (r <= 12) activeIdx = 0;
-            else if (r <= 22) activeIdx = 1;
+            else if (r <= 25) activeIdx = 1;
+            else activeIdx = 2;
+        } else if (isHighlighter) {
+            const w = this.options.activeWidth;
+            if (w <= 15) activeIdx = 0;
+            else if (w <= 25) activeIdx = 1;
             else activeIdx = 2;
         } else {
             const w = this.options.activeWidth;
@@ -591,6 +662,11 @@ export class Toolbar {
         this.options.activeWidth = width;
         this.options.eraserRadius = eraserRadius;
         this.updateThicknessVisual();
+    }
+
+    setEraserMode(mode: EraserMode): void {
+        this.options.eraserMode = mode;
+        this.updateToolButtonsVisual();
     }
 
     setHistory(canUndo: boolean, canRedo: boolean): void {

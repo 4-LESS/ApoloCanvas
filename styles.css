@@ -1076,20 +1076,662 @@
 }
 
 /* ==========================================================================
-   Space Block (Drawing canvas spacer between text)
+   Space Block (Drawing canvas card between text)
    ========================================================================== */
 .apolo-space,
 .apolo-space-block,
-.apolo-space-widget {
+.apolo-space-widget,
+[data-apolo-space],
+[data-apolo-space-id] {
+  --apolo-grid-step: 24px;
+  --apolo-accent-stripe: #a98bff;
   display: block !important;
   width: 100% !important;
+  min-height: 120px !important;
   position: relative !important;
   box-sizing: border-box !important;
   pointer-events: none !important;
   user-select: none !important;
   -webkit-user-select: none !important;
-  margin: 0 !important;
+  margin: 12px 0 !important;
   padding: 0 !important;
-  background: transparent !important;
+  background-color: var(--background-secondary, var(--apolo-bg-alt, #f4f5f8)) !important;
+  border: none !important;
+  border-left: 4px solid var(--apolo-accent-stripe, #a98bff) !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  transition: height 0.22s cubic-bezier(0.16, 1, 0.3, 1), min-height 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, border-color 0.15s ease;
 }
+
+.apolo-space.is-resizing,
+.apolo-space-block.is-resizing,
+.apolo-space-widget.is-resizing {
+  transition: none !important;
+}
+
+.theme-dark .apolo-space,
+.theme-dark .apolo-space-block,
+.theme-dark .apolo-space-widget,
+.theme-dark [data-apolo-space],
+.theme-dark [data-apolo-space-id] {
+  background-color: #1f1f21 !important;
+  border: none !important;
+  border-left: 4px solid var(--apolo-accent-stripe, #a98bff) !important;
+}
+
+/* Optional 1px outline toggle */
+.apolo-space[data-apolo-border="true"],
+.apolo-space-block[data-apolo-border="true"],
+.apolo-space-widget[data-apolo-border="true"],
+[data-apolo-space][data-apolo-border="true"],
+[data-apolo-space-id][data-apolo-border="true"] {
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  border-left: 4px solid var(--apolo-accent-stripe, #a98bff) !important;
+}
+
+.theme-dark .apolo-space[data-apolo-border="true"],
+.theme-dark .apolo-space-block[data-apolo-border="true"],
+.theme-dark .apolo-space-widget[data-apolo-border="true"],
+.theme-dark [data-apolo-space][data-apolo-border="true"],
+.theme-dark [data-apolo-space-id][data-apolo-border="true"] {
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-left: 4px solid var(--apolo-accent-stripe, #a98bff) !important;
+}
+
+/* Reading mode SVG companion rendering */
+.apolo-box-preview-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.apolo-box-preview-svg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.cm-editor .apolo-box-preview-svg,
+.is-live-preview .apolo-box-preview-svg {
+  display: none !important;
+}
+
+/* Left accent stripe colors */
+[data-apolo-accent="purple"], .apolo-space[data-apolo-accent="purple"] {
+  --apolo-accent-stripe: #a98bff;
+}
+[data-apolo-accent="blue"], .apolo-space[data-apolo-accent="blue"] {
+  --apolo-accent-stripe: #3b82f6;
+}
+[data-apolo-accent="emerald"], .apolo-space[data-apolo-accent="emerald"] {
+  --apolo-accent-stripe: #10b981;
+}
+[data-apolo-accent="amber"], .apolo-space[data-apolo-accent="amber"] {
+  --apolo-accent-stripe: #f59e0b;
+}
+[data-apolo-accent="coral"], .apolo-space[data-apolo-accent="coral"] {
+  --apolo-accent-stripe: #f43f5e;
+}
+[data-apolo-accent="neutral"], .apolo-space[data-apolo-accent="neutral"] {
+  --apolo-accent-stripe: rgba(255, 255, 255, 0.35);
+}
+[data-apolo-accent="none"], .apolo-space[data-apolo-accent="none"] {
+  border-left: none !important;
+}
+
+/* Background Theme Colors */
+[data-apolo-bg-theme="pitch-black"],
+.apolo-space[data-apolo-bg-theme="pitch-black"] {
+  background-color: #000000 !important;
+}
+
+[data-apolo-bg-theme="graphite"],
+.apolo-space[data-apolo-bg-theme="graphite"],
+[data-apolo-bg-theme="elevated"],
+.apolo-space[data-apolo-bg-theme="elevated"] {
+  background-color: #27272a !important;
+}
+
+.theme-dark [data-apolo-bg-theme="default"],
+.theme-dark .apolo-space[data-apolo-bg-theme="default"] {
+  background-color: #1f1f21 !important;
+}
+
+.theme-light [data-apolo-bg-theme="default"],
+.theme-light .apolo-space[data-apolo-bg-theme="default"] {
+  background-color: var(--background-secondary, #f4f5f8) !important;
+}
+
+[data-apolo-bg-theme="transparent"],
+.apolo-space[data-apolo-bg-theme="transparent"] {
+  background-color: transparent !important;
+}
+
+/* Fluid Entrance Animation for New Space */
+@keyframes apolo-box-enter {
+  0% {
+    opacity: 0.25;
+    transform: scaleY(0.75);
+    transform-origin: top center;
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1);
+    transform-origin: top center;
+  }
+}
+
+.apolo-box-enter {
+  animation: apolo-box-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* ==========================================================================
+   Grid Styles: Dots, Square Grid, Ruled, None (Garantizado en Edición y Lectura)
+   ========================================================================== */
+/* 1. Dots / Puntos (Estilo por defecto para cualquier caja) */
+.apolo-space:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.apolo-space-block:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.apolo-space-widget:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+[data-apolo-space]:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+[data-apolo-space-id]:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.apolo-space[data-apolo-grid-style="dots"],
+.apolo-space-widget[data-apolo-grid-style="dots"],
+.apolo-space-block[data-apolo-grid-style="dots"],
+[data-apolo-space][data-apolo-grid-style="dots"],
+[data-apolo-space-id][data-apolo-grid-style="dots"] {
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.22) 1.5px, transparent 1.5px) !important;
+  background-size: var(--apolo-grid-step, 24px) var(--apolo-grid-step, 24px) !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
+}
+
+.theme-dark .apolo-space:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.theme-dark .apolo-space-block:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.theme-dark .apolo-space-widget:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.theme-dark [data-apolo-space]:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.theme-dark [data-apolo-space-id]:not([data-apolo-grid="false"]):not([data-apolo-grid-style="none"]):not([data-apolo-grid-style="grid"]):not([data-apolo-grid-style="ruled"]),
+.theme-dark .apolo-space[data-apolo-grid-style="dots"],
+.theme-dark .apolo-space-widget[data-apolo-grid-style="dots"],
+.theme-dark .apolo-space-block[data-apolo-grid-style="dots"],
+.theme-dark [data-apolo-space][data-apolo-grid-style="dots"],
+.theme-dark [data-apolo-space-id][data-apolo-grid-style="dots"] {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.28) 1.5px, transparent 1.5px) !important;
+  background-size: var(--apolo-grid-step, 24px) var(--apolo-grid-step, 24px) !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
+}
+
+/* 2. Grid / Cuadriculado */
+.apolo-space[data-apolo-grid-style="grid"],
+.apolo-space-widget[data-apolo-grid-style="grid"],
+.apolo-space-block[data-apolo-grid-style="grid"],
+[data-apolo-space][data-apolo-grid-style="grid"],
+[data-apolo-space-id][data-apolo-grid-style="grid"] {
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.12) 1px, transparent 1px) !important;
+  background-size: var(--apolo-grid-step, 24px) var(--apolo-grid-step, 24px) !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
+}
+
+.theme-dark .apolo-space[data-apolo-grid-style="grid"],
+.theme-dark .apolo-space-widget[data-apolo-grid-style="grid"],
+.theme-dark .apolo-space-block[data-apolo-grid-style="grid"],
+.theme-dark [data-apolo-space][data-apolo-grid-style="grid"],
+.theme-dark [data-apolo-space-id][data-apolo-grid-style="grid"] {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.18) 1px, transparent 1px) !important;
+  background-size: var(--apolo-grid-step, 24px) var(--apolo-grid-step, 24px) !important;
+  background-repeat: repeat !important;
+  background-position: 0 0 !important;
+}
+
+/* 3. Ruled / Rayado */
+.apolo-space[data-apolo-grid-style="ruled"],
+.apolo-space-widget[data-apolo-grid-style="ruled"],
+.apolo-space-block[data-apolo-grid-style="ruled"],
+[data-apolo-space][data-apolo-grid-style="ruled"],
+[data-apolo-space-id][data-apolo-grid-style="ruled"] {
+  background-image:
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.14) 1px, transparent 1px) !important;
+  background-size: 100% var(--apolo-grid-step, 24px) !important;
+  background-repeat: repeat-y !important;
+  background-position: 0 0 !important;
+}
+
+.theme-dark .apolo-space[data-apolo-grid-style="ruled"],
+.theme-dark .apolo-space-widget[data-apolo-grid-style="ruled"],
+.theme-dark .apolo-space-block[data-apolo-grid-style="ruled"],
+.theme-dark [data-apolo-space][data-apolo-grid-style="ruled"],
+.theme-dark [data-apolo-space-id][data-apolo-grid-style="ruled"] {
+  background-image:
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 1px, transparent 1px) !important;
+  background-size: 100% var(--apolo-grid-step, 24px) !important;
+  background-repeat: repeat-y !important;
+  background-position: 0 0 !important;
+}
+
+/* 4. None / En blanco */
+.apolo-space[data-apolo-grid-style="none"],
+.apolo-space-widget[data-apolo-grid-style="none"],
+.apolo-space-block[data-apolo-grid-style="none"],
+.apolo-space[data-apolo-grid="false"],
+.apolo-space-widget[data-apolo-grid="false"],
+.apolo-space-block[data-apolo-grid="false"],
+[data-apolo-space][data-apolo-grid="false"],
+[data-apolo-space-id][data-apolo-grid="false"],
+[data-apolo-space][data-apolo-grid-style="none"],
+[data-apolo-space-id][data-apolo-grid-style="none"] {
+  background-image: none !important;
+}
+
+/* ==========================================================================
+   Drawing Box Options Button (Top-left 3-dots) & Resize Handle (Bottom)
+   Visible únicamente en Modo Edición
+   ========================================================================== */
+.apolo-box-options-btn {
+  display: flex !important;
+  position: absolute !important;
+  top: 8px !important;
+  left: 10px !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: var(--apolo-text-muted, #94a3b8) !important;
+  cursor: pointer !important;
+  z-index: 10 !important;
+  opacity: 0.65 !important;
+  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1) !important;
+  padding: 0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
+  pointer-events: auto !important;
+}
+
+.apolo-box-options-btn:hover,
+.apolo-box-options-btn:active {
+  opacity: 1 !important;
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: var(--apolo-text, #ffffff) !important;
+  transform: scale(1.05) !important;
+}
+
+.theme-light .apolo-box-options-btn {
+  background: rgba(0, 0, 0, 0.05) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  color: var(--text-muted, #6b7280) !important;
+}
+
+.theme-light .apolo-box-options-btn:hover,
+.theme-light .apolo-box-options-btn:active {
+  background: rgba(0, 0, 0, 0.1) !important;
+  color: var(--text-normal, #111827) !important;
+}
+
+/* Ocultar en Modo Lectura */
+.markdown-preview-view .apolo-box-options-btn,
+.markdown-preview-view .apolo-box-handle {
+  display: none !important;
+}
+
+.apolo-box-handle {
+  display: flex !important;
+  position: absolute !important;
+  bottom: 0 !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 140px !important;
+  height: 44px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  pointer-events: auto !important;
+  cursor: ns-resize !important;
+  z-index: 10 !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.apolo-box-handle-bar {
+  width: 60px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--text-faint, rgba(148, 163, 184, 0.6));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: all 0.15s cubic-bezier(0.2, 0, 1, 1);
+  pointer-events: none;
+}
+
+.theme-light .apolo-box-handle-bar {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.theme-dark .apolo-box-handle-bar {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.apolo-box-handle:hover .apolo-box-handle-bar,
+.apolo-box-handle.is-dragging .apolo-box-handle-bar,
+.apolo-box-handle:active .apolo-box-handle-bar {
+  background: var(--apolo-accent-stripe, #a98bff) !important;
+  width: 76px;
+  height: 7px;
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(169, 139, 255, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.theme-dark .apolo-box-handle:hover .apolo-box-handle-bar,
+.theme-dark .apolo-box-handle.is-dragging .apolo-box-handle-bar,
+.theme-dark .apolo-box-handle:active .apolo-box-handle-bar {
+  background: #a98bff !important;
+  box-shadow: 0 0 12px rgba(169, 139, 255, 0.6), 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+/* ==========================================================================
+   BoxMenu Contextual Floating Inspector (Aspecto de la Caja Mockup UI)
+   ========================================================================== */
+.apolo-box-menu-container {
+  width: 326px;
+  max-width: 94vw;
+  border-radius: 20px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  background: #18191c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-y;
+  box-sizing: border-box;
+}
+
+.theme-light .apolo-box-menu-container {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+/* Header */
+.apolo-box-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.apolo-box-menu-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 0.2px;
+}
+
+.theme-light .apolo-box-menu-title {
+  color: #111827;
+}
+
+.apolo-box-menu-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none !important;
+  background: #25262b !important;
+  color: #9ca3af !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  transition: all 0.15s ease !important;
+  pointer-events: auto !important;
+  z-index: 10 !important;
+}
+
+.apolo-box-menu-close:hover,
+.apolo-box-menu-close:active {
+  background: #323339 !important;
+  color: #ffffff !important;
+}
+
+.theme-light .apolo-box-menu-close {
+  background: #f1f2f5 !important;
+  color: #4b5563 !important;
+}
+
+.theme-light .apolo-box-menu-close:hover,
+.theme-light .apolo-box-menu-close:active {
+  background: #e5e7eb !important;
+  color: #111827 !important;
+}
+
+/* Sections & Labels */
+.apolo-box-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apolo-box-menu-section-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8e9099;
+}
+
+.theme-light .apolo-box-menu-section-label {
+  color: #6b7280;
+}
+
+/* Fondo 4 Visual Cards */
+.apolo-box-menu-grid-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.apolo-box-menu-tile {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 52px !important;
+  border-radius: 12px !important;
+  border: 1.5px solid transparent !important;
+  background: #222328 !important;
+  color: #9ca3af !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+  transition: all 0.15s ease !important;
+}
+
+.apolo-box-menu-tile:hover {
+  background: #2b2c33 !important;
+  color: #e5e7eb !important;
+}
+
+.apolo-box-menu-tile.is-active {
+  background: rgba(99, 85, 216, 0.18) !important;
+  border-color: #6355d8 !important;
+  color: #c4b5fd !important;
+}
+
+.theme-light .apolo-box-menu-tile {
+  background: #f3f4f6 !important;
+  color: #6b7280 !important;
+}
+
+.theme-light .apolo-box-menu-tile:hover {
+  background: #e5e7eb !important;
+  color: #1f2937 !important;
+}
+
+.theme-light .apolo-box-menu-tile.is-active {
+  background: #ede9fe !important;
+  border-color: #6355d8 !important;
+  color: #5b46e8 !important;
+}
+
+/* Espaciado Row & Segmented Control */
+.apolo-box-menu-espaciado-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.apolo-box-menu-segmented {
+  display: flex;
+  align-items: center;
+  background: #222328;
+  border-radius: 12px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.theme-light .apolo-box-menu-segmented {
+  background: #f3f4f6;
+}
+
+.apolo-box-menu-seg-btn {
+  padding: 6px 14px !important;
+  border-radius: 9px !important;
+  border: none !important;
+  background: transparent !important;
+  color: #8e9099 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.apolo-box-menu-seg-btn:hover {
+  color: #e5e7eb !important;
+}
+
+.apolo-box-menu-seg-btn.is-active {
+  background: #3e3859 !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+}
+
+.theme-light .apolo-box-menu-seg-btn {
+  color: #6b7280 !important;
+}
+
+.theme-light .apolo-box-menu-seg-btn:hover {
+  color: #111827 !important;
+}
+
+.theme-light .apolo-box-menu-seg-btn.is-active {
+  background: #ffffff !important;
+  color: #4338ca !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Acento Lateral Swatches */
+.apolo-box-menu-swatches {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.apolo-box-menu-swatch {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 50% !important;
+  border: none !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  transition: transform 0.12s ease, box-shadow 0.15s ease !important;
+  position: relative !important;
+}
+
+.apolo-box-menu-swatch:hover {
+  transform: scale(1.12) !important;
+}
+
+.apolo-box-menu-swatch.is-active {
+  transform: scale(1.05) !important;
+  box-shadow: 0 0 0 2.5px #18191c, 0 0 0 4.5px #6355d8 !important;
+}
+
+.theme-light .apolo-box-menu-swatch.is-active {
+  box-shadow: 0 0 0 2.5px #ffffff, 0 0 0 4.5px #6355d8 !important;
+}
+
+/* Bottom Action Row (3 Buttons) */
+.apolo-box-menu-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.apolo-box-menu-action-btn {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 12px 4px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  background: #222328 !important;
+  color: #e5e7eb !important;
+  cursor: pointer !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  white-space: nowrap !important;
+  box-sizing: border-box !important;
+  transition: all 0.15s ease !important;
+}
+
+.apolo-box-menu-action-btn:hover {
+  background: #2b2c33 !important;
+}
+
+.theme-light .apolo-box-menu-action-btn {
+  background: #f3f4f6 !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  color: #1f2937 !important;
+}
+
+.theme-light .apolo-box-menu-action-btn:hover {
+  background: #e5e7eb !important;
+}
+
+.apolo-box-menu-action-btn.is-danger {
+  background: rgba(239, 68, 68, 0.1) !important;
+  border-color: rgba(239, 68, 68, 0.25) !important;
+  color: #f87171 !important;
+}
+
+.apolo-box-menu-action-btn.is-danger:hover {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+}
+
+.theme-light .apolo-box-menu-action-btn.is-danger {
+  background: #fef2f2 !important;
+  border-color: #fecaca !important;
+  color: #dc2626 !important;
+}
+
+.theme-light .apolo-box-menu-action-btn.is-danger:hover {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+}
+
 
