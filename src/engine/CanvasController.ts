@@ -50,6 +50,8 @@ import {
 import {
     applySpaceMutationToMarkdown,
     BoxRegistry,
+    escapeRegExp,
+    normalizeBoxId,
     SpaceMutation,
 } from '../editor/ApoloSpaceExtension';
 import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion';
@@ -730,6 +732,11 @@ export class CanvasController {
 
     public setDefaultBoxAccentColor(accent: BoxAccentColor): void {
         this.options.defaultBoxAccentColor = accent;
+    }
+
+    public setPalmRejectionCooldown(ms: number): void {
+        this.options.palmRejectionCooldownMs = ms;
+        this.input?.setPalmRejectionCooldown(ms);
     }
 
     private getBoxMinimumHeight(boxId: string): number {
@@ -2995,7 +3002,8 @@ export class CanvasController {
                         if (isInsert) continue;
 
                         const height = mut.height ?? 240;
-                        const idRegex = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mut.id}["'][^>]*>`, 'i');
+                        const safeMutId = escapeRegExp(normalizeBoxId(mut.id));
+                        const idRegex = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeMutId}["'][^>]*>`, 'i');
 
                         for (let l = 1; l <= doc.lines; l++) {
                             const line = doc.line(l);
@@ -3018,7 +3026,7 @@ export class CanvasController {
                                             newTag = newTag.replace(/(height:\s*)\d+px/i, `$1${height}px`);
                                         }
                                         if (newTag !== oldTag) {
-                                            const newText = line.text.replace(oldTag, newTag);
+                                            const newText = line.text.replace(oldTag, () => newTag);
                                             changes.push({ from: line.from, to: line.to, insert: newText });
                                         }
                                     }

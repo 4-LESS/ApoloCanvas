@@ -303,6 +303,34 @@ describe('Code Review Fixes Verification', () => {
                 input.destroy();
             }
         });
+
+        test('InputManager markPenHover uses configurable cooldownMs watchdog', async () => {
+            const mockTarget = {
+                style: { touchAction: '', userSelect: '' },
+                addEventListener: () => {},
+                removeEventListener: () => {},
+            } as any;
+
+            const input = new InputManager(mockTarget, { palmRejectionCooldownMs: 150 });
+            assert.strictEqual(input.getPalmRejectionCooldown(), 150);
+
+            (input as any).markPenHover();
+            assert.strictEqual((input as any).isPenHovering, true);
+
+            // Wait 80ms (before timeout): should still be hovering
+            await new Promise(r => setTimeout(r, 80));
+            assert.strictEqual((input as any).isPenHovering, true);
+
+            // Wait another 100ms (180ms total > 150ms): should expire
+            await new Promise(r => setTimeout(r, 100));
+            assert.strictEqual((input as any).isPenHovering, false);
+
+            // Dynamically update cooldown to 300ms
+            input.setPalmRejectionCooldown(300);
+            assert.strictEqual(input.getPalmRejectionCooldown(), 300);
+
+            input.destroy();
+        });
     });
 
     describe('Issue 7, 8 & 9: Lifecycle Shutdown Guard and Tab Switch Serialization', () => {
@@ -439,13 +467,62 @@ describe('Code Review Fixes Verification', () => {
                 height: 350,
             });
             assert.ok(updated.includes('height:350px'));
-            assert.ok(updated.includes(specialId));
-
-            // Remove block
             const removed = applySpaceMutationToMarkdown(updated, {
                 id: specialId,
                 type: 'delete',
             });
+            assert.ok(!removed.includes(specialId));
+            assert.ok(removed.includes('# Heading'));
+            assert.ok(removed.includes('Content text'));
+        });
+
+        test('applySpaceMutationToMarkdown safely handles IDs containing replacement injection tokens ($1, $&, $)', () => {
+            const injectionId = 'box$1&test$2';
+            const initialDoc = [
+                '# Heading',
+                `<div class="apolo-space" data-apolo-space="${injectionId}" style="height:150px;"></div>`,
+                'Content text',
+            ].join('\n');
+
+            const updated = applySpaceMutationToMarkdown(initialDoc, {
+                id: injectionId,
+                height: 400,
+            });
+            assert.ok(updated.includes('height:400px'));
+            assert.ok(updated.includes(injectionId), 'ID with $ tokens must be preserved literally without injection');
+
+            const removed = applySpaceMutationToMarkdown(updated, {
+                id: injectionId,
+                type: 'delete',
+            });
+            assert.ok(!removed.includes(injectionId));
+        });
+
+        test('applySpaceMutationToMarkdown correctly updates codeblocks with quoted IDs', () => {
+            const initialDoc = [
+                '# Title',
+                '```apolo-space',
+                'height: 150',
+                'id: "box 1"',
+                '```',
+                'Paragraph text',
+            ].join('\n');
+
+            const updated = applySpaceMutationToMarkdown(initialDoc, {
+                id: 'box 1',
+                height: 280,
+            });
+            assert.ok(updated.includes('height: 280'));
+            assert.ok(updated.includes('id: "box 1"'));
+            assert.ok(updated.includes('Paragraph text'));
+
+            // Remove codeblock with quoted ID
+            const removed = applySpaceMutationToMarkdown(updated, {
+                id: 'box 1',
+                type: 'delete',
+            });
+            assert.ok(!removed.includes('box 1'));
+            assert.ok(removed.includes('Paragraph text'));
         });
     });
 

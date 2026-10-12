@@ -211,10 +211,24 @@ export interface ParsedApoloSpace {
     accentColor?: BoxAccentColor;
 }
 
+export function normalizeBoxId(id: string): string {
+    if (!id) return '';
+    let clean = id.trim();
+    if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+        clean = clean.slice(1, -1).trim();
+    }
+    return clean;
+}
+
+export function escapeRegExp(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+}
+
 export function parseApoloSpaceHtml(html: string): ParsedApoloSpace | null {
     const idMatch = html.match(/data-apolo-space(?:-id)?=["']([^"']+)["']/i);
     if (!idMatch) return null;
-    const id = idMatch[1];
+    const id = normalizeBoxId(idMatch[1]);
+    if (!id) return null;
     const dataHMatch = html.match(/data-h=["'](\d+)["']/i);
     const styleHMatch = html.match(/height:\s*(\d+)px/i);
     let height = 240;
@@ -245,8 +259,9 @@ export function parseApoloSpaceHtml(html: string): ParsedApoloSpace | null {
 export function parseApoloSpaceBlock(text: string): ParsedApoloSpace {
     const heightMatch = text.match(/height:\s*(\d+)/i);
     const height = heightMatch ? Math.max(20, Math.min(3000, parseInt(heightMatch[1], 10))) : 200;
-    const idMatch = text.match(/id:\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s\n\r"']+))/i);
-    const id = idMatch ? (idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '').trim() : '';
+    const idMatch = text.match(/(?:^|\r?\n)\s*id:\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s\r\n#"']+))/i);
+    const rawId = idMatch ? (idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '') : '';
+    const id = normalizeBoxId(rawId);
 
     const densityMatch = text.match(/gridDensity:\s*(\d+)/i);
     const gridDensity = densityMatch ? parseInt(densityMatch[1], 10) : undefined;
@@ -258,10 +273,6 @@ export function parseApoloSpaceBlock(text: string): ParsedApoloSpace {
     const accentColor = accentMatch ? (accentMatch[1] as BoxAccentColor) : undefined;
 
     return { height, id, gridDensity, gridStyle, bgTheme, accentColor };
-}
-
-function escapeRegExp(s: string): string {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export interface SpaceMutation {
@@ -276,15 +287,17 @@ export interface SpaceMutation {
 export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMutation): string {
     const isRemove = !!mutation.remove || mutation.type === 'delete';
     const isNew = !!mutation.isNew || mutation.type === 'insert';
-    const height = mutation.height ?? 240;
-    const safeId = escapeRegExp(mutation.id);
+    const height = Math.max(20, Math.min(3000, mutation.height ?? 240));
+    const normalizedId = normalizeBoxId(mutation.id);
+    if (!normalizedId) return content;
+    const safeId = escapeRegExp(normalizedId);
 
     if (isRemove) {
         // Remove <div ... data-apolo-space="id" ...></div>
         const divRegex = new RegExp(`[\\r\\n]*<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*><\\/div>`, 'gi');
         let res = content.replace(divRegex, '');
-        // Also remove codeblock if present
-        const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*["']?${safeId}["']?[\\s\\S]*?\`\`\``, 'gi');
+        // Also remove codeblock if present (supporting quoted or unquoted ID)
+        const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*(?:"${safeId}"|'${safeId}'|${safeId})[\\s\\S]*?\`\`\``, 'gi');
         res = res.replace(codeBlockRegex, '');
         return res;
     }
@@ -294,26 +307,26 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
         // 1. Try HTML div with data-h
         const dataHRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*data-h=["'])\\d+(["'][^>]*><\\/div>)`, 'i');
         if (dataHRegex.test(content)) {
-            return content.replace(dataHRegex, `$1${height}$2`);
+            return content.replace(dataHRegex, (_m, p1, p2) => `${p1}${height}${p2}`);
         }
         // 2. Try HTML div with style height
         const divRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*style=["'][^"']*height:\\s*)\\d+px([^"']*["'][^>]*><\\/div>)`, 'i');
         if (divRegex.test(content)) {
-            return content.replace(divRegex, `$1${height}px$2`);
+            return content.replace(divRegex, (_m, p1, p2) => `${p1}${height}px${p2}`);
         }
         const generalDiv = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*><\\/div>`, 'i');
         if (generalDiv.test(content)) {
-            return content.replace(generalDiv, `<div data-apolo-space="${mutation.id}" data-h="${height}"></div>`);
+            return content.replace(generalDiv, () => `<div data-apolo-space="${normalizedId}" data-h="${height}"></div>`);
         }
-        // 2. Try codeblock
-        const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*["']?${safeId}["']?[\\s\\S]*?)\`\`\``, 'i');
+        // 3. Try codeblock (matching unquoted or quoted id)
+        const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*(?:"${safeId}"|'${safeId}'|${safeId})[\\s\\S]*?)\`\`\``, 'i');
         if (codeBlockRegex.test(content)) {
-            return content.replace(codeBlockRegex, `\`\`\`apolo-space\nheight: ${height}\nid: ${mutation.id}\n\`\`\``);
+            return content.replace(codeBlockRegex, () => `\`\`\`apolo-space\nheight: ${height}\nid: "${normalizedId}"\n\`\`\``);
         }
         return content;
     } else {
         // Insert new block as <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
-        const divTag = `<div class="apolo-space" data-apolo-space="${mutation.id}" style="height:${height}px;"></div>`;
+        const divTag = `<div class="apolo-space" data-apolo-space="${normalizedId}" style="height:${height}px;"></div>`;
         const lines = content.split('\n');
         const targetLine = Math.max(0, Math.min(lines.length, (mutation.targetLine ?? lines.length) + 1));
         if (targetLine < lines.length && lines[targetLine].trim() === '') {

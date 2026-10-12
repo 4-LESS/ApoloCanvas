@@ -20,8 +20,16 @@ export interface InputManagerOptions {
 
 /** Captures S-Pen input while allowing ordinary multi-touch navigation. */
 export class InputManager {
-    private readonly cooldownMs: number;
+    private cooldownMs: number;
     private readonly mouseDrawingEnabled: boolean;
+
+    public setPalmRejectionCooldown(ms: number): void {
+        this.cooldownMs = Math.max(0, ms);
+    }
+
+    public getPalmRejectionCooldown(): number {
+        return this.cooldownMs;
+    }
     private lastPenContactAt = Number.NEGATIVE_INFINITY;
     private isPenHovering = false;
     private activeDrawingPointerId: number | null = null;

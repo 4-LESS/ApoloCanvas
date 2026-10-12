@@ -747,6 +747,11 @@ export default class ApoloCanvasPlugin extends Plugin {
         }
     }
 
+    setPalmRejectionCooldown(ms: number): void {
+        this.settings.palmRejectionCooldownMs = ms;
+        this.controller?.setPalmRejectionCooldown(ms);
+    }
+
     private async flushAndDestroy(): Promise<void> {
         if (this.isShuttingDown) return;
         this.isShuttingDown = true;
@@ -816,7 +821,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.palmRejectionCooldownMs)
                 .setDynamicTooltip()
                 .onChange(async value => {
-                    this.plugin.settings.palmRejectionCooldownMs = value;
+                    this.plugin.setPalmRejectionCooldown(value);
                     await this.plugin.saveSettings();
                 }));
 
