@@ -1,4 +1,4 @@
-import { Point } from '../../core/types';
+import type { Point } from '../../core/types.ts';
 
 export interface InputManagerOptions {
     palmRejectionCooldownMs?: number;
@@ -31,9 +31,35 @@ export class InputManager {
     private readonly previousUserSelect: string;
     private readonly pointPool: Point[] = [];
     private readonly moveBatch: Point[] = [];
+    private readonly rejectedPointerIds = new Set<number>();
+    private resetPenHoverTimeout: number | null = null;
     private disposed = false;
 
-    constructor(private readonly target: HTMLElement, private readonly options: InputManagerOptions = {}) {
+    private markPenHover(): void {
+        this.isPenHovering = true;
+        if (this.resetPenHoverTimeout !== null) {
+            clearTimeout(this.resetPenHoverTimeout);
+        }
+        this.resetPenHoverTimeout = setTimeout(() => {
+            this.isPenHovering = false;
+            this.resetPenHoverTimeout = null;
+        }, 500) as unknown as number;
+    }
+
+    private clearPenHover(): void {
+        this.isPenHovering = false;
+        if (this.resetPenHoverTimeout !== null) {
+            clearTimeout(this.resetPenHoverTimeout);
+            this.resetPenHoverTimeout = null;
+        }
+    }
+
+    private readonly target: HTMLElement;
+    private readonly options: InputManagerOptions;
+
+    constructor(target: HTMLElement, options: InputManagerOptions = {}) {
+        this.target = target;
+        this.options = options;
         this.cooldownMs = options.palmRejectionCooldownMs ?? 400;
         this.mouseDrawingEnabled = options.enableMouseDrawing ?? true;
         for (let i = 0; i < 256; i++) {
@@ -71,6 +97,8 @@ export class InputManager {
     destroy(): void {
         if (this.disposed) return;
         this.disposed = true;
+        this.clearPenHover();
+        this.rejectedPointerIds.clear();
         this.target.removeEventListener('pointerdown', this.handleDown);
         this.target.removeEventListener('pointermove', this.handleMove);
         this.target.removeEventListener('pointerup', this.handleUp);
@@ -87,13 +115,16 @@ export class InputManager {
     private readonly handleDown = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
             this.lastPenContactAt = Date.now();
-            this.isPenHovering = true;
+            this.markPenHover();
             this.options.onPenHoverOrContact?.(event);
         }
 
         if (this.isDrawingStart(event)) {
             if (this.options.shouldAcceptPointer && !this.options.shouldAcceptPointer(event)) {
-                // Drawing input is deactivated: let the pointer event pass through to Obsidian / UI
+                // Drawing input is deactivated: suppress canvas draw and let the pointer event pass through to Obsidian / UI
+                event.preventDefault();
+                event.stopPropagation();
+                this.rejectedPointerIds.add(event.pointerId);
                 this.passThroughPointerEvent(event);
                 return;
             }
@@ -118,14 +149,21 @@ export class InputManager {
     };
 
     private readonly handleMove = (event: PointerEvent): void => {
+        if (this.rejectedPointerIds.has(event.pointerId)) {
+            return;
+        }
+
         if (event.pointerType === 'pen') {
             this.lastPenContactAt = Date.now(); // Also records hover, as required for palm gating.
-            this.isPenHovering = true;
+            this.markPenHover();
             this.options.onPenHoverOrContact?.(event);
         }
 
         if (this.isDrawingMove(event)) {
             if (this.activeDrawingPointerId !== event.pointerId) return;
+            if (this.options.shouldAcceptPointer && !this.options.shouldAcceptPointer(event)) {
+                return;
+            }
             this.stopDrawingEvent(event);
             this.activeBarrel = this.isBarrel(event);
 
@@ -148,7 +186,9 @@ export class InputManager {
         }
 
         if (event.pointerType !== 'touch') {
-            this.options.onHover?.(event);
+            if (!this.options.shouldAcceptPointer || this.options.shouldAcceptPointer(event)) {
+                this.options.onHover?.(event);
+            }
         }
 
         if (event.pointerType === 'touch' && this.isPalmRejected()) {
@@ -159,7 +199,7 @@ export class InputManager {
     private readonly handleEnter = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
             this.lastPenContactAt = Date.now();
-            this.isPenHovering = true;
+            this.markPenHover();
             this.options.onPenHoverOrContact?.(event);
         }
     };
@@ -167,20 +207,20 @@ export class InputManager {
     private readonly handleOver = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
             this.lastPenContactAt = Date.now();
-            this.isPenHovering = true;
+            this.markPenHover();
             this.options.onPenHoverOrContact?.(event);
         }
     };
 
     private readonly handleOut = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
-            this.isPenHovering = false;
+            this.clearPenHover();
         }
     };
 
     private readonly handleLeave = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
-            this.isPenHovering = false;
+            this.clearPenHover();
         }
         this.options.onPointerLeave?.(event);
     };
@@ -189,24 +229,55 @@ export class InputManager {
         if (typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return;
         const elements = document.elementsFromPoint(event.clientX, event.clientY);
         const underlying = elements.find(el =>
+            el !== this.target &&
+            !this.target.contains(el) &&
             !el.classList?.contains('apolo-canvas-surface') &&
             !el.classList?.contains('apolo-canvas-layer')
         );
-        if (underlying instanceof HTMLElement) {
-            underlying.focus();
-            if (event.button === 0 && (
-                underlying.tagName === 'BUTTON' ||
-                underlying.tagName === 'A' ||
-                underlying.tagName === 'INPUT' ||
-                underlying.getAttribute('role') === 'button' ||
-                underlying.closest('button, .clickable-icon, .metadata-property') !== null
-            )) {
-                underlying.click();
+        const isHtmlEl = typeof HTMLElement !== 'undefined'
+            ? underlying instanceof HTMLElement
+            : Boolean(underlying && typeof (underlying as any).dispatchEvent === 'function');
+
+        if (isHtmlEl && underlying) {
+            let pointerEvent: Event;
+            if (typeof PointerEvent !== 'undefined') {
+                pointerEvent = new PointerEvent('pointerdown', {
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    screenX: event.screenX,
+                    screenY: event.screenY,
+                    button: event.button,
+                    buttons: event.buttons,
+                    pointerId: event.pointerId,
+                    pointerType: event.pointerType,
+                    isPrimary: event.isPrimary,
+                    bubbles: true,
+                    cancelable: true,
+                });
+            } else {
+                const ce = new CustomEvent('pointerdown', { bubbles: true, cancelable: true });
+                Object.assign(ce, {
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                    screenX: event.screenX,
+                    screenY: event.screenY,
+                    button: event.button,
+                    buttons: event.buttons,
+                    pointerId: event.pointerId,
+                    pointerType: event.pointerType,
+                    isPrimary: event.isPrimary,
+                });
+                pointerEvent = ce;
             }
+            underlying.dispatchEvent(pointerEvent);
         }
-    };
+    }
 
     private readonly handleUp = (event: PointerEvent): void => {
+        if (this.rejectedPointerIds.has(event.pointerId)) {
+            this.rejectedPointerIds.delete(event.pointerId);
+            return;
+        }
         if (!this.isDrawingEnd(event) || this.activeDrawingPointerId !== event.pointerId) return;
         this.stopDrawingEvent(event);
         this.options.onStrokeEnd?.(this.toPoint(event), this.activeBarrel || this.isBarrel(event), event);
@@ -218,6 +289,10 @@ export class InputManager {
     };
 
     private readonly handleCancel = (event: PointerEvent): void => {
+        if (this.rejectedPointerIds.has(event.pointerId)) {
+            this.rejectedPointerIds.delete(event.pointerId);
+            return;
+        }
         if (!this.isDrawingEnd(event) || this.activeDrawingPointerId !== event.pointerId) return;
         this.stopDrawingEvent(event);
         this.release(event);

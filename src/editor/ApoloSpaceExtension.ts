@@ -1,46 +1,75 @@
-import { RangeSetBuilder, StateField, type EditorState } from '@codemirror/state';
+import { type Extension, RangeSetBuilder, StateEffect, StateField, type EditorState } from '@codemirror/state';
 import {
     Decoration,
     type DecorationSet,
     EditorView,
+    ViewPlugin,
+    type ViewUpdate,
     WidgetType,
 } from '@codemirror/view';
 
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 export { BoxRegistry };
 
+export const boxRegistryUpdateEffect = StateEffect.define<void>();
+
 declare const require: ((id: string) => any) | undefined;
+
+export interface BoxWidgetSnapshot {
+    height: number;
+    gridVisible: boolean;
+    gridStyle: string;
+    bgTheme: string;
+    customBgColor?: string;
+    accentColor: string;
+    gridDensity: number;
+    borderOutline: boolean;
+    snapActive: boolean;
+}
 
 export class ApoloSpaceWidget extends WidgetType {
     readonly height: number;
     readonly id: string;
+    readonly snapshot: BoxWidgetSnapshot;
 
-    constructor(height: number, id: string) {
+    constructor(height: number, id: string, snapshot?: BoxWidgetSnapshot) {
         super();
         this.height = height;
         this.id = id;
+        const sidecarHeight = BoxRegistry.getHeight(id);
+        this.snapshot = snapshot ?? {
+            height: Math.max(120, sidecarHeight ?? height),
+            gridVisible: BoxRegistry.isGridVisible(id),
+            gridStyle: BoxRegistry.getGridStyle(id),
+            bgTheme: BoxRegistry.getBgTheme(id),
+            customBgColor: BoxRegistry.getCustomBgColor(id),
+            accentColor: BoxRegistry.getAccentColor(id),
+            gridDensity: BoxRegistry.getGridDensity(id),
+            borderOutline: BoxRegistry.isBorderOutline(id),
+            snapActive: BoxRegistry.isSnapActive(id),
+        };
     }
 
     get estimatedHeight(): number {
-        return Math.max(120, BoxRegistry.getHeight(this.id) ?? this.height);
+        return Math.max(120, BoxRegistry.getHeight(this.id) ?? this.snapshot.height);
     }
 
     toDOM(): HTMLElement {
         const sidecarHeight = BoxRegistry.getHeight(this.id);
-        const effectiveHeight = Math.max(120, sidecarHeight ?? this.height);
+        const effectiveHeight = Math.max(120, sidecarHeight ?? this.snapshot.height);
 
         const div = document.createElement('div');
         div.className = 'apolo-space-block apolo-space-widget apolo-space';
         div.dataset.apoloSpaceId = this.id;
         div.dataset.apoloSpace = this.id;
         div.dataset.apoloHeight = String(effectiveHeight);
-        div.dataset.apoloGrid = BoxRegistry.isGridVisible(this.id) ? 'true' : 'false';
-        div.dataset.apoloGridStyle = BoxRegistry.getGridStyle(this.id);
-        div.dataset.apoloBgTheme = BoxRegistry.getBgTheme(this.id);
-        div.dataset.apoloAccent = BoxRegistry.getAccentColor(this.id);
-        div.dataset.apoloBorder = BoxRegistry.isBorderOutline(this.id) ? 'true' : 'false';
-        div.dataset.apoloSnap = BoxRegistry.isSnapActive(this.id) ? 'true' : 'false';
-        const customBg = BoxRegistry.getCustomBgColor(this.id);
+        div.dataset.apoloGrid = (BoxRegistry.isGridVisible(this.id) ?? this.snapshot.gridVisible) ? 'true' : 'false';
+        div.dataset.apoloGridStyle = BoxRegistry.getGridStyle(this.id) ?? this.snapshot.gridStyle;
+        div.dataset.apoloBgTheme = BoxRegistry.getBgTheme(this.id) ?? this.snapshot.bgTheme;
+        div.dataset.apoloAccent = BoxRegistry.getAccentColor(this.id) ?? this.snapshot.accentColor;
+        div.dataset.apoloBorder = (BoxRegistry.isBorderOutline(this.id) ?? this.snapshot.borderOutline) ? 'true' : 'false';
+        div.dataset.apoloSnap = (BoxRegistry.isSnapActive(this.id) ?? this.snapshot.snapActive) ? 'true' : 'false';
+        const customBg = BoxRegistry.getCustomBgColor(this.id) ?? this.snapshot.customBgColor;
         if (customBg) {
             div.style.setProperty('background-color', customBg, 'important');
         }
@@ -87,17 +116,17 @@ export class ApoloSpaceWidget extends WidgetType {
 
     updateDOM(dom: HTMLElement): boolean {
         const sidecarHeight = BoxRegistry.getHeight(this.id);
-        const effectiveHeight = Math.max(120, sidecarHeight ?? this.height);
+        const effectiveHeight = Math.max(120, sidecarHeight ?? this.snapshot.height);
         dom.style.setProperty('height', `${effectiveHeight}px`, 'important');
         dom.style.setProperty('min-height', `${effectiveHeight}px`, 'important');
         dom.dataset.apoloHeight = String(effectiveHeight);
-        dom.dataset.apoloGrid = BoxRegistry.isGridVisible(this.id) ? 'true' : 'false';
-        dom.dataset.apoloGridStyle = BoxRegistry.getGridStyle(this.id);
-        dom.dataset.apoloBgTheme = BoxRegistry.getBgTheme(this.id);
-        dom.dataset.apoloAccent = BoxRegistry.getAccentColor(this.id);
-        dom.dataset.apoloBorder = BoxRegistry.isBorderOutline(this.id) ? 'true' : 'false';
-        dom.dataset.apoloSnap = BoxRegistry.isSnapActive(this.id) ? 'true' : 'false';
-        const customBg = BoxRegistry.getCustomBgColor(this.id);
+        dom.dataset.apoloGrid = (BoxRegistry.isGridVisible(this.id) ?? this.snapshot.gridVisible) ? 'true' : 'false';
+        dom.dataset.apoloGridStyle = BoxRegistry.getGridStyle(this.id) ?? this.snapshot.gridStyle;
+        dom.dataset.apoloBgTheme = BoxRegistry.getBgTheme(this.id) ?? this.snapshot.bgTheme;
+        dom.dataset.apoloAccent = BoxRegistry.getAccentColor(this.id) ?? this.snapshot.accentColor;
+        dom.dataset.apoloBorder = (BoxRegistry.isBorderOutline(this.id) ?? this.snapshot.borderOutline) ? 'true' : 'false';
+        dom.dataset.apoloSnap = (BoxRegistry.isSnapActive(this.id) ?? this.snapshot.snapActive) ? 'true' : 'false';
+        const customBg = BoxRegistry.getCustomBgColor(this.id) ?? this.snapshot.customBgColor;
         if (customBg) {
             dom.style.setProperty('background-color', customBg, 'important');
         } else {
@@ -111,19 +140,17 @@ export class ApoloSpaceWidget extends WidgetType {
     }
 
     eq(other: ApoloSpaceWidget): boolean {
-        const mySidecar = BoxRegistry.getHeight(this.id);
-        const otherSidecar = BoxRegistry.getHeight(other.id);
-        const myH = mySidecar ?? this.height;
-        const otherH = otherSidecar ?? other.height;
         return (
-            myH === otherH &&
             this.id === other.id &&
-            BoxRegistry.getGridStyle(this.id) === BoxRegistry.getGridStyle(other.id) &&
-            BoxRegistry.getBgTheme(this.id) === BoxRegistry.getBgTheme(other.id) &&
-            BoxRegistry.getAccentColor(this.id) === BoxRegistry.getAccentColor(other.id) &&
-            BoxRegistry.isGridVisible(this.id) === BoxRegistry.isGridVisible(other.id) &&
-            BoxRegistry.isBorderOutline(this.id) === BoxRegistry.isBorderOutline(other.id) &&
-            BoxRegistry.isSnapActive(this.id) === BoxRegistry.isSnapActive(other.id)
+            this.snapshot.height === other.snapshot.height &&
+            this.snapshot.gridVisible === other.snapshot.gridVisible &&
+            this.snapshot.gridStyle === other.snapshot.gridStyle &&
+            this.snapshot.bgTheme === other.snapshot.bgTheme &&
+            this.snapshot.customBgColor === other.snapshot.customBgColor &&
+            this.snapshot.accentColor === other.snapshot.accentColor &&
+            this.snapshot.gridDensity === other.snapshot.gridDensity &&
+            this.snapshot.borderOutline === other.snapshot.borderOutline &&
+            this.snapshot.snapActive === other.snapshot.snapActive
         );
     }
 }
@@ -241,13 +268,15 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
     const doc = state.doc;
     const text = doc.toString();
     const items: SpaceDecorationItem[] = [];
+    const seenIds = new Set<string>();
 
     // 1. Match HTML div blocks: <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
     const htmlRegex = /<div\s+[^>]*data-apolo-space(?:-id)?=["'][^"']+["'][^>]*>\s*<\/div>/gi;
     let match: RegExpExecArray | null;
     while ((match = htmlRegex.exec(text)) !== null) {
         const parsed = parseApoloSpaceHtml(match[0]);
-        if (parsed) {
+        if (parsed && parsed.id && !seenIds.has(parsed.id)) {
+            seenIds.add(parsed.id);
             const line = doc.lineAt(match.index);
             items.push({
                 from: line.from,
@@ -262,14 +291,17 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
     const codeRegex = /```apolo-space\b([\s\S]*?)```/gi;
     while ((match = codeRegex.exec(text)) !== null) {
         const parsed = parseApoloSpaceBlock(match[1]);
-        const startLine = doc.lineAt(match.index);
-        const endLine = doc.lineAt(match.index + match[0].length);
-        items.push({
-            from: startLine.from,
-            to: endLine.to,
-            height: parsed.height,
-            id: parsed.id,
-        });
+        if (parsed && parsed.id && !seenIds.has(parsed.id)) {
+            seenIds.add(parsed.id);
+            const startLine = doc.lineAt(match.index);
+            const endLine = doc.lineAt(match.index + match[0].length);
+            items.push({
+                from: startLine.from,
+                to: endLine.to,
+                height: parsed.height,
+                id: parsed.id,
+            });
+        }
     }
 
     // Sort items monotonically by start position as required by RangeSetBuilder
@@ -285,21 +317,74 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
                     block: true,
                 }),
             );
+        } else {
+            console.warn('[ApoloCanvas] Skipping malformed space block range:', item);
         }
     }
 
     return builder.finish();
 }
 
-export const apoloSpaceExtension = StateField.define<DecorationSet>({
+export const apoloSpaceField = StateField.define<DecorationSet>({
     create(state: EditorState): DecorationSet {
         return buildApoloSpaceDecorations(state);
     },
     update(decorations: DecorationSet, tr): DecorationSet {
-        if (tr.docChanged || tr.reconfigured) {
+        const hasBoxEffect = tr.effects.some((e) => e.is(boxRegistryUpdateEffect));
+        if (tr.docChanged || tr.reconfigured || (tr as any).viewportChanged || hasBoxEffect) {
             return buildApoloSpaceDecorations(tr.state);
         }
         return decorations.map(tr.changes);
     },
     provide: (field) => EditorView.decorations.from(field),
 });
+
+export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(
+    class {
+        private view: EditorView;
+        private unsubscribe: (() => void) | null = null;
+        private lastViewportFrom = -1;
+        private lastViewportTo = -1;
+        private scheduledDispatch = false;
+
+        constructor(view: EditorView) {
+            this.view = view;
+            this.unsubscribe = BoxRegistry.onChange(() => {
+                this.requestSync();
+            });
+        }
+
+        update(update: ViewUpdate): void {
+            if (update.viewportChanged) {
+                const vp = update.view.viewport;
+                if (vp.from !== this.lastViewportFrom || vp.to !== this.lastViewportTo) {
+                    this.lastViewportFrom = vp.from;
+                    this.lastViewportTo = vp.to;
+                    this.requestSync();
+                }
+            }
+        }
+
+        private requestSync(): void {
+            if (this.scheduledDispatch) return;
+            this.scheduledDispatch = true;
+            queueMicrotask(() => {
+                this.scheduledDispatch = false;
+                if (this.view.dom.isConnected) {
+                    this.view.dispatch({
+                        effects: boxRegistryUpdateEffect.of(),
+                    });
+                }
+            });
+        }
+
+        destroy(): void {
+            if (this.unsubscribe) {
+                this.unsubscribe();
+                this.unsubscribe = null;
+            }
+        }
+    },
+);
+
+export const apoloSpaceExtension: Extension = [apoloSpaceField, apoloSpaceSyncPlugin];

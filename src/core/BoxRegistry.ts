@@ -10,9 +10,27 @@ export class BoxRegistry {
     private static gridDensities = new Map<string, number>();
     private static borderOutlines = new Map<string, boolean>();
     private static customBgColors = new Map<string, string>();
+    private static listeners = new Set<() => void>();
+
+    static onChange(listener: () => void): () => void {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    }
+
+    private static notifyChange(): void {
+        for (const listener of this.listeners) {
+            try {
+                listener();
+            } catch (err) {
+                console.error('[BoxRegistry] Error in change listener:', err);
+            }
+        }
+    }
 
     static setHeight(boxId: string, height: number): void {
+        if (this.heights.get(boxId) === height) return;
         this.heights.set(boxId, height);
+        this.notifyChange();
     }
 
     static getHeight(boxId: string): number | undefined {
@@ -20,7 +38,9 @@ export class BoxRegistry {
     }
 
     static setGridVisible(boxId: string, visible: boolean): void {
+        if (this.gridVisible.get(boxId) === visible) return;
         this.gridVisible.set(boxId, visible);
+        this.notifyChange();
     }
 
     static isGridVisible(boxId: string): boolean {
@@ -28,7 +48,9 @@ export class BoxRegistry {
     }
 
     static setSnapActive(boxId: string, active: boolean): void {
+        if (this.snapActive.get(boxId) === active) return;
         this.snapActive.set(boxId, active);
+        this.notifyChange();
     }
 
     static isSnapActive(boxId: string): boolean {
@@ -36,11 +58,15 @@ export class BoxRegistry {
     }
 
     static setGridStyle(boxId: string, style: BoxGridStyle): void {
+        const prev = this.gridStyles.get(boxId);
         this.gridStyles.set(boxId, style);
         if (style === 'none') {
             this.gridVisible.set(boxId, false);
         } else {
             this.gridVisible.set(boxId, true);
+        }
+        if (prev !== style) {
+            this.notifyChange();
         }
     }
 
@@ -49,7 +75,9 @@ export class BoxRegistry {
     }
 
     static setBgTheme(boxId: string, theme: BoxBgTheme): void {
+        if (this.bgThemes.get(boxId) === theme) return;
         this.bgThemes.set(boxId, theme);
+        this.notifyChange();
     }
 
     static getBgTheme(boxId: string): BoxBgTheme {
@@ -57,7 +85,9 @@ export class BoxRegistry {
     }
 
     static setCustomBgColor(boxId: string, color: string): void {
+        if (this.customBgColors.get(boxId) === color) return;
         this.customBgColors.set(boxId, color);
+        this.notifyChange();
     }
 
     static getCustomBgColor(boxId: string): string | undefined {
@@ -65,7 +95,9 @@ export class BoxRegistry {
     }
 
     static setAccentColor(boxId: string, accent: BoxAccentColor): void {
+        if (this.accentColors.get(boxId) === accent) return;
         this.accentColors.set(boxId, accent);
+        this.notifyChange();
     }
 
     static getAccentColor(boxId: string): BoxAccentColor {
@@ -73,7 +105,9 @@ export class BoxRegistry {
     }
 
     static setGridDensity(boxId: string, density: number): void {
+        if (this.gridDensities.get(boxId) === density) return;
         this.gridDensities.set(boxId, density);
+        this.notifyChange();
     }
 
     static getGridDensity(boxId: string): number {
@@ -81,7 +115,9 @@ export class BoxRegistry {
     }
 
     static setBorderOutline(boxId: string, outline: boolean): void {
+        if (this.borderOutlines.get(boxId) === outline) return;
         this.borderOutlines.set(boxId, outline);
+        this.notifyChange();
     }
 
     static isBorderOutline(boxId: string): boolean {
@@ -98,5 +134,6 @@ export class BoxRegistry {
         this.gridDensities.clear();
         this.borderOutlines.clear();
         this.customBgColors.clear();
+        this.notifyChange();
     }
 }

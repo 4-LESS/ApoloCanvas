@@ -66,6 +66,8 @@ export default class ApoloCanvasPlugin extends Plugin {
     private mountedMode: 'source' | 'preview' | '' = '';
     private mountGeneration = 0;
     private saveStatusBarItem: HTMLElement | null = null;
+    private isShuttingDown = false;
+    private mountPromise: Promise<void> = Promise.resolve();
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -260,6 +262,12 @@ export default class ApoloCanvasPlugin extends Plugin {
         // Vault note renaming: preserve ink document association and rename companion SVG without data loss
         this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
             if (!(file instanceof TFile)) return;
+            try {
+                this.controller?.commitActiveStroke();
+                await this.persistence?.flush();
+            } catch (err) {
+                console.error('[ApoloCanvas] Flush failed before rename:', err);
+            }
             if (this.mountedFilePath === oldPath) {
                 this.mountedFilePath = file.path;
             }
@@ -283,10 +291,12 @@ export default class ApoloCanvasPlugin extends Plugin {
 
         // App closing / tab hiding / lifecycle hooks: ensure immediate flush of all pending ink data
         this.registerDomEvent(window, 'beforeunload', () => {
+            if (this.isShuttingDown) return;
             this.controller?.commitActiveStroke();
             void this.persistence?.flush();
         });
         this.registerDomEvent(window, 'pagehide', () => {
+            if (this.isShuttingDown) return;
             this.controller?.commitActiveStroke();
             void this.persistence?.flush();
         });
@@ -468,6 +478,17 @@ export default class ApoloCanvasPlugin extends Plugin {
     };
 
     private async mountActiveEditor(force = false): Promise<void> {
+        if (this.isShuttingDown) return;
+        this.mountPromise = this.mountPromise.then(async () => {
+            if (this.isShuttingDown) return;
+            await this.doMountActiveEditor(force);
+        }).catch((err) => {
+            console.error('[ApoloCanvas] Error during mountActiveEditor:', err);
+        });
+        await this.mountPromise;
+    }
+
+    private async doMountActiveEditor(force = false): Promise<void> {
         const generation = ++this.mountGeneration;
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
         const file = view?.file;
@@ -596,29 +617,33 @@ export default class ApoloCanvasPlugin extends Plugin {
     private async destroyController(): Promise<void> {
         if (this.controller) {
             const current = this.controller;
+            this.controller = null;
             try {
                 current.commitActiveStroke();
                 await current.flush();
             } catch (error) {
                 console.error('[ApoloCanvas] Final save failed:', error);
+            } finally {
+                current.destroy();
             }
-            current.destroy();
         }
-        this.controller = null;
         this.mountedScroller = null;
         this.mountedFilePath = '';
         this.mountedMode = '';
     }
 
     private async flushAndDestroy(): Promise<void> {
+        if (this.isShuttingDown) return;
+        this.isShuttingDown = true;
         this.mountGeneration++;
         try {
-            await this.controller?.flush();
+            this.controller?.commitActiveStroke();
             await this.persistence?.flush();
         } catch (error) {
             console.error('[ApoloCanvas] Flush failed during unload:', error);
+        } finally {
+            await this.destroyController();
         }
-        await this.destroyController();
     }
 }
 
