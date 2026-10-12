@@ -1,4 +1,4 @@
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from '../core/types';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from '../core/types.ts';
 
 export interface BoxMenuCallbacks {
     onSetGridStyle: (boxId: string, style: BoxGridStyle) => void;
@@ -231,6 +231,7 @@ export class BoxMenu {
         this.container = document.createElement('div');
         this.container.className = 'apolo-box-menu-container apolo-popover-panel';
         this.container.hidden = true;
+        this.container.style.display = 'none';
         this.container.setAttribute('role', 'dialog');
         this.container.setAttribute('aria-label', 'Espacio de dibujo');
 
@@ -247,25 +248,37 @@ export class BoxMenu {
     }
 
     private readonly onOutsidePointerDown = (e: PointerEvent): void => {
-        if (!this.container.hidden && !this.container.contains(e.target as Node)) {
+        if (this.isOpen() && !this.container.contains(e.target as Node)) {
+            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
+            if (targetEl?.closest?.('.apolo-box-options-btn')) {
+                return;
+            }
             this.hide();
         }
     };
 
     private readonly onOutsideTouchStart = (e: TouchEvent): void => {
-        if (!this.container.hidden && e.target && !this.container.contains(e.target as Node)) {
+        if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
+            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
+            if (targetEl?.closest?.('.apolo-box-options-btn')) {
+                return;
+            }
             this.hide();
         }
     };
 
     private readonly onKeyDown = (e: KeyboardEvent): void => {
-        if (!this.container.hidden && e.key === 'Escape') {
+        if (this.isOpen() && e.key === 'Escape') {
             this.hide();
         }
     };
 
     isOpen(): boolean {
-        return !this.container.hidden;
+        return !this.container.hidden && this.container.style.display !== 'none';
+    }
+
+    get boxId(): string {
+        return this.currentBoxId;
     }
 
     show(boxId: string, anchorRect: DOMRect, state: BoxMenuState): void {
@@ -291,14 +304,13 @@ export class BoxMenu {
         this.container.style.left = `${Math.round(left)}px`;
         this.container.style.top = `${Math.round(top)}px`;
         this.container.style.zIndex = '1002';
-
-        requestAnimationFrame(() => {
-            this.container.hidden = false;
-        });
+        this.container.style.display = 'flex';
+        this.container.hidden = false;
     }
 
     hide(): void {
         this.container.hidden = true;
+        this.container.style.display = 'none';
         this.currentBoxId = '';
         this.currentState = null;
     }
@@ -311,7 +323,7 @@ export class BoxMenu {
     }
 
     private render(state: BoxMenuState): void {
-        this.container.empty();
+        this.container.replaceChildren();
 
         // 1. Header (Title "Espacio" + Circular Close Button "✕")
         const header = document.createElement('div');
@@ -333,11 +345,7 @@ export class BoxMenu {
             e.preventDefault();
             this.hide();
         };
-        closeBtn.addEventListener('pointerdown', (e: PointerEvent) => {
-            e.stopPropagation();
-            e.preventDefault();
-            this.hide();
-        });
+        closeBtn.addEventListener('pointerdown', handleClose);
         closeBtn.addEventListener('click', handleClose);
         closeBtn.addEventListener('touchend', handleClose);
 

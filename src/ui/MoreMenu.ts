@@ -1,4 +1,4 @@
-import { ToolbarSlot } from '../core/types';
+import type { ToolbarSlot } from '../core/types.ts';
 
 export interface MoreMenuOptions {
     slot: ToolbarSlot;
@@ -25,12 +25,44 @@ export class MoreMenu {
         this.container.setAttribute('role', 'dialog');
         this.container.setAttribute('aria-label', 'Más opciones y ajustes');
         this.container.hidden = true;
+        this.container.style.display = 'none';
 
         this.container.addEventListener('pointerdown', e => e.stopPropagation());
+        this.container.addEventListener('touchstart', e => e.stopPropagation());
 
         parent.appendChild(this.container);
         this.render();
+
+        window.addEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
+        window.addEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
+        window.addEventListener('keydown', this.onKeyDown);
     }
+
+    private readonly onOutsidePointerDown = (e: PointerEvent): void => {
+        if (this.isOpen() && !this.container.contains(e.target as Node)) {
+            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
+            if (targetEl?.closest?.('.apolo-more-btn')) {
+                return;
+            }
+            this.close();
+        }
+    };
+
+    private readonly onOutsideTouchStart = (e: TouchEvent): void => {
+        if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
+            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
+            if (targetEl?.closest?.('.apolo-more-btn')) {
+                return;
+            }
+            this.close();
+        }
+    };
+
+    private readonly onKeyDown = (e: KeyboardEvent): void => {
+        if (this.isOpen() && e.key === 'Escape') {
+            this.close();
+        }
+    };
 
     open(options?: Partial<MoreMenuOptions>): void {
         if (options) {
@@ -38,6 +70,7 @@ export class MoreMenu {
         }
         this.isVisible = true;
         this.container.hidden = false;
+        this.container.style.display = 'block';
         this.render();
         this.position();
     }
@@ -45,6 +78,7 @@ export class MoreMenu {
     close(): void {
         this.isVisible = false;
         this.container.hidden = true;
+        this.container.style.display = 'none';
         this.options.onClose();
     }
 
@@ -57,7 +91,7 @@ export class MoreMenu {
     }
 
     isOpen(): boolean {
-        return this.isVisible && !this.container.hidden;
+        return this.isVisible && !this.container.hidden && this.container.style.display !== 'none';
     }
 
     updateState(options: Partial<MoreMenuOptions>): void {
@@ -95,10 +129,34 @@ export class MoreMenu {
     private render(): void {
         this.container.replaceChildren();
 
+        const header = document.createElement('div');
+        header.className = 'apolo-popover-header';
+        header.style.display = 'flex';
+        header.style.alignItems = 'center';
+        header.style.justifyContent = 'space-between';
+        header.style.marginBottom = '8px';
+
         const title = document.createElement('div');
         title.className = 'apolo-popover-title';
         title.textContent = 'Opciones de Apolo Canvas';
-        this.container.appendChild(title);
+        header.appendChild(title);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'apolo-box-menu-close';
+        closeBtn.type = 'button';
+        closeBtn.setAttribute('aria-label', 'Cerrar');
+        closeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        const handleClose = (e: Event): void => {
+            e.stopPropagation();
+            e.preventDefault();
+            this.close();
+        };
+        closeBtn.addEventListener('pointerdown', handleClose);
+        closeBtn.addEventListener('click', handleClose);
+        closeBtn.addEventListener('touchend', handleClose);
+        header.appendChild(closeBtn);
+
+        this.container.appendChild(header);
 
         const actionsList = document.createElement('div');
         actionsList.className = 'apolo-more-actions-list';
@@ -224,6 +282,9 @@ export class MoreMenu {
     }
 
     destroy(): void {
+        window.removeEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
+        window.removeEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
+        window.removeEventListener('keydown', this.onKeyDown);
         this.container.remove();
     }
 }

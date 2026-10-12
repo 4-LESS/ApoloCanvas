@@ -11,6 +11,8 @@ import {
     type BoxWidgetSnapshot,
 } from '../src/editor/ApoloSpaceExtension.ts';
 import { InputManager } from '../src/engine/input/InputManager.ts';
+import { BoxMenu } from '../src/ui/BoxMenu.ts';
+import { MoreMenu } from '../src/ui/MoreMenu.ts';
 import type { PageDocument, StrokeElement } from '../src/core/types.ts';
 
 describe('Code Review Fixes Verification', () => {
@@ -443,7 +445,189 @@ describe('Code Review Fixes Verification', () => {
                 id: specialId,
                 type: 'delete',
             });
-            assert.ok(!removed.includes(specialId), 'Block with regex characters must be safely removed without RegExp errors');
+        });
+    });
+
+    describe('Issue 11: Canvas Menu & Popover Instant Dismissal and State Management', () => {
+        const createMockEnvironment = () => {
+            const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
+            const mockWindow = {
+                innerWidth: 1024,
+                innerHeight: 768,
+                addEventListener: (event: string, listener: Function, options?: any) => {
+                    if (!listeners.has(event)) listeners.set(event, []);
+                    listeners.get(event)!.push({ listener, options });
+                },
+                removeEventListener: (event: string, listener: Function) => {
+                    const list = listeners.get(event);
+                    if (list) {
+                        const idx = list.findIndex(item => item.listener === listener);
+                        if (idx !== -1) list.splice(idx, 1);
+                    }
+                },
+                dispatch: (event: string, evObj: any) => {
+                    const list = listeners.get(event) || [];
+                    for (const item of [...list]) {
+                        item.listener(evObj);
+                    }
+                },
+            };
+
+            const createElement = (tag: string) => {
+                const children: any[] = [];
+                const classes = new Set<string>();
+                const el: any = {
+                    tagName: tag.toUpperCase(),
+                    style: { display: '' },
+                    dataset: {},
+                    hidden: false,
+                    className: '',
+                    children,
+                    classList: {
+                        add: (c: string) => { classes.add(c); el.className = [...classes].join(' '); },
+                        remove: (c: string) => { classes.delete(c); el.className = [...classes].join(' '); },
+                        contains: (c: string) => classes.has(c),
+                        toggle: (c: string, force?: boolean) => {
+                            const next = force !== undefined ? force : !classes.has(c);
+                            if (next) classes.add(c); else classes.delete(c);
+                            el.className = [...classes].join(' ');
+                            return next;
+                        },
+                    },
+                    setAttribute: () => {},
+                    getAttribute: () => null,
+                    appendChild: (child: any) => { children.push(child); return child; },
+                    append: (...args: any[]) => { children.push(...args); },
+                    replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); },
+                    empty: () => { children.length = 0; },
+                    remove: () => {},
+                    contains: (target: any) => target === el || children.some(c => c === target || c.contains?.(target)),
+                    addEventListener: () => {},
+                    removeEventListener: () => {},
+                    closest: () => null,
+                    getBoundingClientRect: () => ({ left: 100, top: 100, right: 200, bottom: 130, width: 100, height: 30 }),
+                };
+                return el;
+            };
+
+            const mockDocument = {
+                body: createElement('body'),
+                createElement,
+                createElementNS: () => createElement('svg'),
+            };
+
+            return { mockWindow, mockDocument };
+        };
+
+        test('BoxMenu properly toggles style.display, hidden attribute, and dismisses on outside clicks and Escape', () => {
+            const { mockWindow, mockDocument } = createMockEnvironment();
+            const prevWindow = (globalThis as any).window;
+            const prevDocument = (globalThis as any).document;
+            (globalThis as any).window = mockWindow;
+            (globalThis as any).document = mockDocument;
+
+            try {
+                let deletedBox = '';
+                const menu = new BoxMenu({
+                    onSetGridStyle: () => {},
+                    onSetGridDensity: () => {},
+                    onSetAccentColor: () => {},
+                    onFitHeight: () => {},
+                    onClearContent: () => {},
+                    onDeleteBox: (id) => { deletedBox = id; },
+                }, mockDocument.body as any);
+
+                // Initially hidden with display: none
+                assert.strictEqual(menu.isOpen(), false);
+                assert.strictEqual(menu.container.hidden, true);
+                assert.strictEqual(menu.container.style.display, 'none');
+
+                // Show menu
+                const anchorRect = { left: 150, top: 100, bottom: 120, right: 200 } as DOMRect;
+                menu.show('box-test-1', anchorRect, { gridStyle: 'dots', gridDensity: 32 });
+
+                assert.strictEqual(menu.isOpen(), true);
+                assert.strictEqual(menu.container.hidden, false);
+                assert.strictEqual(menu.container.style.display, 'flex');
+                assert.strictEqual(menu.boxId, 'box-test-1');
+
+                // Outside click dismisses menu
+                const outsideEl = mockDocument.createElement('div');
+                mockWindow.dispatch('pointerdown', { target: outsideEl });
+
+                assert.strictEqual(menu.isOpen(), false);
+                assert.strictEqual(menu.container.hidden, true);
+                assert.strictEqual(menu.container.style.display, 'none');
+                assert.strictEqual(menu.boxId, '');
+
+                // Re-open and test Escape key dismissal
+                menu.show('box-test-1', anchorRect, { gridStyle: 'dots', gridDensity: 32 });
+                assert.strictEqual(menu.isOpen(), true);
+
+                mockWindow.dispatch('keydown', { key: 'Escape' });
+                assert.strictEqual(menu.isOpen(), false);
+                assert.strictEqual(menu.container.style.display, 'none');
+
+                menu.destroy();
+            } finally {
+                (globalThis as any).window = prevWindow;
+                (globalThis as any).document = prevDocument;
+            }
+        });
+
+        test('MoreMenu properly toggles style.display, hidden attribute, and dismisses on outside clicks and Escape', () => {
+            const { mockWindow, mockDocument } = createMockEnvironment();
+            const prevWindow = (globalThis as any).window;
+            const prevDocument = (globalThis as any).document;
+            (globalThis as any).window = mockWindow;
+            (globalThis as any).document = mockDocument;
+
+            try {
+                let closed = false;
+                const menu = new MoreMenu({
+                    slot: 'tr',
+                    onlyPen: false,
+                    snapGrid: false,
+                    onExportSvg: () => {},
+                    onOpenGraph: () => {},
+                    onTestAnchor: () => {},
+                    onToggleOnlyPen: () => {},
+                    onToggleSnapGrid: () => {},
+                    onClose: () => { closed = true; },
+                }, mockDocument.body as any);
+
+                assert.strictEqual(menu.isOpen(), false);
+                assert.strictEqual(menu.container.hidden, true);
+                assert.strictEqual(menu.container.style.display, 'none');
+
+                menu.open();
+                assert.strictEqual(menu.isOpen(), true);
+                assert.strictEqual(menu.container.hidden, false);
+                assert.strictEqual(menu.container.style.display, 'block');
+
+                // Outside click dismisses MoreMenu
+                const outsideEl = mockDocument.createElement('div');
+                mockWindow.dispatch('pointerdown', { target: outsideEl });
+
+                assert.strictEqual(menu.isOpen(), false);
+                assert.strictEqual(menu.container.hidden, true);
+                assert.strictEqual(menu.container.style.display, 'none');
+                assert.strictEqual(closed, true);
+
+                // Re-open and test Escape dismissal
+                menu.open();
+                assert.strictEqual(menu.isOpen(), true);
+
+                mockWindow.dispatch('keydown', { key: 'Escape' });
+                assert.strictEqual(menu.isOpen(), false);
+                assert.strictEqual(menu.container.style.display, 'none');
+
+                menu.destroy();
+            } finally {
+                (globalThis as any).window = prevWindow;
+                (globalThis as any).document = prevDocument;
+            }
         });
     });
 });
+

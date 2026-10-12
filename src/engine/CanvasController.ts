@@ -326,7 +326,9 @@ export class CanvasController {
             this.canvas.addEventListener('pointercancel', this.onTouchEnd, { passive: false });
             this.canvas.addEventListener('dblclick', this.onCanvasDblClick);
             this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
-            document.addEventListener('pointerdown', this.onDocumentPointerDown);
+            window.addEventListener('pointerdown', this.onDocumentPointerDown, { capture: true });
+            window.addEventListener('touchstart', this.onDocumentTouchStart, { capture: true });
+            window.addEventListener('keydown', this.onDocumentKeyDown);
         }
 
         this.scrollHandler = (event?: Event) => {
@@ -842,7 +844,11 @@ export class CanvasController {
                 || actualBtn.closest('.apolo-space-block')?.getAttribute('data-apolo-space')
                 || '';
             if (boxId) {
-                this.openBoxMenuFor(boxId, actualBtn);
+                if (this.boxMenu?.isOpen() && this.boxMenu.boxId === boxId) {
+                    this.boxMenu.hide();
+                } else {
+                    this.openBoxMenuFor(boxId, actualBtn);
+                }
             }
             return;
         }
@@ -1567,7 +1573,9 @@ export class CanvasController {
         this.canvas.removeEventListener('pointercancel', this.onTouchEnd);
         this.canvas.removeEventListener('dblclick', this.onCanvasDblClick);
         this.canvas.removeEventListener('wheel', this.onWheel);
-        document.removeEventListener('pointerdown', this.onDocumentPointerDown);
+        window.removeEventListener('pointerdown', this.onDocumentPointerDown, { capture: true });
+        window.removeEventListener('touchstart', this.onDocumentTouchStart, { capture: true });
+        window.removeEventListener('keydown', this.onDocumentKeyDown);
 
         if (this.frame) cancelAnimationFrame(this.frame);
 
@@ -1605,9 +1613,44 @@ export class CanvasController {
         ) {
             return;
         }
+        const targetEl = (target && typeof (target as any).closest === 'function') ? (target as any) : null;
+        if (targetEl?.closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn')) {
+            return;
+        }
         this.estuche?.close();
         this.moreMenu?.close();
         this.boxMenu?.hide();
+    };
+
+    private readonly onDocumentTouchStart = (event: TouchEvent): void => {
+        const target = event.target;
+        if (!(target instanceof Node)) return;
+        if (
+            this.toolbar?.container.contains(target) ||
+            this.estuche?.container.contains(target) ||
+            this.lassoMenu?.container.contains(target) ||
+            this.moreMenu?.container.contains(target) ||
+            this.zoomPill?.container.contains(target) ||
+            this.boxMenu?.container.contains(target)
+        ) {
+            return;
+        }
+        const targetEl = (target && typeof (target as any).closest === 'function') ? (target as any) : null;
+        if (targetEl?.closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn')) {
+            return;
+        }
+        this.estuche?.close();
+        this.moreMenu?.close();
+        this.boxMenu?.hide();
+    };
+
+    private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Escape') {
+            this.estuche?.close();
+            this.moreMenu?.close();
+            this.boxMenu?.hide();
+            this.lassoMenu?.hide();
+        }
     };
 
     private getDocumentContentBounds(): DocumentContentBounds {

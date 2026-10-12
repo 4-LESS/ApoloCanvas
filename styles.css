@@ -47,6 +47,17 @@
   --apolo-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.65);
 }
 
+/* Universal dismissal for hidden elements and popovers */
+[hidden],
+.apolo-box-menu-container[hidden],
+.apolo-popover-panel[hidden],
+.apolo-lasso-menu-container[hidden],
+.apolo-snap-dots-container[hidden],
+.apolo-more-menu-popover[hidden],
+.apolo-tool-estuche[hidden] {
+  display: none !important;
+}
+
 /* Layer & Canvas Surfaces */
 .apolo-canvas-layer {
   position: absolute;
@@ -1457,6 +1468,10 @@
   -webkit-user-select: none;
   touch-action: pan-y;
   box-sizing: border-box;
+}
+
+.apolo-box-menu-container[hidden] {
+  display: none !important;
 }
 
 .theme-light .apolo-box-menu-container {
