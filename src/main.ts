@@ -77,6 +77,7 @@ export default class ApoloCanvasPlugin extends Plugin {
             () => new Notice('Apolo Canvas: El guardado falló; revisa la consola para más detalles.'),
         );
         this.persistence.setCompanionSvgEnabled(this.settings.companionSvgExport);
+        BoxRegistry.setDefaultBgTheme(this.settings.defaultBoxBgTheme || 'default');
 
         await ensureFolder(this.app, '.apolocanvas');
         await ensureFolder(this.app, '.apolocanvas/boxes');
@@ -89,13 +90,23 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.registerMarkdownCodeBlockProcessor('apolo-space', (source, el) => {
             const heightMatch = source.match(/height:\s*(\d+)/i);
             const height = heightMatch ? Math.max(20, Math.min(2000, parseInt(heightMatch[1], 10))) : 200;
-            const idMatch = source.match(/id:\s*([^\s\n\r]+)/i);
-            const id = idMatch ? idMatch[1] : '';
+            const idMatch = source.match(/id:\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s\n\r"']+))/i);
+            const id = idMatch ? (idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '').trim() : '';
+
+            const densityMatch = source.match(/gridDensity:\s*(\d+)/i);
+            const gridStyleMatch = source.match(/gridStyle:\s*["']?([^\s\r\n"']+)["']?/i);
+            const bgThemeMatch = source.match(/bgTheme:\s*["']?([^\s\r\n"']+)["']?/i);
+            const accentMatch = source.match(/accentColor:\s*["']?([^\s\r\n"']+)["']?/i);
 
             el.empty();
             el.addClass('apolo-space-block');
             el.dataset.apoloSpaceId = id;
+            el.dataset.apoloSpace = id;
             el.dataset.apoloHeight = String(height);
+            if (densityMatch) el.dataset.apoloGridDensity = densityMatch[1];
+            if (gridStyleMatch) el.dataset.apoloGridStyle = gridStyleMatch[1];
+            if (bgThemeMatch) el.dataset.apoloBgTheme = bgThemeMatch[1];
+            if (accentMatch) el.dataset.apoloAccent = accentMatch[1];
             el.style.height = `${height}px`;
             el.style.width = '100%';
             el.style.display = 'block';
@@ -140,13 +151,33 @@ export default class ApoloCanvasPlugin extends Plugin {
                     if (BoxRegistry.getHeight(id) === undefined) {
                         BoxRegistry.setHeight(id, h);
                     }
+                    if (s.dataset.apoloGridDensity) {
+                        BoxRegistry.setGridDensity(id, parseInt(s.dataset.apoloGridDensity, 10));
+                    }
+                    if (s.dataset.apoloGridStyle) {
+                        BoxRegistry.setGridStyle(id, s.dataset.apoloGridStyle as BoxGridStyle);
+                    }
+                    if (s.dataset.apoloBgTheme) {
+                        BoxRegistry.setBgTheme(id, s.dataset.apoloBgTheme as BoxBgTheme);
+                    }
+                    if (s.dataset.apoloAccent) {
+                        BoxRegistry.setAccentColor(id, s.dataset.apoloAccent as BoxAccentColor);
+                    }
                     s.dataset.apoloGrid = BoxRegistry.isGridVisible(id) ? 'true' : 'false';
                     s.dataset.apoloGridStyle = BoxRegistry.getGridStyle(id);
                     s.dataset.apoloBgTheme = BoxRegistry.getBgTheme(id);
-                    const w = s.clientWidth || s.offsetWidth || 300;
                     const density = BoxRegistry.getGridDensity(id);
-                    const step = Math.round((w / density) * 100) / 100;
-                    s.style.setProperty('--apolo-grid-step', step + 'px');
+                    s.dataset.apoloGridDensity = String(density);
+                    const updateGridStep = () => {
+                        const parentW = s.parentElement?.clientWidth || s.closest('.markdown-rendered, .markdown-preview-view, .cm-content')?.clientWidth;
+                        const w = s.clientWidth || s.offsetWidth || parentW || 800;
+                        const step = Math.round((w / density) * 100) / 100;
+                        s.style.setProperty('--apolo-grid-step', step + 'px');
+                    };
+                    updateGridStep();
+                    if (!s.clientWidth && typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                        window.requestAnimationFrame(() => updateGridStep());
+                    }
                     s.dataset.apoloAccent = BoxRegistry.getAccentColor(id);
                     s.dataset.apoloBorder = BoxRegistry.isBorderOutline(id) ? 'true' : 'false';
                     s.dataset.apoloSnap = BoxRegistry.isSnapActive(id) ? 'true' : 'false';
@@ -632,6 +663,56 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.mountedMode = '';
     }
 
+    async updateGlobalBgTheme(newTheme: BoxBgTheme): Promise<void> {
+        this.settings.defaultBoxBgTheme = newTheme;
+        await this.saveSettings();
+
+        // 1. Update BoxRegistry and trigger Live Preview update
+        BoxRegistry.updateAllBgThemes(newTheme);
+
+        // 2. Update active controller if mounted
+        if (this.controller) {
+            this.controller.updateDefaultBoxBgTheme(newTheme);
+        }
+
+        // 3. Update all DOM elements in workspace (Reading mode, CM views)
+        const spaceEls = document.querySelectorAll<HTMLElement>(
+            '.apolo-space, .apolo-space-block, .apolo-space-widget, [data-apolo-space], [data-apolo-space-id]'
+        );
+        for (const el of Array.from(spaceEls)) {
+            el.dataset.apoloBgTheme = newTheme;
+        }
+
+        // 4. Update all vault box persistence files (.apolocanvas/boxes/*.json) retroactively
+        try {
+            const adapter = this.app.vault.adapter;
+            if (await adapter.exists('.apolocanvas/boxes')) {
+                const listing = await adapter.list('.apolocanvas/boxes');
+                for (const filePath of listing.files) {
+                    if (filePath.endsWith('.json')) {
+                        try {
+                            const raw = await adapter.read(filePath);
+                            const parsed = JSON.parse(raw);
+                            if (parsed && typeof parsed === 'object') {
+                                parsed.bgTheme = newTheme;
+                                await adapter.write(filePath, JSON.stringify(parsed));
+                            }
+                        } catch { /* skip invalid */ }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('[ApoloCanvas] Failed to update vault boxes retroactively:', err);
+        }
+    }
+
+    setDefaultBoxAccentColor(accent: BoxAccentColor): void {
+        this.settings.defaultBoxAccentColor = accent;
+        if (this.controller) {
+            this.controller.setDefaultBoxAccentColor(accent);
+        }
+    }
+
     private async flushAndDestroy(): Promise<void> {
         if (this.isShuttingDown) return;
         this.isShuttingDown = true;
@@ -805,7 +886,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Tema de fondo por defecto')
-            .setDesc('Color y apariencia del fondo de las cajas de dibujo.')
+            .setDesc('Color y apariencia del fondo de las cajas de dibujo (afecta a todos los canvas retroactivamente).')
             .addDropdown(dd => dd
                 .addOption('default', 'Gris oscuro (#1f1f21)')
                 .addOption('pitch-black', 'Negro puro (#000000 - OLED)')
@@ -813,8 +894,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .addOption('transparent', 'Transparente (Sin fondo)')
                 .setValue(this.plugin.settings.defaultBoxBgTheme || 'default')
                 .onChange(async value => {
-                    this.plugin.settings.defaultBoxBgTheme = value as BoxBgTheme;
-                    await this.plugin.saveSettings();
+                    await this.plugin.updateGlobalBgTheme(value as BoxBgTheme);
                 }));
 
         new Setting(containerEl)
@@ -830,7 +910,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Color de acento lateral por defecto')
-            .setDesc('Franja de color identificativa en el borde izquierdo de la caja.')
+            .setDesc('Franja de color identificativa en el borde izquierdo de la caja (solo para nuevos espacios).')
             .addDropdown(dd => dd
                 .addOption('purple', 'Morado (#a98bff)')
                 .addOption('blue', 'Azul (#3b82f6)')
@@ -841,7 +921,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .addOption('none', 'Desactivado (Sin barra)')
                 .setValue(this.plugin.settings.defaultBoxAccentColor || 'purple')
                 .onChange(async value => {
-                    this.plugin.settings.defaultBoxAccentColor = value as BoxAccentColor;
+                    this.plugin.setDefaultBoxAccentColor(value as BoxAccentColor);
                     await this.plugin.saveSettings();
                 }));
 

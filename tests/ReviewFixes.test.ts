@@ -6,6 +6,7 @@ import {
     BoxRegistry,
     apoloSpaceField,
     boxRegistryUpdateEffect,
+    parseApoloSpaceHtml,
     parseApoloSpaceBlock,
     applySpaceMutationToMarkdown,
     type BoxWidgetSnapshot,
@@ -627,6 +628,124 @@ describe('Code Review Fixes Verification', () => {
                 (globalThis as any).window = prevWindow;
                 (globalThis as any).document = prevDocument;
             }
+        });
+    });
+
+    describe('Issue 12: Grid Density Rendering & Retroactive Background Theme vs Scoped Accent', () => {
+        test('parseApoloSpaceHtml and parseApoloSpaceBlock extract gridDensity, gridStyle, bgTheme, and accentColor', () => {
+            const html = '<div class="apolo-space" data-apolo-space="box-custom" data-h="280" data-apolo-grid-density="40" data-apolo-grid-style="grid" data-apolo-bg-theme="pitch-black" data-apolo-accent="emerald"></div>';
+            const parsedHtml = parseApoloSpaceHtml(html);
+            assert.ok(parsedHtml);
+            assert.strictEqual(parsedHtml.id, 'box-custom');
+            assert.strictEqual(parsedHtml.height, 280);
+            assert.strictEqual(parsedHtml.gridDensity, 40);
+            assert.strictEqual(parsedHtml.gridStyle, 'grid');
+            assert.strictEqual(parsedHtml.bgTheme, 'pitch-black');
+            assert.strictEqual(parsedHtml.accentColor, 'emerald');
+
+            const codeblock = '```apolo-space\nid: "box-code"\nheight: 320\ngridDensity: 24\ngridStyle: ruled\nbgTheme: graphite\naccentColor: coral\n```';
+            const parsedBlock = parseApoloSpaceBlock(codeblock);
+            assert.strictEqual(parsedBlock.id, 'box-code');
+            assert.strictEqual(parsedBlock.height, 320);
+            assert.strictEqual(parsedBlock.gridDensity, 24);
+            assert.strictEqual(parsedBlock.gridStyle, 'ruled');
+            assert.strictEqual(parsedBlock.bgTheme, 'graphite');
+            assert.strictEqual(parsedBlock.accentColor, 'coral');
+        });
+
+        test('ApoloSpaceWidget toDOM and updateDOM set data-apolo-grid-density and calculate --apolo-grid-step', () => {
+            const prevWindow = (globalThis as any).window;
+            const prevDoc = (globalThis as any).document;
+
+            class MockStyle {
+                private props = new Map<string, string>();
+                setProperty(prop: string, val: string) { this.props.set(prop, val); }
+                getPropertyValue(prop: string) { return this.props.get(prop) || ''; }
+                removeProperty(prop: string) { this.props.delete(prop); }
+            }
+
+            class MockDomElement {
+                style = new MockStyle();
+                dataset: Record<string, string> = {};
+                className = '';
+                clientWidth = 800;
+                offsetWidth = 800;
+                isConnected = true;
+                children: any[] = [];
+                appendChild(c: any) { this.children.push(c); }
+                setAttribute(_k: string, _v: string) {}
+            }
+
+            (globalThis as any).document = {
+                createElement: () => new MockDomElement(),
+                createElementNS: () => new MockDomElement(),
+            };
+            (globalThis as any).window = {
+                requestAnimationFrame: (cb: () => void) => cb(),
+            };
+
+            try {
+                BoxRegistry.clear();
+                BoxRegistry.setHeight('box-dense-1', 250);
+                BoxRegistry.setGridDensity('box-dense-1', 40); // 800 / 40 = 20px step
+                BoxRegistry.setBgTheme('box-dense-1', 'pitch-black');
+
+                const widget = new ApoloSpaceWidget(250, 'box-dense-1');
+                const dom = widget.toDOM();
+
+                assert.strictEqual(dom.dataset.apoloGridDensity, '40');
+                assert.strictEqual(dom.style.getPropertyValue('--apolo-grid-step'), '20px');
+                assert.strictEqual(dom.dataset.apoloBgTheme, 'pitch-black');
+
+                // Update DOM with normal density (32 -> 800 / 32 = 25px)
+                BoxRegistry.setGridDensity('box-dense-1', 32);
+                const updatedWidget = new ApoloSpaceWidget(250, 'box-dense-1');
+                updatedWidget.updateDOM(dom);
+
+                assert.strictEqual(dom.dataset.apoloGridDensity, '32');
+                assert.strictEqual(dom.style.getPropertyValue('--apolo-grid-step'), '25px');
+            } finally {
+                (globalThis as any).window = prevWindow;
+                (globalThis as any).document = prevDoc;
+            }
+        });
+
+        test('Changing background theme retroactively updates all existing boxes in BoxRegistry, while accent color remains scoped', () => {
+            BoxRegistry.clear();
+
+            // Set up two existing boxes with different accent colors
+            BoxRegistry.setHeight('box-1', 200);
+            BoxRegistry.setAccentColor('box-1', 'purple');
+            BoxRegistry.setBgTheme('box-1', 'default');
+
+            BoxRegistry.setHeight('box-2', 200);
+            BoxRegistry.setAccentColor('box-2', 'amber');
+            BoxRegistry.setBgTheme('box-2', 'default');
+
+            assert.strictEqual(BoxRegistry.getBgTheme('box-1'), 'default');
+            assert.strictEqual(BoxRegistry.getBgTheme('box-2'), 'default');
+            assert.strictEqual(BoxRegistry.getAccentColor('box-1'), 'purple');
+            assert.strictEqual(BoxRegistry.getAccentColor('box-2'), 'amber');
+
+            // User changes plugin background theme to pitch-black (retroactive)
+            BoxRegistry.updateAllBgThemes('pitch-black');
+
+            // Both existing boxes now reflect pitch-black retroactively
+            assert.strictEqual(BoxRegistry.getBgTheme('box-1'), 'pitch-black');
+            assert.strictEqual(BoxRegistry.getBgTheme('box-2'), 'pitch-black');
+
+            // Accent colors of existing boxes are strictly preserved!
+            assert.strictEqual(BoxRegistry.getAccentColor('box-1'), 'purple', 'box-1 accent color must not change');
+            assert.strictEqual(BoxRegistry.getAccentColor('box-2'), 'amber', 'box-2 accent color must not change');
+
+            // Newly created box can adopt new default accent color
+            const defaultNewAccent = 'emerald';
+            BoxRegistry.setHeight('box-new', 200);
+            BoxRegistry.setAccentColor('box-new', defaultNewAccent);
+
+            assert.strictEqual(BoxRegistry.getAccentColor('box-new'), 'emerald');
+            assert.strictEqual(BoxRegistry.getAccentColor('box-1'), 'purple');
+            assert.strictEqual(BoxRegistry.getAccentColor('box-2'), 'amber');
         });
     });
 });

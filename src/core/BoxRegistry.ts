@@ -74,6 +74,24 @@ export class BoxRegistry {
         return this.gridStyles.get(boxId) ?? 'dots';
     }
 
+    private static defaultBgTheme: BoxBgTheme = 'default';
+
+    static setDefaultBgTheme(theme: BoxBgTheme): void {
+        this.defaultBgTheme = theme;
+    }
+
+    static updateAllBgThemes(theme: BoxBgTheme): void {
+        this.defaultBgTheme = theme;
+        for (const boxId of this.heights.keys()) {
+            this.bgThemes.set(boxId, theme);
+        }
+        this.notifyChange();
+    }
+
+    static getKnownBoxIds(): string[] {
+        return Array.from(this.heights.keys());
+    }
+
     static setBgTheme(boxId: string, theme: BoxBgTheme): void {
         if (this.bgThemes.get(boxId) === theme) return;
         this.bgThemes.set(boxId, theme);
@@ -81,7 +99,7 @@ export class BoxRegistry {
     }
 
     static getBgTheme(boxId: string): BoxBgTheme {
-        return this.bgThemes.get(boxId) ?? 'default';
+        return this.bgThemes.get(boxId) ?? this.defaultBgTheme;
     }
 
     static setCustomBgColor(boxId: string, color: string): void {

@@ -1,5 +1,5 @@
 import type { App, TFile } from 'obsidian';
-import type { CanvasElement, LayoutHint, PageDocument, ShapeElement } from '../core/types.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, ShapeElement } from '../core/types.ts';
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 
 export function notePathToKey(notePath: string): string {
@@ -23,6 +23,13 @@ export interface BoxRecord {
     height: number;
     lastTop?: number;
     gridVisible?: boolean;
+    gridStyle?: BoxGridStyle;
+    gridDensity?: number;
+    snapToGrid?: boolean;
+    bgTheme?: BoxBgTheme;
+    customBgColor?: string;
+    accentColor?: BoxAccentColor;
+    borderOutline?: boolean;
     updatedAt: number;
     elements: CanvasElement[];
 }
@@ -149,7 +156,7 @@ export class PersistenceQueue {
 
         // 4. Load boxes
         const boxElements: CanvasElement[] = [];
-        const boxesMeta: Record<string, { height: number; lastTop?: number; gridVisible?: boolean }> = {};
+        const boxesMeta: Record<string, BoxMetadata> = {};
 
         for (const boxId of boxIds) {
             const boxFile = `.apolocanvas/boxes/${boxId}.json`;
@@ -160,8 +167,23 @@ export class PersistenceQueue {
                         height: boxData.height,
                         lastTop: boxData.lastTop,
                         gridVisible: boxData.gridVisible,
+                        gridStyle: boxData.gridStyle,
+                        gridDensity: boxData.gridDensity,
+                        snapToGrid: boxData.snapToGrid,
+                        bgTheme: boxData.bgTheme,
+                        customBgColor: boxData.customBgColor,
+                        accentColor: boxData.accentColor,
+                        borderOutline: boxData.borderOutline,
                     };
                     BoxRegistry.setHeight(boxId, boxData.height);
+                    if (boxData.gridVisible !== undefined) BoxRegistry.setGridVisible(boxId, boxData.gridVisible);
+                    if (boxData.gridStyle) BoxRegistry.setGridStyle(boxId, boxData.gridStyle);
+                    if (boxData.gridDensity) BoxRegistry.setGridDensity(boxId, boxData.gridDensity);
+                    if (boxData.snapToGrid !== undefined) BoxRegistry.setSnapActive(boxId, boxData.snapToGrid);
+                    if (boxData.bgTheme) BoxRegistry.setBgTheme(boxId, boxData.bgTheme);
+                    if (boxData.customBgColor !== undefined) BoxRegistry.setCustomBgColor(boxId, boxData.customBgColor);
+                    if (boxData.accentColor) BoxRegistry.setAccentColor(boxId, boxData.accentColor);
+                    if (boxData.borderOutline !== undefined) BoxRegistry.setBorderOutline(boxId, boxData.borderOutline);
                     if (boxData.elements) {
                         boxElements.push(...boxData.elements);
                     }
@@ -290,7 +312,14 @@ export class PersistenceQueue {
                 boxId,
                 height: meta?.height ?? 280,
                 lastTop: meta?.lastTop,
-                gridVisible: meta?.gridVisible ?? true,
+                gridVisible: meta?.gridVisible ?? BoxRegistry.isGridVisible(boxId),
+                gridStyle: meta?.gridStyle ?? BoxRegistry.getGridStyle(boxId),
+                gridDensity: meta?.gridDensity ?? BoxRegistry.getGridDensity(boxId),
+                snapToGrid: meta?.snapToGrid ?? BoxRegistry.isSnapActive(boxId),
+                bgTheme: meta?.bgTheme ?? BoxRegistry.getBgTheme(boxId),
+                customBgColor: meta?.customBgColor ?? BoxRegistry.getCustomBgColor(boxId),
+                accentColor: meta?.accentColor ?? BoxRegistry.getAccentColor(boxId),
+                borderOutline: meta?.borderOutline ?? BoxRegistry.isBorderOutline(boxId),
                 updatedAt: Date.now(),
                 elements,
             };
@@ -364,13 +393,27 @@ export function renderBoxSvg(
     elements: CanvasElement[],
     width = 800,
     height = 280,
-    meta?: { height?: number; gridStyle?: string; gridDensity?: number },
+    meta?: { height?: number; gridStyle?: string; gridDensity?: number; bgTheme?: string; customBgColor?: string },
 ): string {
     const scale = width;
     let gridDef = '';
     const gridStyle = meta?.gridStyle ?? BoxRegistry.getGridStyle(boxId);
     const density = meta?.gridDensity ?? BoxRegistry.getGridDensity(boxId) ?? 32;
     const step = Math.round((width / density) * 100) / 100;
+
+    const bgTheme = meta?.bgTheme ?? BoxRegistry.getBgTheme(boxId);
+    const customBg = meta?.customBgColor ?? BoxRegistry.getCustomBgColor(boxId);
+    let bgFill = 'transparent';
+    if (customBg) {
+        bgFill = customBg;
+    } else if (bgTheme === 'pitch-black') {
+        bgFill = '#000000';
+    } else if (bgTheme === 'graphite') {
+        bgFill = '#27272a';
+    } else if (bgTheme === 'default') {
+        bgFill = '#1f1f21';
+    }
+    const bgRect = bgFill !== 'transparent' ? `<rect width="100%" height="100%" fill="${bgFill}"/>` : '';
 
     if (gridStyle === 'dots') {
         gridDef = `<pattern id="apolo-grid-${boxId}" width="${step}" height="${step}" patternUnits="userSpaceOnUse"><circle cx="${step / 2}" cy="${step / 2}" r="1.5" fill="rgba(128,128,128,0.3)"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${boxId})"/>`;
@@ -381,7 +424,7 @@ export function renderBoxSvg(
     }
 
     const content = elements.map(el => renderElement(el, scale)).join('\n');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><defs/>${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><defs/>${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
 }
 
 function vaultRelativeLink(notePath: string, assetPath: string): string {

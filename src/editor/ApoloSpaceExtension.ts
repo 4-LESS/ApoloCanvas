@@ -9,6 +9,7 @@ import {
 } from '@codemirror/view';
 
 import { BoxRegistry } from '../core/BoxRegistry.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from '../core/types.ts';
 export { BoxRegistry };
 
 export const boxRegistryUpdateEffect = StateEffect.define<void>();
@@ -69,6 +70,22 @@ export class ApoloSpaceWidget extends WidgetType {
         div.dataset.apoloAccent = BoxRegistry.getAccentColor(this.id) ?? this.snapshot.accentColor;
         div.dataset.apoloBorder = (BoxRegistry.isBorderOutline(this.id) ?? this.snapshot.borderOutline) ? 'true' : 'false';
         div.dataset.apoloSnap = (BoxRegistry.isSnapActive(this.id) ?? this.snapshot.snapActive) ? 'true' : 'false';
+        const density = BoxRegistry.getGridDensity(this.id) ?? this.snapshot.gridDensity ?? 32;
+        div.dataset.apoloGridDensity = String(density);
+        const effectiveWidth = div.clientWidth || div.offsetWidth || 800;
+        const stepPx = Math.round((effectiveWidth / density) * 100) / 100;
+        div.style.setProperty('--apolo-grid-step', `${stepPx}px`);
+
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => {
+                if (div.isConnected) {
+                    const actualW = div.clientWidth || div.offsetWidth || 800;
+                    const updatedStep = Math.round((actualW / density) * 100) / 100;
+                    div.style.setProperty('--apolo-grid-step', `${updatedStep}px`);
+                }
+            });
+        }
+
         const customBg = BoxRegistry.getCustomBgColor(this.id) ?? this.snapshot.customBgColor;
         if (customBg) {
             div.style.setProperty('background-color', customBg, 'important');
@@ -125,6 +142,22 @@ export class ApoloSpaceWidget extends WidgetType {
         dom.dataset.apoloAccent = this.snapshot.accentColor;
         dom.dataset.apoloBorder = this.snapshot.borderOutline ? 'true' : 'false';
         dom.dataset.apoloSnap = this.snapshot.snapActive ? 'true' : 'false';
+        const density = this.snapshot.gridDensity ?? BoxRegistry.getGridDensity(this.id) ?? 32;
+        dom.dataset.apoloGridDensity = String(density);
+        const effectiveWidth = dom.clientWidth || dom.offsetWidth || 800;
+        const stepPx = Math.round((effectiveWidth / density) * 100) / 100;
+        dom.style.setProperty('--apolo-grid-step', `${stepPx}px`);
+
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => {
+                if (dom.isConnected) {
+                    const actualW = dom.clientWidth || dom.offsetWidth || 800;
+                    const updatedStep = Math.round((actualW / density) * 100) / 100;
+                    dom.style.setProperty('--apolo-grid-step', `${updatedStep}px`);
+                }
+            });
+        }
+
         if (this.snapshot.customBgColor) {
             dom.style.setProperty('background-color', this.snapshot.customBgColor, 'important');
         } else {
@@ -153,7 +186,16 @@ export class ApoloSpaceWidget extends WidgetType {
     }
 }
 
-export function parseApoloSpaceHtml(html: string): { height: number; id: string } | null {
+export interface ParsedApoloSpace {
+    height: number;
+    id: string;
+    gridDensity?: number;
+    gridStyle?: BoxGridStyle;
+    bgTheme?: BoxBgTheme;
+    accentColor?: BoxAccentColor;
+}
+
+export function parseApoloSpaceHtml(html: string): ParsedApoloSpace | null {
     const idMatch = html.match(/data-apolo-space(?:-id)?=["']([^"']+)["']/i);
     if (!idMatch) return null;
     const id = idMatch[1];
@@ -165,15 +207,41 @@ export function parseApoloSpaceHtml(html: string): { height: number; id: string 
     } else if (styleHMatch) {
         height = parseInt(styleHMatch[1], 10);
     }
-    return { height: Math.max(20, Math.min(3000, height)), id };
+    const densityMatch = html.match(/data-apolo-grid-density=["'](\d+)["']/i);
+    const gridDensity = densityMatch ? parseInt(densityMatch[1], 10) : undefined;
+    const styleMatch = html.match(/data-apolo-grid-style=["']([^"']+)["']/i);
+    const gridStyle = styleMatch ? (styleMatch[1] as BoxGridStyle) : undefined;
+    const bgMatch = html.match(/data-apolo-bg-theme=["']([^"']+)["']/i);
+    const bgTheme = bgMatch ? (bgMatch[1] as BoxBgTheme) : undefined;
+    const accentMatch = html.match(/data-apolo-accent=["']([^"']+)["']/i);
+    const accentColor = accentMatch ? (accentMatch[1] as BoxAccentColor) : undefined;
+
+    return {
+        height: Math.max(20, Math.min(3000, height)),
+        id,
+        gridDensity,
+        gridStyle,
+        bgTheme,
+        accentColor,
+    };
 }
 
-export function parseApoloSpaceBlock(text: string): { height: number; id: string } {
+export function parseApoloSpaceBlock(text: string): ParsedApoloSpace {
     const heightMatch = text.match(/height:\s*(\d+)/i);
     const height = heightMatch ? Math.max(20, Math.min(3000, parseInt(heightMatch[1], 10))) : 200;
     const idMatch = text.match(/id:\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s\n\r"']+))/i);
     const id = idMatch ? (idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '').trim() : '';
-    return { height, id };
+
+    const densityMatch = text.match(/gridDensity:\s*(\d+)/i);
+    const gridDensity = densityMatch ? parseInt(densityMatch[1], 10) : undefined;
+    const styleMatch = text.match(/gridStyle:\s*["']?([^\s\r\n"']+)["']?/i);
+    const gridStyle = styleMatch ? (styleMatch[1] as BoxGridStyle) : undefined;
+    const bgMatch = text.match(/bgTheme:\s*["']?([^\s\r\n"']+)["']?/i);
+    const bgTheme = bgMatch ? (bgMatch[1] as BoxBgTheme) : undefined;
+    const accentMatch = text.match(/accentColor:\s*["']?([^\s\r\n"']+)["']?/i);
+    const accentColor = accentMatch ? (accentMatch[1] as BoxAccentColor) : undefined;
+
+    return { height, id, gridDensity, gridStyle, bgTheme, accentColor };
 }
 
 function escapeRegExp(s: string): string {
@@ -280,6 +348,18 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
         const parsed = parseApoloSpaceHtml(match[0]);
         if (parsed && parsed.id && !seenIds.has(parsed.id)) {
             seenIds.add(parsed.id);
+            if (parsed.gridDensity !== undefined) {
+                BoxRegistry.setGridDensity(parsed.id, parsed.gridDensity);
+            }
+            if (parsed.gridStyle !== undefined) {
+                BoxRegistry.setGridStyle(parsed.id, parsed.gridStyle);
+            }
+            if (parsed.bgTheme !== undefined) {
+                BoxRegistry.setBgTheme(parsed.id, parsed.bgTheme);
+            }
+            if (parsed.accentColor !== undefined) {
+                BoxRegistry.setAccentColor(parsed.id, parsed.accentColor);
+            }
             const line = doc.lineAt(match.index);
             items.push({
                 from: line.from,
@@ -296,6 +376,18 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
         const parsed = parseApoloSpaceBlock(match[1]);
         if (parsed && parsed.id && !seenIds.has(parsed.id)) {
             seenIds.add(parsed.id);
+            if (parsed.gridDensity !== undefined) {
+                BoxRegistry.setGridDensity(parsed.id, parsed.gridDensity);
+            }
+            if (parsed.gridStyle !== undefined) {
+                BoxRegistry.setGridStyle(parsed.id, parsed.gridStyle);
+            }
+            if (parsed.bgTheme !== undefined) {
+                BoxRegistry.setBgTheme(parsed.id, parsed.bgTheme);
+            }
+            if (parsed.accentColor !== undefined) {
+                BoxRegistry.setAccentColor(parsed.id, parsed.accentColor);
+            }
             const startLine = doc.lineAt(match.index);
             const endLine = doc.lineAt(match.index + match[0].length);
             items.push({

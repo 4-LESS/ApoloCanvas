@@ -1173,53 +1173,84 @@
 }
 
 /* Left accent stripe colors */
-[data-apolo-accent="purple"], .apolo-space[data-apolo-accent="purple"] {
+[data-apolo-accent="purple"],
+.apolo-space[data-apolo-accent="purple"],
+.apolo-space-widget[data-apolo-accent="purple"],
+.apolo-space-block[data-apolo-accent="purple"] {
   --apolo-accent-stripe: #a98bff;
 }
-[data-apolo-accent="blue"], .apolo-space[data-apolo-accent="blue"] {
+[data-apolo-accent="blue"],
+.apolo-space[data-apolo-accent="blue"],
+.apolo-space-widget[data-apolo-accent="blue"],
+.apolo-space-block[data-apolo-accent="blue"] {
   --apolo-accent-stripe: #3b82f6;
 }
-[data-apolo-accent="emerald"], .apolo-space[data-apolo-accent="emerald"] {
+[data-apolo-accent="emerald"],
+.apolo-space[data-apolo-accent="emerald"],
+.apolo-space-widget[data-apolo-accent="emerald"],
+.apolo-space-block[data-apolo-accent="emerald"] {
   --apolo-accent-stripe: #10b981;
 }
-[data-apolo-accent="amber"], .apolo-space[data-apolo-accent="amber"] {
+[data-apolo-accent="amber"],
+.apolo-space[data-apolo-accent="amber"],
+.apolo-space-widget[data-apolo-accent="amber"],
+.apolo-space-block[data-apolo-accent="amber"] {
   --apolo-accent-stripe: #f59e0b;
 }
-[data-apolo-accent="coral"], .apolo-space[data-apolo-accent="coral"] {
+[data-apolo-accent="coral"],
+.apolo-space[data-apolo-accent="coral"],
+.apolo-space-widget[data-apolo-accent="coral"],
+.apolo-space-block[data-apolo-accent="coral"] {
   --apolo-accent-stripe: #f43f5e;
 }
-[data-apolo-accent="neutral"], .apolo-space[data-apolo-accent="neutral"] {
+[data-apolo-accent="neutral"],
+.apolo-space[data-apolo-accent="neutral"],
+.apolo-space-widget[data-apolo-accent="neutral"],
+.apolo-space-block[data-apolo-accent="neutral"] {
   --apolo-accent-stripe: rgba(255, 255, 255, 0.35);
 }
-[data-apolo-accent="none"], .apolo-space[data-apolo-accent="none"] {
+[data-apolo-accent="none"],
+.apolo-space[data-apolo-accent="none"],
+.apolo-space-widget[data-apolo-accent="none"],
+.apolo-space-block[data-apolo-accent="none"] {
   border-left: none !important;
 }
 
 /* Background Theme Colors */
 [data-apolo-bg-theme="pitch-black"],
-.apolo-space[data-apolo-bg-theme="pitch-black"] {
+.apolo-space[data-apolo-bg-theme="pitch-black"],
+.apolo-space-widget[data-apolo-bg-theme="pitch-black"],
+.apolo-space-block[data-apolo-bg-theme="pitch-black"] {
   background-color: #000000 !important;
 }
 
 [data-apolo-bg-theme="graphite"],
 .apolo-space[data-apolo-bg-theme="graphite"],
+.apolo-space-widget[data-apolo-bg-theme="graphite"],
+.apolo-space-block[data-apolo-bg-theme="graphite"],
 [data-apolo-bg-theme="elevated"],
 .apolo-space[data-apolo-bg-theme="elevated"] {
   background-color: #27272a !important;
 }
 
 .theme-dark [data-apolo-bg-theme="default"],
-.theme-dark .apolo-space[data-apolo-bg-theme="default"] {
+.theme-dark .apolo-space[data-apolo-bg-theme="default"],
+.theme-dark .apolo-space-widget[data-apolo-bg-theme="default"],
+.theme-dark .apolo-space-block[data-apolo-bg-theme="default"] {
   background-color: #1f1f21 !important;
 }
 
 .theme-light [data-apolo-bg-theme="default"],
-.theme-light .apolo-space[data-apolo-bg-theme="default"] {
+.theme-light .apolo-space[data-apolo-bg-theme="default"],
+.theme-light .apolo-space-widget[data-apolo-bg-theme="default"],
+.theme-light .apolo-space-block[data-apolo-bg-theme="default"] {
   background-color: var(--background-secondary, #f4f5f8) !important;
 }
 
 [data-apolo-bg-theme="transparent"],
-.apolo-space[data-apolo-bg-theme="transparent"] {
+.apolo-space[data-apolo-bg-theme="transparent"],
+.apolo-space-widget[data-apolo-bg-theme="transparent"],
+.apolo-space-block[data-apolo-bg-theme="transparent"] {
   background-color: transparent !important;
 }
 

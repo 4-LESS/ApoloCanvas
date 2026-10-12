@@ -684,10 +684,40 @@ export class CanvasController {
                 el.dataset.apoloAccent = String(value);
             } else if (key === 'borderOutline') {
                 el.dataset.apoloBorder = value ? 'true' : 'false';
+            } else if (key === 'gridDensity') {
+                el.dataset.apoloGridDensity = String(value);
+                const { width: contentWidth } = this.getContentGeometry();
+                const boxWidth = el.clientWidth || el.offsetWidth || contentWidth || 800;
+                const density = Number(value) || 32;
+                if (boxWidth > 0 && density > 0) {
+                    const stepPx = Math.round((boxWidth / density) * 100) / 100;
+                    el.style.setProperty('--apolo-grid-step', `${stepPx}px`);
+                }
+            } else if (key === 'customBgColor') {
+                if (value) {
+                    el.style.setProperty('background-color', String(value), 'important');
+                } else {
+                    el.style.removeProperty('background-color');
+                }
             }
         }
 
         this.persistSoon();
+    }
+
+    public updateDefaultBoxBgTheme(theme: BoxBgTheme): void {
+        this.options.defaultBoxBgTheme = theme;
+        if (this.document.boxes) {
+            for (const boxId of Object.keys(this.document.boxes)) {
+                this.document.boxes[boxId].bgTheme = theme;
+            }
+        }
+        this.syncBoxElements();
+        this.persistSoon();
+    }
+
+    public setDefaultBoxAccentColor(accent: BoxAccentColor): void {
+        this.options.defaultBoxAccentColor = accent;
     }
 
     private getBoxMinimumHeight(boxId: string): number {
@@ -1065,6 +1095,14 @@ export class CanvasController {
             el.dataset.apoloAccent = BoxRegistry.getAccentColor(id);
             el.dataset.apoloBorder = BoxRegistry.isBorderOutline(id) ? 'true' : 'false';
             el.dataset.apoloSnap = (BoxRegistry.isSnapActive(id) || this.snapGrid) ? 'true' : 'false';
+            const density = BoxRegistry.getGridDensity(id) || this.document.boxes?.[id]?.gridDensity || this.gridDensity || 32;
+            el.dataset.apoloGridDensity = String(density);
+            const { width: contentWidth } = this.getContentGeometry();
+            const boxWidth = el.clientWidth || el.offsetWidth || contentWidth || 800;
+            if (boxWidth > 0 && density > 0) {
+                const stepPx = Math.round((boxWidth / density) * 100) / 100;
+                el.style.setProperty('--apolo-grid-step', `${stepPx}px`);
+            }
 
             const customBg = BoxRegistry.getCustomBgColor(id);
             if (customBg) {
