@@ -3,8 +3,11 @@
  * and safely inserting drawing canvas boxes (<div data-apolo-space="id" data-h="N"></div>).
  */
 
+import { htmlEscapeAttribute, normalizeBoxId } from './ApoloSpaceExtension.ts';
+
 export function formatCanvasDivTag(boxId: string, height: number): string {
-    return `<div data-apolo-space="${boxId}" data-h="${height}"></div>`;
+    const cleanId = htmlEscapeAttribute(normalizeBoxId(boxId));
+    return `<div data-apolo-space="${cleanId}" data-h="${height}"></div>`;
 }
 
 /**

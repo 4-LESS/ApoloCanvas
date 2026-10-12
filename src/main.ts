@@ -5,7 +5,7 @@ import { CanvasController } from './engine/CanvasController';
 import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue';
 import { DEFAULT_FAVORITES } from './ui/theme';
 import { openLocalGraph } from './ui/LinkSuggestModal';
-import { apoloSpaceExtension, BoxRegistry, boxRegistryUpdateEffect } from './editor/ApoloSpaceExtension';
+import { apoloSpaceExtension, BoxRegistry, boxRegistryUpdateEffect, normalizeBoxId } from './editor/ApoloSpaceExtension';
 
 export interface ApoloCanvasSettings {
     defaultPenColor: string;
@@ -90,8 +90,22 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.registerMarkdownCodeBlockProcessor('apolo-space', (source, el) => {
             const heightMatch = source.match(/height:\s*(\d+)/i);
             const height = heightMatch ? Math.max(20, Math.min(2000, parseInt(heightMatch[1], 10))) : 200;
-            const idMatch = source.match(/id:\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s\n\r"']+))/i);
-            const id = idMatch ? (idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '').trim() : '';
+            const idMatch = source.match(/(?:^|\r?\n)\s*id:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s\n\r#"']+))/i);
+            let rawId = '';
+            if (idMatch) {
+                if (idMatch[1] !== undefined) {
+                    try {
+                        rawId = JSON.parse(`"${idMatch[1]}"`);
+                    } catch {
+                        rawId = idMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                    }
+                } else if (idMatch[2] !== undefined) {
+                    rawId = idMatch[2].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+                } else if (idMatch[3] !== undefined) {
+                    rawId = idMatch[3];
+                }
+            }
+            const id = normalizeBoxId(rawId);
 
             const densityMatch = source.match(/gridDensity:\s*(\d+)/i);
             const gridStyleMatch = source.match(/gridStyle:\s*["']?([^\s\r\n"']+)["']?/i);

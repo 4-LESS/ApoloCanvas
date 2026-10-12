@@ -211,9 +211,38 @@ export interface ParsedApoloSpace {
     accentColor?: BoxAccentColor;
 }
 
+export function htmlEscapeAttribute(s: string): string {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+export function htmlUnescapeAttribute(s: string): string {
+    return s
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+}
+
+export function safeQuotedIdForCodeblock(id: string): string {
+    // 1. Strip backticks to guarantee markdown code fence integrity (```)
+    const sanitized = id.replace(/`/g, '').trim();
+    // 2. Safely quote and escape double quotes and backslashes using JSON.stringify
+    return JSON.stringify(sanitized);
+}
+
 export function normalizeBoxId(id: string): string {
     if (!id) return '';
     let clean = id.trim();
+    if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+        clean = clean.slice(1, -1).trim();
+    }
+    clean = htmlUnescapeAttribute(clean);
     if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
         clean = clean.slice(1, -1).trim();
     }
@@ -225,9 +254,10 @@ export function escapeRegExp(s: string): string {
 }
 
 export function parseApoloSpaceHtml(html: string): ParsedApoloSpace | null {
-    const idMatch = html.match(/data-apolo-space(?:-id)?=["']([^"']+)["']/i);
+    const idMatch = html.match(/data-apolo-space(?:-id)?=(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
     if (!idMatch) return null;
-    const id = normalizeBoxId(idMatch[1]);
+    const rawId = idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '';
+    const id = normalizeBoxId(rawId);
     if (!id) return null;
     const dataHMatch = html.match(/data-h=["'](\d+)["']/i);
     const styleHMatch = html.match(/height:\s*(\d+)px/i);
@@ -259,8 +289,21 @@ export function parseApoloSpaceHtml(html: string): ParsedApoloSpace | null {
 export function parseApoloSpaceBlock(text: string): ParsedApoloSpace {
     const heightMatch = text.match(/height:\s*(\d+)/i);
     const height = heightMatch ? Math.max(20, Math.min(3000, parseInt(heightMatch[1], 10))) : 200;
-    const idMatch = text.match(/(?:^|\r?\n)\s*id:\s*(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s\r\n#"']+))/i);
-    const rawId = idMatch ? (idMatch[1] ?? idMatch[2] ?? idMatch[3] ?? '') : '';
+    const idMatch = text.match(/(?:^|\r?\n)\s*id:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s\r\n#"']+))/i);
+    let rawId = '';
+    if (idMatch) {
+        if (idMatch[1] !== undefined) {
+            try {
+                rawId = JSON.parse(`"${idMatch[1]}"`);
+            } catch {
+                rawId = idMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            }
+        } else if (idMatch[2] !== undefined) {
+            rawId = idMatch[2].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+        } else if (idMatch[3] !== undefined) {
+            rawId = idMatch[3];
+        }
+    }
     const id = normalizeBoxId(rawId);
 
     const densityMatch = text.match(/gridDensity:\s*(\d+)/i);
@@ -290,14 +333,28 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
     const height = Math.max(20, Math.min(3000, mutation.height ?? 240));
     const normalizedId = normalizeBoxId(mutation.id);
     if (!normalizedId) return content;
+    const escapedId = htmlEscapeAttribute(normalizedId);
     const safeId = escapeRegExp(normalizedId);
+    const safeEscapedId = escapeRegExp(escapedId);
+    const safeJsonId = escapeRegExp(JSON.stringify(normalizedId).slice(1, -1));
+
+    const htmlIdPattern = safeEscapedId === safeId ? safeId : `(?:${safeEscapedId}|${safeId})`;
+
+    const codeIdVariants = [safeId];
+    if (safeEscapedId !== safeId && !codeIdVariants.includes(safeEscapedId)) {
+        codeIdVariants.push(safeEscapedId);
+    }
+    if (safeJsonId !== safeId && !codeIdVariants.includes(safeJsonId)) {
+        codeIdVariants.push(safeJsonId);
+    }
+    const codeIdPattern = codeIdVariants.map(v => `"${v}"|'${v}'|${v}`).join('|');
 
     if (isRemove) {
         // Remove <div ... data-apolo-space="id" ...></div>
-        const divRegex = new RegExp(`[\\r\\n]*<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*><\\/div>`, 'gi');
+        const divRegex = new RegExp(`[\\r\\n]*<div\\s+[^>]*data-apolo-space(?:-id)?=["']${htmlIdPattern}["'][^>]*><\\/div>`, 'gi');
         let res = content.replace(divRegex, '');
-        // Also remove codeblock if present (supporting quoted or unquoted ID)
-        const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*(?:"${safeId}"|'${safeId}'|${safeId})[\\s\\S]*?\`\`\``, 'gi');
+        // Also remove codeblock if present (supporting quoted, escaped, or unquoted ID)
+        const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*(?:${codeIdPattern})[\\s\\S]*?\`\`\``, 'gi');
         res = res.replace(codeBlockRegex, '');
         return res;
     }
@@ -305,28 +362,28 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
     if (!isNew) {
         // Update existing block
         // 1. Try HTML div with data-h
-        const dataHRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*data-h=["'])\\d+(["'][^>]*><\\/div>)`, 'i');
+        const dataHRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${htmlIdPattern}["'][^>]*data-h=["'])\\d+(["'][^>]*><\\/div>)`, 'i');
         if (dataHRegex.test(content)) {
             return content.replace(dataHRegex, (_m, p1, p2) => `${p1}${height}${p2}`);
         }
         // 2. Try HTML div with style height
-        const divRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*style=["'][^"']*height:\\s*)\\d+px([^"']*["'][^>]*><\\/div>)`, 'i');
+        const divRegex = new RegExp(`(<div\\s+[^>]*data-apolo-space(?:-id)?=["']${htmlIdPattern}["'][^>]*style=["'][^"']*height:\\s*)\\d+px([^"']*["'][^>]*><\\/div>)`, 'i');
         if (divRegex.test(content)) {
             return content.replace(divRegex, (_m, p1, p2) => `${p1}${height}px${p2}`);
         }
-        const generalDiv = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeId}["'][^>]*><\\/div>`, 'i');
+        const generalDiv = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${htmlIdPattern}["'][^>]*><\\/div>`, 'i');
         if (generalDiv.test(content)) {
-            return content.replace(generalDiv, () => `<div data-apolo-space="${normalizedId}" data-h="${height}"></div>`);
+            return content.replace(generalDiv, () => `<div data-apolo-space="${escapedId}" data-h="${height}"></div>`);
         }
         // 3. Try codeblock (matching unquoted or quoted id)
-        const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*(?:"${safeId}"|'${safeId}'|${safeId})[\\s\\S]*?)\`\`\``, 'i');
+        const codeBlockRegex = new RegExp(`\`\`\`apolo-space([\\s\\S]*?id:\\s*(?:${codeIdPattern})[\\s\\S]*?)\`\`\``, 'i');
         if (codeBlockRegex.test(content)) {
-            return content.replace(codeBlockRegex, () => `\`\`\`apolo-space\nheight: ${height}\nid: "${normalizedId}"\n\`\`\``);
+            return content.replace(codeBlockRegex, () => `\`\`\`apolo-space\nheight: ${height}\nid: ${safeQuotedIdForCodeblock(normalizedId)}\n\`\`\``);
         }
         return content;
     } else {
         // Insert new block as <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
-        const divTag = `<div class="apolo-space" data-apolo-space="${normalizedId}" style="height:${height}px;"></div>`;
+        const divTag = `<div class="apolo-space" data-apolo-space="${escapedId}" style="height:${height}px;"></div>`;
         const lines = content.split('\n');
         const targetLine = Math.max(0, Math.min(lines.length, (mutation.targetLine ?? lines.length) + 1));
         if (targetLine < lines.length && lines[targetLine].trim() === '') {
@@ -371,7 +428,7 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
     const seenIds = new Set<string>();
 
     // 1. Match HTML div blocks: <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
-    const htmlRegex = /<div\s+[^>]*data-apolo-space(?:-id)?=["'][^"']+["'][^>]*>\s*<\/div>/gi;
+    const htmlRegex = /<div\s+[^>]*data-apolo-space(?:-id)?=(?:"[^"]+"|'[^']+'|[^\s>]+)[^>]*>\s*<\/div>/gi;
     let match: RegExpExecArray | null;
     while ((match = htmlRegex.exec(text)) !== null) {
         const parsed = parseApoloSpaceHtml(match[0]);

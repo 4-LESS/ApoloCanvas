@@ -9,8 +9,14 @@ import {
     parseApoloSpaceHtml,
     parseApoloSpaceBlock,
     applySpaceMutationToMarkdown,
+    htmlEscapeAttribute,
+    htmlUnescapeAttribute,
+    safeQuotedIdForCodeblock,
+    normalizeBoxId,
+    escapeRegExp,
     type BoxWidgetSnapshot,
 } from '../src/editor/ApoloSpaceExtension.ts';
+import { formatCanvasDivTag } from '../src/editor/CanvasInsertion.ts';
 import { InputManager } from '../src/engine/input/InputManager.ts';
 import { BoxMenu } from '../src/ui/BoxMenu.ts';
 import { MoreMenu } from '../src/ui/MoreMenu.ts';
@@ -245,7 +251,7 @@ describe('Code Review Fixes Verification', () => {
             input.destroy();
         });
 
-        test('passThroughPointerEvent dispatches pointerdown and pointerup sequence without stealing focus, and triggers click', () => {
+        test('passThroughPointerEvent dispatches pointerdown immediately and schedules pointerup and click asynchronously', async () => {
             const target = {
                 style: { touchAction: '', userSelect: '' },
                 addEventListener: () => {},
@@ -291,12 +297,19 @@ describe('Code Review Fixes Verification', () => {
                     isPrimary: true,
                 } as PointerEvent);
 
+                // Synchronously: only pointerdown should be dispatched; pointerup and click are scheduled
                 assert.strictEqual(focusCalled, false, 'Focus must NOT be stolen from editor');
-                assert.strictEqual(dispatchedEvents.length, 2, 'Must dispatch both pointerdown and pointerup');
+                assert.strictEqual(dispatchedEvents.length, 1, 'Only pointerdown must be dispatched synchronously');
                 assert.strictEqual((dispatchedEvents[0] as any).type, 'pointerdown');
-                assert.strictEqual((dispatchedEvents[1] as any).type, 'pointerup');
                 assert.strictEqual((dispatchedEvents[0] as any).clientX, 120);
                 assert.strictEqual((dispatchedEvents[0] as any).clientY, 240);
+                assert.strictEqual(clickCalled, false, 'Click must not be called synchronously');
+
+                // Wait for scheduled release (next tick/rAF)
+                await new Promise((resolve) => setTimeout(resolve, 20));
+
+                assert.strictEqual(dispatchedEvents.length, 2, 'Must dispatch both pointerdown and pointerup');
+                assert.strictEqual((dispatchedEvents[1] as any).type, 'pointerup');
                 assert.strictEqual(clickCalled, true, 'Click must be triggered on interactive buttons');
             } finally {
                 (globalThis as any).document = originalDoc;
@@ -899,5 +912,154 @@ describe('Code Review Fixes Verification', () => {
             }
         });
     });
+
+    describe('Issue 13: HTML Attribute Escaping, Safe Codeblock Serialization, and ID Fuzzing Round-Trip', () => {
+        test('htmlEscapeAttribute and htmlUnescapeAttribute correctly round-trip special characters', () => {
+            const raw = `box "quotes" & 'single' <tag> >arrow< $dollar`;
+            const escaped = htmlEscapeAttribute(raw);
+            assert.strictEqual(escaped.includes('"'), false, 'Escaped attribute must not contain literal double quotes');
+            assert.strictEqual(escaped.includes("'"), false, 'Escaped attribute must not contain literal single quotes');
+            assert.strictEqual(escaped.includes('<'), false, 'Escaped attribute must not contain literal <');
+            assert.strictEqual(escaped.includes('>'), false, 'Escaped attribute must not contain literal >');
+            assert.ok(escaped.includes('&quot;'));
+            assert.ok(escaped.includes('&#39;'));
+            assert.ok(escaped.includes('&amp;'));
+            assert.ok(escaped.includes('&lt;'));
+            assert.ok(escaped.includes('&gt;'));
+
+            const unescaped = htmlUnescapeAttribute(escaped);
+            assert.strictEqual(unescaped, raw, 'Unescape must restore original string exactly');
+        });
+
+        test('safeQuotedIdForCodeblock strips backticks and safely serializes JSON string', () => {
+            const withTicks = 'box`with`backticks```';
+            const serialized1 = safeQuotedIdForCodeblock(withTicks);
+            assert.strictEqual(serialized1.includes('`'), false, 'Backticks must be stripped to protect code fences');
+            assert.strictEqual(JSON.parse(serialized1), 'boxwithbackticks');
+
+            const withQuotes = 'box"double"and\\backslash';
+            const serialized2 = safeQuotedIdForCodeblock(withQuotes);
+            assert.strictEqual(JSON.parse(serialized2), 'box"double"and\\backslash');
+        });
+
+        test('formatCanvasDivTag produces HTML-safe data-apolo-space attribute', () => {
+            const tag = formatCanvasDivTag('box<"bad"&attr>', 250);
+            assert.ok(tag.startsWith('<div data-apolo-space="'));
+            assert.ok(tag.includes('&quot;bad&quot;'));
+            assert.ok(tag.includes('&lt;'));
+            assert.ok(tag.includes('&gt;'));
+            assert.ok(tag.includes('&amp;'));
+            assert.ok(!tag.includes('<"bad"'));
+
+            const parsed = parseApoloSpaceHtml(tag);
+            assert.ok(parsed);
+            assert.strictEqual(parsed.id, 'box<"bad"&attr>');
+            assert.strictEqual(parsed.height, 250);
+        });
+
+        test('ID Fuzzing Round-Trip (insert -> parse -> update -> delete) with extreme characters in HTML blocks', () => {
+            const testIds = [
+                'box"double"quotes',
+                "box'single'quotes",
+                'box`with`backticks',
+                'box$1&test$2',
+                'box.*+?^${}()|[]\\/regex',
+                '<box>&attr="val"\'quote\'',
+                'box&amp;test&quot;123',
+                'box🎨dibujo_日本語_ñç_🚀',
+                'simple-box-123',
+            ];
+
+            const initialDoc = '# Title\n\nIntroductory paragraph.\n';
+
+            for (const testId of testIds) {
+                // 1. Insert new space block
+                const insertedDoc = applySpaceMutationToMarkdown(initialDoc, {
+                    id: testId,
+                    height: 240,
+                    isNew: true,
+                    targetLine: 1,
+                });
+
+                assert.ok(insertedDoc.includes('<div class="apolo-space"'), `Must insert div tag for ID: ${testId}`);
+
+                // 2. Parse space block
+                const parsed = parseApoloSpaceHtml(insertedDoc);
+                assert.ok(parsed, `Failed to parse HTML for ID: ${testId}`);
+                assert.strictEqual(parsed.id, normalizeBoxId(testId), `Parsed ID must match normalized ID for ${testId}`);
+                assert.strictEqual(parsed.height, 240);
+
+                // 3. Update height
+                const updatedDoc = applySpaceMutationToMarkdown(insertedDoc, {
+                    id: testId,
+                    height: 480,
+                });
+                assert.ok(updatedDoc.includes('height:480px') || updatedDoc.includes('data-h="480"'), `Must update height for ID: ${testId}`);
+
+                // 4. Delete space block
+                const deletedDoc = applySpaceMutationToMarkdown(updatedDoc, {
+                    id: testId,
+                    type: 'delete',
+                });
+
+                assert.strictEqual(deletedDoc.includes('data-apolo-space'), false, `Space block must be deleted for ID: ${testId}`);
+                assert.ok(!deletedDoc.includes(testId), `Document must not contain ID after delete: ${testId}`);
+                assert.ok(deletedDoc.includes('# Title'));
+                assert.ok(deletedDoc.includes('Introductory paragraph.'));
+            }
+        });
+
+        test('ID Fuzzing Round-Trip (insert -> parse -> update -> delete) with extreme characters in Codeblocks', () => {
+            const testIds = [
+                'box"double"quotes',
+                "box'single'quotes",
+                'box`with`backticks',
+                'box$1&test$2',
+                'box.*+?^${}()|[]\\/regex',
+                'box🎨dibujo_日本語_ñç_🚀',
+                'standard-code-box',
+            ];
+
+            for (const rawId of testIds) {
+                const normId = normalizeBoxId(rawId);
+                const safeCodeId = safeQuotedIdForCodeblock(normId);
+
+                const codeblockDoc = [
+                    '# Header',
+                    '```apolo-space',
+                    'height: 210',
+                    `id: ${safeCodeId}`,
+                    '```',
+                    'Paragraph after.',
+                ].join('\n');
+
+                // 1. Parse codeblock
+                const parsed = parseApoloSpaceBlock(codeblockDoc);
+                // Backticks are stripped for codeblocks
+                const expectedId = normId.replace(/`/g, '');
+                assert.strictEqual(parsed.id, expectedId, `Parsed codeblock ID must match expected ID for ${rawId}`);
+                assert.strictEqual(parsed.height, 210);
+
+                // 2. Update codeblock height
+                const updatedDoc = applySpaceMutationToMarkdown(codeblockDoc, {
+                    id: expectedId,
+                    height: 520,
+                });
+                assert.ok(updatedDoc.includes('height: 520'), `Must update height in codeblock for ID: ${rawId}`);
+                assert.ok(updatedDoc.includes('# Header'));
+                assert.ok(updatedDoc.includes('Paragraph after.'));
+
+                // 3. Delete codeblock
+                const deletedDoc = applySpaceMutationToMarkdown(updatedDoc, {
+                    id: expectedId,
+                    type: 'delete',
+                });
+                assert.strictEqual(deletedDoc.includes('```apolo-space'), false, `Codeblock must be deleted for ID: ${rawId}`);
+                assert.ok(deletedDoc.includes('# Header'));
+                assert.ok(deletedDoc.includes('Paragraph after.'));
+            }
+        });
+    });
 });
+
 

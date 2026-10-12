@@ -51,6 +51,7 @@ import {
     applySpaceMutationToMarkdown,
     BoxRegistry,
     escapeRegExp,
+    htmlEscapeAttribute,
     normalizeBoxId,
     SpaceMutation,
 } from '../editor/ApoloSpaceExtension';
@@ -3002,8 +3003,11 @@ export class CanvasController {
                         if (isInsert) continue;
 
                         const height = mut.height ?? 240;
-                        const safeMutId = escapeRegExp(normalizeBoxId(mut.id));
-                        const idRegex = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${safeMutId}["'][^>]*>`, 'i');
+                        const normalizedMutId = normalizeBoxId(mut.id);
+                        const safeMutId = escapeRegExp(normalizedMutId);
+                        const safeEscapedMutId = escapeRegExp(htmlEscapeAttribute(normalizedMutId));
+                        const mutPattern = safeEscapedMutId === safeMutId ? safeMutId : `(?:${safeEscapedMutId}|${safeMutId})`;
+                        const idRegex = new RegExp(`<div\\s+[^>]*data-apolo-space(?:-id)?=["']${mutPattern}["'][^>]*>`, 'i');
 
                         for (let l = 1; l <= doc.lines; l++) {
                             const line = doc.line(l);

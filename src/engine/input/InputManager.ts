@@ -283,16 +283,23 @@ export class InputManager {
             };
 
             underlying.dispatchEvent(createEvent('pointerdown'));
-            underlying.dispatchEvent(createEvent('pointerup'));
 
-            if (event.button === 0) {
-                const clickable = typeof (underlying as any).closest === 'function'
-                    ? ((underlying as any).closest('button, a, input, [role="button"], .clickable-icon') ?? underlying)
-                    : underlying;
-                if (clickable && typeof (clickable as any).click === 'function') {
-                    (clickable as any).click();
+            const scheduleRelease = typeof requestAnimationFrame === 'function'
+                ? requestAnimationFrame
+                : (cb: () => void) => setTimeout(cb, 0);
+
+            scheduleRelease(() => {
+                underlying.dispatchEvent(createEvent('pointerup'));
+
+                if (event.button === 0) {
+                    const clickable = typeof (underlying as any).closest === 'function'
+                        ? ((underlying as any).closest('button, a, input, [role="button"], .clickable-icon') ?? underlying)
+                        : underlying;
+                    if (clickable && typeof (clickable as any).click === 'function') {
+                        (clickable as any).click();
+                    }
                 }
-            }
+            });
         }
     }
 
