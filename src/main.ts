@@ -1,11 +1,11 @@
-import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { EngineEventBus } from './core/events';
-import { BoundingBox, CanvasElement, PageDocument, PenFavorite, ToolbarSlot, ToolType } from './core/types';
+import { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot } from './core/types';
 import { CanvasController } from './engine/CanvasController';
-import { PersistenceQueue } from './io/PersistenceQueue';
+import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue';
 import { DEFAULT_FAVORITES } from './ui/theme';
 import { openLocalGraph } from './ui/LinkSuggestModal';
-import { apoloSpaceExtension } from './editor/ApoloSpaceExtension';
+import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension';
 
 export interface ApoloCanvasSettings {
     defaultPenColor: string;
@@ -19,6 +19,14 @@ export interface ApoloCanvasSettings {
     toolbarSlot: ToolbarSlot;
     favorites: PenFavorite[];
     hasSeenHelpNotice: boolean;
+    gridDensity: number;
+    defaultBoxHeight: number;
+    defaultBoxGridStyle: BoxGridStyle;
+    defaultBoxGridDensity: number;
+    defaultBoxBorderOutline: boolean;
+    defaultBoxBgTheme: BoxBgTheme;
+    defaultBoxCustomBgColor: string;
+    defaultBoxAccentColor: BoxAccentColor;
 }
 
 export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
@@ -38,6 +46,14 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
         { profile: 'pencil', color: '#111827', width: 3 },
     ],
     hasSeenHelpNotice: false,
+    gridDensity: 32,
+    defaultBoxHeight: 120,
+    defaultBoxGridStyle: 'dots',
+    defaultBoxGridDensity: 32,
+    defaultBoxBorderOutline: false,
+    defaultBoxBgTheme: 'default',
+    defaultBoxCustomBgColor: '',
+    defaultBoxAccentColor: 'purple',
 };
 
 export default class ApoloCanvasPlugin extends Plugin {
@@ -50,6 +66,8 @@ export default class ApoloCanvasPlugin extends Plugin {
     private mountedMode: 'source' | 'preview' | '' = '';
     private mountGeneration = 0;
     private saveStatusBarItem: HTMLElement | null = null;
+    private isShuttingDown = false;
+    private mountPromise: Promise<void> = Promise.resolve();
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -59,24 +77,50 @@ export default class ApoloCanvasPlugin extends Plugin {
             () => new Notice('Apolo Canvas: El guardado falló; revisa la consola para más detalles.'),
         );
         this.persistence.setCompanionSvgEnabled(this.settings.companionSvgExport);
+        BoxRegistry.setDefaultBgTheme(this.settings.defaultBoxBgTheme || 'default');
 
         await ensureFolder(this.app, '.apolocanvas');
-        await ensureFolder(this.app, '.apolocanvas/data');
+        await ensureFolder(this.app, '.apolocanvas/boxes');
+        await ensureFolder(this.app, '.apolocanvas/notes');
 
         // Register CM6 Live Preview widget extension for apolo-space blocks
-        this.registerEditorExtension(apoloSpaceExtension);
+        this.registerEditorExtension(createApoloSpaceExtension(editorLivePreviewField));
 
         // Register Reading mode codeblock processor for apolo-space blocks
         this.registerMarkdownCodeBlockProcessor('apolo-space', (source, el) => {
             const heightMatch = source.match(/height:\s*(\d+)/i);
             const height = heightMatch ? Math.max(20, Math.min(2000, parseInt(heightMatch[1], 10))) : 200;
-            const idMatch = source.match(/id:\s*([^\s\n\r]+)/i);
-            const id = idMatch ? idMatch[1] : '';
+            const idMatch = source.match(/(?:^|\r?\n)\s*id:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^\s\n\r#"']+))/i);
+            let rawId = '';
+            if (idMatch) {
+                if (idMatch[1] !== undefined) {
+                    try {
+                        rawId = JSON.parse(`"${idMatch[1]}"`);
+                    } catch {
+                        rawId = idMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+                    }
+                } else if (idMatch[2] !== undefined) {
+                    rawId = idMatch[2].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+                } else if (idMatch[3] !== undefined) {
+                    rawId = idMatch[3];
+                }
+            }
+            const id = normalizeBoxId(rawId);
+
+            const densityMatch = source.match(/gridDensity:\s*(\d+)/i);
+            const gridStyleMatch = source.match(/gridStyle:\s*["']?([^\s\r\n"']+)["']?/i);
+            const bgThemeMatch = source.match(/bgTheme:\s*["']?([^\s\r\n"']+)["']?/i);
+            const accentMatch = source.match(/accentColor:\s*["']?([^\s\r\n"']+)["']?/i);
 
             el.empty();
             el.addClass('apolo-space-block');
             el.dataset.apoloSpaceId = id;
+            el.dataset.apoloSpace = id;
             el.dataset.apoloHeight = String(height);
+            if (densityMatch) el.dataset.apoloGridDensity = densityMatch[1];
+            if (gridStyleMatch) el.dataset.apoloGridStyle = gridStyleMatch[1];
+            if (bgThemeMatch) el.dataset.apoloBgTheme = bgThemeMatch[1];
+            if (accentMatch) el.dataset.apoloAccent = accentMatch[1];
             el.style.height = `${height}px`;
             el.style.width = '100%';
             el.style.display = 'block';
@@ -101,32 +145,135 @@ export default class ApoloCanvasPlugin extends Plugin {
                     s.dataset.apoloSpaceId = id;
                     s.dataset.apoloSpace = id;
                 }
+                const sidecarH = id ? BoxRegistry.getHeight(id) : undefined;
+                const dataH = s.dataset.h ? parseInt(s.dataset.h, 10) : undefined;
                 const hMatch = s.style.height || s.getAttribute('style')?.match(/height:\s*(\d+)px/i)?.[1];
-                if (hMatch) {
-                    const h = parseInt(hMatch, 10);
-                    s.dataset.apoloHeight = String(h);
-                    s.style.height = `${h}px`;
+                const h = Math.max(120, sidecarH ?? dataH ?? (hMatch ? parseInt(hMatch, 10) : 280));
+                s.dataset.apoloHeight = String(h);
+                s.style.setProperty('height', `${h}px`, 'important');
+                s.style.setProperty('min-height', `${h}px`, 'important');
+                s.style.setProperty('width', '100%', 'important');
+                s.style.setProperty('display', 'block', 'important');
+
+                const embedParent = s.closest<HTMLElement>('.cm-embed-block');
+                if (embedParent) {
+                    embedParent.style.setProperty('min-height', `${h}px`, 'important');
                 }
-                s.style.width = '100%';
-                s.style.display = 'block';
+
+                // Sincronizar BoxRegistry para que Live Preview y el motor de dibujo lo conozcan
+                if (id) {
+                    if (BoxRegistry.getHeight(id) === undefined) {
+                        BoxRegistry.setHeight(id, h);
+                    }
+                    if (s.dataset.apoloGridDensity) {
+                        BoxRegistry.setGridDensity(id, parseInt(s.dataset.apoloGridDensity, 10));
+                    }
+                    if (s.dataset.apoloGridStyle) {
+                        BoxRegistry.setGridStyle(id, s.dataset.apoloGridStyle as BoxGridStyle);
+                    }
+                    if (s.dataset.apoloBgTheme && s.dataset.apoloBgTheme !== 'default') {
+                        BoxRegistry.setBgTheme(id, s.dataset.apoloBgTheme as BoxBgTheme);
+                    }
+                    if (s.dataset.apoloAccent) {
+                        BoxRegistry.setAccentColor(id, s.dataset.apoloAccent as BoxAccentColor);
+                    }
+                    s.dataset.apoloGrid = BoxRegistry.isGridVisible(id) ? 'true' : 'false';
+                    s.dataset.apoloGridStyle = BoxRegistry.getGridStyle(id);
+                    const effectiveBgTheme = BoxRegistry.getBgTheme(id);
+                    s.dataset.apoloBgTheme = effectiveBgTheme;
+                    const density = BoxRegistry.getGridDensity(id);
+                    s.dataset.apoloGridDensity = String(density);
+                    const updateGridStep = () => {
+                        const parentW = s.parentElement?.clientWidth || s.closest('.markdown-rendered, .markdown-preview-view, .cm-content')?.clientWidth;
+                        const w = s.clientWidth || s.offsetWidth || parentW || 800;
+                        const step = Math.round((w / density) * 100) / 100;
+                        s.style.setProperty('--apolo-grid-step', step + 'px');
+                    };
+                    updateGridStep();
+                    if (!s.clientWidth && typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+                        window.requestAnimationFrame(() => updateGridStep());
+                    }
+                    s.dataset.apoloAccent = BoxRegistry.getAccentColor(id);
+                    s.dataset.apoloBorder = BoxRegistry.isBorderOutline(id) ? 'true' : 'false';
+                    s.dataset.apoloSnap = BoxRegistry.isSnapActive(id) ? 'true' : 'false';
+                    const customBg = BoxRegistry.getCustomBgColor(id);
+                    if (customBg) {
+                        s.style.setProperty('background-color', customBg, 'important');
+                    } else if (effectiveBgTheme === 'pitch-black') {
+                        s.style.setProperty('background-color', '#000000', 'important');
+                    } else if (effectiveBgTheme === 'graphite') {
+                        s.style.setProperty('background-color', '#27272a', 'important');
+                    } else if (effectiveBgTheme === 'transparent') {
+                        s.style.setProperty('background-color', 'transparent', 'important');
+                    } else {
+                        s.style.removeProperty('background-color');
+                    }
+                }
+
+                // En modo lectura no se muestran asas ni botones de menú; sólo la caja y sus trazos
+                const isPreview = !!el.closest('.markdown-preview-view');
+                const existingHandle = s.querySelector('.apolo-box-handle');
+                const existingOptions = s.querySelector('.apolo-box-options-btn');
+                if (isPreview) {
+                    if (existingHandle) existingHandle.remove();
+                    if (existingOptions) existingOptions.remove();
+
+                    // Render companion SVG faithfully synchronized with text
+                    if (id) {
+                        const doc = this.controller?.getDocument() ?? (this.mountedFilePath ? this.persistence?.getDocument(this.mountedFilePath) : null);
+                        const boxElements = doc?.elements.filter(e => e.blockId === `space:${id}`) || [];
+                        let previewSvgWrap = s.querySelector<HTMLElement>('.apolo-box-preview-svg');
+                        if (boxElements.length > 0) {
+                            if (!previewSvgWrap) {
+                                previewSvgWrap = document.createElement('div');
+                                previewSvgWrap.className = 'apolo-box-preview-svg';
+                                s.appendChild(previewSvgWrap);
+                            }
+                            previewSvgWrap.innerHTML = renderBoxSvg(id, boxElements, 800, h);
+                        } else if (previewSvgWrap) {
+                            previewSvgWrap.remove();
+                        }
+                    }
+                } else if (id) {
+                    if (!existingOptions) {
+                        const optBtn = document.createElement('button');
+                        optBtn.className = 'apolo-box-options-btn';
+                        optBtn.type = 'button';
+                        optBtn.dataset.apoloBoxId = id;
+                        optBtn.setAttribute('aria-label', 'Opciones del espacio');
+                        const dotsSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                        dotsSvg.setAttribute('viewBox', '0 0 24 24');
+                        dotsSvg.setAttribute('width', '16');
+                        dotsSvg.setAttribute('height', '16');
+                        dotsSvg.setAttribute('fill', 'none');
+                        dotsSvg.setAttribute('stroke', 'currentColor');
+                        dotsSvg.setAttribute('stroke-width', '2');
+                        dotsSvg.setAttribute('stroke-linecap', 'round');
+                        dotsSvg.setAttribute('stroke-linejoin', 'round');
+                        dotsSvg.innerHTML = '<circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle><circle cx="5" cy="12" r="1.5"></circle>';
+                        optBtn.appendChild(dotsSvg);
+                        s.appendChild(optBtn);
+                    }
+                    if (!existingHandle) {
+                        const handle = document.createElement('div');
+                        handle.className = 'apolo-box-handle';
+                        handle.dataset.apoloHandleId = id;
+                        handle.setAttribute('role', 'button');
+                        handle.setAttribute('aria-label', 'Redimensionar caja de dibujo');
+
+                        const bar = document.createElement('div');
+                        bar.className = 'apolo-box-handle-bar';
+
+                        handle.appendChild(bar);
+                        s.appendChild(handle);
+                    }
+                }
             }
 
             const sectionInfo = ctx.getSectionInfo(el);
             if (sectionInfo) {
                 el.dataset.apoloLineStart = String(sectionInfo.lineStart);
                 el.dataset.apoloLineEnd = String(sectionInfo.lineEnd);
-
-                // Preserve vertical space for blank lines in source markdown between sections
-                const prev = el.previousElementSibling;
-                if (prev instanceof HTMLElement && prev.dataset.apoloLineEnd) {
-                    const prevEnd = parseInt(prev.dataset.apoloLineEnd, 10);
-                    if (sectionInfo.lineStart > prevEnd + 1) {
-                        const blankCount = sectionInfo.lineStart - prevEnd - 1;
-                        if (blankCount > 0) {
-                            el.style.marginTop = `${blankCount * 24}px`;
-                        }
-                    }
-                }
             } else {
                 // Fallback: check closest ancestor with line data
                 const parent = el.closest<HTMLElement>('[data-apolo-line-start]');
@@ -185,9 +332,46 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.registerEvent(this.app.workspace.on('editor-change', () => this.controller?.onEditorChange()));
         this.registerEvent(this.app.workspace.on('file-open', () => { void this.mountActiveEditor(); }));
 
+        // Vault note renaming: preserve ink document association and rename companion SVG without data loss
+        this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
+            if (!(file instanceof TFile)) return;
+            try {
+                this.controller?.commitActiveStroke();
+                await this.persistence?.flush();
+            } catch (err) {
+                console.error('[ApoloCanvas] Flush failed before rename:', err);
+            }
+            if (this.mountedFilePath === oldPath) {
+                this.mountedFilePath = file.path;
+            }
+            this.controller?.onFileRenamed(file, oldPath);
+            await this.persistence?.onFileRenamed(oldPath, file);
+        }));
+
+        // Vault note deletion: clean up note-level ink storage (boxes kept as orphans)
+        this.registerEvent(this.app.vault.on('delete', async (file) => {
+            if (!(file instanceof TFile)) return;
+            if (this.mountedFilePath === file.path) {
+                await this.destroyController();
+            }
+            await this.persistence?.onFileDeleted(file.path);
+        }));
+
         this.app.workspace.onLayoutReady(() => {
             void this.mountActiveEditor();
             this.showFirstTimeNoticeIfNeeded();
+        });
+
+        // App closing / tab hiding / lifecycle hooks: ensure immediate flush of all pending ink data
+        this.registerDomEvent(window, 'beforeunload', () => {
+            if (this.isShuttingDown) return;
+            this.controller?.commitActiveStroke();
+            void this.persistence?.flush();
+        });
+        this.registerDomEvent(window, 'pagehide', () => {
+            if (this.isShuttingDown) return;
+            this.controller?.commitActiveStroke();
+            void this.persistence?.flush();
         });
 
         this.registerDomEvent(window, 'keydown', this.onKeyDown, true);
@@ -243,12 +427,22 @@ export default class ApoloCanvasPlugin extends Plugin {
 
     private registerCommands(): void {
         this.addCommand({
+            id: 'apolo-insert-canvas',
+            name: 'Apolo Canvas: Insertar canvas',
+            callback: () => {
+                this.controller?.insertCanvas();
+            },
+        });
+
+        this.addCommand({
             id: 'apolo-toggle-pen',
             name: 'Apolo Canvas: Alternar modo lápiz / modo teclado',
+            hotkeys: [
+                { modifiers: ['Alt'], key: 'P' },
+                { modifiers: ['Mod', 'Shift'], key: 'P' },
+            ],
             callback: () => {
-                this.settings.penInputEnabled = !this.settings.penInputEnabled;
-                this.controller?.setPenEnabled(this.settings.penInputEnabled);
-                void this.saveSettings();
+                this.setPenInput(!this.settings.penInputEnabled);
             },
         });
 
@@ -323,31 +517,58 @@ export default class ApoloCanvasPlugin extends Plugin {
         const target = event.target;
         if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
 
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        // Quick toggle shortcut: Alt+P or Mod+Shift+P to freeze pen and switch to keyboard mode
+        if ((event.altKey && event.key.toLowerCase() === 'p') ||
+            ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p')) {
             event.preventDefault();
-            if (event.shiftKey) this.controller?.redo();
-            else this.controller?.undo();
+            this.setPenInput(!this.settings.penInputEnabled);
+            return;
+        }
+
+        // Undo (Ctrl+Z) and Redo (Ctrl+Shift+Z / Ctrl+Y)
+        const isUndo = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey;
+        const isRedo = ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'z') ||
+                       ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y');
+        if (isUndo) {
+            event.preventDefault();
+            this.controller?.undo();
+            return;
+        }
+        if (isRedo) {
+            event.preventDefault();
+            this.controller?.redo();
             return;
         }
 
         // Printable text key press -> switch to text editing mode automatically
-        if (!event.ctrlKey && !event.altKey && !event.metaKey && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Enter')) {
+        if (this.settings.penInputEnabled && !event.ctrlKey && !event.altKey && !event.metaKey && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Enter')) {
             const view = this.app.workspace.getActiveViewOfType(MarkdownView);
             if (view && view.getMode() === 'source' && view.editor) {
-                this.controller?.setPenEnabled(false);
+                this.setPenInput(false);
                 view.editor.focus();
             }
         }
     };
 
     private async mountActiveEditor(force = false): Promise<void> {
+        if (this.isShuttingDown) return;
+        this.mountPromise = this.mountPromise.then(async () => {
+            if (this.isShuttingDown) return;
+            await this.doMountActiveEditor(force);
+        }).catch((err) => {
+            console.error('[ApoloCanvas] Error during mountActiveEditor:', err);
+        });
+        await this.mountPromise;
+    }
+
+    private async doMountActiveEditor(force = false): Promise<void> {
         const generation = ++this.mountGeneration;
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
         const file = view?.file;
         const mode = view?.getMode();
 
         if (!view || !file || (mode !== 'source' && mode !== 'preview')) {
-            this.destroyController();
+            await this.destroyController();
             return;
         }
 
@@ -385,14 +606,14 @@ export default class ApoloCanvasPlugin extends Plugin {
         }
 
         const inMemoryDoc = (this.controller && this.mountedFilePath === file.path) ? this.controller.getDocument() : null;
-        this.destroyController();
-        const pageId = await this.ensurePageId(file);
+        await this.destroyController();
+        const pageId = file.path;
 
         if (!inMemoryDoc) {
             await this.persistence.flush();
         }
 
-        const documentModel = inMemoryDoc ?? (await this.loadDocument(file, pageId));
+        const documentModel = inMemoryDoc ?? (await this.persistence.loadDocumentForNote(file));
         if (generation !== this.mountGeneration || this.app.workspace.getActiveFile()?.path !== file.path || !scroller.isConnected || view.getMode() !== mode) {
             return;
         }
@@ -414,6 +635,14 @@ export default class ApoloCanvasPlugin extends Plugin {
                 shapeRecognition: this.settings.shapeRecognition,
                 toolbarSlot: this.settings.toolbarSlot,
                 favorites: this.settings.favorites,
+                gridDensity: this.settings.gridDensity,
+                defaultBoxHeight: this.settings.defaultBoxHeight,
+                defaultBoxGridStyle: this.settings.defaultBoxGridStyle,
+                defaultBoxGridDensity: this.settings.defaultBoxGridDensity,
+                defaultBoxBorderOutline: this.settings.defaultBoxBorderOutline,
+                defaultBoxBgTheme: this.settings.defaultBoxBgTheme,
+                defaultBoxAccentColor: this.settings.defaultBoxAccentColor,
+                defaultBoxCustomBgColor: this.settings.defaultBoxCustomBgColor,
                 eventBus: this.eventBus,
                 app: this.app,
                 viewContainer: view.contentEl,
@@ -458,58 +687,118 @@ export default class ApoloCanvasPlugin extends Plugin {
         await this.mountActiveEditor(true);
     }
 
-    private async ensurePageId(file: TFile): Promise<string> {
-        const current = this.app.metadataCache.getFileCache(file)?.frontmatter?.['apolo-page-id'];
-        if (typeof current === 'string' && current.length > 0) return current;
-        let pageId = createId();
-        await this.app.fileManager.processFrontMatter(file, frontmatter => {
-            const existing = frontmatter['apolo-page-id'];
-            if (typeof existing === 'string' && existing.length > 0) pageId = existing;
-            else frontmatter['apolo-page-id'] = pageId;
-        });
-        return pageId;
-    }
-
-    private async loadDocument(file: TFile, pageId: string): Promise<PageDocument> {
-        const path = `.apolocanvas/data/${pageId}.json`;
-        const adapter = this.app.vault.adapter;
-        if (await adapter.exists(path)) {
-            try {
-                const parsed: unknown = JSON.parse(await adapter.read(path));
-                if (isPageDocument(parsed)) {
-                    parsed.notePath = file.path;
-                    return parsed;
-                }
-            } catch (error) {
-                console.error(`[ApoloCanvas] Could not load ${path}`, error);
-                new Notice('Apolo Canvas: no se pudo leer la tinta; el archivo original fue preservado.');
-            }
-        }
-        const now = Date.now();
-        return { schemaVersion: 1, version: 1, id: pageId, notePath: file.path, elements: [], createdAt: now, updatedAt: now };
-    }
-
-    private destroyController(): void {
+    private async destroyController(): Promise<void> {
         if (this.controller) {
             const current = this.controller;
-            void current.flush().catch(error => console.error('[ApoloCanvas] Final save failed:', error));
-            current.destroy();
+            this.controller = null;
+            try {
+                current.commitActiveStroke();
+                await current.flush();
+            } catch (error) {
+                console.error('[ApoloCanvas] Final save failed:', error);
+            } finally {
+                current.destroy();
+            }
         }
-        this.controller = null;
         this.mountedScroller = null;
         this.mountedFilePath = '';
         this.mountedMode = '';
     }
 
+    async updateGlobalBgTheme(newTheme: BoxBgTheme): Promise<void> {
+        this.settings.defaultBoxBgTheme = newTheme;
+        await this.saveSettings();
+
+        // 1. Update BoxRegistry and trigger Live Preview update
+        BoxRegistry.updateAllBgThemes(newTheme);
+
+        // 2. Update active controller if mounted
+        if (this.controller) {
+            this.controller.updateDefaultBoxBgTheme(newTheme);
+        }
+
+        // 3. Immediately dispatch boxRegistryUpdateEffect to all open CM6 editor leaves
+        try {
+            this.app.workspace.iterateAllLeaves(leaf => {
+                const cm = (leaf.view as any)?.editor?.cm;
+                if (cm && typeof cm.dispatch === 'function') {
+                    cm.dispatch({
+                        effects: boxRegistryUpdateEffect.of(),
+                    });
+                }
+            });
+        } catch (err) {
+            console.error('[ApoloCanvas] Failed to dispatch update effect to leaves:', err);
+        }
+
+        // 4. Update all DOM elements in workspace (Reading mode, CM views)
+        const spaceEls = document.querySelectorAll<HTMLElement>(
+            '.apolo-space, .apolo-space-block, .apolo-space-widget, [data-apolo-space], [data-apolo-space-id]'
+        );
+        for (const el of Array.from(spaceEls)) {
+            el.dataset.apoloBgTheme = newTheme;
+            const boxId = el.dataset.apoloSpaceId || el.dataset.apoloSpace;
+            const customBg = boxId ? BoxRegistry.getCustomBgColor(boxId) : null;
+            if (customBg) {
+                el.style.setProperty('background-color', customBg, 'important');
+            } else if (newTheme === 'pitch-black') {
+                el.style.setProperty('background-color', '#000000', 'important');
+            } else if (newTheme === 'graphite') {
+                el.style.setProperty('background-color', '#27272a', 'important');
+            } else if (newTheme === 'transparent') {
+                el.style.setProperty('background-color', 'transparent', 'important');
+            } else {
+                el.style.removeProperty('background-color');
+            }
+        }
+
+        // 4. Update all vault box persistence files (.apolocanvas/boxes/*.json) retroactively
+        try {
+            const adapter = this.app.vault.adapter;
+            if (await adapter.exists('.apolocanvas/boxes')) {
+                const listing = await adapter.list('.apolocanvas/boxes');
+                for (const filePath of listing.files) {
+                    if (filePath.endsWith('.json')) {
+                        try {
+                            const raw = await adapter.read(filePath);
+                            const parsed = JSON.parse(raw);
+                            if (parsed && typeof parsed === 'object') {
+                                parsed.bgTheme = newTheme;
+                                await adapter.write(filePath, JSON.stringify(parsed));
+                            }
+                        } catch { /* skip invalid */ }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('[ApoloCanvas] Failed to update vault boxes retroactively:', err);
+        }
+    }
+
+    setDefaultBoxAccentColor(accent: BoxAccentColor): void {
+        this.settings.defaultBoxAccentColor = accent;
+        if (this.controller) {
+            this.controller.setDefaultBoxAccentColor(accent);
+        }
+    }
+
+    setPalmRejectionCooldown(ms: number): void {
+        this.settings.palmRejectionCooldownMs = ms;
+        this.controller?.setPalmRejectionCooldown(ms);
+    }
+
     private async flushAndDestroy(): Promise<void> {
+        if (this.isShuttingDown) return;
+        this.isShuttingDown = true;
         this.mountGeneration++;
         try {
-            await this.controller?.flush();
+            this.controller?.commitActiveStroke();
             await this.persistence?.flush();
         } catch (error) {
             console.error('[ApoloCanvas] Flush failed during unload:', error);
+        } finally {
+            await this.destroyController();
         }
-        this.destroyController();
     }
 }
 
@@ -567,7 +856,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.palmRejectionCooldownMs)
                 .setDynamicTooltip()
                 .onChange(async value => {
-                    this.plugin.settings.palmRejectionCooldownMs = value;
+                    this.plugin.setPalmRejectionCooldown(value);
                     await this.plugin.saveSettings();
                 }));
 
@@ -625,46 +914,104 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                     this.plugin.setShapeRecognition(value);
                     await this.plugin.saveSettings();
                 }));
+
+        containerEl.createEl('h3', { text: 'Cajas de Dibujo (Canvas)' });
+
+        new Setting(containerEl)
+            .setName('Altura inicial por defecto')
+            .setDesc('Altura en píxeles al insertar un nuevo canvas debajo del bloque activo.')
+            .addText(text => text
+                .setPlaceholder('280')
+                .setValue(String(this.plugin.settings.defaultBoxHeight || 280))
+                .onChange(async value => {
+                    const num = parseInt(value, 10);
+                    if (!isNaN(num) && num >= 120 && num <= 3000) {
+                        this.plugin.settings.defaultBoxHeight = num;
+                        await this.plugin.saveSettings();
+                    }
+                }));
+
+        new Setting(containerEl)
+            .setName('Estilo de rejilla por defecto')
+            .setDesc('Patrón de fondo para nuevas cajas de dibujo.')
+            .addDropdown(dd => dd
+                .addOption('dots', 'Puntos (Dots)')
+                .addOption('grid', 'Cuadrícula (Grid)')
+                .addOption('ruled', 'Rayas horizontales (Ruled)')
+                .addOption('none', 'En blanco (Sin rejilla)')
+                .setValue(this.plugin.settings.defaultBoxGridStyle || 'dots')
+                .onChange(async value => {
+                    this.plugin.settings.defaultBoxGridStyle = value as BoxGridStyle;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Densidad de la rejilla por defecto')
+            .setDesc('Número de divisiones relativas al ancho de la columna (ancho / N).')
+            .addDropdown(dd => dd
+                .addOption('40', 'Fina (40 divisiones)')
+                .addOption('32', 'Normal (32 divisiones)')
+                .addOption('24', 'Amplia (24 divisiones)')
+                .setValue(String(this.plugin.settings.defaultBoxGridDensity || 32))
+                .onChange(async value => {
+                    this.plugin.settings.defaultBoxGridDensity = parseInt(value, 10);
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Tema de fondo por defecto')
+            .setDesc('Color y apariencia del fondo de las cajas de dibujo (afecta a todos los canvas retroactivamente).')
+            .addDropdown(dd => dd
+                .addOption('default', 'Gris oscuro (#1f1f21)')
+                .addOption('pitch-black', 'Negro puro (#000000 - OLED)')
+                .addOption('graphite', 'Gris grafito (#27272a)')
+                .addOption('transparent', 'Transparente (Sin fondo)')
+                .setValue(this.plugin.settings.defaultBoxBgTheme || 'default')
+                .onChange(async value => {
+                    await this.plugin.updateGlobalBgTheme(value as BoxBgTheme);
+                }));
+
+        new Setting(containerEl)
+            .setName('Color de fondo personalizado (Opcional)')
+            .setDesc('Color hexadecimal si deseas un tono específico en lugar de los predefinidos (ej. #18181b).')
+            .addText(text => text
+                .setPlaceholder('#1f1f21')
+                .setValue(this.plugin.settings.defaultBoxCustomBgColor || '')
+                .onChange(async value => {
+                    this.plugin.settings.defaultBoxCustomBgColor = value.trim();
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Color de acento lateral por defecto')
+            .setDesc('Franja de color identificativa en el borde izquierdo de la caja (solo para nuevos espacios).')
+            .addDropdown(dd => dd
+                .addOption('purple', 'Morado (#a98bff)')
+                .addOption('blue', 'Azul (#3b82f6)')
+                .addOption('emerald', 'Esmeralda (#10b981)')
+                .addOption('amber', 'Ámbar (#f59e0b)')
+                .addOption('coral', 'Coral (#f43f5e)')
+                .addOption('neutral', 'Gris neutro')
+                .addOption('none', 'Desactivado (Sin barra)')
+                .setValue(this.plugin.settings.defaultBoxAccentColor || 'purple')
+                .onChange(async value => {
+                    this.plugin.setDefaultBoxAccentColor(value as BoxAccentColor);
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Contorno exterior (Borde de 1px)')
+            .setDesc('Activa un sutil borde perimetral de 1px alrededor de toda la tarjeta además del acento izquierdo.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.defaultBoxBorderOutline ?? false)
+                .onChange(async value => {
+                    this.plugin.settings.defaultBoxBorderOutline = value;
+                    await this.plugin.saveSettings();
+                }));
     }
 }
 
 async function ensureFolder(app: App, path: string): Promise<void> {
     const adapter = app.vault.adapter;
     if (!(await adapter.exists(path))) await adapter.mkdir(path);
-}
-
-function createId(): string {
-    return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `apolo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
-function isPageDocument(value: unknown): value is PageDocument {
-    if (typeof value !== 'object' || value === null) return false;
-    const candidate = value as Partial<PageDocument>;
-    return (candidate.schemaVersion === 1 || typeof candidate.version === 'number')
-        && typeof candidate.id === 'string'
-        && typeof candidate.notePath === 'string'
-        && Array.isArray(candidate.elements)
-        && candidate.elements.every(isCanvasElement)
-        && typeof candidate.createdAt === 'number'
-        && typeof candidate.updatedAt === 'number';
-}
-
-function isCanvasElement(value: unknown): value is CanvasElement {
-    if (typeof value !== 'object' || value === null) return false;
-    const element = value as Partial<CanvasElement>;
-    if (typeof element.id !== 'string' || typeof element.timestamp !== 'number'
-        || typeof element.zIndex !== 'number' || !validBounds(element.bounds)
-        || typeof element.style !== 'object' || element.style === null) return false;
-    if (element.type === 'stroke') return Array.isArray(element.points) && element.points.length % 4 === 0;
-    return element.type === 'shape' && typeof element.startX === 'number' && typeof element.startY === 'number'
-        && typeof element.endX === 'number' && typeof element.endY === 'number';
-}
-
-function validBounds(value: unknown): value is BoundingBox {
-    if (typeof value !== 'object' || value === null) return false;
-    const bounds = value as Partial<BoundingBox>;
-    return typeof bounds.minX === 'number' && typeof bounds.minY === 'number'
-        && typeof bounds.maxX === 'number' && typeof bounds.maxY === 'number';
 }

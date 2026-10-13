@@ -38,6 +38,7 @@ export class LassoMenu {
         this.container = document.createElement('div');
         this.container.className = 'apolo-lasso-menu-container';
         this.container.hidden = true;
+        this.container.style.display = 'none';
 
         this.menuEl = document.createElement('div');
         this.menuEl.className = 'apolo-selection-floating-menu';
@@ -85,6 +86,7 @@ export class LassoMenu {
             return;
         }
 
+        this.container.style.display = '';
         this.container.hidden = false;
         this.updatePosition();
         this.updateLinkCard();
@@ -101,6 +103,7 @@ export class LassoMenu {
 
     hide(): void {
         this.container.hidden = true;
+        this.container.style.display = 'none';
         this.isStyleOpen = false;
         this.stylePopoverEl.hidden = true;
         this.linkCardEl.hidden = true;

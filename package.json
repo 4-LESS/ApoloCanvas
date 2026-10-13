@@ -1,11 +1,12 @@
 {
   "name": "apolo-canvas",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "description": "High-performance digital ink and diagramming for Obsidian",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc --noEmit && node esbuild.config.mjs production"
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "test": "node --test tests/**/*.test.ts"
   },
   "keywords": ["obsidian", "canvas", "digital-ink", "s-pen"],
   "license": "MIT",

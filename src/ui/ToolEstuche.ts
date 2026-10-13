@@ -1,5 +1,5 @@
-import { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, ToolbarSlot, ToolType } from '../core/types';
-import { ICONS, PEN_PROFILES, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createStrokeWavePreview, createSvg, isDarkTheme, mapInkColorForDark } from './theme';
+import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, ToolbarSlot, ToolType } from '../core/types.ts';
+import { HIGHLIGHTER_COLOR_NAMES, HIGHLIGHTER_PALETTE, ICONS, PEN_PROFILES, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createStrokeWavePreview, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
 
 export interface ToolEstucheState {
     tool: ToolType;
@@ -40,6 +40,7 @@ export class ToolEstuche {
     private state: ToolEstucheState;
     private callbacks: ToolEstucheCallbacks;
     private isVisible = false;
+    private openedAt = 0;
 
     constructor(initialState: ToolEstucheState, callbacks: ToolEstucheCallbacks, parent: HTMLElement = document.body) {
         this.state = { ...initialState };
@@ -49,12 +50,47 @@ export class ToolEstuche {
         this.container.className = 'apolo-popover-panel apolo-tool-estuche';
         this.container.setAttribute('role', 'dialog');
         this.container.hidden = true;
+        this.container.style.display = 'none';
 
         // Prevent pointer events from falling through to the canvas
         this.container.addEventListener('pointerdown', e => e.stopPropagation());
+        this.container.addEventListener('touchstart', e => e.stopPropagation());
 
         parent.appendChild(this.container);
+
+        window.addEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
+        window.addEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
+        window.addEventListener('keydown', this.onKeyDown);
     }
+
+    private readonly onOutsidePointerDown = (e: PointerEvent): void => {
+        if (this.isOpen() && !this.container.contains(e.target as Node)) {
+            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
+            if (targetEl?.closest?.('.apolo-tool-btn') || targetEl?.closest?.('.apolo-toolbar-btn')) {
+                return;
+            }
+            this.close();
+        }
+    };
+
+    private readonly onOutsideTouchStart = (e: TouchEvent): void => {
+        if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
+            if (Date.now() - this.openedAt < 300) {
+                return;
+            }
+            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
+            if (targetEl?.closest?.('.apolo-tool-btn') || targetEl?.closest?.('.apolo-toolbar-btn')) {
+                return;
+            }
+            this.close();
+        }
+    };
+
+    private readonly onKeyDown = (e: KeyboardEvent): void => {
+        if (this.isOpen() && e.key === 'Escape') {
+            this.close();
+        }
+    };
 
     open(state?: Partial<ToolEstucheState>): void {
         if (state) {
@@ -64,8 +100,10 @@ export class ToolEstuche {
             this.close();
             return;
         }
+        this.openedAt = Date.now();
         this.isVisible = true;
         this.container.hidden = false;
+        this.container.style.display = 'block';
         this.render();
         this.position();
     }
@@ -73,11 +111,12 @@ export class ToolEstuche {
     close(): void {
         this.isVisible = false;
         this.container.hidden = true;
+        this.container.style.display = 'none';
         this.callbacks.onClose();
     }
 
     isOpen(): boolean {
-        return this.isVisible && !this.container.hidden;
+        return this.isVisible && !this.container.hidden && this.container.style.display !== 'none';
     }
 
     updateState(partial: Partial<ToolEstucheState>): void {
@@ -157,7 +196,14 @@ export class ToolEstuche {
         closeBtn.setAttribute('aria-label', 'Cerrar estuche');
         closeBtn.title = 'Cerrar';
         closeBtn.appendChild(createSvg(ICONS.close, { size: 18 }));
-        closeBtn.addEventListener('click', () => this.close());
+        const handleClose = (e: Event): void => {
+            e.stopPropagation();
+            e.preventDefault();
+            this.close();
+        };
+        closeBtn.addEventListener('click', handleClose);
+        closeBtn.addEventListener('pointerdown', handleClose);
+        closeBtn.addEventListener('touchend', handleClose);
 
         header.append(titleGroup, closeBtn);
         this.container.appendChild(header);
@@ -507,14 +553,17 @@ export class ToolEstuche {
         swatchesRow.className = 'apolo-colors-row';
 
         const dark = isDarkTheme();
-        for (const col of PRIMARY_PALETTE) {
+        const palette = this.state.tool === 'highlighter' ? HIGHLIGHTER_PALETTE : PRIMARY_PALETTE;
+        const colorNames = this.state.tool === 'highlighter' ? HIGHLIGHTER_COLOR_NAMES : PRIMARY_COLOR_NAMES;
+
+        for (const col of palette) {
             const swatch = document.createElement('button');
             swatch.type = 'button';
             const isActive = this.state.color.toLowerCase() === col.toLowerCase();
             swatch.className = `apolo-palette-swatch ${isActive ? 'is-active' : ''}`;
             swatch.style.background = mapInkColorForDark(col, dark);
-            swatch.setAttribute('aria-label', PRIMARY_COLOR_NAMES[col] || col);
-            swatch.title = PRIMARY_COLOR_NAMES[col] || col;
+            swatch.setAttribute('aria-label', colorNames[col] || col);
+            swatch.title = colorNames[col] || col;
 
             swatch.addEventListener('click', () => {
                 this.state.color = col;
@@ -668,6 +717,9 @@ export class ToolEstuche {
     }
 
     destroy(): void {
+        window.removeEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
+        window.removeEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
+        window.removeEventListener('keydown', this.onKeyDown);
         this.container.remove();
     }
 }

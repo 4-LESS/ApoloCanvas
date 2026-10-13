@@ -1,7 +1,7 @@
 {
   "id": "apolo-canvas",
   "name": "Apolo Canvas",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "minAppVersion": "1.5.0",
   "description": "Draw anywhere, link everything. High-performance S-Pen ink for Obsidian.",
   "author": "Apolo Canvas contributors",

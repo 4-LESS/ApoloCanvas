@@ -1,4 +1,4 @@
-import { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types';
+import type { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types';
 
 /**
  * Checks whether Obsidian is currently rendering in dark theme.
@@ -53,15 +53,38 @@ export const PRIMARY_COLOR_NAMES: Record<string, string> = {
 };
 
 /**
+ * Dedicated fluorescent highlighter palette (Yellow, Green, Cyan, Pink, Orange, Purple).
+ */
+export const HIGHLIGHTER_PALETTE: readonly string[] = [
+    '#F5C400', // Amarillo fluorescente
+    '#2ECC71', // Verde neón
+    '#48D597', // Verde menta pastel
+    '#54C7EC', // Celeste cielo
+    '#FF70A6', // Rosa fluorescente
+    '#FFA940', // Naranja suave
+    '#A388EE', // Violeta pastel
+];
+
+export const HIGHLIGHTER_COLOR_NAMES: Record<string, string> = {
+    '#F5C400': 'Amarillo fluorescente',
+    '#2ECC71': 'Verde neón',
+    '#48D597': 'Verde menta pastel',
+    '#54C7EC': 'Celeste cielo',
+    '#FF70A6': 'Rosa fluorescente',
+    '#FFA940': 'Naranja suave',
+    '#A388EE': 'Violeta pastel',
+};
+
+/**
  * Pen profiles definitions.
  */
 export const PEN_PROFILES: Record<PenProfileId, PenProfile> = {
     fountain: { id: 'fountain', name: 'Pluma estilográfica', wm: 1.0, op: 1.0, cap: 'round', dash: '' },
     calli: { id: 'calli', name: 'Pincel caligráfico', wm: 2.2, op: 1.0, cap: 'butt', dash: '' },
-    ball: { id: 'ball', name: 'Bolígrafo', wm: 0.75, op: 0.95, cap: 'round', dash: '' },
+    ball: { id: 'ball', name: 'Bolígrafo', wm: 0.85, op: 0.98, cap: 'round', dash: '' },
     pencil: { id: 'pencil', name: 'Lápiz texturado', wm: 1.2, op: 0.75, cap: 'round', dash: '1.5 2' },
-    hlr: { id: 'hlr', name: 'Marcador redondo', wm: 4.5, op: 0.35, cap: 'round', dash: '' },
-    hlf: { id: 'hlf', name: 'Marcador plano', wm: 4.5, op: 0.35, cap: 'square', dash: '' },
+    hlr: { id: 'hlr', name: 'Marcador redondo', wm: 4.5, op: 0.45, cap: 'round', dash: '' },
+    hlf: { id: 'hlf', name: 'Marcador plano', wm: 4.5, op: 0.45, cap: 'square', dash: '' },
 };
 
 export const DEFAULT_FAVORITES: PenFavorite[] = [
@@ -87,9 +110,11 @@ export const ICONS = {
         triangle: 'M12 4l9 16H3z',
     } as Record<ShapeType | 'circle', string>,
     spacer: 'M8 8l4-4 4 4 M8 16l4 4 4-4 M5 12h14',
+    insertCanvas: 'M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5z M9 12h6 M12 9v6',
     undo: 'M9 14L4 9l5-5 M4 9h9a6 6 0 010 12h-3',
     redo: 'M15 14l5-5-5-5 M20 9h-9a6 6 0 000 12h3',
     grid: 'M4 4h16v16H4z M4 12h16 M12 4v16',
+    snap: 'M4 4v7a8 8 0 0016 0V4 M8 4v7a4 4 0 008 0V4 M4 4h4 M16 4h4',
     more: 'M5 12h.01 M12 12h.01 M19 12h.01',
     keyboardMode: 'M9 4h6 M9 20h6 M12 4v16',
     link: 'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1 M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',
