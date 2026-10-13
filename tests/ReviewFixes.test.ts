@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { EditorState } from '@codemirror/state';
 import {
     ApoloSpaceWidget,
+    ApoloSpaceSyncController,
     BoxRegistry,
     apoloSpaceField,
     boxRegistryUpdateEffect,
@@ -1040,18 +1041,18 @@ describe('Code Review Fixes Verification', () => {
                 assert.strictEqual(parsed.id, expectedId, `Parsed codeblock ID must match expected ID for ${rawId}`);
                 assert.strictEqual(parsed.height, 210);
 
-                // 2. Update codeblock height
+                // 2. Update codeblock height (using rawId directly even if it contains backticks)
                 const updatedDoc = applySpaceMutationToMarkdown(codeblockDoc, {
-                    id: expectedId,
+                    id: rawId,
                     height: 520,
                 });
                 assert.ok(updatedDoc.includes('height: 520'), `Must update height in codeblock for ID: ${rawId}`);
                 assert.ok(updatedDoc.includes('# Header'));
                 assert.ok(updatedDoc.includes('Paragraph after.'));
 
-                // 3. Delete codeblock
+                // 3. Delete codeblock (using rawId directly)
                 const deletedDoc = applySpaceMutationToMarkdown(updatedDoc, {
-                    id: expectedId,
+                    id: rawId,
                     type: 'delete',
                 });
                 assert.strictEqual(deletedDoc.includes('```apolo-space'), false, `Codeblock must be deleted for ID: ${rawId}`);
@@ -1059,7 +1060,119 @@ describe('Code Review Fixes Verification', () => {
                 assert.ok(deletedDoc.includes('Paragraph after.'));
             }
         });
+
+        test('Stress test: 200 rapid BoxRegistry mutations coalesce into <= 1 effect dispatch per frame and cancel on destroy', async () => {
+            BoxRegistry.clear();
+            let dispatchCount = 0;
+
+            const mockView = {
+                dom: { isConnected: true },
+                viewport: { from: 0, to: 500 },
+                dispatch: (tr: any) => {
+                    if (tr?.effects) {
+                        dispatchCount++;
+                    }
+                },
+            } as any;
+
+            const syncController = new ApoloSpaceSyncController(mockView);
+
+            // Fire 200 rapid BoxRegistry changes in a burst (simulating continuous resize drag)
+            for (let i = 1; i <= 200; i++) {
+                BoxRegistry.setHeight('stress-box-1', 200 + i);
+            }
+
+            // Before the frame fires, 0 dispatches have occurred
+            assert.strictEqual(dispatchCount, 0, 'Dispatches must be coalesced until animation frame fires');
+
+            // Wait for 1 frame window (~25ms)
+            await new Promise((resolve) => setTimeout(resolve, 25));
+
+            assert.strictEqual(dispatchCount, 1, '200 rapid BoxRegistry mutations must coalesce into exactly 1 dispatch per frame');
+
+            // Fire another 50 mutations and immediately destroy before frame fires
+            for (let i = 1; i <= 50; i++) {
+                BoxRegistry.setHeight('stress-box-1', 500 + i);
+            }
+            syncController.destroy();
+
+            await new Promise((resolve) => setTimeout(resolve, 25));
+            assert.strictEqual(dispatchCount, 1, 'Pending frame dispatch must be cancelled when controller is destroyed');
+        });
+
+        test('Pass-through timing: stateful UI button requiring temporal down->up separation opens menu on pointerup', async () => {
+            const target = {
+                style: { touchAction: '', userSelect: '' },
+                addEventListener: () => {},
+                removeEventListener: () => {},
+                contains: () => false,
+                getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+            } as unknown as HTMLElement;
+
+            const input = new InputManager(target);
+
+            // Simulate a UI component that tracks press state on pointerdown and only triggers action if pointerup arrives in a later tick
+            let isPressedInPreviousTick = false;
+            let pressTickCompleted = false;
+            let menuOpenedOnPointerUp = false;
+            let downButtons = -1;
+            let upButtons = -1;
+
+            const statefulButton = {
+                tagName: 'BUTTON',
+                classList: { contains: () => false },
+                closest: () => statefulButton,
+                dispatchEvent: (ev: any) => {
+                    if (ev.type === 'pointerdown') {
+                        isPressedInPreviousTick = true;
+                        downButtons = ev.buttons;
+                        queueMicrotask(() => {
+                            pressTickCompleted = true;
+                        });
+                    } else if (ev.type === 'pointerup') {
+                        upButtons = ev.buttons;
+                        if (isPressedInPreviousTick && pressTickCompleted) {
+                            menuOpenedOnPointerUp = true;
+                        }
+                        isPressedInPreviousTick = false;
+                    }
+                    return true;
+                },
+            };
+
+            const originalDoc = globalThis.document;
+            (globalThis as any).document = {
+                elementsFromPoint: () => [statefulButton],
+            };
+
+            try {
+                (input as any).passThroughPointerEvent({
+                    clientX: 80,
+                    clientY: 40,
+                    screenX: 80,
+                    screenY: 40,
+                    button: 0,
+                    buttons: 1,
+                    pointerId: 7,
+                    pointerType: 'pen',
+                    isPrimary: true,
+                } as PointerEvent);
+
+                assert.strictEqual(isPressedInPreviousTick, true, 'Button must enter pressed state synchronously on pointerdown');
+                assert.strictEqual(downButtons, 1, 'pointerdown must carry active buttons=1');
+                assert.strictEqual(menuOpenedOnPointerUp, false, 'Menu must not open synchronously before pointerup frame');
+
+                await new Promise((resolve) => setTimeout(resolve, 20));
+
+                assert.strictEqual(upButtons, 0, 'pointerup must carry released buttons=0');
+                assert.strictEqual(menuOpenedOnPointerUp, true, 'Stateful button must open menu after receiving asynchronous pointerup');
+            } finally {
+                (globalThis as any).document = originalDoc;
+                input.destroy();
+            }
+        });
     });
 });
+
 
 

@@ -334,18 +334,20 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
     const normalizedId = normalizeBoxId(mutation.id);
     if (!normalizedId) return content;
     const escapedId = htmlEscapeAttribute(normalizedId);
+    const sanitizedCodeId = normalizedId.replace(/`/g, '').trim();
     const safeId = escapeRegExp(normalizedId);
     const safeEscapedId = escapeRegExp(escapedId);
+    const safeSanitizedCodeId = escapeRegExp(sanitizedCodeId);
     const safeJsonId = escapeRegExp(JSON.stringify(normalizedId).slice(1, -1));
+    const safeSanitizedJsonId = escapeRegExp(JSON.stringify(sanitizedCodeId).slice(1, -1));
 
     const htmlIdPattern = safeEscapedId === safeId ? safeId : `(?:${safeEscapedId}|${safeId})`;
 
     const codeIdVariants = [safeId];
-    if (safeEscapedId !== safeId && !codeIdVariants.includes(safeEscapedId)) {
-        codeIdVariants.push(safeEscapedId);
-    }
-    if (safeJsonId !== safeId && !codeIdVariants.includes(safeJsonId)) {
-        codeIdVariants.push(safeJsonId);
+    for (const variant of [safeEscapedId, safeSanitizedCodeId, safeJsonId, safeSanitizedJsonId]) {
+        if (variant && !codeIdVariants.includes(variant)) {
+            codeIdVariants.push(variant);
+        }
     }
     const codeIdPattern = codeIdVariants.map(v => `"${v}"|'${v}'|${v}`).join('|');
 
@@ -520,61 +522,73 @@ export const apoloSpaceField = StateField.define<DecorationSet>({
     provide: (field) => EditorView.decorations.from(field),
 });
 
-export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(
-    class {
-        private view: EditorView;
-        private unsubscribe: (() => void) | null = null;
-        private lastViewportFrom = -1;
-        private lastViewportTo = -1;
-        private rafId: any = null;
+export class ApoloSpaceSyncController {
+    private view: EditorView;
+    private unsubscribe: (() => void) | null = null;
+    private lastViewportFrom = -1;
+    private lastViewportTo = -1;
+    private rafId: any = null;
+    private usedRaf = false;
 
-        constructor(view: EditorView) {
-            this.view = view;
-            this.unsubscribe = BoxRegistry.onChange(() => {
+    constructor(view: EditorView) {
+        this.view = view;
+        this.unsubscribe = BoxRegistry.onChange(() => {
+            this.requestSync();
+        });
+    }
+
+    update(update: ViewUpdate): void {
+        if (update.viewportChanged) {
+            const vp = update.view.viewport;
+            if (vp.from !== this.lastViewportFrom || vp.to !== this.lastViewportTo) {
+                this.lastViewportFrom = vp.from;
+                this.lastViewportTo = vp.to;
                 this.requestSync();
-            });
-        }
-
-        update(update: ViewUpdate): void {
-            if (update.viewportChanged) {
-                const vp = update.view.viewport;
-                if (vp.from !== this.lastViewportFrom || vp.to !== this.lastViewportTo) {
-                    this.lastViewportFrom = vp.from;
-                    this.lastViewportTo = vp.to;
-                    this.requestSync();
-                }
             }
         }
+    }
 
-        private requestSync(): void {
-            if (this.rafId !== null) return;
-            const schedule = typeof requestAnimationFrame === 'function'
-                ? requestAnimationFrame
-                : (cb: () => void) => setTimeout(cb, 16);
-            this.rafId = schedule(() => {
+    private requestSync(): void {
+        if (this.rafId !== null) return;
+        if (typeof requestAnimationFrame === 'function') {
+            this.usedRaf = true;
+            this.rafId = requestAnimationFrame(() => {
                 this.rafId = null;
-                if (this.view.dom.isConnected) {
+                if (this.view.dom?.isConnected) {
                     this.view.dispatch({
                         effects: boxRegistryUpdateEffect.of(),
                     });
                 }
             });
-        }
-
-        destroy(): void {
-            if (this.rafId !== null) {
-                const cancel = typeof cancelAnimationFrame === 'function'
-                    ? cancelAnimationFrame
-                    : (id: any) => clearTimeout(id);
-                cancel(this.rafId);
+        } else {
+            this.usedRaf = false;
+            this.rafId = setTimeout(() => {
                 this.rafId = null;
-            }
-            if (this.unsubscribe) {
-                this.unsubscribe();
-                this.unsubscribe = null;
-            }
+                if (this.view.dom?.isConnected) {
+                    this.view.dispatch({
+                        effects: boxRegistryUpdateEffect.of(),
+                    });
+                }
+            }, 16);
         }
-    },
-);
+    }
+
+    destroy(): void {
+        if (this.rafId !== null) {
+            if (this.usedRaf && typeof cancelAnimationFrame === 'function') {
+                cancelAnimationFrame(this.rafId);
+            } else {
+                clearTimeout(this.rafId);
+            }
+            this.rafId = null;
+        }
+        if (this.unsubscribe) {
+            this.unsubscribe();
+            this.unsubscribe = null;
+        }
+    }
+}
+
+export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(ApoloSpaceSyncController);
 
 export const apoloSpaceExtension: Extension = [apoloSpaceField, apoloSpaceSyncPlugin];

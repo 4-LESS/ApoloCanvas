@@ -248,6 +248,7 @@ export class InputManager {
 
         if (isHtmlEl && underlying) {
             const createEvent = (type: string): Event => {
+                const buttonsVal = type === 'pointerup' ? 0 : event.buttons;
                 if (typeof PointerEvent !== 'undefined') {
                     try {
                         return new PointerEvent(type, {
@@ -256,7 +257,7 @@ export class InputManager {
                             screenX: event.screenX,
                             screenY: event.screenY,
                             button: event.button,
-                            buttons: event.buttons,
+                            buttons: buttonsVal,
                             pointerId: event.pointerId,
                             pointerType: event.pointerType,
                             isPrimary: event.isPrimary,
@@ -274,7 +275,7 @@ export class InputManager {
                     screenX: event.screenX,
                     screenY: event.screenY,
                     button: event.button,
-                    buttons: event.buttons,
+                    buttons: buttonsVal,
                     pointerId: event.pointerId,
                     pointerType: event.pointerType,
                     isPrimary: event.isPrimary,
