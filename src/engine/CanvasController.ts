@@ -34,7 +34,6 @@ import { Toolbar } from '../ui/Toolbar';
 import { ToolEstuche } from '../ui/ToolEstuche';
 import { LassoMenu } from '../ui/LassoMenu';
 import { BoxMenu, BoxMenuState } from '../ui/BoxMenu';
-import { MoreMenu } from '../ui/MoreMenu';
 import { ZoomPill } from '../ui/ZoomPill';
 import { Toast } from '../ui/Toast';
 import { PopoverController } from '../ui/kit';
@@ -132,7 +131,6 @@ export class CanvasController {
     private toolbar: Toolbar | null = null;
     private estuche: ToolEstuche | null = null;
     private lassoMenu: LassoMenu | null = null;
-    private moreMenu: MoreMenu | null = null;
     private zoomPill: ZoomPill | null = null;
     private toast: Toast | null = null;
     private boxMenu: BoxMenu | null = null;
@@ -307,7 +305,6 @@ export class CanvasController {
             this.initToolbar();
             this.initEstuche();
             this.initLassoMenu();
-            this.initMoreMenu();
             this.initZoomPill();
             this.initBoxMenu();
 
@@ -382,7 +379,6 @@ export class CanvasController {
             this.schedulePaint();
             this.toolbar?.setSlot(this.toolbarSlot);
             this.estuche?.position();
-            this.moreMenu?.position();
             this.lassoMenu?.updateViewport(this.zoom, this.currentScrollLeft, this.currentScrollTop);
         });
         this.resizeObserver.observe(scroller);
@@ -443,7 +439,6 @@ export class CanvasController {
         return Boolean(
             this.estuche?.isOpen() ||
             this.boxMenu?.isOpen() ||
-            this.moreMenu?.isOpen() ||
             this.lassoMenu?.isOpen()
         );
     }
@@ -467,7 +462,6 @@ export class CanvasController {
             onSlotChange: (slot) => {
                 this.toolbarSlot = slot;
                 this.estuche?.updateState({ slot });
-                this.moreMenu?.updateState({ slot });
                 this.options.onToolbarSlotChange?.(slot);
             },
             onToggleKeyboardMode: () => {
@@ -511,19 +505,10 @@ export class CanvasController {
                 this.snapGrid = !this.snapGrid;
                 this.toolbar?.setSnapGrid(this.snapGrid);
                 this.estuche?.updateState({ snapGrid: this.snapGrid });
-                this.moreMenu?.updateState({ snapGrid: this.snapGrid });
                 this.toast?.show(this.snapGrid ? 'Cuadrícula magnética: Activada' : 'Cuadrícula magnética: Desactivada');
                 this.syncBoxElements();
                 this.renderDirty = true;
                 this.schedulePaint();
-            },
-            onToggleMoreMenu: () => {
-                this.estuche?.close();
-                this.moreMenu?.toggle({
-                    slot: this.toolbarSlot,
-                    onlyPen: !this.options.enableMouseDrawing,
-                    snapGrid: this.snapGrid,
-                });
             },
             onInsertCanvas: () => {
                 void this.insertCanvas();
@@ -618,32 +603,6 @@ export class CanvasController {
         }, this.uiRoot);
     }
 
-    private initMoreMenu(): void {
-        this.moreMenu = new MoreMenu({
-            slot: this.toolbarSlot,
-            onlyPen: !this.options.enableMouseDrawing,
-            snapGrid: this.snapGrid,
-            onExportSvg: () => {
-                void this.persistence.flush().then(() => {
-                    this.toast?.show('SVG companion sincronizado en assets/ink');
-                });
-            },
-            onOpenGraph: () => openLocalGraph(this.options.app),
-            onTestAnchor: () => this.testAnchorDisplacement(),
-            onToggleOnlyPen: (onlyPen) => {
-                this.options.enableMouseDrawing = !onlyPen;
-                this.toast?.show(onlyPen ? 'Rechazo de palma estricto activado' : 'Dibujo con ratón activado');
-            },
-            onToggleSnapGrid: (enabled) => {
-                this.snapGrid = enabled;
-                this.toolbar?.setSnapGrid(enabled);
-                this.estuche?.updateState({ snapGrid: enabled });
-                this.renderDirty = true;
-                this.schedulePaint();
-            },
-            onClose: () => undefined,
-        }, this.uiRoot);
-    }
 
     private initZoomPill(): void {
         this.zoomPill = new ZoomPill({
@@ -1803,7 +1762,6 @@ export class CanvasController {
         this.toolbar?.destroy();
         this.estuche?.destroy();
         this.lassoMenu?.destroy();
-        this.moreMenu?.destroy();
         this.zoomPill?.destroy();
         this.toast?.destroy();
         this.boxMenu?.destroy();
@@ -1811,7 +1769,6 @@ export class CanvasController {
         this.toolbar = null;
         this.estuche = null;
         this.lassoMenu = null;
-        this.moreMenu = null;
         this.zoomPill = null;
         this.toast = null;
         this.boxMenu = null;
@@ -1838,14 +1795,13 @@ export class CanvasController {
                 this.toolbar?.container.contains(target) ||
                 this.estuche?.container.contains(target) ||
                 this.lassoMenu?.container.contains(target) ||
-                this.moreMenu?.container.contains(target) ||
                 this.zoomPill?.container.contains(target) ||
                 this.boxMenu?.container.contains(target)
             ) {
                 return true;
             }
             const targetEl = typeof (target as any).closest === 'function' ? (target as Element) : null;
-            if (targetEl?.closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn')) {
+            if (targetEl?.closest?.('.apolo-box-options-btn, .apolo-tool-btn')) {
                 return true;
             }
         }
@@ -1866,7 +1822,6 @@ export class CanvasController {
                         this.toolbar?.container.contains(el) ||
                         this.estuche?.container.contains(el) ||
                         this.lassoMenu?.container.contains(el) ||
-                        this.moreMenu?.container.contains(el) ||
                         this.zoomPill?.container.contains(el) ||
                         this.boxMenu?.container.contains(el)
                     ) {
@@ -1874,9 +1829,8 @@ export class CanvasController {
                     }
                     if (
                         el.classList?.contains('apolo-box-options-btn') ||
-                        el.classList?.contains('apolo-more-btn') ||
                         el.classList?.contains('apolo-tool-btn') ||
-                        Boolean((el as Element).closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn'))
+                        Boolean((el as Element).closest?.('.apolo-box-options-btn, .apolo-tool-btn'))
                     ) {
                         return true;
                     }
@@ -1892,7 +1846,6 @@ export class CanvasController {
             return;
         }
         this.estuche?.close();
-        this.moreMenu?.close();
         this.boxMenu?.hide();
     };
 
@@ -1902,7 +1855,6 @@ export class CanvasController {
             return;
         }
         this.estuche?.close();
-        this.moreMenu?.close();
         if (Date.now() - this.lastBoxOptionsTapAt >= 300) {
             this.boxMenu?.hide();
         }
@@ -1911,7 +1863,6 @@ export class CanvasController {
     private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
         if (event.key === 'Escape') {
             this.estuche?.close();
-            this.moreMenu?.close();
             this.boxMenu?.hide();
             this.lassoMenu?.hide();
         }

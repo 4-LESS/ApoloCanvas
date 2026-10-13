@@ -26,7 +26,7 @@ export interface ToolbarOptions {
     onSelectFavorite: (index: number) => void;
     onSelectThickness: (preset: ThicknessPreset) => void;
     onToggleSnapGrid: () => void;
-    onToggleMoreMenu: () => void;
+    onToggleMoreMenu?: () => void;
     onInsertCanvas?: () => void;
 }
 
@@ -43,8 +43,7 @@ export type ToolbarItemId =
     | 'redo'
     | 'favorites'
     | 'thickness'
-    | 'snapGrid'
-    | 'more';
+    | 'snapGrid';
 
 export const TOOLBAR_PRIORITIES = {
     snapGrid: 10,   // Overflows first
@@ -55,7 +54,6 @@ export const TOOLBAR_PRIORITIES = {
     tools: 90,
     keyboardMode: 95,
     grip: 100,
-    more: 100,
 } as const;
 
 export interface ToolbarItemDefinition {
@@ -99,7 +97,6 @@ export class Toolbar {
     private thicknessGroup!: HTMLElement;
     private thicknessButtons: HTMLButtonElement[] = [];
     private gridBtn!: HTMLButtonElement;
-    private moreBtn!: HTMLButtonElement;
 
     constructor(options: ToolbarOptions, parent: HTMLElement = document.body) {
         this.options = { ...options };
@@ -460,7 +457,7 @@ export class Toolbar {
 
         this.container.appendChild(this.createDivider());
 
-        // 8. Grid (Priority 10: overflows first) and More menu (Priority 100: never overflows)
+        // 8. Grid (Priority 10: overflows first)
         const utilGroup = document.createElement('div');
         utilGroup.className = 'apolo-toolbar-group apolo-util-group';
 
@@ -473,17 +470,7 @@ export class Toolbar {
         gridBtn.addEventListener('click', () => this.options.onToggleSnapGrid());
         this.gridBtn = gridBtn;
 
-        const moreBtn = document.createElement('button');
-        moreBtn.type = 'button';
-        moreBtn.className = 'apolo-toolbar-btn apolo-more-btn';
-        moreBtn.setAttribute('data-apolo-popover-trigger', 'true');
-        moreBtn.setAttribute('aria-label', 'Más opciones');
-        moreBtn.title = 'Más opciones';
-        moreBtn.appendChild(createSvg(ICONS.more, { strokeWidth: 3.4 }));
-        moreBtn.addEventListener('click', () => this.options.onToggleMoreMenu());
-        this.moreBtn = moreBtn;
-
-        utilGroup.append(gridBtn, moreBtn);
+        utilGroup.append(gridBtn);
         this.container.appendChild(utilGroup);
         this.updateSnapGridVisual();
     }
@@ -628,11 +615,10 @@ export class Toolbar {
             width += 13; // divider
             width += 3 * 36 + 2 * 2;
         }
-        width += 13; // divider
         if (!this.overflowedItemIds.has('snapGrid')) {
+            width += 13; // divider
             width += 42 + 2;
         }
-        width += 42; // more
         return width;
     }
 
@@ -663,11 +649,10 @@ export class Toolbar {
             height += 9;
             height += 3 * 32 + 2 * 2;
         }
-        height += 9;
         if (!this.overflowedItemIds.has('snapGrid')) {
+            height += 9; // divider
             height += 36 + 2;
         }
-        height += 36; // more
         return height;
     }
 

@@ -426,7 +426,7 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
         assert.equal(thickBtns[0].classList.contains('is-dimmed'), true);
     });
 
-    await t.test('Magnetic Grid toggle and More Menu ⋯ button', () => {
+    await t.test('Magnetic Grid toggle (and More Menu ⋯ button is removed)', () => {
         const gridBtn = toolbar.container.querySelector('.apolo-grid-btn');
         assert.ok(gridBtn);
         assert.equal(gridBtn?.classList.contains('is-active'), false);
@@ -437,11 +437,9 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
         toolbar.setSnapGrid(true);
         assert.equal(gridBtn?.classList.contains('is-active'), true);
 
+        // More Menu button was removed as redundant
         const moreBtn = toolbar.container.querySelector('.apolo-more-btn');
-        assert.ok(moreBtn);
-        assert.equal(moreBtn?.getAttribute('data-apolo-popover-trigger'), 'true');
-        moreBtn?.click();
-        assert.equal(moreMenuToggled, true);
+        assert.equal(moreBtn, null, 'More button is removed');
     });
 
     toolbar.destroy();
@@ -466,9 +464,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 1: Priority 10 (snapGrid) overflows first when width is constrained', () => {
-        // Full width is ~874px. Without snapGrid is ~830px.
-        // At innerWidth = 880px, availableSpace = 848px. SnapGrid overflows, thickness fits.
-        (global as any).window.innerWidth = 880;
+        // Full width is ~832px. Without snapGrid is ~775px.
+        // At innerWidth = 830px, availableSpace = 798px. SnapGrid overflows, thickness fits.
+        (global as any).window.innerWidth = 830;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true, 'snapGrid overflows first');
@@ -481,9 +479,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 2: Priority 20 (thickness) overflows second when width drops further', () => {
-        // Without snapGrid is ~830px. Without thickness is ~705px.
-        // At innerWidth = 780px, availableSpace = 748px. Thickness overflows, favorites fits.
-        (global as any).window.innerWidth = 780;
+        // Without snapGrid is ~775px. Without thickness is ~650px.
+        // At innerWidth = 750px, availableSpace = 718px. Thickness overflows, favorites fits.
+        (global as any).window.innerWidth = 750;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true);
@@ -496,8 +494,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 3: Priority 30 (favorites) overflows third when width drops very narrow', () => {
-        // If available width is 508px, favorites overflows.
-        (global as any).window.innerWidth = 540;
+        // Without favorites is ~479px.
+        // At innerWidth = 580px, availableSpace = 548px. Favorites overflows.
+        (global as any).window.innerWidth = 580;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true);
@@ -508,9 +507,8 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
         assert.equal(favGroup?.style.display, 'none');
         assert.equal(favGroup?.classList.contains('is-overflowed'), true);
 
-        // Core tools, keyboard mode, insertCanvas, history, grip, more NEVER overflow!
+        // Core tools, keyboard mode, insertCanvas, history, grip NEVER overflow!
         assert.ok(toolbar.getToolButton('pen')?.style.display !== 'none');
-        assert.ok(toolbar.container.querySelector('.apolo-more-btn')?.style.display !== 'none');
     });
 
     await t.test('Dividers adapt dynamically with no consecutive or trailing dividers', () => {
