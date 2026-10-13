@@ -1,5 +1,6 @@
 import type { BoundingBox, CanvasElement, StrokePattern } from '../core/types.ts';
-import { ICONS, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
+import { ICONS, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createSvg } from './theme.ts';
+import { ColorSwatchRow } from './kit/index.ts';
 
 export interface LassoMenuCallbacks {
     onCopy: () => void;
@@ -116,53 +117,58 @@ export class LassoMenu {
     private updatePosition(): void {
         if (!this.bounds) return;
 
-        const invZoom = 1 / Math.max(0.1, this.zoom);
-
         // Convert document bounds to viewport client coordinates
         const minX = this.bounds.minX * this.zoom - this.scrollLeft;
         const maxX = this.bounds.maxX * this.zoom - this.scrollLeft;
         const minY = this.bounds.minY * this.zoom - this.scrollTop;
         const maxY = this.bounds.maxY * this.zoom - this.scrollTop;
-        const centerX = (minX + maxX) / 2;
+        const rawCenterX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
+
+        const vpWidth = typeof window !== 'undefined' ? window.innerWidth : 1024;
+        const vpHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
+
+        // Safe margin clamping horizontally for 1:1 scale menu
+        const centerX = Math.max(160, Math.min(vpWidth - 160, rawCenterX));
 
         const menuHeight = 44;
         const isAbove = minY - menuHeight - 16 > 48; // room above
 
-        // 1. Position Floating Action Menu
+        // 1. Position Floating Action Menu at 1:1 scale (no scale(1/zoom))
         const menuTop = isAbove ? minY - 12 : maxY + 12;
         this.menuEl.style.position = 'fixed';
-        this.menuEl.style.left = `${centerX}px`;
-        this.menuEl.style.top = `${menuTop}px`;
-        this.menuEl.style.transform = `translate(-50%, ${isAbove ? '-100%' : '0%'}) scale(${invZoom})`;
+        this.menuEl.style.left = `${Math.round(centerX)}px`;
+        this.menuEl.style.top = `${Math.round(menuTop)}px`;
+        this.menuEl.style.transform = `translate(-50%, ${isAbove ? '-100%' : '0%'})`;
         this.menuEl.style.transformOrigin = `50% ${isAbove ? '100%' : '0%'}`;
 
-        // 2. Position Anchor Pill
+        // 2. Position Anchor Pill at 1:1 scale
         this.anchorPillEl.textContent = `ancla · ${this.anchorBlockName}`;
         this.anchorPillEl.style.position = 'fixed';
-        this.anchorPillEl.style.left = `${minX - 10}px`;
-        this.anchorPillEl.style.top = `${centerY}px`;
-        this.anchorPillEl.style.transform = `translate(-100%, -50%) scale(${invZoom})`;
+        this.anchorPillEl.style.left = `${Math.round(Math.max(12, minX - 10))}px`;
+        this.anchorPillEl.style.top = `${Math.round(centerY)}px`;
+        this.anchorPillEl.style.transform = 'translate(-100%, -50%)';
         this.anchorPillEl.style.transformOrigin = '100% 50%';
 
-        // 3. Position Style Popover (if open)
+        // 3. Position Style Popover (if open) at 1:1 scale
         if (this.isStyleOpen) {
-            const styleLeft = Math.min(window.innerWidth - 300, Math.max(16, maxX + 14));
+            const styleLeft = Math.min(vpWidth - 300, Math.max(16, maxX + 14));
+            const styleTop = Math.max(12, Math.min(vpHeight - 220, minY));
             this.stylePopoverEl.style.position = 'fixed';
-            this.stylePopoverEl.style.left = `${styleLeft}px`;
-            this.stylePopoverEl.style.top = `${minY}px`;
-            this.stylePopoverEl.style.transform = `scale(${invZoom})`;
+            this.stylePopoverEl.style.left = `${Math.round(styleLeft)}px`;
+            this.stylePopoverEl.style.top = `${Math.round(styleTop)}px`;
+            this.stylePopoverEl.style.transform = '';
             this.stylePopoverEl.style.transformOrigin = '0 0';
         }
 
-        // 4. Position Link Card (if selection has a link)
+        // 4. Position Link Card (if selection has a link) at 1:1 scale
         const linkedUrl = this.getLinkedUrl();
         if (linkedUrl && !this.isStyleOpen) {
-            const cardTop = isAbove ? maxY + 14 : maxY + (menuHeight + 20) * invZoom;
+            const cardTop = isAbove ? maxY + 14 : maxY + menuHeight + 20;
             this.linkCardEl.style.position = 'fixed';
-            this.linkCardEl.style.left = `${centerX}px`;
-            this.linkCardEl.style.top = `${cardTop}px`;
-            this.linkCardEl.style.transform = `translate(-50%, 0) scale(${invZoom})`;
+            this.linkCardEl.style.left = `${Math.round(centerX)}px`;
+            this.linkCardEl.style.top = `${Math.round(cardTop)}px`;
+            this.linkCardEl.style.transform = 'translate(-50%, 0)';
             this.linkCardEl.style.transformOrigin = '50% 0';
         }
     }
@@ -222,8 +228,8 @@ export class LassoMenu {
         const btnDefs: Array<{
             label: string;
             className?: string;
+            isPopoverTrigger?: boolean;
             onClick: () => void;
-            iconSvg?: string;
         }> = [
             { label: 'Copiar', onClick: () => this.callbacks.onCopy() },
             { label: 'Pegar', onClick: () => this.callbacks.onPaste() },
@@ -236,6 +242,7 @@ export class LassoMenu {
             { label: 'Al fondo', onClick: () => this.callbacks.onSendToBack() },
             {
                 label: 'Estilo',
+                isPopoverTrigger: true,
                 onClick: () => {
                     this.isStyleOpen = !this.isStyleOpen;
                     this.stylePopoverEl.hidden = !this.isStyleOpen;
@@ -260,6 +267,9 @@ export class LassoMenu {
             btn.className = `apolo-selection-action-btn ${def.className ?? ''}`;
             btn.textContent = def.label;
             btn.setAttribute('aria-label', def.label);
+            if (def.isPopoverTrigger) {
+                btn.setAttribute('data-apolo-popover-trigger', 'true');
+            }
             btn.addEventListener('click', def.onClick);
             this.menuEl.appendChild(btn);
         }
@@ -273,27 +283,18 @@ export class LassoMenu {
         title.textContent = 'Estilo de la selección';
         this.stylePopoverEl.appendChild(title);
 
-        // 1. Color Palette Row
-        const colorsRow = document.createElement('div');
-        colorsRow.className = 'apolo-colors-row';
-        const dark = isDarkTheme();
-
-        for (const col of PRIMARY_PALETTE) {
-            const sw = document.createElement('button');
-            sw.type = 'button';
-            sw.className = 'apolo-palette-swatch';
-            sw.style.background = mapInkColorForDark(col, dark);
-            sw.setAttribute('aria-label', PRIMARY_COLOR_NAMES[col] || col);
-            sw.title = PRIMARY_COLOR_NAMES[col] || col;
-            sw.addEventListener('click', () => {
+        // 1. Color Swatches Row via UI Kit
+        const colorRow = new ColorSwatchRow({
+            colors: [...PRIMARY_PALETTE],
+            colorNames: PRIMARY_COLOR_NAMES,
+            onSelect: (col) => {
                 this.callbacks.onApplyColor(col);
                 this.isStyleOpen = false;
                 this.stylePopoverEl.hidden = true;
                 this.updateLinkCard();
-            });
-            colorsRow.appendChild(sw);
-        }
-        this.stylePopoverEl.appendChild(colorsRow);
+            },
+        });
+        this.stylePopoverEl.appendChild(colorRow.element);
 
         // 2. Thickness Chips (Fina, Media, Gruesa)
         const thicknessRow = document.createElement('div');

@@ -7,12 +7,16 @@ export interface SwatchItem {
 }
 
 export interface ColorSwatchRowOptions {
-    label: string;
-    swatches: SwatchItem[];
-    value: string;
+    label?: string;
+    swatches?: SwatchItem[];
+    colors?: string[];
+    colorNames?: Record<string, string>;
+    value?: string;
+    selectedColor?: string;
     allowCustomColor?: boolean;
     onCustomColorRequested?: () => void;
-    onChange: (color: string) => void;
+    onChange?: (color: string) => void;
+    onSelect?: (color: string) => void;
 }
 
 export class ColorSwatchRow {
@@ -23,21 +27,39 @@ export class ColorSwatchRow {
 
     constructor(options: ColorSwatchRowOptions) {
         this.options = options;
-        this.currentColor = options.value.toLowerCase();
+        const initial = options.selectedColor ?? options.value ?? '#000000';
+        this.currentColor = initial.toLowerCase();
 
         this.element = document.createElement('div');
         this.element.className = 'apolo-swatches-row';
         this.element.setAttribute('role', 'radiogroup');
-        this.element.setAttribute('aria-label', options.label);
+        if (options.label) {
+            this.element.setAttribute('aria-label', options.label);
+        }
 
         this.renderSwatches();
+    }
+
+    private getNormalizedSwatches(): SwatchItem[] {
+        if (this.options.swatches && this.options.swatches.length > 0) {
+            return this.options.swatches;
+        }
+        if (this.options.colors && this.options.colors.length > 0) {
+            return this.options.colors.map(col => ({
+                id: col,
+                color: col,
+                label: this.options.colorNames?.[col] ?? col,
+            }));
+        }
+        return [];
     }
 
     private renderSwatches(): void {
         this.element.replaceChildren();
         this.swatchEntries = [];
 
-        for (const s of this.options.swatches) {
+        const swatches = this.getNormalizedSwatches();
+        for (const s of swatches) {
             const btn = document.createElement('button');
             btn.type = 'button';
             const isActive = this.currentColor === s.color.toLowerCase() || this.currentColor === s.id.toLowerCase();
@@ -45,13 +67,15 @@ export class ColorSwatchRow {
             btn.setAttribute('role', 'radio');
             btn.setAttribute('aria-checked', String(isActive));
             btn.setAttribute('aria-label', s.label);
-            btn.title = s.label;
-            btn.style.setProperty('--swatch-color', s.color);
+            if (typeof btn.style?.setProperty === 'function') {
+                btn.style.setProperty('--swatch-color', s.color);
+            }
             btn.style.backgroundColor = s.color;
 
             btn.addEventListener('click', () => {
                 this.setColor(s.color);
-                this.options.onChange(s.color);
+                this.options.onChange?.(s.color);
+                this.options.onSelect?.(s.color);
             });
 
             this.swatchEntries.push({ item: s, btn });
@@ -81,6 +105,10 @@ export class ColorSwatchRow {
             btn.classList.toggle('is-active', isActive);
             btn.setAttribute('aria-checked', String(isActive));
         }
+    }
+
+    setSelectedColor(color: string): void {
+        this.setColor(color);
     }
 
     getColor(): string {

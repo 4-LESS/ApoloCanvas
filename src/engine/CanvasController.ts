@@ -37,6 +37,7 @@ import { BoxMenu, BoxMenuState } from '../ui/BoxMenu';
 import { MoreMenu } from '../ui/MoreMenu';
 import { ZoomPill } from '../ui/ZoomPill';
 import { Toast } from '../ui/Toast';
+import { PopoverController } from '../ui/kit';
 import { LinkSuggestModal, openLocalGraph } from '../ui/LinkSuggestModal';
 import { DEFAULT_FAVORITES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
 import { calculateNaturalPressureScale, smoothPressure } from './input/PressureCurve';
@@ -135,6 +136,7 @@ export class CanvasController {
     private zoomPill: ZoomPill | null = null;
     private toast: Toast | null = null;
     private boxMenu: BoxMenu | null = null;
+    private readonly popoverController = new PopoverController();
     private activeHandleDrag: {
         boxId: string;
         startY: number;
@@ -482,6 +484,7 @@ export class CanvasController {
                 if (this.estuche?.isOpen()) {
                     this.estuche.close();
                 } else {
+                    const toolBtn = this.toolbar?.getToolButton(tool);
                     this.estuche?.open({
                         tool,
                         slot: this.toolbarSlot,
@@ -497,7 +500,7 @@ export class CanvasController {
                         lassoMode: this.lassoMode,
                         shapeType: this.shapeType,
                         snapGrid: this.snapGrid,
-                    });
+                    }, toolBtn);
                 }
             },
             onUndo: () => this.performUndo(),
@@ -581,6 +584,7 @@ export class CanvasController {
                 onClose: () => undefined,
             },
             this.uiRoot,
+            this.popoverController,
         );
     }
 
@@ -690,7 +694,7 @@ export class CanvasController {
             onExportSvg: () => {
                 this.toast?.show('Exportación SVGcompanion disponible en paso d');
             },
-        }, this.uiRoot);
+        }, this.uiRoot, this.popoverController);
     }
 
     private findSpaceElementsById(boxId: string): HTMLElement[] {
@@ -1803,6 +1807,7 @@ export class CanvasController {
         this.zoomPill?.destroy();
         this.toast?.destroy();
         this.boxMenu?.destroy();
+        this.popoverController.destroy();
         this.toolbar = null;
         this.estuche = null;
         this.lassoMenu = null;

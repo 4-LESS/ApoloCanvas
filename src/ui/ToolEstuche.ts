@@ -1,5 +1,18 @@
 import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, ToolbarSlot, ToolType } from '../core/types.ts';
 import { HIGHLIGHTER_COLOR_NAMES, HIGHLIGHTER_PALETTE, ICONS, PEN_PROFILES, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createStrokeWavePreview, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
+import {
+    PopoverShell,
+    PopoverController,
+    OptionCard,
+    SliderRow,
+    ToggleRow,
+    ColorSwatchRow,
+    createSectionLabel,
+    calculateAnchorPosition,
+    applyPopoverPosition,
+    createSvgIcon,
+    type IconName,
+} from './kit/index.ts';
 
 export interface ToolEstucheState {
     tool: ToolType;
@@ -37,62 +50,75 @@ export interface ToolEstucheCallbacks {
 
 export class ToolEstuche {
     readonly container: HTMLElement;
+    private shell: PopoverShell;
     private state: ToolEstucheState;
     private callbacks: ToolEstucheCallbacks;
-    private isVisible = false;
-    private openedAt = 0;
+    private popoverController?: PopoverController;
+    private currentAnchorEl: HTMLElement | null = null;
 
-    constructor(initialState: ToolEstucheState, callbacks: ToolEstucheCallbacks, parent: HTMLElement = document.body) {
+    // Direct references to UI Kit primitives to support in-place updates without DOM destruction
+    private widthSlider?: SliderRow;
+    private smoothingSlider?: SliderRow;
+    private pressureSlider?: SliderRow;
+    private eraserRadiusSlider?: SliderRow;
+    private eraserPreviewDot?: HTMLElement;
+    private colorSwatchRow?: ColorSwatchRow;
+    private snapGridToggle?: ToggleRow;
+    private scribbleToggle?: ToggleRow;
+    private profileCards: Map<PenProfileId, OptionCard> = new Map();
+    private eraserModeCards: Map<EraserMode, OptionCard> = new Map();
+    private lassoModeCards: Map<LassoMode, OptionCard> = new Map();
+    private shapeButtons: Map<ShapeType, HTMLButtonElement> = new Map();
+
+    constructor(
+        initialState: ToolEstucheState,
+        callbacks: ToolEstucheCallbacks,
+        parent: HTMLElement = document.body,
+        popoverController?: PopoverController,
+    ) {
         this.state = { ...initialState };
         this.callbacks = callbacks;
+        this.popoverController = popoverController;
 
-        this.container = document.createElement('div');
-        this.container.className = 'apolo-popover-panel apolo-tool-estuche';
-        this.container.setAttribute('role', 'dialog');
-        this.container.hidden = true;
-        this.container.style.display = 'none';
+        this.shell = new PopoverShell({
+            title: this.getTitleForTool(this.state.tool),
+            icon: this.getIconForTool(this.state.tool),
+            onClose: () => this.close(),
+        });
 
-        // Prevent pointer events from falling through to the canvas
-        this.container.addEventListener('pointerdown', e => e.stopPropagation());
-        this.container.addEventListener('touchstart', e => e.stopPropagation());
+        this.container = this.shell.container;
+        this.container.classList.add('apolo-tool-estuche');
 
         parent.appendChild(this.container);
-
-        window.addEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
-        window.addEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
-        window.addEventListener('keydown', this.onKeyDown);
     }
 
-    private readonly onOutsidePointerDown = (e: PointerEvent): void => {
-        if (this.isOpen() && !this.container.contains(e.target as Node)) {
-            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
-            if (targetEl?.closest?.('.apolo-tool-btn') || targetEl?.closest?.('.apolo-toolbar-btn')) {
-                return;
-            }
-            this.close();
-        }
-    };
+    private getTitleForTool(tool: ToolType): string {
+        const titles: Record<ToolType, string> = {
+            pen: 'Estuche de plumas',
+            highlighter: 'Estuche de marcadores',
+            eraser: 'Estuche del borrador',
+            lasso: 'Estuche del lazo',
+            shape: 'Estuche de formas',
+            spacer: 'Insertar canvas',
+            link: 'Enlazar',
+        };
+        return titles[tool] || 'Estuche';
+    }
 
-    private readonly onOutsideTouchStart = (e: TouchEvent): void => {
-        if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
-            if (Date.now() - this.openedAt < 300) {
-                return;
-            }
-            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
-            if (targetEl?.closest?.('.apolo-tool-btn') || targetEl?.closest?.('.apolo-toolbar-btn')) {
-                return;
-            }
-            this.close();
-        }
-    };
+    private getIconForTool(tool: ToolType): IconName {
+        const icons: Record<ToolType, IconName> = {
+            pen: 'pen',
+            highlighter: 'highlighter',
+            eraser: 'eraser',
+            lasso: 'lasso',
+            shape: 'shapes',
+            spacer: 'insertCanvas',
+            link: 'dots',
+        };
+        return icons[tool] || 'pen';
+    }
 
-    private readonly onKeyDown = (e: KeyboardEvent): void => {
-        if (this.isOpen() && e.key === 'Escape') {
-            this.close();
-        }
-    };
-
-    open(state?: Partial<ToolEstucheState>): void {
+    open(state?: Partial<ToolEstucheState>, anchorEl?: HTMLElement | null): void {
         if (state) {
             this.state = { ...this.state, ...state };
         }
@@ -100,48 +126,136 @@ export class ToolEstuche {
             this.close();
             return;
         }
-        this.openedAt = Date.now();
-        this.isVisible = true;
-        this.container.hidden = false;
-        this.container.style.display = 'block';
+
+        if (anchorEl) {
+            this.currentAnchorEl = anchorEl;
+        }
+
+        this.shell.setTitle(this.getTitleForTool(this.state.tool));
+        this.shell.setIcon(this.getIconForTool(this.state.tool));
+
         this.render();
-        this.position();
+        this.shell.show();
+        this.position(this.currentAnchorEl);
+
+        if (this.popoverController) {
+            this.popoverController.open(this.shell, this.currentAnchorEl);
+        }
     }
 
     close(): void {
-        this.isVisible = false;
-        this.container.hidden = true;
-        this.container.style.display = 'none';
+        if (!this.isOpen()) return;
+        this.shell.hide();
+        if (this.popoverController) {
+            this.popoverController.close(this.shell);
+        }
         this.callbacks.onClose();
     }
 
     isOpen(): boolean {
-        return this.isVisible && !this.container.hidden && this.container.style.display !== 'none';
+        return this.shell.isOpen();
     }
 
     updateState(partial: Partial<ToolEstucheState>): void {
+        const previousTool = this.state.tool;
         this.state = { ...this.state, ...partial };
-        if (this.isOpen()) {
+
+        if (!this.isOpen()) return;
+
+        // If the tool itself changed, rebuild the panel body
+        if (partial.tool && partial.tool !== previousTool) {
+            this.shell.setTitle(this.getTitleForTool(this.state.tool));
+            this.shell.setIcon(this.getIconForTool(this.state.tool));
             this.render();
-            this.position();
+            this.position(this.currentAnchorEl);
+            return;
+        }
+
+        // In-place updates: do NOT reconstruct DOM to preserve focus and drag operations
+        if (partial.width !== undefined && this.widthSlider) {
+            this.widthSlider.setValue(partial.width);
+        }
+        if (partial.smoothing !== undefined && this.smoothingSlider) {
+            this.smoothingSlider.setValue(Math.round(partial.smoothing * 100));
+        }
+        if (partial.pressureSensitivity !== undefined && this.pressureSlider) {
+            this.pressureSlider.setValue(Math.round(partial.pressureSensitivity * 100));
+        }
+        if (partial.eraserRadius !== undefined && this.eraserRadiusSlider) {
+            this.eraserRadiusSlider.setValue(partial.eraserRadius);
+            this.updateEraserPreviewDot(partial.eraserRadius);
+        }
+        if (partial.color !== undefined && this.colorSwatchRow) {
+            this.colorSwatchRow.setSelectedColor(partial.color);
+        }
+        if (partial.snapGrid !== undefined && this.snapGridToggle) {
+            this.snapGridToggle.setChecked(partial.snapGrid);
+        }
+        if (partial.scribbleToErase !== undefined && this.scribbleToggle) {
+            this.scribbleToggle.setChecked(partial.scribbleToErase);
+        }
+        if (partial.profileId !== undefined) {
+            for (const [pId, card] of this.profileCards) {
+                card.setSelected(pId === partial.profileId);
+            }
+        }
+        if (partial.eraserMode !== undefined) {
+            for (const [mode, card] of this.eraserModeCards) {
+                card.setSelected(mode === partial.eraserMode);
+            }
+        }
+        if (partial.lassoMode !== undefined) {
+            for (const [mode, card] of this.lassoModeCards) {
+                card.setSelected(mode === partial.lassoMode);
+            }
+        }
+        if (partial.shapeType !== undefined) {
+            for (const [type, btn] of this.shapeButtons) {
+                const isActive = type === partial.shapeType;
+                btn.classList.toggle('is-active', isActive);
+                btn.setAttribute('aria-pressed', String(isActive));
+            }
+        }
+        if (partial.slot !== undefined) {
+            this.position(this.currentAnchorEl);
         }
     }
 
-    position(): void {
+    position(anchorEl?: HTMLElement | null): void {
+        const targetAnchor = anchorEl ?? this.currentAnchorEl;
+        const estWidth = 420;
+        const estHeight = Math.min(520, window.innerHeight - 80);
+
+        if (targetAnchor) {
+            const anchorRect = targetAnchor.getBoundingClientRect();
+            const slot = this.state.slot;
+            const preferredPlacement = (slot === 'bl' || slot === 'bc' || slot === 'br') ? 'top' :
+                                       (slot === 'ml') ? 'right' :
+                                       (slot === 'mr') ? 'left' : 'bottom';
+            const pos = calculateAnchorPosition({
+                anchorRect,
+                popoverSize: { width: estWidth, height: estHeight },
+                preferredPlacement,
+                offset: 8,
+                padding: 12,
+            });
+            applyPopoverPosition(this.container, pos);
+            this.container.style.width = `${estWidth}px`;
+            return;
+        }
+
+        // Fallback: slot geometry
         const slot = this.state.slot;
         const col = slot === 'tl' || slot === 'ml' || slot === 'bl' ? 0 : (slot === 'tc' || slot === 'bc' ? 1 : 2);
         const row = slot === 'tl' || slot === 'tc' || slot === 'tr' ? 0 : (slot === 'ml' || slot === 'mr' ? 1 : 2);
 
-        const estWidth = 420;
         const marginX = 16;
         const panelTop = row === 0 ? 122 : 56;
 
         let left = 0;
         if (col === 2) {
-            // Toolbar is on the right -> place estuche on the left
             left = marginX + 44;
         } else {
-            // Toolbar is on the left or center -> place estuche on the right
             left = Math.max(16, window.innerWidth - estWidth - marginX);
         }
 
@@ -154,133 +268,120 @@ export class ToolEstuche {
     }
 
     private render(): void {
-        this.container.replaceChildren();
+        const body = this.shell.body;
+        body.replaceChildren();
+
+        this.profileCards.clear();
+        this.eraserModeCards.clear();
+        this.lassoModeCards.clear();
+        this.shapeButtons.clear();
+        this.widthSlider = undefined;
+        this.smoothingSlider = undefined;
+        this.pressureSlider = undefined;
+        this.eraserRadiusSlider = undefined;
+        this.colorSwatchRow = undefined;
+        this.snapGridToggle = undefined;
+        this.scribbleToggle = undefined;
 
         const tool = this.state.tool;
-        const titles: Record<ToolType, string> = {
-            pen: 'Estuche de plumas',
-            highlighter: 'Estuche de marcadores',
-            eraser: 'Estuche del borrador',
-            lasso: 'Estuche del lazo',
-            shape: 'Estuche de formas',
-            spacer: 'Insertar espacio',
-            link: 'Enlazar',
-        };
-
-        const icons: Record<ToolType, string> = {
-            pen: ICONS.pen,
-            highlighter: ICONS.highlighter,
-            eraser: ICONS.eraser,
-            lasso: ICONS.lasso,
-            shape: ICONS.shapes[this.state.shapeType] || ICONS.shapes.rect,
-            spacer: ICONS.spacer,
-            link: ICONS.link,
-        };
-
-        // 1. Header (Icon + Title + Close Button)
-        const header = document.createElement('div');
-        header.className = 'apolo-estuche-header';
-
-        const titleGroup = document.createElement('div');
-        titleGroup.className = 'apolo-estuche-title-group';
-        titleGroup.appendChild(createSvg(icons[tool] || ICONS.pen, { size: 22, className: 'apolo-estuche-icon' }));
-
-        const titleText = document.createElement('div');
-        titleText.className = 'apolo-estuche-title';
-        titleText.textContent = titles[tool] || 'Estuche';
-        titleGroup.appendChild(titleText);
-
-        const closeBtn = document.createElement('button');
-        closeBtn.type = 'button';
-        closeBtn.className = 'apolo-estuche-close-btn';
-        closeBtn.setAttribute('aria-label', 'Cerrar estuche');
-        closeBtn.title = 'Cerrar';
-        closeBtn.appendChild(createSvg(ICONS.close, { size: 18 }));
-        const handleClose = (e: Event): void => {
-            e.stopPropagation();
-            e.preventDefault();
-            this.close();
-        };
-        closeBtn.addEventListener('click', handleClose);
-        closeBtn.addEventListener('pointerdown', handleClose);
-        closeBtn.addEventListener('touchend', handleClose);
-
-        header.append(titleGroup, closeBtn);
-        this.container.appendChild(header);
-
-        // 2. Body based on tool
         if (tool === 'pen') {
-            this.renderPenContent();
+            this.renderPenContent(body);
         } else if (tool === 'highlighter') {
-            this.renderHighlighterContent();
+            this.renderHighlighterContent(body);
         } else if (tool === 'eraser') {
-            this.renderEraserContent();
+            this.renderEraserContent(body);
         } else if (tool === 'lasso') {
-            this.renderLassoContent();
+            this.renderLassoContent(body);
         } else if (tool === 'shape') {
-            this.renderShapeContent();
+            this.renderShapeContent(body);
         }
     }
 
-    private renderPenContent(): void {
-        // 4 Profile Cards (2x2)
+    private renderPenContent(body: HTMLElement): void {
+        // 1. Profile Cards (2x2 grid)
         const profilesGrid = document.createElement('div');
         profilesGrid.className = 'apolo-profiles-grid';
 
         const profiles: PenProfileId[] = ['fountain', 'calli', 'ball', 'pencil'];
         for (const pId of profiles) {
             const profile = PEN_PROFILES[pId];
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = `apolo-profile-card ${this.state.profileId === pId ? 'is-active' : ''}`;
-            card.setAttribute('aria-label', profile.name);
-
-            const nameEl = document.createElement('div');
-            nameEl.className = 'apolo-profile-name';
-            nameEl.textContent = profile.name;
-
             const wave = createStrokeWavePreview(profile, this.state.width, this.state.color);
             wave.classList.add('apolo-profile-wave');
 
-            card.append(nameEl, wave);
-            card.addEventListener('click', () => {
-                this.callbacks.onSelectProfile(pId);
-                this.state.profileId = pId;
-                this.render();
+            const card = new OptionCard({
+                title: profile.name,
+                preview: wave,
+                selected: this.state.profileId === pId,
+                onClick: () => {
+                    this.callbacks.onSelectProfile(pId);
+                    this.state.profileId = pId;
+                    for (const [id, c] of this.profileCards) {
+                        c.setSelected(id === pId);
+                    }
+                },
             });
-            profilesGrid.appendChild(card);
+            this.profileCards.set(pId, card);
+            profilesGrid.appendChild(card.element);
         }
-        this.container.appendChild(profilesGrid);
+        body.appendChild(profilesGrid);
 
-        // Sliders (Grosor, Suavizado, Presión)
+        // 2. Sliders (Grosor, Suavizado, Presión)
         const slidersList = document.createElement('div');
         slidersList.className = 'apolo-sliders-list';
 
-        slidersList.appendChild(this.createSliderRow('Grosor', 1, 12, 0.5, this.state.width, val => {
-            this.state.width = val;
-            this.callbacks.onChangeWidth(val);
-        }, ' px'));
+        this.widthSlider = new SliderRow({
+            label: 'Grosor',
+            min: 1,
+            max: 12,
+            step: 0.5,
+            value: this.state.width,
+            unit: ' px',
+            onInput: (val) => {
+                this.state.width = val;
+                this.callbacks.onChangeWidth(val);
+                this.updateWavePreviews();
+            },
+        });
+        slidersList.appendChild(this.widthSlider.element);
 
-        slidersList.appendChild(this.createSliderRow('Suavizado', 0, 100, 1, Math.round(this.state.smoothing * 100), val => {
-            this.state.smoothing = val / 100;
-            this.callbacks.onChangeSmoothing(this.state.smoothing);
-        }, ' %'));
+        this.smoothingSlider = new SliderRow({
+            label: 'Suavizado',
+            min: 0,
+            max: 100,
+            step: 1,
+            value: Math.round(this.state.smoothing * 100),
+            unit: ' %',
+            onInput: (val) => {
+                this.state.smoothing = val / 100;
+                this.callbacks.onChangeSmoothing(this.state.smoothing);
+            },
+        });
+        slidersList.appendChild(this.smoothingSlider.element);
 
-        slidersList.appendChild(this.createSliderRow('Sensibilidad a presión', 0, 100, 1, Math.round(this.state.pressureSensitivity * 100), val => {
-            this.state.pressureSensitivity = val / 100;
-            this.callbacks.onChangePressure(this.state.pressureSensitivity);
-        }, ' %'));
+        this.pressureSlider = new SliderRow({
+            label: 'Sensibilidad a presión',
+            min: 0,
+            max: 100,
+            step: 1,
+            value: Math.round(this.state.pressureSensitivity * 100),
+            unit: ' %',
+            onInput: (val) => {
+                this.state.pressureSensitivity = val / 100;
+                this.callbacks.onChangePressure(this.state.pressureSensitivity);
+            },
+        });
+        slidersList.appendChild(this.pressureSlider.element);
 
-        this.container.appendChild(slidersList);
+        body.appendChild(slidersList);
 
-        // Color Swatches + HEX
-        this.container.appendChild(this.createColorSection());
+        // 3. Color Swatches + HEX
+        body.appendChild(this.createColorSection(PRIMARY_PALETTE, PRIMARY_COLOR_NAMES));
 
-        // Favoritos de la barra
-        this.container.appendChild(this.createFavoritesSection());
+        // 4. Favoritos de la barra
+        body.appendChild(this.createFavoritesSection());
     }
 
-    private renderHighlighterContent(): void {
+    private renderHighlighterContent(body: HTMLElement): void {
         // 2 Highlighter Profiles (Round and Flat)
         const profilesGrid = document.createElement('div');
         profilesGrid.className = 'apolo-profiles-grid apolo-grid-2cols';
@@ -288,290 +389,266 @@ export class ToolEstuche {
         const profiles: PenProfileId[] = ['hlr', 'hlf'];
         for (const pId of profiles) {
             const profile = PEN_PROFILES[pId];
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = `apolo-profile-card ${this.state.profileId === pId ? 'is-active' : ''}`;
-            card.setAttribute('aria-label', profile.name);
-
-            const nameEl = document.createElement('div');
-            nameEl.className = 'apolo-profile-name';
-            nameEl.textContent = profile.name;
-
             const wave = createStrokeWavePreview(profile, this.state.width, this.state.color);
             wave.classList.add('apolo-profile-wave');
 
-            card.append(nameEl, wave);
-            card.addEventListener('click', () => {
-                this.callbacks.onSelectProfile(pId);
-                this.state.profileId = pId;
-                this.render();
+            const card = new OptionCard({
+                title: profile.name,
+                preview: wave,
+                selected: this.state.profileId === pId,
+                onClick: () => {
+                    this.callbacks.onSelectProfile(pId);
+                    this.state.profileId = pId;
+                    for (const [id, c] of this.profileCards) {
+                        c.setSelected(id === pId);
+                    }
+                },
             });
-            profilesGrid.appendChild(card);
+            this.profileCards.set(pId, card);
+            profilesGrid.appendChild(card.element);
         }
-        this.container.appendChild(profilesGrid);
+        body.appendChild(profilesGrid);
 
         // Slider Grosor
         const slidersList = document.createElement('div');
         slidersList.className = 'apolo-sliders-list';
-        slidersList.appendChild(this.createSliderRow('Grosor', 4, 24, 1, this.state.width, val => {
-            this.state.width = val;
-            this.callbacks.onChangeWidth(val);
-        }, ' px'));
-        this.container.appendChild(slidersList);
 
-        // Color Palette
-        this.container.appendChild(this.createColorSection());
+        this.widthSlider = new SliderRow({
+            label: 'Grosor',
+            min: 4,
+            max: 24,
+            step: 1,
+            value: this.state.width,
+            unit: ' px',
+            onInput: (val) => {
+                this.state.width = val;
+                this.callbacks.onChangeWidth(val);
+                this.updateWavePreviews();
+            },
+        });
+        slidersList.appendChild(this.widthSlider.element);
+        body.appendChild(slidersList);
+
+        // Color Swatches
+        body.appendChild(this.createColorSection(HIGHLIGHTER_PALETTE, HIGHLIGHTER_COLOR_NAMES));
     }
 
-    private renderEraserContent(): void {
+    private renderEraserContent(body: HTMLElement): void {
         // Mode cards (Trazo completo vs Retícula)
         const modes = document.createElement('div');
         modes.className = 'apolo-eraser-modes';
 
-        const wholeCard = document.createElement('button');
-        wholeCard.type = 'button';
-        wholeCard.className = `apolo-eraser-mode-card ${this.state.eraserMode === 'whole' ? 'is-active' : ''}`;
-        wholeCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Trazo completo</div>
-            <div class="apolo-eraser-mode-desc">Borra el trazo entero al tocarlo</div>
-        `;
-        wholeCard.addEventListener('click', () => {
-            this.callbacks.onSelectEraserMode('whole');
-            this.state.eraserMode = 'whole';
-            this.render();
+        const wholeCard = new OptionCard({
+            title: 'Trazo completo',
+            description: 'Borra el trazo entero al tocarlo',
+            selected: this.state.eraserMode === 'whole',
+            onClick: () => {
+                this.callbacks.onSelectEraserMode('whole');
+                this.state.eraserMode = 'whole';
+                for (const [m, c] of this.eraserModeCards) c.setSelected(m === 'whole');
+            },
         });
+        this.eraserModeCards.set('whole', wholeCard);
 
-        const reticleCard = document.createElement('button');
-        reticleCard.type = 'button';
-        reticleCard.className = `apolo-eraser-mode-card ${this.state.eraserMode === 'reticle' ? 'is-active' : ''}`;
-        reticleCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Retícula</div>
-            <div class="apolo-eraser-mode-desc">Corta el trazo en sub-trazos</div>
-        `;
-        reticleCard.addEventListener('click', () => {
-            this.callbacks.onSelectEraserMode('reticle');
-            this.state.eraserMode = 'reticle';
-            this.render();
+        const reticleCard = new OptionCard({
+            title: 'Retícula',
+            description: 'Corta el trazo en sub-trazos',
+            selected: this.state.eraserMode === 'reticle',
+            onClick: () => {
+                this.callbacks.onSelectEraserMode('reticle');
+                this.state.eraserMode = 'reticle';
+                for (const [m, c] of this.eraserModeCards) c.setSelected(m === 'reticle');
+            },
         });
+        this.eraserModeCards.set('reticle', reticleCard);
 
-        modes.append(wholeCard, reticleCard);
-        this.container.appendChild(modes);
+        modes.append(wholeCard.element, reticleCard.element);
+        body.appendChild(modes);
 
-        // Eraser Size Slider with preview circle
+        // Eraser Size Slider with live preview circle
         const sizeSection = document.createElement('div');
         sizeSection.className = 'apolo-eraser-size-section';
 
-        const sizeTitle = document.createElement('div');
-        sizeTitle.className = 'apolo-section-label';
-        sizeTitle.textContent = 'Tamaño del borrador';
+        const previewWrap = document.createElement('div');
+        previewWrap.className = 'apolo-eraser-preview-wrap';
+        this.eraserPreviewDot = document.createElement('span');
+        this.eraserPreviewDot.className = 'apolo-eraser-preview-dot';
+        this.updateEraserPreviewDot(this.state.eraserRadius);
+        previewWrap.appendChild(this.eraserPreviewDot);
 
-        const sizeWrap = document.createElement('div');
-        sizeWrap.className = 'apolo-eraser-size-wrap';
-
-        const input = document.createElement('input');
-        input.type = 'range';
-        input.className = 'apolo-slider-input';
-        input.min = '8';
-        input.max = '60';
-        input.step = '2';
-        input.value = String(this.state.eraserRadius);
-        input.style.flex = '1';
-
-        const previewDot = document.createElement('span');
-        previewDot.className = 'apolo-eraser-preview-dot';
-        const updateDot = (r: number) => {
-            const size = Math.max(12, Math.min(36, r * 0.7));
-            previewDot.style.width = `${size}px`;
-            previewDot.style.height = `${size}px`;
-        };
-        updateDot(this.state.eraserRadius);
-
-        input.addEventListener('input', () => {
-            const next = Number(input.value);
-            this.state.eraserRadius = next;
-            updateDot(next);
-            this.callbacks.onChangeEraserRadius(next);
+        this.eraserRadiusSlider = new SliderRow({
+            label: 'Tamaño del borrador',
+            min: 8,
+            max: 60,
+            step: 2,
+            value: this.state.eraserRadius,
+            unit: ' px',
+            onInput: (val) => {
+                this.state.eraserRadius = val;
+                this.updateEraserPreviewDot(val);
+                this.callbacks.onChangeEraserRadius(val);
+            },
         });
-
-        sizeWrap.append(input, previewDot);
-        sizeSection.append(sizeTitle, sizeWrap);
-        this.container.appendChild(sizeSection);
+        this.eraserRadiusSlider.element.appendChild(previewWrap);
+        sizeSection.appendChild(this.eraserRadiusSlider.element);
+        body.appendChild(sizeSection);
 
         // Scribble to Erase Toggle
-        const toggleRow = this.createToggleRow(
-            'Garabato para borrar',
-            'Zigzag rápido sobre trazos para eliminarlos',
-            this.state.scribbleToErase,
-            enabled => {
+        this.scribbleToggle = new ToggleRow({
+            label: 'Garabato para borrar',
+            description: 'Zigzag rápido sobre trazos para eliminarlos',
+            checked: this.state.scribbleToErase,
+            onChange: (enabled) => {
                 this.state.scribbleToErase = enabled;
                 this.callbacks.onToggleScribble(enabled);
             },
-        );
-        this.container.appendChild(toggleRow);
+        });
+        body.appendChild(this.scribbleToggle.element);
     }
 
-    private renderLassoContent(): void {
+    private renderLassoContent(body: HTMLElement): void {
         const modes = document.createElement('div');
         modes.className = 'apolo-eraser-modes';
 
-        const freeCard = document.createElement('button');
-        freeCard.type = 'button';
-        freeCard.className = `apolo-eraser-mode-card ${this.state.lassoMode === 'free' ? 'is-active' : ''}`;
-        freeCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Lazo libre</div>
-            <div class="apolo-eraser-mode-desc">Dibuja el contorno con el lápiz</div>
-        `;
-        freeCard.addEventListener('click', () => {
-            this.callbacks.onSelectLassoMode('free');
-            this.state.lassoMode = 'free';
-            this.render();
+        const freeCard = new OptionCard({
+            title: 'Lazo libre',
+            description: 'Dibuja el contorno con el lápiz',
+            selected: this.state.lassoMode === 'free',
+            onClick: () => {
+                this.callbacks.onSelectLassoMode('free');
+                this.state.lassoMode = 'free';
+                for (const [m, c] of this.lassoModeCards) c.setSelected(m === 'free');
+            },
         });
+        this.lassoModeCards.set('free', freeCard);
 
-        const rectCard = document.createElement('button');
-        rectCard.type = 'button';
-        rectCard.className = `apolo-eraser-mode-card ${this.state.lassoMode === 'rect' ? 'is-active' : ''}`;
-        rectCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Rectángulo</div>
-            <div class="apolo-eraser-mode-desc">Arrastra de una esquina a la opuesta</div>
-        `;
-        rectCard.addEventListener('click', () => {
-            this.callbacks.onSelectLassoMode('rect');
-            this.state.lassoMode = 'rect';
-            this.render();
+        const rectCard = new OptionCard({
+            title: 'Rectángulo',
+            description: 'Arrastra de una esquina a la opuesta',
+            selected: this.state.lassoMode === 'rect',
+            onClick: () => {
+                this.callbacks.onSelectLassoMode('rect');
+                this.state.lassoMode = 'rect';
+                for (const [m, c] of this.lassoModeCards) c.setSelected(m === 'rect');
+            },
         });
+        this.lassoModeCards.set('rect', rectCard);
 
-        modes.append(freeCard, rectCard);
-        this.container.appendChild(modes);
+        modes.append(freeCard.element, rectCard.element);
+        body.appendChild(modes);
     }
 
-    private renderShapeContent(): void {
-        // 5 Shape Icons without text (line, arrow, rect, circle, triangle)
+    private renderShapeContent(body: HTMLElement): void {
+        // Shapes row (5 shapes with 44px touch targets)
         const shapesRow = document.createElement('div');
         shapesRow.className = 'apolo-shapes-row';
 
-        const shapeDefs: Array<{ type: ShapeType; label: string; iconD: string }> = [
-            { type: 'line', label: 'Línea', iconD: ICONS.shapes.line },
-            { type: 'arrow', label: 'Flecha', iconD: ICONS.shapes.arrow },
-            { type: 'rect', label: 'Rectángulo', iconD: ICONS.shapes.rect },
-            { type: 'ellipse', label: 'Círculo', iconD: ICONS.shapes.circle },
-            { type: 'triangle', label: 'Triángulo', iconD: ICONS.shapes.triangle },
+        const shapeDefs: Array<{ type: ShapeType; label: string; icon: IconName }> = [
+            { type: 'line', label: 'Línea', icon: 'line' },
+            { type: 'arrow', label: 'Flecha', icon: 'arrow' as IconName },
+            { type: 'rect', label: 'Rectángulo', icon: 'rect' as IconName },
+            { type: 'ellipse', label: 'Círculo', icon: 'ellipse' as IconName },
+            { type: 'triangle', label: 'Triángulo', icon: 'triangle' as IconName },
         ];
 
         for (const def of shapeDefs) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `apolo-shape-icon-btn ${this.state.shapeType === def.type ? 'is-active' : ''}`;
+            const isActive = this.state.shapeType === def.type;
+            btn.className = `apolo-shape-icon-btn ${isActive ? 'is-active' : ''}`;
             btn.setAttribute('aria-label', def.label);
+            btn.setAttribute('aria-pressed', String(isActive));
             btn.title = def.label;
-            btn.appendChild(createSvg(def.iconD, { size: 30 }));
+
+            // Use kit icon helper with fallback to existing theme icon SVG
+            if (ICONS.shapes[def.type]) {
+                btn.appendChild(createSvg(ICONS.shapes[def.type], { size: 28 }));
+            } else {
+                btn.appendChild(createSvgIcon(def.icon, { size: 28 }));
+            }
+
             btn.addEventListener('click', () => {
                 this.callbacks.onSelectShapeType(def.type);
                 this.state.shapeType = def.type;
-                this.render();
+                for (const [t, b] of this.shapeButtons) {
+                    const active = t === def.type;
+                    b.classList.toggle('is-active', active);
+                    b.setAttribute('aria-pressed', String(active));
+                }
             });
+
+            this.shapeButtons.set(def.type, btn);
             shapesRow.appendChild(btn);
         }
-        this.container.appendChild(shapesRow);
+        body.appendChild(shapesRow);
 
         // Snap Grid Toggle
-        const gridRow = this.createToggleRow(
-            'Imán de cuadrícula',
-            'Las formas encajan en una cuadrícula de 12 px',
-            this.state.snapGrid,
-            enabled => {
+        this.snapGridToggle = new ToggleRow({
+            label: 'Imán de cuadrícula',
+            description: 'Las formas encajan en una cuadrícula de 12 px',
+            checked: this.state.snapGrid,
+            onChange: (enabled) => {
                 this.state.snapGrid = enabled;
                 this.callbacks.onToggleSnapGrid(enabled);
             },
-        );
-        this.container.appendChild(gridRow);
+        });
+        body.appendChild(this.snapGridToggle.element);
 
-        // Slider Grosor
+        // Thickness Slider
         const slidersList = document.createElement('div');
         slidersList.className = 'apolo-sliders-list';
-        slidersList.appendChild(this.createSliderRow('Grosor', 1, 12, 0.5, this.state.width, val => {
-            this.state.width = val;
-            this.callbacks.onChangeWidth(val);
-        }, ' px'));
-        this.container.appendChild(slidersList);
-
-        // Color Palette
-        this.container.appendChild(this.createColorSection());
-    }
-
-    private createSliderRow(
-        label: string,
-        min: number,
-        max: number,
-        step: number,
-        value: number,
-        onInput: (val: number) => void,
-        suffix = ' px',
-    ): HTMLElement {
-        const row = document.createElement('div');
-        row.className = 'apolo-slider-item';
-
-        const labelEl = document.createElement('div');
-        labelEl.className = 'apolo-slider-label';
-        labelEl.textContent = label;
-
-        const trackWrap = document.createElement('div');
-        trackWrap.className = 'apolo-slider-track-wrap';
-
-        const input = document.createElement('input');
-        input.type = 'range';
-        input.className = 'apolo-slider-input';
-        input.min = String(min);
-        input.max = String(max);
-        input.step = String(step);
-        input.value = String(value);
-
-        const valText = document.createElement('div');
-        valText.className = 'apolo-slider-value';
-        valText.textContent = suffix === ' px' ? `${value.toFixed(1).replace('.', ',')}${suffix}` : `${value}${suffix}`;
-
-        input.addEventListener('input', () => {
-            const next = Number(input.value);
-            valText.textContent = suffix === ' px' ? `${next.toFixed(1).replace('.', ',')}${suffix}` : `${next}${suffix}`;
-            onInput(next);
+        this.widthSlider = new SliderRow({
+            label: 'Grosor',
+            min: 1,
+            max: 12,
+            step: 0.5,
+            value: this.state.width,
+            unit: ' px',
+            onInput: (val) => {
+                this.state.width = val;
+                this.callbacks.onChangeWidth(val);
+            },
         });
+        slidersList.appendChild(this.widthSlider.element);
+        body.appendChild(slidersList);
 
-        trackWrap.appendChild(input);
-        row.append(labelEl, trackWrap, valText);
-        return row;
+        // Color Section
+        body.appendChild(this.createColorSection(PRIMARY_PALETTE, PRIMARY_COLOR_NAMES));
     }
 
-    private createColorSection(): HTMLElement {
+    private updateEraserPreviewDot(radius: number): void {
+        if (!this.eraserPreviewDot) return;
+        const size = Math.max(12, Math.min(36, radius * 0.7));
+        this.eraserPreviewDot.style.width = `${size}px`;
+        this.eraserPreviewDot.style.height = `${size}px`;
+    }
+
+    private updateWavePreviews(): void {
+        for (const [pId, card] of this.profileCards) {
+            const profile = PEN_PROFILES[pId];
+            if (!profile) continue;
+            const newWave = createStrokeWavePreview(profile, this.state.width, this.state.color);
+            newWave.classList.add('apolo-profile-wave');
+            card.setPreview(newWave);
+        }
+    }
+
+    private createColorSection(palette: readonly string[], colorNames: Record<string, string>): HTMLElement {
         const wrap = document.createElement('div');
         wrap.className = 'apolo-estuche-color-section';
 
-        const title = document.createElement('div');
-        title.className = 'apolo-section-label';
-        title.textContent = 'Color';
-        wrap.appendChild(title);
+        wrap.appendChild(createSectionLabel('Color'));
 
-        const swatchesRow = document.createElement('div');
-        swatchesRow.className = 'apolo-colors-row';
-
-        const dark = isDarkTheme();
-        const palette = this.state.tool === 'highlighter' ? HIGHLIGHTER_PALETTE : PRIMARY_PALETTE;
-        const colorNames = this.state.tool === 'highlighter' ? HIGHLIGHTER_COLOR_NAMES : PRIMARY_COLOR_NAMES;
-
-        for (const col of palette) {
-            const swatch = document.createElement('button');
-            swatch.type = 'button';
-            const isActive = this.state.color.toLowerCase() === col.toLowerCase();
-            swatch.className = `apolo-palette-swatch ${isActive ? 'is-active' : ''}`;
-            swatch.style.background = mapInkColorForDark(col, dark);
-            swatch.setAttribute('aria-label', colorNames[col] || col);
-            swatch.title = colorNames[col] || col;
-
-            swatch.addEventListener('click', () => {
+        this.colorSwatchRow = new ColorSwatchRow({
+            colors: [...palette],
+            colorNames,
+            selectedColor: this.state.color,
+            onSelect: (col) => {
                 this.state.color = col;
                 this.callbacks.onChangeColor(col);
-                this.render();
-            });
-            swatchesRow.appendChild(swatch);
-        }
+                this.updateWavePreviews();
+            },
+        });
 
         // Custom color input button
         const addBtn = document.createElement('button');
@@ -588,11 +665,12 @@ export class ToolEstuche {
         hiddenInput.addEventListener('input', () => {
             this.state.color = hiddenInput.value;
             this.callbacks.onChangeColor(hiddenInput.value);
-            this.render();
+            this.colorSwatchRow?.setSelectedColor(hiddenInput.value);
+            this.updateWavePreviews();
         });
         addBtn.appendChild(hiddenInput);
         addBtn.addEventListener('click', () => hiddenInput.click());
-        swatchesRow.appendChild(addBtn);
+        this.colorSwatchRow.element.appendChild(addBtn);
 
         // HEX Input Field
         const hexGroup = document.createElement('div');
@@ -611,14 +689,15 @@ export class ToolEstuche {
             if (/^#[\da-f]{3,8}$/i.test(val)) {
                 this.state.color = val;
                 this.callbacks.onChangeColor(val);
-                this.render();
+                this.colorSwatchRow?.setSelectedColor(val);
+                this.updateWavePreviews();
             }
         });
 
         hexGroup.append(hexLabel, hexInput);
-        swatchesRow.appendChild(hexGroup);
-        wrap.appendChild(swatchesRow);
+        this.colorSwatchRow.element.appendChild(hexGroup);
 
+        wrap.appendChild(this.colorSwatchRow.element);
         return wrap;
     }
 
@@ -626,10 +705,7 @@ export class ToolEstuche {
         const wrap = document.createElement('div');
         wrap.className = 'apolo-favorites-section';
 
-        const title = document.createElement('div');
-        title.className = 'apolo-section-label';
-        title.textContent = 'Favoritos de la barra';
-        wrap.appendChild(title);
+        wrap.appendChild(createSectionLabel('Favoritos de la barra'));
 
         const list = document.createElement('div');
         list.className = 'apolo-favorites-list';
@@ -677,49 +753,8 @@ export class ToolEstuche {
         return wrap;
     }
 
-    private createToggleRow(
-        title: string,
-        desc: string,
-        active: boolean,
-        onChange: (enabled: boolean) => void,
-    ): HTMLElement {
-        const row = document.createElement('div');
-        row.className = 'apolo-toggle-row';
-
-        const textWrap = document.createElement('div');
-        textWrap.className = 'apolo-toggle-row-text';
-
-        const titleEl = document.createElement('div');
-        titleEl.className = 'apolo-toggle-title';
-        titleEl.textContent = title;
-
-        const descEl = document.createElement('div');
-        descEl.className = 'apolo-toggle-desc';
-        descEl.textContent = desc;
-
-        textWrap.append(titleEl, descEl);
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = `apolo-switch-btn ${active ? '' : 'is-off'}`;
-        btn.setAttribute('aria-pressed', String(active));
-        btn.innerHTML = '<span class="apolo-switch-track"><span class="apolo-switch-thumb"></span></span>';
-
-        btn.addEventListener('click', () => {
-            const next = !active;
-            btn.classList.toggle('is-off', !next);
-            btn.setAttribute('aria-pressed', String(next));
-            onChange(next);
-        });
-
-        row.append(textWrap, btn);
-        return row;
-    }
-
     destroy(): void {
-        window.removeEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
-        window.removeEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
-        window.removeEventListener('keydown', this.onKeyDown);
-        this.container.remove();
+        this.close();
+        this.shell.destroy();
     }
 }

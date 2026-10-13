@@ -1,27 +1,31 @@
 import { createSvgIcon, type IconName } from './Icon.ts';
 
 export interface OptionCardOptions {
-    id: string;
+    id?: string;
     title: string;
     icon?: IconName;
     previewElement?: HTMLElement | SVGSVGElement;
+    preview?: HTMLElement | SVGSVGElement;
     description?: string;
     active?: boolean;
+    selected?: boolean;
     onClick?: () => void;
 }
 
 export class OptionCard {
     readonly element: HTMLButtonElement;
+    private previewWrap?: HTMLElement;
     private options: OptionCardOptions;
 
     constructor(options: OptionCardOptions) {
         this.options = options;
+        const isActive = Boolean(options.selected ?? options.active);
 
         this.element = document.createElement('button');
         this.element.type = 'button';
-        this.element.className = `apolo-option-card${options.active ? ' is-active' : ''}`;
+        this.element.className = `apolo-option-card${isActive ? ' is-active' : ''}`;
         this.element.setAttribute('role', 'radio');
-        this.element.setAttribute('aria-checked', String(Boolean(options.active)));
+        this.element.setAttribute('aria-checked', String(isActive));
         this.element.setAttribute('aria-label', options.title);
 
         const header = document.createElement('div');
@@ -40,11 +44,12 @@ export class OptionCard {
         header.appendChild(titleSpan);
         this.element.appendChild(header);
 
-        if (options.previewElement) {
-            const previewWrap = document.createElement('div');
-            previewWrap.className = 'apolo-option-card-preview';
-            previewWrap.appendChild(options.previewElement);
-            this.element.appendChild(previewWrap);
+        const previewEl = options.preview ?? options.previewElement;
+        if (previewEl) {
+            this.previewWrap = document.createElement('div');
+            this.previewWrap.className = 'apolo-option-card-preview';
+            this.previewWrap.appendChild(previewEl);
+            this.element.appendChild(this.previewWrap);
         }
 
         if (options.description) {
@@ -61,7 +66,21 @@ export class OptionCard {
 
     setActive(active: boolean): void {
         this.options.active = active;
+        this.options.selected = active;
         this.element.classList.toggle('is-active', active);
         this.element.setAttribute('aria-checked', String(active));
+    }
+
+    setSelected(selected: boolean): void {
+        this.setActive(selected);
+    }
+
+    setPreview(previewElement: HTMLElement | SVGSVGElement): void {
+        if (!this.previewWrap) {
+            this.previewWrap = document.createElement('div');
+            this.previewWrap.className = 'apolo-option-card-preview';
+            this.element.appendChild(this.previewWrap);
+        }
+        this.previewWrap.replaceChildren(previewElement);
     }
 }

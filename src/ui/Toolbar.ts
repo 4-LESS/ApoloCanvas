@@ -222,6 +222,7 @@ export class Toolbar {
             // Small triangle indicator for openable estuche
             const tri = document.createElement('span');
             tri.className = 'apolo-tool-triangle';
+            tri.setAttribute('data-apolo-popover-trigger', 'true');
             tri.title = `Abrir opciones de ${def.label}`;
             tri.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -229,13 +230,10 @@ export class Toolbar {
             });
             btn.appendChild(tri);
 
+            btn.setAttribute('data-apolo-popover-trigger', 'true');
             btn.addEventListener('click', () => {
                 if (this.options.activeTool === def.tool && this.options.penEnabled) {
-                    if (def.tool === 'eraser' && this.options.onToggleEraserMode) {
-                        this.options.onToggleEraserMode();
-                    } else {
-                        this.options.onToggleEstuche(def.tool);
-                    }
+                    this.options.onToggleEstuche(def.tool);
                 } else {
                     this.options.onSelectTool(def.tool);
                 }
@@ -386,6 +384,7 @@ export class Toolbar {
         const moreBtn = document.createElement('button');
         moreBtn.type = 'button';
         moreBtn.className = 'apolo-toolbar-btn apolo-more-btn';
+        moreBtn.setAttribute('data-apolo-popover-trigger', 'true');
         moreBtn.setAttribute('aria-label', 'Más opciones');
         moreBtn.title = 'Más opciones';
         moreBtn.appendChild(createSvg(ICONS.more, { strokeWidth: 3.4 }));
@@ -678,6 +677,10 @@ export class Toolbar {
     setSnapGrid(enabled: boolean): void {
         this.options.snapGrid = enabled;
         this.updateSnapGridVisual();
+    }
+
+    getToolButton(tool: ToolType): HTMLButtonElement | undefined {
+        return this.toolButtons.get(tool);
     }
 
     setVisible(visible: boolean): void {

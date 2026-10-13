@@ -1,4 +1,10 @@
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from '../core/types.ts';
+import {
+    calculateAnchorPosition,
+    applyPopoverPosition,
+    PopoverController,
+    type PopoverInstance,
+} from './kit/index.ts';
 
 export interface BoxMenuCallbacks {
     onSetGridStyle: (boxId: string, style: BoxGridStyle) => void;
@@ -215,22 +221,27 @@ function createTrashSvg(): SVGSVGElement {
 
 /**
  * Visual floating inspector panel for drawing boxes.
- * Opens exclusively via the top-left 3-dots button.
- * Matches mockup design from media_1791777394923_df71a561.png.
- * Dismisses instantly on 'X', outside screen touch, or drawing start.
+ * Opens exclusively via the top-left 3-dots button (.apolo-box-options-btn).
+ * Adheres to UI Kit architecture with PopoverShell styling and smart anchor positioning.
  */
-export class BoxMenu {
+export class BoxMenu implements PopoverInstance {
     readonly container: HTMLElement;
     private currentBoxId = '';
     private currentState: BoxMenuState | null = null;
     private callbacks: BoxMenuCallbacks;
+    private popoverController?: PopoverController;
     private openedAt = 0;
 
-    constructor(callbacks: BoxMenuCallbacks, parent: HTMLElement = document.body) {
+    constructor(
+        callbacks: BoxMenuCallbacks,
+        parent: HTMLElement = document.body,
+        popoverController?: PopoverController,
+    ) {
         this.callbacks = callbacks;
+        this.popoverController = popoverController;
 
         this.container = document.createElement('div');
-        this.container.className = 'apolo-box-menu-container apolo-popover-panel';
+        this.container.className = 'apolo-box-menu-container apolo-popover-panel apolo-popover-shell';
         this.container.hidden = true;
         this.container.style.display = 'none';
         this.container.setAttribute('role', 'dialog');
@@ -242,7 +253,7 @@ export class BoxMenu {
 
         parent.appendChild(this.container);
 
-        // Window capture listeners to reliably dismiss on touch/click outside
+        // Window capture listeners for reliable dismiss
         window.addEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
         window.addEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
         window.addEventListener('keydown', this.onKeyDown);
@@ -316,6 +327,7 @@ export class BoxMenu {
 
     private readonly onOutsidePointerDown = (e: PointerEvent): void => {
         if (!this.isOpen()) return;
+        if (e.isPrimary === false) return;
         if (this.isEventInsideMenu(e) || this.isEventOnOptionsBtn(e)) {
             return;
         }
@@ -353,25 +365,21 @@ export class BoxMenu {
         this.currentState = { ...state };
         this.render(this.currentState);
 
-        const menuWidth = 326;
-        let left = anchorRect.left;
-        if (left + menuWidth > window.innerWidth - 12) {
-            left = window.innerWidth - menuWidth - 12;
-        }
-        left = Math.max(12, left);
+        const pos = calculateAnchorPosition({
+            anchorRect,
+            popoverSize: { width: 326, height: 320 },
+            preferredPlacement: 'bottom',
+            offset: 8,
+            padding: 12,
+        });
 
-        let top = anchorRect.bottom + 8;
-        const estimatedHeight = 310;
-        if (top + estimatedHeight > window.innerHeight && anchorRect.top > estimatedHeight + 10) {
-            top = anchorRect.top - estimatedHeight - 8;
-        }
-        top = Math.max(12, top);
-
-        this.container.style.position = 'fixed';
-        this.container.style.left = `${Math.round(left)}px`;
-        this.container.style.top = `${Math.round(top)}px`;
+        applyPopoverPosition(this.container, pos);
         this.container.style.display = 'flex';
         this.container.hidden = false;
+
+        if (this.popoverController) {
+            this.popoverController.open(this);
+        }
     }
 
     hide(): void {
@@ -379,6 +387,10 @@ export class BoxMenu {
         this.container.style.display = 'none';
         this.currentBoxId = '';
         this.currentState = null;
+
+        if (this.popoverController) {
+            this.popoverController.close(this);
+        }
     }
 
     destroy(): void {
@@ -391,7 +403,7 @@ export class BoxMenu {
     private bindButtonAction(btn: HTMLButtonElement, action: () => void): void {
         let lastInvokedAt = 0;
         const invoke = (e: Event): void => {
-            e.stopPropagation();
+            e.stopPropagation?.();
             const now = Date.now();
             if (now - lastInvokedAt < 250) return;
             lastInvokedAt = now;
@@ -400,16 +412,16 @@ export class BoxMenu {
         };
         btn.addEventListener('pointerup', (e: PointerEvent) => {
             if (e.button !== undefined && e.button !== 0) return;
-            e.preventDefault();
+            e.preventDefault?.();
             invoke(e);
         });
         btn.addEventListener('click', (e: MouseEvent) => {
-            e.preventDefault();
+            e.preventDefault?.();
             invoke(e);
         });
         btn.addEventListener('keydown', (e: KeyboardEvent) => {
             if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
+                e.preventDefault?.();
                 invoke(e);
             }
         });
@@ -420,15 +432,15 @@ export class BoxMenu {
 
         // 1. Header (Title "Espacio" + Circular Close Button "✕")
         const header = document.createElement('div');
-        header.className = 'apolo-box-menu-header';
+        header.className = 'apolo-box-menu-header apolo-popover-header';
 
         const title = document.createElement('span');
-        title.className = 'apolo-box-menu-title';
+        title.className = 'apolo-box-menu-title apolo-popover-title';
         title.textContent = 'Espacio';
         header.appendChild(title);
 
         const closeBtn = document.createElement('button');
-        closeBtn.className = 'apolo-box-menu-close';
+        closeBtn.className = 'apolo-box-menu-close apolo-popover-close-btn';
         closeBtn.type = 'button';
         closeBtn.setAttribute('aria-label', 'Cerrar');
         closeBtn.appendChild(createCloseSvg());
@@ -450,7 +462,7 @@ export class BoxMenu {
         fondoSection.className = 'apolo-box-menu-section';
 
         const fondoLabel = document.createElement('span');
-        fondoLabel.className = 'apolo-box-menu-section-label';
+        fondoLabel.className = 'apolo-box-menu-section-label apolo-section-label';
         fondoLabel.textContent = 'Fondo';
         fondoSection.appendChild(fondoLabel);
 
@@ -489,19 +501,19 @@ export class BoxMenu {
         espaciadoRow.className = 'apolo-box-menu-espaciado-row';
 
         const espaciadoLabel = document.createElement('span');
-        espaciadoLabel.className = 'apolo-box-menu-section-label';
+        espaciadoLabel.className = 'apolo-box-menu-section-label apolo-section-label';
         espaciadoLabel.textContent = 'Espaciado';
         espaciadoRow.appendChild(espaciadoLabel);
 
         const segmentedContainer = document.createElement('div');
-        segmentedContainer.className = 'apolo-box-menu-segmented';
+        segmentedContainer.className = 'apolo-box-menu-segmented apolo-segmented';
         segmentedContainer.setAttribute('role', 'radiogroup');
         segmentedContainer.setAttribute('aria-label', 'Espaciado de cuadrícula');
 
         for (const d of GRID_DENSITIES) {
             const btn = document.createElement('button');
             const isActive = Math.abs((state.gridDensity || 32) - d.density) < 4;
-            btn.className = `apolo-box-menu-seg-btn${isActive ? ' is-active' : ''}`;
+            btn.className = `apolo-box-menu-seg-btn apolo-segment-btn${isActive ? ' is-active' : ''}`;
             btn.type = 'button';
             btn.setAttribute('role', 'radio');
             btn.setAttribute('aria-checked', String(isActive));
@@ -523,19 +535,19 @@ export class BoxMenu {
         accentSection.className = 'apolo-box-menu-section';
 
         const accentLabel = document.createElement('span');
-        accentLabel.className = 'apolo-box-menu-section-label';
+        accentLabel.className = 'apolo-box-menu-section-label apolo-section-label';
         accentLabel.textContent = 'Acento lateral';
         accentSection.appendChild(accentLabel);
 
         const swatchesRow = document.createElement('div');
-        swatchesRow.className = 'apolo-box-menu-swatches';
+        swatchesRow.className = 'apolo-box-menu-swatches apolo-swatches-row';
         swatchesRow.setAttribute('role', 'radiogroup');
         swatchesRow.setAttribute('aria-label', 'Color de acento lateral');
 
         for (const a of ACCENT_COLORS) {
             const btn = document.createElement('button');
             const isActive = (state.accentColor || 'purple') === a.id;
-            btn.className = `apolo-box-menu-swatch${isActive ? ' is-active' : ''}`;
+            btn.className = `apolo-box-menu-swatch apolo-swatch-btn${isActive ? ' is-active' : ''}`;
             btn.type = 'button';
             btn.title = a.label;
             btn.setAttribute('role', 'radio');

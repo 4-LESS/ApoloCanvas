@@ -77,6 +77,10 @@ export class PopoverShell {
         }
     }
 
+    get body(): HTMLElement {
+        return this.bodyEl;
+    }
+
     setTitle(title: string): void {
         this.titleEl.textContent = title;
         this.container.setAttribute('aria-label', title);
