@@ -415,12 +415,20 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             });
             assert.strictEqual(shell1.isOpen(), true, 'Clicking trigger element must not dismiss popover');
 
-            // Click outside shell1 dismisses it
+            // Secondary pointer (isPrimary: false, e.g. pinch gesture / palm contact) does NOT dismiss popover
             const outsideEl = mockDocument.createElement('div');
             mockWindow.dispatch('pointerdown', {
                 target: outsideEl,
+                isPrimary: false,
             });
-            assert.strictEqual(shell1.isOpen(), false, 'Outside click must dismiss popover');
+            assert.strictEqual(shell1.isOpen(), true, 'Non-primary pointerdown (palm/pinch) must not dismiss popover');
+
+            // Primary click outside shell1 dismisses it
+            mockWindow.dispatch('pointerdown', {
+                target: outsideEl,
+                isPrimary: true,
+            });
+            assert.strictEqual(shell1.isOpen(), false, 'Primary outside click must dismiss popover');
             assert.strictEqual(controller.isAnyOpen(), false);
 
             controller.destroy();
@@ -429,6 +437,87 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
         } finally {
             (globalThis as any).window = prevWin;
             (globalThis as any).document = prevDoc;
+        }
+    });
+
+    test('AnchorPositioning: Galaxy Tab S10 landscape viewport simulation with visualViewport and virtual keyboard', () => {
+        const { mockWindow } = createMockEnvironment();
+        const prevWin = (globalThis as any).window;
+        (globalThis as any).window = mockWindow;
+
+        try {
+            // Galaxy Tab S10 standard landscape CSS viewport
+            mockWindow.innerWidth = 1133;
+            mockWindow.innerHeight = 755;
+            mockWindow.visualViewport = {
+                width: 1133,
+                height: 755,
+                offsetLeft: 0,
+                offsetTop: 0,
+            } as any;
+
+            // 1. Bottom toolbar in landscape: anchor near screen bottom (top: 700, height: 44)
+            // Popover: width 320, height: 240. Preferred placement: bottom.
+            const bottomPos = calculateAnchorPosition({
+                anchorRect: { left: 500, top: 700, right: 544, bottom: 744, width: 44, height: 44 },
+                popoverSize: { width: 320, height: 240 },
+                preferredPlacement: 'bottom',
+                offset: 8,
+                padding: 12,
+            });
+            // There are only 11px below (755 - 744), so it MUST flip to top
+            assert.strictEqual(bottomPos.placement, 'top', 'Must flip to top when anchored at tablet bottom edge');
+            assert.strictEqual(bottomPos.top, 700 - 8 - 240); // 452
+            // Horizontally centered on anchor (500 + 22 - 160 = 362)
+            assert.strictEqual(bottomPos.left, 362);
+
+            // 2. Right-side docked toolbar (Galaxy Tab S10 side palette): anchor near right edge
+            // anchor at left: 1080, width: 44, right: 1124. Popover width: 280.
+            const sidePos = calculateAnchorPosition({
+                anchorRect: { left: 1080, top: 300, right: 1124, bottom: 344, width: 44, height: 44 },
+                popoverSize: { width: 280, height: 200 },
+                preferredPlacement: 'right',
+                offset: 8,
+                padding: 12,
+            });
+            // Only 9px to the right of anchor (1133 - 1124), must flip to left
+            assert.strictEqual(sidePos.placement, 'left', 'Must flip to left when anchored near right bezel');
+            assert.strictEqual(sidePos.left, 1080 - 8 - 280); // 792
+
+            // 3. Samsung Virtual Keyboard open: visualViewport shrinks to height: 380
+            mockWindow.visualViewport = {
+                width: 1133,
+                height: 380,
+                offsetLeft: 0,
+                offsetTop: 0,
+            } as any;
+
+            // Anchor at top: 320, height: 44, bottom: 364
+            const keyboardPos = calculateAnchorPosition({
+                anchorRect: { left: 500, top: 320, right: 544, bottom: 364, width: 44, height: 44 },
+                popoverSize: { width: 320, height: 220 },
+                preferredPlacement: 'bottom',
+                offset: 8,
+                padding: 12,
+            });
+            // In visual viewport, space below is 380 - (364 + 8) = 8px < 220px. Must flip to top!
+            assert.strictEqual(keyboardPos.placement, 'top', 'Must flip to top above virtual keyboard');
+            // Clamped within visualViewport safe area (maxTop: 380 - 220 - 12 = 148, calculated: 320 - 8 - 220 = 92)
+            assert.strictEqual(keyboardPos.top, 92);
+            assert.ok(keyboardPos.top >= 12, 'Top must respect visualViewport padding');
+            assert.ok(keyboardPos.top + 220 <= 380 - 12, 'Popover must fit within visible visualViewport with keyboard');
+
+            // 4. Clamping against left tablet bezel (left: 4px)
+            const edgePos = calculateAnchorPosition({
+                anchorRect: { left: 4, top: 50, right: 48, bottom: 94, width: 44, height: 44 },
+                popoverSize: { width: 300, height: 180 },
+                preferredPlacement: 'bottom',
+                offset: 8,
+                padding: 12,
+            });
+            assert.strictEqual(edgePos.left, 12, 'Left must be clamped to safe area padding 12px from bezel');
+        } finally {
+            (globalThis as any).window = prevWin;
         }
     });
 });

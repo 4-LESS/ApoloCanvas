@@ -7,6 +7,11 @@ export interface IconButtonOptions {
     size?: 44 | 36 | 32;
     active?: boolean;
     variant?: 'default' | 'subtle' | 'ghost' | 'danger';
+    /**
+     * Set to true if this button toggles or controls a PopoverShell.
+     * Sets `data-apolo-popover-trigger="true"` on the DOM button element so
+     * PopoverController avoids outside-click dismissal races during toggle taps.
+     */
     triggerForPopover?: boolean;
     onClick?: (event: MouseEvent | PointerEvent) => void;
 }

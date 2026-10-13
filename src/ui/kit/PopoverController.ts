@@ -15,6 +15,15 @@ interface ActivePopoverEntry {
  * Implements Architecture Rule 4:
  * "Un único juego de listeners globales (clic afuera, Escape, pila de capas abiertas)...
  *  Los disparadores se marcan con un atributo data-apolo-popover-trigger en lugar de buscar clases."
+ *
+ * Convención `data-apolo-popover-trigger="true"`:
+ * - Cualquier botón o control UI que abra o conmute un popover (por ejemplo: botones de herramienta
+ *   con estuche, botón de tres puntos de caja de dibujo, menú de lazo) DEBE declarar el atributo
+ *   DOM `data-apolo-popover-trigger="true"`.
+ * - PopoverController detecta este atributo durante el evento `pointerdown` global para evitar carreras de cierre:
+ *   si el usuario toca el botón disparador mientras el popover está visible, el controlador descarta el cierre
+ *   por fuera y permite que el disparador ejecute su propio toggle de apertura/cierre de manera predecible.
+ * - Los componentes `IconButton` pueden habilitar esta convención pasando `triggerForPopover: true` en sus opciones.
  */
 export class PopoverController {
     private stack: ActivePopoverEntry[] = [];
@@ -39,6 +48,9 @@ export class PopoverController {
     }
 
     private readonly onWindowPointerDown = (event: PointerEvent): void => {
+        // Filter out non-primary pointers (e.g. secondary touch points in pinch-to-zoom gestures,
+        // palm touches, or legacy browser duplicate synthetic events)
+        if (event.isPrimary === false) return;
         if (this.stack.length === 0) return;
 
         const target = event.target as Node | null;

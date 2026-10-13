@@ -49,8 +49,8 @@ export function calculateAnchorPosition(options: AnchorPositionOptions): AnchorP
 
     // Handle horizontal preferred placement (for vertical side toolbars)
     if (preferredPlacement === 'right' || preferredPlacement === 'left') {
-        const spaceRight = vpWidth - (anchorRect.right + offset);
-        const spaceLeft = anchorRect.left - offset;
+        const spaceRight = (vpLeft + vpWidth) - (anchorRect.right + offset);
+        const spaceLeft = (anchorRect.left - offset) - vpLeft;
 
         if (preferredPlacement === 'right' && spaceRight < popoverSize.width && spaceLeft >= popoverSize.width) {
             placement = 'left';
@@ -70,8 +70,8 @@ export function calculateAnchorPosition(options: AnchorPositionOptions): AnchorP
         top = anchorRect.top + (anchorRect.height / 2) - (popoverSize.height / 2);
     } else {
         // Vertical preferred placement (bottom or top)
-        const spaceBelow = vpHeight - (anchorRect.bottom + offset);
-        const spaceAbove = anchorRect.top - offset;
+        const spaceBelow = (vpTop + vpHeight) - (anchorRect.bottom + offset);
+        const spaceAbove = (anchorRect.top - offset) - vpTop;
 
         if (preferredPlacement === 'top') {
             if (spaceAbove < popoverSize.height && spaceBelow >= popoverSize.height) {
