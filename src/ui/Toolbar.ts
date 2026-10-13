@@ -1,5 +1,5 @@
-import { EraserMode, PenFavorite, PenProfileId, ShapeType, ThicknessPreset, ToolbarSlot, ToolType } from '../core/types';
-import { ICONS, createSvg, isDarkTheme, mapInkColorForDark } from './theme';
+import type { EraserMode, PenFavorite, PenProfileId, ShapeType, ThicknessPreset, ToolbarSlot, ToolType } from '../core/types.ts';
+import { ICONS, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
 
 export interface ToolbarOptions {
     slot: ToolbarSlot;
@@ -30,6 +30,43 @@ export interface ToolbarOptions {
     onInsertCanvas?: () => void;
 }
 
+export type ToolbarItemId =
+    | 'grip'
+    | 'keyboardMode'
+    | 'pen'
+    | 'highlighter'
+    | 'eraser'
+    | 'lasso'
+    | 'shape'
+    | 'insertCanvas'
+    | 'undo'
+    | 'redo'
+    | 'favorites'
+    | 'thickness'
+    | 'snapGrid'
+    | 'more';
+
+export const TOOLBAR_PRIORITIES = {
+    snapGrid: 10,   // Overflows first
+    thickness: 20,  // Overflows second
+    favorites: 30,  // Overflows third
+    history: 70,    // Core undo / redo
+    insertCanvas: 80,
+    tools: 90,
+    keyboardMode: 95,
+    grip: 100,
+    more: 100,
+} as const;
+
+export interface ToolbarItemDefinition {
+    id: ToolbarItemId;
+    priority: number;
+    groupId: string;
+    label: string;
+    render: () => HTMLElement;
+    update?: () => void;
+}
+
 interface DragState {
     pointerId: number;
     scale: number;
@@ -45,14 +82,21 @@ export class Toolbar {
     private options: ToolbarOptions;
     private dragState: DragState | null = null;
     private currentDragPos: { x: number; y: number } | null = null;
+    private resizeObserver: ResizeObserver | null = null;
+
+    // Set of currently overflowed items (hidden from toolbar, delegated to MoreMenu)
+    private overflowedItemIds = new Set<string>();
 
     // DOM references for instant state updating
     private keyboardBtn!: HTMLButtonElement;
     private toolButtons = new Map<ToolType, HTMLButtonElement>();
     private shapeBtnIcon!: HTMLElement;
+    private insertCanvasBtn!: HTMLButtonElement;
     private undoBtn!: HTMLButtonElement;
     private redoBtn!: HTMLButtonElement;
+    private favGroup!: HTMLElement;
     private favButtons: HTMLButtonElement[] = [];
+    private thicknessGroup!: HTMLElement;
     private thicknessButtons: HTMLButtonElement[] = [];
     private gridBtn!: HTMLButtonElement;
     private moreBtn!: HTMLButtonElement;
@@ -73,45 +117,86 @@ export class Toolbar {
         parent.appendChild(this.container);
 
         this.render();
-        this.updatePosition();
+        this.setupObservers();
+        this.recalculateLayout();
     }
+
+    private setupObservers(): void {
+        if (typeof ResizeObserver !== 'undefined' && typeof document !== 'undefined' && document.documentElement) {
+            try {
+                this.resizeObserver = new ResizeObserver(() => {
+                    this.recalculateLayout();
+                });
+                this.resizeObserver.observe(document.documentElement);
+            } catch {
+                // best effort in testing environments
+            }
+        }
+        if (typeof window !== 'undefined') {
+            window.addEventListener('resize', this.onWindowResize);
+        }
+    }
+
+    private readonly onWindowResize = (): void => {
+        this.recalculateLayout();
+    };
 
     private isVertical(): boolean {
         return this.options.slot === 'ml' || this.options.slot === 'mr';
     }
 
-    private getDimensions(slot: ToolbarSlot): { width: number; height: number } {
-        const vert = slot === 'ml' || slot === 'mr';
+    getDimensions(slot?: ToolbarSlot): { width: number; height: number } {
+        const targetSlot = slot ?? this.options.slot;
+        const vert = targetSlot === 'ml' || targetSlot === 'mr';
         if (vert) {
+            const h = (this.container.offsetHeight && this.container.offsetHeight > 0)
+                ? this.container.offsetHeight
+                : this.computeIntrinsicHeight();
+            const maxH = typeof window !== 'undefined' ? window.innerHeight - 96 : 600;
             return {
                 width: 58,
-                height: Math.min(696, Math.max(480, window.innerHeight - 96)),
+                height: Math.min(h, maxH),
             };
         }
+        const w = (this.container.offsetWidth && this.container.offsetWidth > 0)
+            ? this.container.offsetWidth
+            : this.computeIntrinsicWidth();
+        const maxW = typeof window !== 'undefined' ? window.innerWidth - 32 : 1200;
         return {
-            width: Math.min(880, Math.max(520, window.innerWidth - 32)),
+            width: Math.min(w, maxW),
             height: 58,
         };
     }
 
     getSlotCoordinates(slot: ToolbarSlot): { x: number; y: number; width: number; height: number } {
         const { width, height } = this.getDimensions(slot);
-        const col = slot === 'tl' || slot === 'ml' || slot === 'bl' ? 0 : (slot === 'tc' || slot === 'bc' ? 1 : 2);
-        const row = slot === 'tl' || slot === 'tc' || slot === 'tr' ? 0 : (slot === 'ml' || slot === 'mr' ? 1 : 2);
 
         const marginX = 16;
         const marginY = 56; // Leave room for Obsidian header / tabs
         const marginBottom = 36;
 
+        const winW = typeof window !== 'undefined' ? window.innerWidth : 1280;
+        const winH = typeof window !== 'undefined' ? window.innerHeight : 800;
+
         let x = 0;
-        if (col === 0) x = marginX;
-        else if (col === 1) x = Math.round((window.innerWidth - width) / 2);
-        else x = window.innerWidth - width - marginX;
+        if (slot === 'tl' || slot === 'ml' || slot === 'bl') {
+            x = marginX;
+        } else if (slot === 'tc' || slot === 'bc') {
+            x = Math.round((winW - width) / 2);
+        } else {
+            // 'tr', 'mr', 'br'
+            x = winW - width - marginX;
+        }
 
         let y = 0;
-        if (row === 0) y = marginY;
-        else if (row === 1) y = Math.round((window.innerHeight - height) / 2);
-        else y = window.innerHeight - height - marginBottom;
+        if (slot === 'tl' || slot === 'tc' || slot === 'tr') {
+            y = marginY;
+        } else if (slot === 'ml' || slot === 'mr') {
+            y = Math.round((winH - height) / 2);
+        } else {
+            // 'bl', 'bc', 'br'
+            y = winH - height - marginBottom;
+        }
 
         return { x: Math.max(8, x), y: Math.max(8, y), width, height };
     }
@@ -147,8 +232,10 @@ export class Toolbar {
             const coords = this.getSlotCoordinates(this.options.slot);
             this.container.style.left = `${coords.x}px`;
             this.container.style.top = `${coords.y}px`;
-            this.container.style.width = `${coords.width}px`;
-            this.container.style.height = `${coords.height}px`;
+            this.container.style.width = vert ? '58px' : 'fit-content';
+            this.container.style.maxWidth = 'calc(100vw - 32px)';
+            this.container.style.height = vert ? 'fit-content' : '58px';
+            this.container.style.maxHeight = 'calc(100vh - 96px)';
             this.container.style.transform = 'none';
             this.container.style.transition = 'left 0.25s cubic-bezier(0.2, 0, 0, 1), top 0.25s cubic-bezier(0.2, 0, 0, 1)';
         }
@@ -156,7 +243,6 @@ export class Toolbar {
 
     private render(): void {
         this.container.replaceChildren();
-        const vert = this.isVertical();
 
         // 1. Grip handle for dragging
         const grip = document.createElement('button');
@@ -169,6 +255,7 @@ export class Toolbar {
         this.container.appendChild(grip);
 
         // 2. Modo teclado button (stylus as cursor)
+        // Inverted logic: active when !penEnabled, rendered with amber styling
         const kbBtn = document.createElement('button');
         kbBtn.type = 'button';
         kbBtn.className = 'apolo-toolbar-btn apolo-btn-keyboard';
@@ -189,7 +276,7 @@ export class Toolbar {
 
         this.container.appendChild(this.createDivider());
 
-        // 3. Tool buttons (pluma, marcador, borrador, lazo, formas, espacio)
+        // 3. Core Tool buttons (pen, highlighter, eraser, lasso, shape)
         const toolsGroup = document.createElement('div');
         toolsGroup.className = 'apolo-toolbar-group apolo-tools-group';
         this.toolButtons.clear();
@@ -219,7 +306,7 @@ export class Toolbar {
                 this.shapeBtnIcon = iconContainer;
             }
 
-            // Small triangle indicator for openable estuche
+            // Triangle indicator for estuche on active tool
             const tri = document.createElement('span');
             tri.className = 'apolo-tool-triangle';
             tri.setAttribute('data-apolo-popover-trigger', 'true');
@@ -232,6 +319,7 @@ export class Toolbar {
 
             btn.setAttribute('data-apolo-popover-trigger', 'true');
             btn.addEventListener('click', () => {
+                // Second tap on the active tool toggles its estuche (including eraser!)
                 if (this.options.activeTool === def.tool && this.options.penEnabled) {
                     this.options.onToggleEstuche(def.tool);
                 } else {
@@ -242,8 +330,12 @@ export class Toolbar {
             this.toolButtons.set(def.tool, btn);
             toolsGroup.appendChild(btn);
         }
+        this.container.appendChild(toolsGroup);
+        this.updateToolButtonsVisual();
 
-        // Botón "Insertar canvas": un toque inserta caja debajo del cursor y activa el lápiz
+        this.container.appendChild(this.createDivider());
+
+        // 4. Instant Action: "Insertar canvas" (one tap inserts canvas, not a persistent mode)
         const insertCanvasBtn = document.createElement('button');
         insertCanvasBtn.type = 'button';
         insertCanvasBtn.className = 'apolo-toolbar-btn apolo-tool-btn apolo-insert-canvas-btn';
@@ -258,14 +350,12 @@ export class Toolbar {
             e.stopPropagation();
             this.options.onInsertCanvas?.();
         });
-        toolsGroup.appendChild(insertCanvasBtn);
-
-        this.container.appendChild(toolsGroup);
-        this.updateToolButtonsVisual();
+        this.insertCanvasBtn = insertCanvasBtn;
+        this.container.appendChild(insertCanvasBtn);
 
         this.container.appendChild(this.createDivider());
 
-        // 4. Undo and Redo - instant response on pointerdown with zero latency
+        // 5. Undo and Redo - instant response on pointerdown with zero latency
         const historyGroup = document.createElement('div');
         historyGroup.className = 'apolo-toolbar-group apolo-history-group';
 
@@ -311,9 +401,10 @@ export class Toolbar {
 
         this.container.appendChild(this.createDivider());
 
-        // 5. Four Favorites
+        // 6. Four Favorites (Priority 30: candidate for overflow)
         const favGroup = document.createElement('div');
         favGroup.className = 'apolo-toolbar-group apolo-favs-group';
+        this.favGroup = favGroup;
         this.favButtons = [];
 
         for (let i = 0; i < 4; i++) {
@@ -336,9 +427,10 @@ export class Toolbar {
 
         this.container.appendChild(this.createDivider());
 
-        // 6. Thickness preset dots (fino, medio, grueso)
+        // 7. Thickness preset dots: fine (4px), medium (8px), thick (14px) (Priority 20: candidate for overflow)
         const thicknessGroup = document.createElement('div');
         thicknessGroup.className = 'apolo-toolbar-group apolo-thickness-group';
+        this.thicknessGroup = thicknessGroup;
         this.thicknessButtons = [];
 
         const presets: Array<{ id: ThicknessPreset; label: string; tooltip: string }> = [
@@ -368,7 +460,7 @@ export class Toolbar {
 
         this.container.appendChild(this.createDivider());
 
-        // 7. Grid and More menu
+        // 8. Grid (Priority 10: overflows first) and More menu (Priority 100: never overflows)
         const utilGroup = document.createElement('div');
         utilGroup.className = 'apolo-toolbar-group apolo-util-group';
 
@@ -407,6 +499,190 @@ export class Toolbar {
         return ICONS.shapes[shape] || ICONS.shapes.rect;
     }
 
+    // Responsive overflow evaluation
+    recalculateLayout(): void {
+        this.evaluateOverflow();
+        this.updatePosition();
+    }
+
+    private evaluateOverflow(): void {
+        const vert = this.isVertical();
+        const winW = typeof window !== 'undefined' ? window.innerWidth : 1280;
+        const winH = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+        const availableSpace = vert
+            ? Math.max(300, winH - 96)
+            : Math.max(300, winW - 32);
+
+        // Reset visibility before measuring
+        this.overflowedItemIds.clear();
+        this.setCandidateVisibility('snapGrid', true);
+        this.setCandidateVisibility('thickness', true);
+        this.setCandidateVisibility('favorites', true);
+        this.updateDividersVisibility();
+
+        // Candidates ordered by priority: lowest priority overflows first
+        const overflowCandidates: Array<{ id: 'snapGrid' | 'thickness' | 'favorites'; priority: number }> = [
+            { id: 'snapGrid', priority: TOOLBAR_PRIORITIES.snapGrid },
+            { id: 'thickness', priority: TOOLBAR_PRIORITIES.thickness },
+            { id: 'favorites', priority: TOOLBAR_PRIORITIES.favorites },
+        ];
+
+        let neededSpace = vert ? this.getNeededHeight() : this.getNeededWidth();
+
+        for (const candidate of overflowCandidates) {
+            if (neededSpace <= availableSpace) {
+                break;
+            }
+            // Candidate must overflow
+            this.overflowedItemIds.add(candidate.id);
+            this.setCandidateVisibility(candidate.id, false);
+            this.updateDividersVisibility();
+            neededSpace = vert ? this.getNeededHeight() : this.getNeededWidth();
+        }
+    }
+
+    private setCandidateVisibility(id: 'snapGrid' | 'thickness' | 'favorites', visible: boolean): void {
+        if (id === 'snapGrid' && this.gridBtn) {
+            this.gridBtn.classList.toggle('is-overflowed', !visible);
+            this.gridBtn.style.display = visible ? '' : 'none';
+        } else if (id === 'thickness' && this.thicknessGroup) {
+            this.thicknessGroup.classList.toggle('is-overflowed', !visible);
+            this.thicknessGroup.style.display = visible ? '' : 'none';
+        } else if (id === 'favorites' && this.favGroup) {
+            this.favGroup.classList.toggle('is-overflowed', !visible);
+            this.favGroup.style.display = visible ? '' : 'none';
+        }
+    }
+
+    private updateDividersVisibility(): void {
+        const children = Array.from(this.container.children) as HTMLElement[];
+        let hasVisiblePreceding = false;
+
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            if (child.classList.contains('apolo-snap-dots-container')) continue;
+
+            if (child.classList.contains('apolo-toolbar-divider')) {
+                // Find if there is any visible following interactive element
+                let hasVisibleFollowing = false;
+                for (let j = i + 1; j < children.length; j++) {
+                    const next = children[j];
+                    if (!next.classList.contains('apolo-toolbar-divider') && next.style.display !== 'none' && !next.hidden) {
+                        hasVisibleFollowing = true;
+                        break;
+                    }
+                }
+                if (hasVisiblePreceding && hasVisibleFollowing) {
+                    child.style.display = '';
+                    hasVisiblePreceding = false;
+                } else {
+                    child.style.display = 'none';
+                }
+            } else {
+                if (child.style.display !== 'none' && !child.hidden) {
+                    hasVisiblePreceding = true;
+                }
+            }
+        }
+    }
+
+    private getNeededWidth(): number {
+        if (this.container.scrollWidth && this.container.scrollWidth > 0) {
+            return this.container.scrollWidth;
+        }
+        return this.computeIntrinsicWidth();
+    }
+
+    private getNeededHeight(): number {
+        if (this.container.scrollHeight && this.container.scrollHeight > 0) {
+            return this.container.scrollHeight;
+        }
+        return this.computeIntrinsicHeight();
+    }
+
+    computeIntrinsicWidth(): number {
+        let width = 24; // padding left & right (12px * 2)
+        // grip
+        width += 22 + 2;
+        // keyboard
+        width += 42 + 2;
+        // divider
+        width += 13;
+        // 5 tools
+        width += 5 * 42 + 4 * 2;
+        // divider
+        width += 13;
+        // insert canvas
+        width += 42 + 2;
+        // divider
+        width += 13;
+        // history (undo, redo)
+        width += 2 * 42 + 2;
+
+        if (!this.overflowedItemIds.has('favorites')) {
+            width += 13; // divider
+            width += 4 * 38 + 3 * 2;
+        }
+        if (!this.overflowedItemIds.has('thickness')) {
+            width += 13; // divider
+            width += 3 * 36 + 2 * 2;
+        }
+        width += 13; // divider
+        if (!this.overflowedItemIds.has('snapGrid')) {
+            width += 42 + 2;
+        }
+        width += 42; // more
+        return width;
+    }
+
+    computeIntrinsicHeight(): number {
+        let height = 16; // padding top & bottom (8px * 2)
+        // grip
+        height += 20 + 2;
+        // keyboard
+        height += 36 + 2;
+        // divider
+        height += 9;
+        // 5 tools
+        height += 5 * 36 + 4 * 2;
+        // divider
+        height += 9;
+        // insert canvas
+        height += 36 + 2;
+        // divider
+        height += 9;
+        // history
+        height += 2 * 36 + 2;
+
+        if (!this.overflowedItemIds.has('favorites')) {
+            height += 9;
+            height += 4 * 34 + 3 * 2;
+        }
+        if (!this.overflowedItemIds.has('thickness')) {
+            height += 9;
+            height += 3 * 32 + 2 * 2;
+        }
+        height += 9;
+        if (!this.overflowedItemIds.has('snapGrid')) {
+            height += 36 + 2;
+        }
+        height += 36; // more
+        return height;
+    }
+
+    getOverflowedItems(): string[] {
+        return Array.from(this.overflowedItemIds);
+    }
+
+    isItemOverflowed(id: string): boolean {
+        return this.overflowedItemIds.has(id);
+    }
+
+    getSlot(): ToolbarSlot {
+        return this.options.slot;
+    }
+
     private updateKeyboardModeVisual(): void {
         const isKeyboardActive = !this.options.penEnabled;
         this.keyboardBtn.classList.toggle('is-active', isKeyboardActive);
@@ -427,8 +703,8 @@ export class Toolbar {
                 btn.classList.toggle('is-whole-mode', isWhole);
                 btn.classList.toggle('is-reticle-mode', !isWhole);
                 const title = isWhole
-                    ? 'Borrador (Trazo completo) - Clic para alternar a Retícula'
-                    : 'Borrador (Retícula / Píxel) - Clic para alternar a Trazo completo';
+                    ? 'Borrador (Trazo completo) - Clic para opciones'
+                    : 'Borrador (Retícula / Píxel) - Clic para opciones';
                 btn.title = title;
                 btn.setAttribute('aria-label', title);
             }
@@ -462,7 +738,7 @@ export class Toolbar {
     private updateThicknessVisual(): void {
         const isEraser = this.options.activeTool === 'eraser';
         const isHighlighter = this.options.activeTool === 'highlighter';
-        const isDimmed = !this.options.penEnabled || this.options.activeTool === 'lasso' || this.options.activeTool === 'spacer';
+        const isDimmed = !this.options.penEnabled || this.options.activeTool === 'lasso';
         const dark = isDarkTheme();
 
         let activeIdx = 1; // default medium
@@ -553,8 +829,8 @@ export class Toolbar {
         this.currentDragPos = { x: newX, y: newY };
         this.updatePosition();
 
-        const curWidth = this.container.offsetWidth;
-        const curHeight = this.container.offsetHeight;
+        const curWidth = this.container.offsetWidth || this.computeIntrinsicWidth();
+        const curHeight = this.container.offsetHeight || this.computeIntrinsicHeight();
         const nearest = this.getNearestSlot(newX + curWidth / 2, newY + curHeight / 2);
         this.highlightSnapDot(nearest);
     };
@@ -562,8 +838,8 @@ export class Toolbar {
     private readonly onGripPointerUp = (e: PointerEvent): void => {
         if (!this.dragState || e.pointerId !== this.dragState.pointerId) return;
 
-        const curWidth = this.container.offsetWidth;
-        const curHeight = this.container.offsetHeight;
+        const curWidth = this.container.offsetWidth || this.computeIntrinsicWidth();
+        const curHeight = this.container.offsetHeight || this.computeIntrinsicHeight();
         const lastPos = this.currentDragPos || { x: this.dragState.origLeft, y: this.dragState.origTop };
         const nearest = this.getNearestSlot(lastPos.x + curWidth / 2, lastPos.y + curHeight / 2);
 
@@ -618,7 +894,7 @@ export class Toolbar {
         if (wasVert !== nowVert) {
             this.render();
         }
-        this.updatePosition();
+        this.recalculateLayout();
     }
 
     setPenEnabled(enabled: boolean): void {
@@ -688,9 +964,13 @@ export class Toolbar {
     }
 
     destroy(): void {
-        window.removeEventListener('pointermove', this.onGripPointerMove);
-        window.removeEventListener('pointerup', this.onGripPointerUp);
-        window.removeEventListener('pointercancel', this.onGripPointerUp);
+        this.resizeObserver?.disconnect();
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('resize', this.onWindowResize);
+            window.removeEventListener('pointermove', this.onGripPointerMove);
+            window.removeEventListener('pointerup', this.onGripPointerUp);
+            window.removeEventListener('pointercancel', this.onGripPointerUp);
+        }
         this.dotsContainer.remove();
         this.container.remove();
     }

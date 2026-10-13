@@ -30,7 +30,7 @@ export interface StrokeStyle {
 
 export type ShapeType = 'line' | 'arrow' | 'rect' | 'rounded-rect' | 'ellipse' | 'triangle';
 
-export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'spacer' | 'link';
+export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'link';
 
 export type ToolbarSlot = 'tl' | 'tc' | 'tr' | 'ml' | 'mr' | 'bl' | 'bc' | 'br';
 

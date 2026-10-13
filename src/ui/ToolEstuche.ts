@@ -99,7 +99,6 @@ export class ToolEstuche {
             eraser: 'Estuche del borrador',
             lasso: 'Estuche del lazo',
             shape: 'Estuche de formas',
-            spacer: 'Insertar canvas',
             link: 'Enlazar',
         };
         return titles[tool] || 'Estuche';
@@ -112,7 +111,6 @@ export class ToolEstuche {
             eraser: 'eraser',
             lasso: 'lasso',
             shape: 'shapes',
-            spacer: 'insertCanvas',
             link: 'dots',
         };
         return icons[tool] || 'pen';
@@ -121,10 +119,6 @@ export class ToolEstuche {
     open(state?: Partial<ToolEstucheState>, anchorEl?: HTMLElement | null): void {
         if (state) {
             this.state = { ...this.state, ...state };
-        }
-        if (this.state.tool === 'spacer') {
-            this.close();
-            return;
         }
 
         if (anchorEl) {

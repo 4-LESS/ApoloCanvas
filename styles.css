@@ -225,6 +225,9 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  width: max-content;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
   height: 58px;
   padding: 0 12px;
   box-sizing: border-box;
@@ -239,7 +242,10 @@
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
-  overflow: hidden;
+}
+
+.apolo-canvas-toolbar .is-overflowed {
+  display: none;
 }
 
 .apolo-canvas-toolbar * {
@@ -249,7 +255,9 @@
 .apolo-canvas-toolbar.is-vertical {
   flex-direction: column;
   width: 58px;
-  height: auto;
+  height: max-content;
+  height: fit-content;
+  max-height: calc(100vh - 96px);
   padding: 8px 10px;
   border-radius: var(--apolo-radius-toolbar);
 }

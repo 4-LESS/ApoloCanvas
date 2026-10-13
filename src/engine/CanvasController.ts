@@ -2162,9 +2162,7 @@ export class CanvasController {
             this.persistSoon();
         } else {
             this.recordHistory();
-            if (this.tool === 'spacer') {
-                this.insertSpace(raw);
-            } else if (this.tool === 'shape') {
+            if (this.tool === 'shape') {
                 this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
             } else {
                 const recognized = this.shapeRecognition ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
@@ -3756,9 +3754,7 @@ export class CanvasController {
         );
 
         if (this.points.size > 0 && this.activeStart) {
-            if (this.tool === 'spacer') {
-                this.paintSpacer();
-            } else if (this.tool === 'lasso') {
+            if (this.tool === 'lasso') {
                 this.paintLasso();
             } else {
                 this.paintActive();
