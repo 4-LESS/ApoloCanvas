@@ -631,10 +631,7 @@ export class CanvasController {
                 const { width: contentWidth } = this.getContentGeometry();
                 if (contentWidth > 0 && density > 0) {
                     const stepPx = Math.round((contentWidth / density) * 100) / 100;
-                    const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
-                        `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
-                    );
-                    for (const el of Array.from(spaceEls)) {
+                    for (const el of this.findSpaceElementsById(boxId)) {
                         el.style.setProperty('--apolo-grid-step', `${stepPx}px`);
                     }
                 }
@@ -659,6 +656,27 @@ export class CanvasController {
         }, document.body);
     }
 
+    private findSpaceElementsById(boxId: string): HTMLElement[] {
+        if (!boxId || typeof this.scroller?.querySelectorAll !== 'function') return [];
+        const candidates = this.scroller.querySelectorAll<HTMLElement>(
+            '.apolo-space, .apolo-space-block, .apolo-space-widget, [data-apolo-space], [data-apolo-space-id]'
+        );
+        const matches: HTMLElement[] = [];
+        for (let i = 0; i < candidates.length; i++) {
+            const el = candidates[i];
+            const id = el.dataset?.apoloSpace || el.dataset?.apoloSpaceId || el.getAttribute?.('data-apolo-space') || el.getAttribute?.('data-apolo-space-id');
+            if (id === boxId) {
+                matches.push(el);
+            }
+        }
+        return matches;
+    }
+
+    private findSpaceElementById(boxId: string): HTMLElement | null {
+        const list = this.findSpaceElementsById(boxId);
+        return list.length > 0 ? list[0] : null;
+    }
+
     private updateBoxProperty<K extends keyof BoxMetadata>(boxId: string, key: K, value: BoxMetadata[K]): void {
         if (!this.document.boxes) this.document.boxes = {};
         if (!this.document.boxes[boxId]) {
@@ -680,10 +698,7 @@ export class CanvasController {
             BoxRegistry.setBorderOutline(boxId, !!value);
         }
 
-        const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
-            `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
-        );
-        for (const el of Array.from(spaceEls)) {
+        for (const el of this.findSpaceElementsById(boxId)) {
             if (key === 'gridStyle') {
                 el.dataset.apoloGridStyle = String(value);
                 el.dataset.apoloGrid = value !== 'none' ? 'true' : 'false';
@@ -823,10 +838,7 @@ export class CanvasController {
 
     private deleteBox(boxId: string): void {
         this.queueSpaceMutation({ type: 'delete', id: boxId });
-        const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
-            `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
-        );
-        for (const el of Array.from(spaceEls)) {
+        for (const el of this.findSpaceElementsById(boxId)) {
             el.remove();
         }
         this.requestCmMeasure();
@@ -846,10 +858,7 @@ export class CanvasController {
             this.document.boxes[boxId].height = clampedHeight;
         }
 
-        const spaceEls = this.scroller.querySelectorAll<HTMLElement>(
-            `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
-        );
-        for (const el of Array.from(spaceEls)) {
+        for (const el of this.findSpaceElementsById(boxId)) {
             el.style.setProperty('height', `${clampedHeight}px`, 'important');
             el.style.setProperty('min-height', `${clampedHeight}px`, 'important');
             el.dataset.apoloHeight = String(clampedHeight);
@@ -1113,9 +1122,7 @@ export class CanvasController {
     private checkAutoGrowth(rawPoints: Point[]): void {
         if (!this.activeAnchor || !this.activeAnchor.blockId.startsWith('space:') || rawPoints.length === 0) return;
         const spaceId = this.activeAnchor.blockId.slice(6);
-        const boxEl = this.scroller.querySelector<HTMLElement>(
-            `[data-apolo-space-id="${spaceId}"], [data-apolo-space="${spaceId}"]`
-        );
+        const boxEl = this.findSpaceElementById(spaceId);
         if (!boxEl) return;
 
         const scrollerRect = this.scroller.getBoundingClientRect();
@@ -1525,6 +1532,8 @@ export class CanvasController {
 
     private focusEditorAt(clientX: number, clientY: number): void {
         if (!this.editor) return;
+        if (this.input?.shouldRejectTouch()) return;
+        if (isScreenPointForbidden(clientX, clientY)) return;
 
         // 1. Guard against tapping inside any drawing box element or handle
         if (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function') {
@@ -2354,9 +2363,7 @@ export class CanvasController {
         // 1. Space block anchor: direct element match in both Live Preview & Reading mode
         if (blockId.startsWith('space:')) {
             const spaceId = blockId.slice(6);
-            const spaceEl = this.scroller.querySelector<HTMLElement>(
-                `[data-apolo-space-id="${spaceId}"], [data-apolo-space="${spaceId}"]`
-            );
+            const spaceEl = this.findSpaceElementById(spaceId);
             if (spaceEl) {
                 const top = (spaceEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom;
                 this.blockPositionCache.set(cacheKey, top);
@@ -2517,9 +2524,7 @@ export class CanvasController {
         if (blockId.startsWith('space:')) {
             const spaceId = blockId.slice(6);
             const boxH = BoxRegistry.getHeight(spaceId) ?? 280;
-            const spaceEl = this.scroller.querySelector<HTMLElement>(
-                `[data-apolo-space-id="${spaceId}"], [data-apolo-space="${spaceId}"]`
-            );
+            const spaceEl = this.findSpaceElementById(spaceId);
             if (spaceEl) {
                 const rect = spaceEl.getBoundingClientRect();
                 const originX = (rect.left - scrollerRect.left + this.currentScrollLeft) / this.zoom;
@@ -3026,9 +3031,7 @@ export class CanvasController {
 
         // Scroll to the new box and apply fluid entrance animation
         window.setTimeout(() => {
-            const boxEl = this.scroller.querySelector<HTMLElement>(
-                `[data-apolo-space-id="${boxId}"], [data-apolo-space="${boxId}"]`
-            );
+            const boxEl = this.findSpaceElementById(boxId);
             if (boxEl) {
                 boxEl.classList.add('apolo-box-enter');
                 boxEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -4226,6 +4229,7 @@ export class CanvasController {
             if (isPenGated) {
                 // S-Pen is hovering or active: cancel single-finger touch immediately to prevent accidental screen jumping or ghost taps
                 event.preventDefault();
+                event.stopPropagation();
                 this.palmRejectedSingleTouch = true;
                 this.singleTouchStartCoords = null;
                 this.lastSingleTouch = null;
@@ -4255,6 +4259,7 @@ export class CanvasController {
         if (this.touches.size === 1) {
             if (this.palmRejectedSingleTouch) {
                 event.preventDefault();
+                event.stopPropagation();
                 return;
             }
 
@@ -4295,7 +4300,7 @@ export class CanvasController {
         if (event.pointerType !== 'touch') return;
         const start = this.singleTouchStartCoords;
         const wasPanned = this.singleTouchPanned;
-        const wasPalmRejected = this.palmRejectedSingleTouch;
+        const wasPalmRejected = this.palmRejectedSingleTouch || (this.input ? this.input.shouldRejectTouch() : false);
         this.singleTouchStartCoords = null;
         this.lastSingleTouch = null;
         this.singleTouchPanned = false;
@@ -4315,6 +4320,7 @@ export class CanvasController {
 
         if (wasPalmRejected) {
             event.preventDefault();
+            event.stopPropagation();
             return;
         }
 

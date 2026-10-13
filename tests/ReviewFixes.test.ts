@@ -1,12 +1,16 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { EditorState } from '@codemirror/state';
+import { EditorState, StateField } from '@codemirror/state';
 import {
     ApoloSpaceWidget,
     ApoloSpaceSyncController,
     BoxRegistry,
     apoloSpaceField,
     boxRegistryUpdateEffect,
+    configureLivePreviewField,
+    getConfiguredLivePreviewField,
+    isLivePreviewState,
+    createApoloSpaceExtension,
     parseApoloSpaceHtml,
     parseApoloSpaceBlock,
     applySpaceMutationToMarkdown,
@@ -19,9 +23,21 @@ import {
 } from '../src/editor/ApoloSpaceExtension.ts';
 import { formatCanvasDivTag } from '../src/editor/CanvasInsertion.ts';
 import { InputManager } from '../src/engine/input/InputManager.ts';
+import {
+    PersistenceQueue,
+    sanitizeBoxId,
+    boxStoragePath,
+    noteStoragePath,
+    normalizeVaultNotePath,
+    notePathToKey,
+    keyToNotePath,
+    companionPath,
+    boxCompanionPath,
+    renderBoxSvg,
+} from '../src/io/PersistenceQueue.ts';
 import { BoxMenu } from '../src/ui/BoxMenu.ts';
 import { MoreMenu } from '../src/ui/MoreMenu.ts';
-import type { PageDocument, StrokeElement } from '../src/core/types.ts';
+import type { PageDocument, Point, StrokeElement } from '../src/core/types.ts';
 
 describe('Code Review Fixes Verification', () => {
     describe('Issue 1 & 3: BoxRegistry Synchronization & Widget Snapshot Equality', () => {
@@ -200,7 +216,7 @@ describe('Code Review Fixes Verification', () => {
         });
     });
 
-    describe('Issue 5 & 6: shouldAcceptPointer Enforcement and Pass-Through Event Handling', () => {
+    describe('Issue 5 & 6: shouldAcceptPointer Enforcement and Rejected Input Safety', () => {
         test('shouldAcceptPointer=false prevents drawing, stops propagation, and ignores subsequent moves', () => {
             const target = {
                 style: { touchAction: '', userSelect: '' },
@@ -211,11 +227,13 @@ describe('Code Review Fixes Verification', () => {
 
             let strokeStarted = false;
             let strokeMoved = false;
+            let nonDrawingCalled = false;
 
             const input = new InputManager(target, {
                 shouldAcceptPointer: (event) => event.clientX < 500, // Reject pointers at clientX >= 500
                 onStrokeStart: () => { strokeStarted = true; },
                 onStrokeMove: () => { strokeMoved = true; },
+                onNonDrawingPointerDown: () => { nonDrawingCalled = true; },
             });
 
             let defaultPrevented = false;
@@ -236,23 +254,43 @@ describe('Code Review Fixes Verification', () => {
             assert.strictEqual(defaultPrevented, true, 'Event must be preventDefaulted when rejected');
             assert.strictEqual(propagationStopped, true, 'Event propagation must be stopped when rejected');
             assert.strictEqual(strokeStarted, false, 'Stroke must not start for rejected pointer');
+            assert.strictEqual(nonDrawingCalled, false, 'onNonDrawingPointerDown must NOT fire for rejected pointers');
             assert.strictEqual(input.hasActiveStroke, false);
 
-            // Subsequent move with rejected pointerId
+            // Subsequent move and up with rejected pointerId
+            let movePrevented = false;
+            let moveStopped = false;
             const moveEvent = {
                 pointerId: 42,
                 pointerType: 'pen',
                 clientX: 605,
                 clientY: 105,
+                preventDefault: () => { movePrevented = true; },
+                stopPropagation: () => { moveStopped = true; },
             } as unknown as PointerEvent;
 
             (input as any).handleMove(moveEvent);
             assert.strictEqual(strokeMoved, false, 'Subsequent move with rejected pointer must be ignored');
+            assert.strictEqual(movePrevented, true, 'Move event for rejected pointer must be preventDefaulted');
+            assert.strictEqual(moveStopped, true, 'Move event for rejected pointer must stop propagation');
+
+            let upPrevented = false;
+            let upStopped = false;
+            (input as any).handleUp({
+                pointerId: 42,
+                pointerType: 'pen',
+                clientX: 605,
+                clientY: 105,
+                preventDefault: () => { upPrevented = true; },
+                stopPropagation: () => { upStopped = true; },
+            } as unknown as PointerEvent);
+            assert.strictEqual(upPrevented, true, 'Up event for rejected pointer must be preventDefaulted');
+            assert.strictEqual(upStopped, true, 'Up event for rejected pointer must stop propagation');
 
             input.destroy();
         });
 
-        test('passThroughPointerEvent dispatches pointerdown immediately and schedules pointerup and click asynchronously', async () => {
+        test('Rejected drawing gestures and palm-rejected touches never synthesize or forward DOM events to underlying elements', async () => {
             const target = {
                 style: { touchAction: '', userSelect: '' },
                 addEventListener: () => {},
@@ -261,7 +299,14 @@ describe('Code Review Fixes Verification', () => {
                 getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
             } as unknown as HTMLElement;
 
-            const input = new InputManager(target);
+            let nonDrawingCount = 0;
+            const input = new InputManager(target, {
+                shouldAcceptPointer: (event) => event.clientX < 300,
+                onNonDrawingPointerDown: () => { nonDrawingCount++; },
+            });
+
+            // Verify passThroughPointerEvent is completely removed
+            assert.strictEqual(typeof (input as any).passThroughPointerEvent, 'undefined', 'passThroughPointerEvent must not exist');
 
             const dispatchedEvents: Event[] = [];
             let focusCalled = false;
@@ -279,39 +324,52 @@ describe('Code Review Fixes Verification', () => {
                 },
             };
 
-            // Temporarily mock document.elementsFromPoint
             const originalDoc = globalThis.document;
             (globalThis as any).document = {
                 elementsFromPoint: () => [mockUnderlying],
             };
 
             try {
-                (input as any).passThroughPointerEvent({
-                    clientX: 120,
+                // 1. Rejected pen gesture (outside allowed drawing area: clientX = 450 >= 300)
+                (input as any).handleDown({
+                    clientX: 450,
                     clientY: 240,
-                    screenX: 120,
-                    screenY: 240,
                     button: 0,
                     buttons: 1,
                     pointerId: 99,
                     pointerType: 'pen',
                     isPrimary: true,
-                } as PointerEvent);
+                    preventDefault: () => {},
+                    stopPropagation: () => {},
+                } as unknown as PointerEvent);
 
-                // Synchronously: only pointerdown should be dispatched; pointerup and click are scheduled
-                assert.strictEqual(focusCalled, false, 'Focus must NOT be stolen from editor');
-                assert.strictEqual(dispatchedEvents.length, 1, 'Only pointerdown must be dispatched synchronously');
-                assert.strictEqual((dispatchedEvents[0] as any).type, 'pointerdown');
-                assert.strictEqual((dispatchedEvents[0] as any).clientX, 120);
-                assert.strictEqual((dispatchedEvents[0] as any).clientY, 240);
-                assert.strictEqual(clickCalled, false, 'Click must not be called synchronously');
+                // 2. Palm-rejected touch while pen is hovering (inside allowed area: clientX = 120 < 300)
+                (input as any).handleEnter({ pointerType: 'pen', clientX: 120, clientY: 240 } as PointerEvent);
+                let palmPrevented = false;
+                let palmStopped = false;
+                (input as any).handleDown({
+                    clientX: 120,
+                    clientY: 240,
+                    button: 0,
+                    buttons: 1,
+                    pointerId: 100,
+                    pointerType: 'touch',
+                    isPrimary: true,
+                    preventDefault: () => { palmPrevented = true; },
+                    stopPropagation: () => { palmStopped = true; },
+                } as unknown as PointerEvent);
 
-                // Wait for scheduled release (next tick/rAF)
-                await new Promise((resolve) => setTimeout(resolve, 20));
+                assert.strictEqual(palmPrevented, true, 'Palm-rejected touch must call preventDefault()');
+                assert.strictEqual(palmStopped, true, 'Palm-rejected touch must call stopPropagation()');
+                assert.strictEqual(nonDrawingCount, 0, 'Neither rejected pen nor palm-rejected touch may call onNonDrawingPointerDown');
+                assert.strictEqual(dispatchedEvents.length, 0, 'No synthetic DOM events may be dispatched synchronously');
+                assert.strictEqual(focusCalled, false, 'Focus must never be triggered on underlying elements');
+                assert.strictEqual(clickCalled, false, 'Click must never be triggered on underlying elements');
 
-                assert.strictEqual(dispatchedEvents.length, 2, 'Must dispatch both pointerdown and pointerup');
-                assert.strictEqual((dispatchedEvents[1] as any).type, 'pointerup');
-                assert.strictEqual(clickCalled, true, 'Click must be triggered on interactive buttons');
+                await new Promise((resolve) => setTimeout(resolve, 25));
+
+                assert.strictEqual(dispatchedEvents.length, 0, 'No synthetic DOM events may be dispatched asynchronously');
+                assert.strictEqual(clickCalled, false, 'Click must never be triggered asynchronously');
             } finally {
                 (globalThis as any).document = originalDoc;
                 input.destroy();
@@ -1100,7 +1158,7 @@ describe('Code Review Fixes Verification', () => {
             assert.strictEqual(dispatchCount, 1, 'Pending frame dispatch must be cancelled when controller is destroyed');
         });
 
-        test('Pass-through timing: stateful UI button requiring temporal down->up separation opens menu on pointerup', async () => {
+        test('Non-drawing pointer handling only routes allowed non-drawing pointers without synthesizing DOM clicks', async () => {
             const target = {
                 style: { touchAction: '', userSelect: '' },
                 addEventListener: () => {},
@@ -1109,33 +1167,22 @@ describe('Code Review Fixes Verification', () => {
                 getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
             } as unknown as HTMLElement;
 
-            const input = new InputManager(target);
+            const nonDrawingEvents: PointerEvent[] = [];
+            const input = new InputManager(target, {
+                enableMouseDrawing: false,
+                shouldAcceptPointer: (ev) => ev.clientX < 400,
+                onNonDrawingPointerDown: (ev) => {
+                    nonDrawingEvents.push(ev);
+                },
+            });
 
-            // Simulate a UI component that tracks press state on pointerdown and only triggers action if pointerup arrives in a later tick
-            let isPressedInPreviousTick = false;
-            let pressTickCompleted = false;
-            let menuOpenedOnPointerUp = false;
-            let downButtons = -1;
-            let upButtons = -1;
-
+            const dispatchedEvents: any[] = [];
             const statefulButton = {
                 tagName: 'BUTTON',
                 classList: { contains: () => false },
                 closest: () => statefulButton,
                 dispatchEvent: (ev: any) => {
-                    if (ev.type === 'pointerdown') {
-                        isPressedInPreviousTick = true;
-                        downButtons = ev.buttons;
-                        queueMicrotask(() => {
-                            pressTickCompleted = true;
-                        });
-                    } else if (ev.type === 'pointerup') {
-                        upButtons = ev.buttons;
-                        if (isPressedInPreviousTick && pressTickCompleted) {
-                            menuOpenedOnPointerUp = true;
-                        }
-                        isPressedInPreviousTick = false;
-                    }
+                    dispatchedEvents.push(ev);
                     return true;
                 },
             };
@@ -1146,26 +1193,43 @@ describe('Code Review Fixes Verification', () => {
             };
 
             try {
-                (input as any).passThroughPointerEvent({
+                // 1. Allowed non-drawing mouse click (pen is NOT active, clientX=80 < 400)
+                const allowedMouse = {
                     clientX: 80,
                     clientY: 40,
-                    screenX: 80,
-                    screenY: 40,
                     button: 0,
                     buttons: 1,
                     pointerId: 7,
-                    pointerType: 'pen',
+                    pointerType: 'mouse',
                     isPrimary: true,
-                } as PointerEvent);
+                    preventDefault: () => {},
+                    stopPropagation: () => {},
+                } as unknown as PointerEvent;
+                (input as any).handleDown(allowedMouse);
 
-                assert.strictEqual(isPressedInPreviousTick, true, 'Button must enter pressed state synchronously on pointerdown');
-                assert.strictEqual(downButtons, 1, 'pointerdown must carry active buttons=1');
-                assert.strictEqual(menuOpenedOnPointerUp, false, 'Menu must not open synchronously before pointerup frame');
+                assert.strictEqual(nonDrawingEvents.length, 1, 'Allowed non-drawing mouse pointerdown must invoke onNonDrawingPointerDown');
+                assert.strictEqual(nonDrawingEvents[0].pointerId, 7);
+                assert.strictEqual(dispatchedEvents.length, 0, 'InputManager must never synthesize DOM events on underlying elements');
 
-                await new Promise((resolve) => setTimeout(resolve, 20));
+                // 2. Rejected mouse pointer outside accepted region (clientX=500 >= 400)
+                let rejectedPrevented = false;
+                let rejectedStopped = false;
+                (input as any).handleDown({
+                    clientX: 500,
+                    clientY: 40,
+                    button: 0,
+                    buttons: 1,
+                    pointerId: 8,
+                    pointerType: 'mouse',
+                    isPrimary: true,
+                    preventDefault: () => { rejectedPrevented = true; },
+                    stopPropagation: () => { rejectedStopped = true; },
+                } as unknown as PointerEvent);
 
-                assert.strictEqual(upButtons, 0, 'pointerup must carry released buttons=0');
-                assert.strictEqual(menuOpenedOnPointerUp, true, 'Stateful button must open menu after receiving asynchronous pointerup');
+                assert.strictEqual(rejectedPrevented, true);
+                assert.strictEqual(rejectedStopped, true);
+                assert.strictEqual(nonDrawingEvents.length, 1, 'Rejected pointer must NOT invoke onNonDrawingPointerDown');
+                assert.strictEqual(dispatchedEvents.length, 0, 'No synthetic DOM events may be dispatched');
             } finally {
                 (globalThis as any).document = originalDoc;
                 input.destroy();
@@ -1313,4 +1377,394 @@ describe('Code Review Fixes Verification', () => {
             }
         });
     });
+
+    describe('PR Review Critical Fixes: Point Immutability, ESM Live Preview Field, and Path Sanitization', () => {
+        test('InputManager yields frozen immutable Point snapshots by default so retained references never mutate across coalesced batches', () => {
+            const target = {
+                style: { touchAction: '', userSelect: '' },
+                addEventListener: () => {},
+                removeEventListener: () => {},
+                setPointerCapture: () => {},
+                releasePointerCapture: () => {},
+                getBoundingClientRect: () => ({ left: 10, top: 20, width: 800, height: 600 }),
+            } as unknown as HTMLElement;
+
+            let startPoint: Point | null = null;
+            let endPoint: Point | null = null;
+            const retainedBatches: ReadonlyArray<Point>[] = [];
+            const retainedPoints: Point[] = [];
+            const initialSnapshots: Array<{ x: number; y: number; pressure: number }> = [];
+
+            const input = new InputManager(target, {
+                onStrokeStart: (pt) => {
+                    startPoint = pt;
+                },
+                onStrokeMove: (points) => {
+                    retainedBatches.push(points);
+                    for (const p of points) {
+                        retainedPoints.push(p);
+                        initialSnapshots.push({ x: p.x, y: p.y, pressure: p.pressure });
+                    }
+                },
+                onStrokeEnd: (pt) => {
+                    endPoint = pt;
+                },
+            });
+
+            (input as any).handleDown({
+                pointerId: 1,
+                pointerType: 'pen',
+                button: 0,
+                clientX: 50,
+                clientY: 60,
+                pressure: 0.4,
+                tiltX: 5,
+                tiltY: 10,
+                timeStamp: 1000,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            } as unknown as PointerEvent);
+
+            assert.ok(startPoint, 'onStrokeStart must receive a point');
+            assert.strictEqual(Object.isFrozen(startPoint), true, 'Start point must be frozen in default immutable mode');
+            assert.strictEqual((startPoint as Point).x, 40);
+            assert.strictEqual((startPoint as Point).y, 40);
+
+            // Dispatch 30 move events, each with 4 coalesced events = 120 points (> 64 pool size)
+            for (let m = 0; m < 30; m++) {
+                const coalesced = [0, 1, 2, 3].map((c) => ({
+                    pointerId: 1,
+                    pointerType: 'pen',
+                    clientX: 100 + m * 10 + c,
+                    clientY: 200 + m * 10 + c,
+                    pressure: Math.min(1, 0.2 + (m * 4 + c) * 0.005),
+                    tiltX: m,
+                    tiltY: c,
+                    timeStamp: 1001 + m * 10 + c,
+                }));
+
+                (input as any).handleMove({
+                    pointerId: 1,
+                    pointerType: 'pen',
+                    clientX: 100 + m * 10 + 3,
+                    clientY: 200 + m * 10 + 3,
+                    pressure: 0.5,
+                    timeStamp: 1001 + m * 10 + 3,
+                    getCoalescedEvents: () => coalesced,
+                    preventDefault: () => {},
+                } as unknown as PointerEvent);
+            }
+
+            (input as any).handleUp({
+                pointerId: 1,
+                pointerType: 'pen',
+                clientX: 500,
+                clientY: 600,
+                pressure: 0.1,
+                timeStamp: 2000,
+                preventDefault: () => {},
+            } as unknown as PointerEvent);
+
+            assert.strictEqual(retainedPoints.length, 120, 'All 120 coalesced points must be delivered');
+            assert.strictEqual(retainedBatches.length, 30, 'Each move must yield an independent batch array');
+
+            // Verify every retained batch and point is frozen, unique, and unmutated
+            for (let i = 0; i < retainedBatches.length; i++) {
+                assert.strictEqual(Object.isFrozen(retainedBatches[i]), true, `Batch ${i} array must be frozen`);
+                if (i > 0) {
+                    assert.notStrictEqual(retainedBatches[i], retainedBatches[i - 1], 'Batch arrays must not be reused in immutable mode');
+                }
+            }
+
+            for (let i = 0; i < retainedPoints.length; i++) {
+                const pt = retainedPoints[i];
+                const snap = initialSnapshots[i];
+                assert.strictEqual(Object.isFrozen(pt), true, `Point ${i} must be frozen`);
+                assert.strictEqual(pt.x, snap.x, `Retained point ${i}.x must not be mutated by later pool wrap-around`);
+                assert.strictEqual(pt.y, snap.y, `Retained point ${i}.y must not be mutated by later pool wrap-around`);
+                assert.strictEqual(pt.pressure, snap.pressure, `Retained point ${i}.pressure must not be mutated`);
+            }
+
+            assert.ok(endPoint, 'onStrokeEnd must receive a point');
+            assert.strictEqual(Object.isFrozen(endPoint), true, 'End point must be frozen');
+
+            input.destroy();
+        });
+
+        test('InputManager supports opt-in poolPoints: true and InputManager.clonePoints helper', () => {
+            const target = {
+                style: { touchAction: '', userSelect: '' },
+                addEventListener: () => {},
+                removeEventListener: () => {},
+                setPointerCapture: () => {},
+                releasePointerCapture: () => {},
+                getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+            } as unknown as HTMLElement;
+
+            let clonedFromPool: Point[] = [];
+            const rawPoolRefs: Point[] = [];
+
+            const input = new InputManager(target, {
+                poolPoints: true,
+                onStrokeMove: (points) => {
+                    rawPoolRefs.push(points[0]);
+                    if (clonedFromPool.length === 0) {
+                        clonedFromPool = InputManager.clonePoints(points);
+                    }
+                },
+            });
+
+            (input as any).handleDown({
+                pointerId: 5,
+                pointerType: 'pen',
+                button: 0,
+                clientX: 10,
+                clientY: 20,
+                pressure: 0.5,
+                timeStamp: 100,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            } as unknown as PointerEvent);
+
+            // Dispatch 70 single-point moves to wrap the 64-slot pool
+            for (let i = 0; i < 70; i++) {
+                (input as any).handleMove({
+                    pointerId: 5,
+                    pointerType: 'pen',
+                    clientX: 100 + i,
+                    clientY: 200 + i,
+                    pressure: 0.6,
+                    timeStamp: 101 + i,
+                    preventDefault: () => {},
+                } as unknown as PointerEvent);
+            }
+
+            // In pooled mode, slot 0 of pointPool is reused on every move batch
+            assert.strictEqual(rawPoolRefs[0], rawPoolRefs[1], 'Opt-in poolPoints: true reuses pre-allocated Point instances across moves');
+            assert.strictEqual(rawPoolRefs[0].x, 169, 'Pooled object slot 0 reflects the latest move value (100 + 69)');
+
+            // However, the snapshot cloned via InputManager.clonePoints remains untouched and frozen
+            assert.strictEqual(clonedFromPool.length, 1);
+            assert.strictEqual(Object.isFrozen(clonedFromPool[0]), true);
+            assert.strictEqual(clonedFromPool[0].x, 100, 'Cloned point from InputManager.clonePoints must remain immutable');
+            assert.strictEqual(clonedFromPool[0].y, 200);
+
+            input.destroy();
+        });
+
+        test('ApoloSpaceExtension configures Live Preview StateField explicitly without CommonJS require', () => {
+            const mockLivePreviewField = StateField.define<boolean>({
+                create: () => true,
+                update: (val) => val,
+            });
+
+            const mockSourceModeField = StateField.define<boolean>({
+                create: () => false,
+                update: (val) => val,
+            });
+
+            try {
+                const docText = '<div class="apolo-space" data-apolo-space="box-esm-1" style="height:220px;"></div>';
+
+                // 1. Live Preview = true -> decorations rendered
+                const extensionsLive = createApoloSpaceExtension(mockLivePreviewField);
+                assert.strictEqual(getConfiguredLivePreviewField(), mockLivePreviewField);
+
+                const liveState = EditorState.create({
+                    doc: docText,
+                    extensions: [mockLivePreviewField, ...extensionsLive],
+                });
+                assert.strictEqual(isLivePreviewState(liveState), true);
+                const liveDecos = liveState.field(apoloSpaceField);
+                let liveCount = 0;
+                const liveIter = liveDecos.iter();
+                while (liveIter.value) {
+                    liveCount++;
+                    liveIter.next();
+                }
+                assert.strictEqual(liveCount, 1, 'Widget decoration must render when Live Preview StateField is true');
+
+                // 2. Source Mode (Live Preview = false) -> no decorations rendered
+                configureLivePreviewField(mockSourceModeField);
+                const sourceState = EditorState.create({
+                    doc: docText,
+                    extensions: [mockSourceModeField, apoloSpaceField],
+                });
+                assert.strictEqual(isLivePreviewState(sourceState), false);
+                const sourceDecos = sourceState.field(apoloSpaceField);
+                assert.strictEqual(sourceDecos.size, 0, 'Decorations must be suppressed when Live Preview StateField is false (Source Mode)');
+            } finally {
+                configureLivePreviewField(null);
+            }
+        });
+
+        test('sanitizeBoxId and filepath helpers prevent path traversal, Windows reserved names, and collisions', () => {
+            // 1. Clean alphanumeric IDs are preserved verbatim
+            assert.strictEqual(sanitizeBoxId('box-abc_123'), 'box-abc_123');
+            assert.strictEqual(boxStoragePath('box-abc_123'), '.apolocanvas/boxes/box-abc_123.json');
+            assert.strictEqual(boxCompanionPath('Notes/Daily Note.md', 'box-abc'), 'Notes/assets/ink/Daily Note.box-abc.ink.svg');
+
+            // 2. Path traversal attempts are sanitized and hashed
+            const traversalIds = [
+                '../../etc/passwd',
+                '..\\..\\Windows\\System32\\cmd.exe',
+                '..',
+                '.',
+                'box/../../../secret',
+                'folder/box',
+                'folder\\box',
+            ];
+            for (const rawId of traversalIds) {
+                const safeId = sanitizeBoxId(rawId);
+                assert.ok(/^[A-Za-z0-9_-]+$/.test(safeId), `Sanitized ID "${safeId}" for "${rawId}" must only contain [A-Za-z0-9_-]`);
+                assert.ok(!safeId.includes('..'), 'Sanitized ID must not contain ..');
+
+                const storagePath = boxStoragePath(rawId);
+                assert.ok(storagePath.startsWith('.apolocanvas/boxes/'), `Storage path "${storagePath}" must stay inside .apolocanvas/boxes/`);
+                assert.strictEqual(storagePath.split('/').length, 3, 'Storage path must not contain extra directory segments');
+
+                const svgPath = boxCompanionPath('Notes/Daily.md', rawId);
+                assert.ok(svgPath.startsWith('Notes/assets/ink/Daily.'), `Companion path "${svgPath}" must stay inside Notes/assets/ink/`);
+                assert.strictEqual(svgPath.split('/').length, 4, 'Companion path must not traverse directories');
+            }
+
+            // 3. Windows reserved device names are never emitted bare
+            const reservedNames = ['CON', 'prn', 'Aux', 'NUL', 'COM1', 'com9', 'LPT1', 'lpt9', 'con.txt', 'nul.json'];
+            for (const reserved of reservedNames) {
+                const safeId = sanitizeBoxId(reserved);
+                assert.ok(!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(safeId), `Reserved name "${reserved}" must be hashed/disambiguated, got "${safeId}"`);
+            }
+
+            // 4. Collision resistance: distinct unsafe IDs map to distinct sanitized filenames
+            const distinctUnsafe = [
+                'box:1',
+                'box*1',
+                'box?1',
+                'box/1',
+                'box\\1',
+                'box_1',
+                '../box-1',
+                '..\\box-1',
+                'box-1',
+            ];
+            const mapped = new Set(distinctUnsafe.map((id) => sanitizeBoxId(id)));
+            assert.strictEqual(mapped.size, distinctUnsafe.length, 'Distinct raw box IDs must never collide after sanitization');
+
+            // 5. Note path normalization prevents traversal in noteStoragePath and companionPath
+            assert.strictEqual(normalizeVaultNotePath('../../outside/secret.md'), 'outside/secret.md');
+            const safeNoteStorage = noteStoragePath('../../outside/secret.md');
+            assert.ok(safeNoteStorage.startsWith('.apolocanvas/notes/'));
+            assert.ok(!safeNoteStorage.includes('..'));
+
+            const safeCompanion = companionPath('../../outside/CON.md');
+            assert.ok(!safeCompanion.includes('..'));
+            assert.strictEqual(safeCompanion, 'outside/assets/ink/_CON.ink.svg');
+
+            // 6. renderBoxSvg uses sanitized pattern ID
+            const svg = renderBoxSvg('box"onload="alert(1)', [], 400, 200, { gridStyle: 'dots' });
+            assert.ok(!svg.includes('onload="alert(1)"'), 'SVG pattern ID must be sanitized against attribute injection');
+        });
+
+        test('PersistenceQueue persists and reloads strokes with adversarial box IDs without path traversal or collisions', async () => {
+            const files = new Map<string, string>();
+            const noteMarkdown = [
+                '<div class="apolo-space" data-apolo-space="../../etc/passwd" style="height:200px;"></div>',
+                '<div class="apolo-space" data-apolo-space="CON" style="height:200px;"></div>',
+                '<div class="apolo-space" data-apolo-space="box:alpha" style="height:200px;"></div>',
+                '<div class="apolo-space" data-apolo-space="box*alpha" style="height:200px;"></div>',
+            ].join('\n');
+
+            const mockFile = { path: 'Notes/Test.md' } as any;
+            const mockApp = {
+                vault: {
+                    read: async () => noteMarkdown,
+                    adapter: {
+                        exists: async (p: string) => files.has(p),
+                        mkdir: async () => {},
+                        read: async (p: string) => {
+                            const content = files.get(p);
+                            if (content === undefined) throw new Error(`ENOENT: ${p}`);
+                            return content;
+                        },
+                        write: async (p: string, data: string) => {
+                            files.set(p, data);
+                        },
+                        remove: async (p: string) => {
+                            files.delete(p);
+                        },
+                        rename: async (oldP: string, newP: string) => {
+                            const v = files.get(oldP);
+                            if (v !== undefined) {
+                                files.set(newP, v);
+                                files.delete(oldP);
+                            }
+                        },
+                    },
+                },
+            } as any;
+
+            const queue = new PersistenceQueue(mockApp);
+            const makeStroke = (id: string, boxId: string): StrokeElement => ({
+                id,
+                type: 'stroke',
+                blockId: `space:${boxId}`,
+                points: [
+                    { x: 0.1, y: 10, pressure: 0.5, time: 1000 },
+                    { x: 0.6, y: 60, pressure: 0.5, time: 1010 },
+                ],
+                style: {
+                    color: 'var(--text-normal)',
+                    width: 2,
+                    opacity: 1,
+                    blendMode: 'source-over',
+                },
+                bounds: { minX: 0.1, minY: 10, maxX: 0.6, maxY: 60 },
+                timestamp: 1000,
+            });
+
+            const doc: PageDocument = {
+                schemaVersion: 1,
+                version: 1,
+                id: 'Notes/Test.md',
+                notePath: 'Notes/Test.md',
+                elements: [
+                    makeStroke('s-traversal', '../../etc/passwd'),
+                    makeStroke('s-reserved', 'CON'),
+                    makeStroke('s-colon', 'box:alpha'),
+                    makeStroke('s-star', 'box*alpha'),
+                ],
+                boxes: {
+                    '../../etc/passwd': { height: 200 },
+                    'CON': { height: 200 },
+                    'box:alpha': { height: 200 },
+                    'box*alpha': { height: 200 },
+                },
+                createdAt: 1000,
+                updatedAt: 1000,
+            };
+
+            queue.enqueue(doc, mockFile, 'Notes/Test.md');
+            await queue.flush();
+
+            assert.ok(files.size >= 5, 'Must write 1 note file and 4 distinct box files');
+
+            // Verify every written file path is strictly inside .apolocanvas/boxes/, .apolocanvas/notes/, or Notes/assets/ink/
+            for (const filePath of files.keys()) {
+                assert.ok(!filePath.includes('..'), `Written path "${filePath}" must never contain '..'`);
+                const validPrefix =
+                    filePath.startsWith('.apolocanvas/boxes/') ||
+                    filePath.startsWith('.apolocanvas/notes/') ||
+                    filePath.startsWith('Notes/assets/ink/');
+                assert.ok(validPrefix, `Written path "${filePath}" must stay within expected vault subdirectories`);
+            }
+
+            // Cold disk reload via a fresh PersistenceQueue instance must recover all 4 strokes without collision
+            const coldQueue = new PersistenceQueue(mockApp);
+            const reloaded = await coldQueue.loadDocumentForNote(mockFile);
+            assert.strictEqual(reloaded.elements.length, 4, 'All 4 strokes from distinct adversarial box IDs must round-trip from disk without collision');
+            const reloadedIds = new Set(reloaded.elements.map((s) => s.id));
+            assert.deepStrictEqual(reloadedIds, new Set(['s-traversal', 's-reserved', 's-colon', 's-star']));
+        });
+    });
 });
+

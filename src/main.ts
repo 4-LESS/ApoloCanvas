@@ -1,11 +1,11 @@
-import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { EngineEventBus } from './core/events';
 import { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot } from './core/types';
 import { CanvasController } from './engine/CanvasController';
 import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue';
 import { DEFAULT_FAVORITES } from './ui/theme';
 import { openLocalGraph } from './ui/LinkSuggestModal';
-import { apoloSpaceExtension, BoxRegistry, boxRegistryUpdateEffect, normalizeBoxId } from './editor/ApoloSpaceExtension';
+import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension';
 
 export interface ApoloCanvasSettings {
     defaultPenColor: string;
@@ -84,7 +84,7 @@ export default class ApoloCanvasPlugin extends Plugin {
         await ensureFolder(this.app, '.apolocanvas/notes');
 
         // Register CM6 Live Preview widget extension for apolo-space blocks
-        this.registerEditorExtension(apoloSpaceExtension);
+        this.registerEditorExtension(createApoloSpaceExtension(editorLivePreviewField));
 
         // Register Reading mode codeblock processor for apolo-space blocks
         this.registerMarkdownCodeBlockProcessor('apolo-space', (source, el) => {

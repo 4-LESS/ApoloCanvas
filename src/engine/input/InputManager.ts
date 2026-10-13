@@ -4,10 +4,32 @@ export interface InputManagerOptions {
     palmRejectionCooldownMs?: number;
     /** Enables primary-button mouse strokes for desktop and trackpad users. Defaults to true. */
     enableMouseDrawing?: boolean;
+    /**
+     * Controls whether `onStrokeStart`, `onStrokeMove`, and `onStrokeEnd` yield frozen,
+     * immutable `Point` snapshots (`Object.freeze`) in a fresh batch array so retained
+     * references are never mutated by subsequent move events.
+     * Defaults to `true` unless `poolPoints: true` is set.
+     */
+    immutablePoints?: boolean;
+    /**
+     * Opt-in zero-allocation mode that reuses pre-allocated `Point` instances and a shared
+     * `moveBatch` array across `onStrokeMove` callbacks.
+     * WARNING: When `poolPoints` is `true` (or `immutablePoints` is `false`), points passed
+     * to `onStrokeMove` are ephemeral and mutated on the next move batch; consumers MUST
+     * copy point coordinates synchronously inside `onStrokeMove` if they retain them.
+     * Defaults to `false`.
+     */
+    poolPoints?: boolean;
     /** Returns false to deactivate drawing input (e.g. in forbidden zones or UI overlays). */
     shouldAcceptPointer?: (event: PointerEvent) => boolean;
     onStrokeStart?: (pt: Point, isBarrel: boolean, rawEvent: PointerEvent) => void;
-    /** Points are reused on the next move event. Copy them if they must outlive this callback. */
+    /**
+     * Called for each batch of movement samples.
+     * By default (`immutablePoints: true`), both the batch array and each `Point` object
+     * are frozen snapshots safe to retain. If `poolPoints: true` (or `immutablePoints: false`)
+     * is configured, points are ephemeral pooled objects reused on the next move event and
+     * must be copied by the consumer (e.g. via `InputManager.clonePoints(points)`).
+     */
     onStrokeMove?: (points: Point[], isBarrel: boolean, rawEvent: PointerEvent) => void;
     onStrokeEnd?: (pt: Point, isBarrel: boolean, rawEvent: PointerEvent) => void;
     onStrokeCancel?: () => void;
@@ -22,6 +44,17 @@ export interface InputManagerOptions {
 export class InputManager {
     private cooldownMs: number;
     private readonly mouseDrawingEnabled: boolean;
+    private readonly useImmutablePoints: boolean;
+
+    /** Creates independent, frozen copies of a point batch (useful when `poolPoints: true`). */
+    public static clonePoints(points: readonly Point[]): Point[] {
+        const copy = new Array<Point>(points.length);
+        for (let i = 0; i < points.length; i++) {
+            const p = points[i];
+            copy[i] = Object.freeze({ x: p.x, y: p.y, pressure: p.pressure, time: p.time });
+        }
+        return copy;
+    }
 
     public setPalmRejectionCooldown(ms: number): void {
         this.cooldownMs = Math.max(0, ms);
@@ -70,6 +103,9 @@ export class InputManager {
         this.options = options;
         this.cooldownMs = options.palmRejectionCooldownMs ?? 400;
         this.mouseDrawingEnabled = options.enableMouseDrawing ?? true;
+        this.useImmutablePoints = options.immutablePoints !== undefined
+            ? options.immutablePoints
+            : !(options.poolPoints ?? false);
         for (let i = 0; i < 256; i++) {
             const point: Point = { x: 0, y: 0, pressure: 0, time: 0 };
             this.pointPool.push(point);
@@ -129,11 +165,11 @@ export class InputManager {
 
         if (this.isDrawingStart(event)) {
             if (this.options.shouldAcceptPointer && !this.options.shouldAcceptPointer(event)) {
-                // Drawing input is deactivated: suppress canvas draw and let the pointer event pass through to Obsidian / UI
+                // Drawing input is rejected: suppress canvas draw and block propagation.
+                // Never synthesize or forward pointer/click events to underlying DOM elements.
                 event.preventDefault();
                 event.stopPropagation();
                 this.rejectedPointerIds.add(event.pointerId);
-                this.passThroughPointerEvent(event);
                 return;
             }
             this.stopDrawingEvent(event);
@@ -146,18 +182,28 @@ export class InputManager {
             return;
         }
 
-        if (event.pointerType === 'touch' && this.isPalmRejected()) {
+        if (event.pointerType === 'touch' && this.shouldRejectTouch()) {
             event.preventDefault();
+            event.stopPropagation();
+            this.rejectedPointerIds.add(event.pointerId);
             return;
         }
 
         if (event.pointerType === 'mouse' && event.button === 0) {
+            if (this.shouldRejectTouch() || (this.options.shouldAcceptPointer && !this.options.shouldAcceptPointer(event))) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.rejectedPointerIds.add(event.pointerId);
+                return;
+            }
             this.options.onNonDrawingPointerDown?.(event);
         }
     };
 
     private readonly handleMove = (event: PointerEvent): void => {
         if (this.rejectedPointerIds.has(event.pointerId)) {
+            event.preventDefault();
+            event.stopPropagation();
             return;
         }
 
@@ -175,11 +221,23 @@ export class InputManager {
             this.stopDrawingEvent(event);
             this.activeBarrel = this.isBarrel(event);
 
-            // Do not create a fallback array here: this path runs for every input sample.
             const coalesced = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : null;
             const hasCoalesced = coalesced !== null && coalesced.length > 0;
             const bounds = this.target.getBoundingClientRect();
             const sampleCount = hasCoalesced ? coalesced.length : 1;
+
+            if (this.useImmutablePoints) {
+                const batch = new Array<Point>(sampleCount);
+                for (let i = 0; i < sampleCount; i++) {
+                    const point: Point = { x: 0, y: 0, pressure: 0, time: 0 };
+                    this.fillPoint(hasCoalesced ? coalesced[i] : event, bounds, point);
+                    batch[i] = Object.freeze(point);
+                }
+                this.options.onStrokeMove?.(Object.freeze(batch) as unknown as Point[], this.activeBarrel, event);
+                return;
+            }
+
+            // Pooled mode: reuse pre-allocated Point instances and moveBatch array in 256-sample chunks.
             for (let start = 0; start < sampleCount; start += this.pointPool.length) {
                 const count = Math.min(this.pointPool.length, sampleCount - start);
                 this.moveBatch.length = count;
@@ -199,8 +257,9 @@ export class InputManager {
             }
         }
 
-        if (event.pointerType === 'touch' && this.isPalmRejected()) {
+        if (event.pointerType === 'touch' && this.shouldRejectTouch()) {
             event.preventDefault();
+            event.stopPropagation();
         }
     };
 
@@ -233,80 +292,16 @@ export class InputManager {
         this.options.onPointerLeave?.(event);
     };
 
-    private passThroughPointerEvent(event: PointerEvent): void {
-        if (typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return;
-        const elements = document.elementsFromPoint(event.clientX, event.clientY);
-        const underlying = elements.find(el =>
-            el !== this.target &&
-            !this.target.contains(el) &&
-            !el.classList?.contains('apolo-canvas-surface') &&
-            !el.classList?.contains('apolo-canvas-layer')
-        );
-        const isHtmlEl = typeof HTMLElement !== 'undefined'
-            ? underlying instanceof HTMLElement
-            : Boolean(underlying && typeof (underlying as any).dispatchEvent === 'function');
-
-        if (isHtmlEl && underlying) {
-            const createEvent = (type: string): Event => {
-                const buttonsVal = type === 'pointerup' ? 0 : event.buttons;
-                if (typeof PointerEvent !== 'undefined') {
-                    try {
-                        return new PointerEvent(type, {
-                            clientX: event.clientX,
-                            clientY: event.clientY,
-                            screenX: event.screenX,
-                            screenY: event.screenY,
-                            button: event.button,
-                            buttons: buttonsVal,
-                            pointerId: event.pointerId,
-                            pointerType: event.pointerType,
-                            isPrimary: event.isPrimary,
-                            bubbles: true,
-                            cancelable: true,
-                        });
-                    } catch {
-                        // Fallback if PointerEvent constructor fails with non-standard options
-                    }
-                }
-                const ce = new CustomEvent(type, { bubbles: true, cancelable: true });
-                Object.assign(ce, {
-                    clientX: event.clientX,
-                    clientY: event.clientY,
-                    screenX: event.screenX,
-                    screenY: event.screenY,
-                    button: event.button,
-                    buttons: buttonsVal,
-                    pointerId: event.pointerId,
-                    pointerType: event.pointerType,
-                    isPrimary: event.isPrimary,
-                });
-                return ce;
-            };
-
-            underlying.dispatchEvent(createEvent('pointerdown'));
-
-            const scheduleRelease = typeof requestAnimationFrame === 'function'
-                ? requestAnimationFrame
-                : (cb: () => void) => setTimeout(cb, 0);
-
-            scheduleRelease(() => {
-                underlying.dispatchEvent(createEvent('pointerup'));
-
-                if (event.button === 0) {
-                    const clickable = typeof (underlying as any).closest === 'function'
-                        ? ((underlying as any).closest('button, a, input, [role="button"], .clickable-icon') ?? underlying)
-                        : underlying;
-                    if (clickable && typeof (clickable as any).click === 'function') {
-                        (clickable as any).click();
-                    }
-                }
-            });
-        }
-    }
-
     private readonly handleUp = (event: PointerEvent): void => {
         if (this.rejectedPointerIds.has(event.pointerId)) {
             this.rejectedPointerIds.delete(event.pointerId);
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        if (event.pointerType === 'touch' && this.shouldRejectTouch()) {
+            event.preventDefault();
+            event.stopPropagation();
             return;
         }
         if (!this.isDrawingEnd(event) || this.activeDrawingPointerId !== event.pointerId) return;
@@ -322,6 +317,13 @@ export class InputManager {
     private readonly handleCancel = (event: PointerEvent): void => {
         if (this.rejectedPointerIds.has(event.pointerId)) {
             this.rejectedPointerIds.delete(event.pointerId);
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        if (event.pointerType === 'touch' && this.shouldRejectTouch()) {
+            event.preventDefault();
+            event.stopPropagation();
             return;
         }
         if (!this.isDrawingEnd(event) || this.activeDrawingPointerId !== event.pointerId) return;
@@ -335,13 +337,13 @@ export class InputManager {
     };
 
     private readonly handleContextMenu = (event: MouseEvent): void => {
-        event.preventDefault();
-        event.stopPropagation();
+        event.preventDefault?.();
+        event.stopPropagation?.();
     };
 
     private stopDrawingEvent(event: PointerEvent): void {
-        event.preventDefault();
-        event.stopPropagation();
+        event.preventDefault?.();
+        event.stopPropagation?.();
     }
 
     private isDrawingStart(event: PointerEvent): boolean {
@@ -379,7 +381,7 @@ export class InputManager {
         const bounds = this.target.getBoundingClientRect();
         const point: Point = { x: 0, y: 0, pressure: 0, time: 0 };
         this.fillPoint(event, bounds, point);
-        return point;
+        return this.useImmutablePoints ? Object.freeze(point) : point;
     }
 
     private capture(event: PointerEvent): void {

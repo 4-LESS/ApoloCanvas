@@ -1,21 +1,103 @@
 import type { App, TFile } from 'obsidian';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, ShapeElement } from '../core/types.ts';
 import { BoxRegistry } from '../core/BoxRegistry.ts';
+import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
+
+const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+/** Computes a deterministic 8-hex-character 32-bit FNV-1a hash for collision-free ID disambiguation. */
+function fnv1aHex(input: string): string {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < input.length; i++) {
+        hash ^= input.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Normalizes a vault-relative note path by converting backslashes to forward slashes,
+ * stripping control characters, and removing empty, `.` or `..` traversal segments.
+ */
+export function normalizeVaultNotePath(notePath: string): string {
+    const cleaned = (notePath ?? '').replace(/[\x00-\x1f\x7f]/g, '').replace(/\\/g, '/');
+    const segments: string[] = [];
+    for (const rawSeg of cleaned.split('/')) {
+        const seg = rawSeg.trim();
+        if (!seg || seg === '.' || seg === '..') continue;
+        segments.push(seg);
+    }
+    return segments.join('/');
+}
+
+/**
+ * Converts a user-supplied box ID into a strict, cross-platform filesystem-safe identifier
+ * matching `/^[a-zA-Z0-9_-]{1,64}$/` and guaranteed not to be a Windows reserved device name
+ * or contain path separators / traversal sequences.
+ * Clean alphanumeric IDs (`box-abc`, `b1`, `c_123456`) are preserved as-is; any ID containing
+ * special characters, dots, slashes, spaces, reserved names, or excessive length is converted
+ * into `<safe-slug>_<8char-fnv1a-hash>`.
+ */
+export function sanitizeBoxId(rawId: string): string {
+    const trimmed = (rawId ?? '').trim();
+    const normalized = normalizeBoxId(trimmed);
+    if (
+        normalized.length > 0 &&
+        normalized === trimmed &&
+        STRICT_SAFE_BOX_ID_RE.test(normalized) &&
+        !WINDOWS_RESERVED_NAME_RE.test(normalized)
+    ) {
+        return normalized;
+    }
+
+    const source = normalized || trimmed;
+    let slug = source
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^[-_]+|[-_]+$/g, '')
+        .slice(0, 32)
+        .replace(/[-_]+$/g, '');
+
+    if (!slug || WINDOWS_RESERVED_NAME_RE.test(slug)) {
+        slug = 'box';
+    }
+
+    const hash = fnv1aHex(source || 'empty');
+    return `${slug}_${hash}`;
+}
+
+/** Resolves the sanitized vault storage path `.apolocanvas/boxes/<safeId>.json` for a box ID. */
+export function boxStoragePath(boxId: string): string {
+    return `.apolocanvas/boxes/${sanitizeBoxId(boxId)}.json`;
+}
 
 export function notePathToKey(notePath: string): string {
+    const normalized = normalizeVaultNotePath(notePath);
     let hex = '';
-    for (let i = 0; i < notePath.length; i++) {
-        hex += notePath.charCodeAt(i).toString(16).padStart(4, '0');
+    for (let i = 0; i < normalized.length; i++) {
+        hex += normalized.charCodeAt(i).toString(16).padStart(4, '0');
+    }
+    if (!hex) return '0000';
+    // Cap filename length well below the 255-byte filesystem limit on all platforms
+    if (hex.length > 160) {
+        return `${hex.slice(0, 144)}_${fnv1aHex(normalized)}`;
     }
     return hex;
 }
 
 export function keyToNotePath(key: string): string {
+    const hexPart = key.includes('_') ? key.slice(0, key.indexOf('_')) : key;
     let result = '';
-    for (let i = 0; i < key.length; i += 4) {
-        result += String.fromCharCode(parseInt(key.slice(i, i + 4), 16));
+    for (let i = 0; i + 4 <= hexPart.length; i += 4) {
+        result += String.fromCharCode(parseInt(hexPart.slice(i, i + 4), 16));
     }
     return result;
+}
+
+/** Resolves the sanitized vault storage path `.apolocanvas/notes/<noteKey>.json` for a note path. */
+export function noteStoragePath(notePath: string): string {
+    return `.apolocanvas/notes/${notePathToKey(notePath)}.json`;
 }
 
 export interface BoxRecord {
@@ -43,7 +125,7 @@ export interface NoteRecord {
 
 /** Debounced, serialized vault writes with box-by-box and note-level persistence without frontmatter pollution. */
 export class PersistenceQueue {
-    private timer: number | null = null;
+    private timer: ReturnType<typeof setTimeout> | null = null;
     private pending: { document: PageDocument; file: TFile; pageId: string } | null = null;
     private chain: Promise<void> = Promise.resolve();
     private debounceMs: number;
@@ -78,8 +160,8 @@ export class PersistenceQueue {
         this.cacheByPageId.set(pageId, copy);
         this.cacheByPageId.set(file.path, copy);
         this.pending = { document: copy, file, pageId };
-        if (this.timer !== null) window.clearTimeout(this.timer);
-        this.timer = window.setTimeout(() => {
+        if (this.timer !== null) globalThis.clearTimeout(this.timer);
+        this.timer = globalThis.setTimeout(() => {
             this.timer = null;
             this.flush().catch((error: unknown) => {
                 console.error('[ApoloCanvas] Save failed:', error);
@@ -89,7 +171,7 @@ export class PersistenceQueue {
     }
 
     async flush(): Promise<void> {
-        if (this.timer !== null) { window.clearTimeout(this.timer); this.timer = null; }
+        if (this.timer !== null) { globalThis.clearTimeout(this.timer); this.timer = null; }
         const batch = this.pending;
         this.pending = null;
         if (!batch) return this.chain;
@@ -114,17 +196,33 @@ export class PersistenceQueue {
             content = '';
         }
 
-        // 2. Scan box IDs present in the note
+        // 2. Scan box IDs present in the note (HTML blocks and codeblocks), normalizing each ID
         const boxIds = new Set<string>();
-        const boxRegex = /data-apolo-space(?:-id)?=["']([^"']+)["']/gi;
+        const htmlDivRegex = /<div\s+[^>]*data-apolo-space(?:-id)?=(?:"[^"]+"|'[^']+'|[^\s>]+)[^>]*>/gi;
         let match: RegExpExecArray | null;
-        while ((match = boxRegex.exec(content)) !== null) {
-            boxIds.add(match[1]);
+        while ((match = htmlDivRegex.exec(content)) !== null) {
+            const parsed = parseApoloSpaceHtml(`${match[0]}</div>`);
+            if (parsed?.id) {
+                boxIds.add(parsed.id);
+            }
+        }
+        const attrFallbackRegex = /data-apolo-space(?:-id)?=["']([^"']+)["']/gi;
+        while ((match = attrFallbackRegex.exec(content)) !== null) {
+            const norm = normalizeBoxId(match[1]);
+            if (norm) {
+                boxIds.add(norm);
+            }
+        }
+        const codeRegex = /```apolo-space\b([\s\S]*?)```/gi;
+        while ((match = codeRegex.exec(content)) !== null) {
+            const parsed = parseApoloSpaceBlock(match[1]);
+            if (parsed?.id) {
+                boxIds.add(parsed.id);
+            }
         }
 
         // 3. Load freehand ink
-        const noteKey = notePathToKey(file.path);
-        const noteFile = `.apolocanvas/notes/${noteKey}.json`;
+        const noteFile = noteStoragePath(file.path);
         let freehandElements: CanvasElement[] = [];
         let layoutHint: LayoutHint | undefined = undefined;
 
@@ -139,7 +237,7 @@ export class PersistenceQueue {
                 const checkTime = Date.now();
                 freehandElements = freehandElements.filter(el => {
                     if (el.blockId && el.blockId.startsWith('space:')) {
-                        const bId = el.blockId.slice(6);
+                        const bId = normalizeBoxId(el.blockId.slice(6));
                         if (!boxIds.has(bId)) {
                             const age = checkTime - (el.timestamp || 0);
                             if (age > THIRTY_DAYS_MS) {
@@ -154,12 +252,12 @@ export class PersistenceQueue {
             }
         }
 
-        // 4. Load boxes
+        // 4. Load boxes using sanitized filesystem paths
         const boxElements: CanvasElement[] = [];
         const boxesMeta: Record<string, BoxMetadata> = {};
 
         for (const boxId of boxIds) {
-            const boxFile = `.apolocanvas/boxes/${boxId}.json`;
+            const boxFile = boxStoragePath(boxId);
             if (await adapter.exists(boxFile)) {
                 try {
                     const boxData = JSON.parse(await adapter.read(boxFile)) as BoxRecord;
@@ -224,8 +322,8 @@ export class PersistenceQueue {
         }
 
         const adapter = this.app.vault.adapter;
-        const oldNoteFile = `.apolocanvas/notes/${notePathToKey(oldPath)}.json`;
-        const newNoteFile = `.apolocanvas/notes/${notePathToKey(newFile.path)}.json`;
+        const oldNoteFile = noteStoragePath(oldPath);
+        const newNoteFile = noteStoragePath(newFile.path);
         try {
             if (await adapter.exists(oldNoteFile)) {
                 await ensureDirectory(adapter, '.apolocanvas/notes');
@@ -255,7 +353,7 @@ export class PersistenceQueue {
     async onFileDeleted(deletedPath: string): Promise<void> {
         this.cacheByPageId.delete(deletedPath);
         const adapter = this.app.vault.adapter;
-        const noteFile = `.apolocanvas/notes/${notePathToKey(deletedPath)}.json`;
+        const noteFile = noteStoragePath(deletedPath);
         try {
             if (await adapter.exists(noteFile)) {
                 await adapter.remove(noteFile);
@@ -276,36 +374,41 @@ export class PersistenceQueue {
         const boxElementsMap = new Map<string, CanvasElement[]>();
 
         if (document.boxes) {
-            for (const boxId of Object.keys(document.boxes)) {
-                boxElementsMap.set(boxId, []);
+            for (const rawBoxId of Object.keys(document.boxes)) {
+                const boxId = normalizeBoxId(rawBoxId) || rawBoxId;
+                if (boxId) {
+                    boxElementsMap.set(boxId, []);
+                }
             }
         }
 
         for (const el of document.elements) {
             if (el.blockId && el.blockId.startsWith('space:')) {
-                const boxId = el.blockId.slice(6);
-                let list = boxElementsMap.get(boxId);
-                if (!list) {
-                    list = [];
-                    boxElementsMap.set(boxId, list);
+                const rawBoxId = el.blockId.slice(6);
+                const boxId = normalizeBoxId(rawBoxId) || rawBoxId;
+                if (boxId) {
+                    let list = boxElementsMap.get(boxId);
+                    if (!list) {
+                        list = [];
+                        boxElementsMap.set(boxId, list);
+                    }
+                    list.push(el);
                 }
-                list.push(el);
             } else {
                 freehandElements.push(el);
             }
         }
 
         // 1. Save freehand ink for this note by note path
-        const noteKey = notePathToKey(file.path);
         const noteRecord: NoteRecord = {
             notePath: file.path,
             updatedAt: Date.now(),
             elements: freehandElements,
             layoutHint: document.layoutHint,
         };
-        await adapter.write(`.apolocanvas/notes/${noteKey}.json`, JSON.stringify(noteRecord));
+        await adapter.write(noteStoragePath(file.path), JSON.stringify(noteRecord));
 
-        // 2. Save each box by boxId
+        // 2. Save each box by sanitized boxId path
         for (const [boxId, elements] of boxElementsMap.entries()) {
             const meta = document.boxes?.[boxId];
             const boxRecord: BoxRecord = {
@@ -323,7 +426,7 @@ export class PersistenceQueue {
                 updatedAt: Date.now(),
                 elements,
             };
-            await adapter.write(`.apolocanvas/boxes/${boxId}.json`, JSON.stringify(boxRecord));
+            await adapter.write(boxStoragePath(boxId), JSON.stringify(boxRecord));
         }
 
         // 3. Companion SVG if enabled
@@ -366,7 +469,7 @@ export class PersistenceQueue {
 }
 
 async function ensureDirectory(adapter: App['vault']['adapter'], path: string): Promise<void> {
-    const parts = path.split('/');
+    const parts = path.split('/').filter(Boolean);
     let current = '';
     for (const part of parts) {
         current = current ? `${current}/${part}` : part;
@@ -374,18 +477,40 @@ async function ensureDirectory(adapter: App['vault']['adapter'], path: string): 
     }
 }
 
+function sanitizePathSegment(segment: string, fallback = 'note'): string {
+    let clean = segment
+        .replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, '-')
+        .replace(/^\.+|\.+$/g, '')
+        .trim();
+    if (!clean || clean === '.' || clean === '..' || WINDOWS_RESERVED_NAME_RE.test(clean)) {
+        clean = clean ? `_${clean}` : fallback;
+    }
+    if (clean.length > 120) {
+        clean = `${clean.slice(0, 100)}_${fnv1aHex(segment)}`;
+    }
+    return clean;
+}
+
+function resolveSafeNoteCompanionParts(notePath: string): { folder: string; basename: string } {
+    const normalized = normalizeVaultNotePath(notePath);
+    const segments = normalized ? normalized.split('/') : [];
+    const rawFile = segments.pop() ?? 'note';
+    const safeFolders = segments.map(seg => sanitizePathSegment(seg, 'folder'));
+    const folder = safeFolders.join('/');
+    const rawBasename = rawFile.replace(/\.md$/i, '');
+    const basename = sanitizePathSegment(rawBasename, 'note');
+    return { folder, basename };
+}
+
 export function companionPath(notePath: string): string {
-    const slash = notePath.lastIndexOf('/');
-    const folder = slash >= 0 ? notePath.slice(0, slash) : '';
-    const basename = (slash >= 0 ? notePath.slice(slash + 1) : notePath).replace(/\.md$/i, '').replace(/[\\/:*?"<>|]/g, '-');
+    const { folder, basename } = resolveSafeNoteCompanionParts(notePath);
     return `${folder ? `${folder}/` : ''}assets/ink/${basename}.ink.svg`;
 }
 
 export function boxCompanionPath(notePath: string, boxId: string): string {
-    const slash = notePath.lastIndexOf('/');
-    const folder = slash >= 0 ? notePath.slice(0, slash) : '';
-    const basename = (slash >= 0 ? notePath.slice(slash + 1) : notePath).replace(/\.md$/i, '').replace(/[\\/:*?"<>|]/g, '-');
-    return `${folder ? `${folder}/` : ''}assets/ink/${basename}.${boxId}.ink.svg`;
+    const { folder, basename } = resolveSafeNoteCompanionParts(notePath);
+    const safeBoxId = sanitizeBoxId(boxId);
+    return `${folder ? `${folder}/` : ''}assets/ink/${basename}.${safeBoxId}.ink.svg`;
 }
 
 export function renderBoxSvg(
@@ -400,6 +525,7 @@ export function renderBoxSvg(
     const gridStyle = meta?.gridStyle ?? BoxRegistry.getGridStyle(boxId);
     const density = meta?.gridDensity ?? BoxRegistry.getGridDensity(boxId) ?? 32;
     const step = Math.round((width / density) * 100) / 100;
+    const safeBoxId = sanitizeBoxId(boxId);
 
     const bgTheme = meta?.bgTheme ?? BoxRegistry.getBgTheme(boxId);
     const customBg = meta?.customBgColor ?? BoxRegistry.getCustomBgColor(boxId);
@@ -413,14 +539,14 @@ export function renderBoxSvg(
     } else if (bgTheme === 'default') {
         bgFill = '#1f1f21';
     }
-    const bgRect = bgFill !== 'transparent' ? `<rect width="100%" height="100%" fill="${bgFill}"/>` : '';
+    const bgRect = bgFill !== 'transparent' ? `<rect width="100%" height="100%" fill="${escapeXml(bgFill)}"/>` : '';
 
     if (gridStyle === 'dots') {
-        gridDef = `<pattern id="apolo-grid-${boxId}" width="${step}" height="${step}" patternUnits="userSpaceOnUse"><circle cx="${step / 2}" cy="${step / 2}" r="1.5" fill="rgba(128,128,128,0.3)"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${boxId})"/>`;
+        gridDef = `<pattern id="apolo-grid-${safeBoxId}" width="${step}" height="${step}" patternUnits="userSpaceOnUse"><circle cx="${step / 2}" cy="${step / 2}" r="1.5" fill="rgba(128,128,128,0.3)"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${safeBoxId})"/>`;
     } else if (gridStyle === 'grid') {
-        gridDef = `<pattern id="apolo-grid-${boxId}" width="${step}" height="${step}" patternUnits="userSpaceOnUse"><path d="M ${step} 0 L 0 0 0 ${step}" fill="none" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${boxId})"/>`;
+        gridDef = `<pattern id="apolo-grid-${safeBoxId}" width="${step}" height="${step}" patternUnits="userSpaceOnUse"><path d="M ${step} 0 L 0 0 0 ${step}" fill="none" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${safeBoxId})"/>`;
     } else if (gridStyle === 'ruled') {
-        gridDef = `<pattern id="apolo-grid-${boxId}" width="100%" height="${step}" patternUnits="userSpaceOnUse"><line x1="0" y1="${step}" x2="100%" y2="${step}" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${boxId})"/>`;
+        gridDef = `<pattern id="apolo-grid-${safeBoxId}" width="100%" height="${step}" patternUnits="userSpaceOnUse"><line x1="0" y1="${step}" x2="100%" y2="${step}" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${safeBoxId})"/>`;
     }
 
     const content = elements.map(el => renderElement(el, scale)).join('\n');

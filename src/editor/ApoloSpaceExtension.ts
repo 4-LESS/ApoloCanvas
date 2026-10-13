@@ -14,7 +14,20 @@ export { BoxRegistry };
 
 export const boxRegistryUpdateEffect = StateEffect.define<void>();
 
-declare const require: ((id: string) => any) | undefined;
+let configuredLivePreviewField: StateField<boolean> | null = null;
+
+/**
+ * Configures the Obsidian `editorLivePreviewField` StateField via explicit import
+ * from the host entry point (`src/main.ts`), avoiding runtime CommonJS `require` calls
+ * in editor extension code.
+ */
+export function configureLivePreviewField(field: StateField<boolean> | null): void {
+    configuredLivePreviewField = field;
+}
+
+export function getConfiguredLivePreviewField(): StateField<boolean> | null {
+    return configuredLivePreviewField;
+}
 
 export interface BoxWidgetSnapshot {
     height: number;
@@ -404,22 +417,21 @@ interface SpaceDecorationItem {
     id: string;
 }
 
-function isLivePreview(state: EditorState): boolean {
+export function isLivePreviewState(
+    state: EditorState,
+    field: StateField<boolean> | null = configuredLivePreviewField,
+): boolean {
+    if (!field) return true;
     try {
-        // Safely access obsidian in runtime without breaking Node test runner
-        const obs = typeof require === 'function' ? (require('obsidian') as { editorLivePreviewField?: any } | undefined) : null;
-        if (obs?.editorLivePreviewField) {
-            const lp = state.field(obs.editorLivePreviewField, false);
-            return lp === undefined ? true : Boolean(lp);
-        }
+        const lp = state.field(field, false);
+        return lp === undefined ? true : Boolean(lp);
     } catch {
-        // Fallback for tests or environments without obsidian runtime
+        return true;
     }
-    return true;
 }
 
 function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
-    if (!isLivePreview(state)) {
+    if (!isLivePreviewState(state)) {
         return Decoration.none;
     }
 
@@ -592,3 +604,10 @@ export class ApoloSpaceSyncController {
 export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(ApoloSpaceSyncController);
 
 export const apoloSpaceExtension: Extension = [apoloSpaceField, apoloSpaceSyncPlugin];
+
+export function createApoloSpaceExtension(livePreviewField?: StateField<boolean> | null): Extension {
+    if (livePreviewField !== undefined) {
+        configureLivePreviewField(livePreviewField);
+    }
+    return apoloSpaceExtension;
+}
