@@ -370,7 +370,6 @@ export class BoxMenu {
         this.container.style.position = 'fixed';
         this.container.style.left = `${Math.round(left)}px`;
         this.container.style.top = `${Math.round(top)}px`;
-        this.container.style.zIndex = '1002';
         this.container.style.display = 'flex';
         this.container.hidden = false;
     }
@@ -407,6 +406,12 @@ export class BoxMenu {
         btn.addEventListener('click', (e: MouseEvent) => {
             e.preventDefault();
             invoke(e);
+        });
+        btn.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                invoke(e);
+            }
         });
     }
 
@@ -451,11 +456,16 @@ export class BoxMenu {
 
         const fondoGrid = document.createElement('div');
         fondoGrid.className = 'apolo-box-menu-grid-tiles';
+        fondoGrid.setAttribute('role', 'radiogroup');
+        fondoGrid.setAttribute('aria-label', 'Estilo de cuadrícula de fondo');
 
         for (const s of GRID_STYLES) {
             const btn = document.createElement('button');
-            btn.className = `apolo-box-menu-tile${state.gridStyle === s.id ? ' is-active' : ''}`;
+            const isActive = state.gridStyle === s.id;
+            btn.className = `apolo-box-menu-tile${isActive ? ' is-active' : ''}`;
             btn.type = 'button';
+            btn.setAttribute('role', 'radio');
+            btn.setAttribute('aria-checked', String(isActive));
             btn.setAttribute('aria-label', s.label);
             btn.title = s.label;
 
@@ -485,12 +495,17 @@ export class BoxMenu {
 
         const segmentedContainer = document.createElement('div');
         segmentedContainer.className = 'apolo-box-menu-segmented';
+        segmentedContainer.setAttribute('role', 'radiogroup');
+        segmentedContainer.setAttribute('aria-label', 'Espaciado de cuadrícula');
 
         for (const d of GRID_DENSITIES) {
             const btn = document.createElement('button');
             const isActive = Math.abs((state.gridDensity || 32) - d.density) < 4;
             btn.className = `apolo-box-menu-seg-btn${isActive ? ' is-active' : ''}`;
             btn.type = 'button';
+            btn.setAttribute('role', 'radio');
+            btn.setAttribute('aria-checked', String(isActive));
+            btn.setAttribute('aria-label', `Espaciado ${d.label}`);
             btn.textContent = d.label;
 
             this.bindButtonAction(btn, () => {
@@ -514,6 +529,8 @@ export class BoxMenu {
 
         const swatchesRow = document.createElement('div');
         swatchesRow.className = 'apolo-box-menu-swatches';
+        swatchesRow.setAttribute('role', 'radiogroup');
+        swatchesRow.setAttribute('aria-label', 'Color de acento lateral');
 
         for (const a of ACCENT_COLORS) {
             const btn = document.createElement('button');
@@ -521,6 +538,8 @@ export class BoxMenu {
             btn.className = `apolo-box-menu-swatch${isActive ? ' is-active' : ''}`;
             btn.type = 'button';
             btn.title = a.label;
+            btn.setAttribute('role', 'radio');
+            btn.setAttribute('aria-checked', String(isActive));
             btn.setAttribute('aria-label', a.label);
             btn.style.backgroundColor = a.color;
 
@@ -542,6 +561,7 @@ export class BoxMenu {
         const fitBtn = document.createElement('button');
         fitBtn.className = 'apolo-box-menu-action-btn';
         fitBtn.type = 'button';
+        fitBtn.setAttribute('aria-label', 'Ajustar altura de la caja');
         fitBtn.appendChild(createCompressSvg());
         const fitTxt = document.createElement('span');
         fitTxt.textContent = 'Ajustar altura';
@@ -557,6 +577,7 @@ export class BoxMenu {
         const clearBtn = document.createElement('button');
         clearBtn.className = 'apolo-box-menu-action-btn';
         clearBtn.type = 'button';
+        clearBtn.setAttribute('aria-label', 'Limpiar trazos de la caja');
         clearBtn.appendChild(createEraserSvg());
         const clearTxt = document.createElement('span');
         clearTxt.textContent = 'Limpiar trazos';
@@ -572,6 +593,7 @@ export class BoxMenu {
         const delBtn = document.createElement('button');
         delBtn.className = 'apolo-box-menu-action-btn is-danger';
         delBtn.type = 'button';
+        delBtn.setAttribute('aria-label', 'Eliminar espacio de dibujo');
         delBtn.appendChild(createTrashSvg());
         const delTxt = document.createElement('span');
         delTxt.textContent = 'Eliminar';

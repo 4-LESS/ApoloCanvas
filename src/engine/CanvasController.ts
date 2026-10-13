@@ -299,8 +299,7 @@ export class CanvasController {
 
         // Mount decoupled UI components if not readonly
         if (!this.options.readonly) {
-            this.uiRoot.className = 'apolo-ui';
-            document.body.appendChild(this.uiRoot);
+            this.mountUiRoot();
 
             this.toast = new Toast(this.uiRoot);
             this.initToolbar();
@@ -323,7 +322,14 @@ export class CanvasController {
                 onStrokeMove: (points, barrel, rawEvent) => this.move(points, barrel, rawEvent),
                 onStrokeEnd: (point, barrel, rawEvent) => this.end(point, barrel, rawEvent.timeStamp),
                 onStrokeCancel: () => this.cancel(),
-                onNonDrawingPointerDown: (event) => this.focusEditorAt(event.clientX, event.clientY),
+                onNonDrawingPointerDown: (event) => {
+                    if (this.activeHandleDrag) return;
+                    if (this.input?.shouldRejectTouch() || this.input?.isPalmRejected()) return;
+                    if (this.input?.isPointerRejected(event.pointerId)) return;
+                    if (isScreenPointForbidden(event.clientX, event.clientY)) return;
+                    if (this.isAnyMenuOpen()) return;
+                    this.focusEditorAt(event.clientX, event.clientY);
+                },
                 onHover: (event) => this.updateCursor(event),
                 onPointerLeave: () => this.resetCursor(),
                 onPenHoverOrContact: () => this.cancelSingleFingerTouch(),
@@ -412,6 +418,32 @@ export class CanvasController {
         this.layer.classList.toggle('is-pen-disabled', !canDraw);
         this.layer.style.pointerEvents = canDraw ? 'auto' : 'none';
         this.canvas.style.pointerEvents = canDraw ? 'auto' : 'none';
+    }
+
+    private mountUiRoot(): void {
+        if (this.options.readonly) return;
+        this.uiRoot.className = 'apolo-ui';
+        if (typeof document !== 'undefined' && document.body) {
+            const existingRoots = document.body.querySelectorAll(':scope > .apolo-ui');
+            for (let i = 0; i < existingRoots.length; i++) {
+                const node = existingRoots[i];
+                if (node !== this.uiRoot) {
+                    node.remove();
+                }
+            }
+            if (!this.uiRoot.parentElement) {
+                document.body.appendChild(this.uiRoot);
+            }
+        }
+    }
+
+    private isAnyMenuOpen(): boolean {
+        return Boolean(
+            this.estuche?.isOpen() ||
+            this.boxMenu?.isOpen() ||
+            this.moreMenu?.isOpen() ||
+            this.lassoMenu?.isOpen()
+        );
     }
 
     private initToolbar(): void {
@@ -1537,8 +1569,10 @@ export class CanvasController {
 
     private focusEditorAt(clientX: number, clientY: number): void {
         if (!this.editor) return;
-        if (this.input?.shouldRejectTouch()) return;
+        if (this.activeHandleDrag) return;
+        if (this.input?.shouldRejectTouch() || this.input?.isPalmRejected()) return;
         if (isScreenPointForbidden(clientX, clientY)) return;
+        if (this.isAnyMenuOpen()) return;
 
         // 1. Guard against tapping inside any drawing box element or handle
         if (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function') {
@@ -1769,6 +1803,14 @@ export class CanvasController {
         this.zoomPill?.destroy();
         this.toast?.destroy();
         this.boxMenu?.destroy();
+        this.toolbar = null;
+        this.estuche = null;
+        this.lassoMenu = null;
+        this.moreMenu = null;
+        this.zoomPill = null;
+        this.toast = null;
+        this.boxMenu = null;
+        this.uiRoot.replaceChildren();
         this.uiRoot.remove();
 
         this.layer.remove();

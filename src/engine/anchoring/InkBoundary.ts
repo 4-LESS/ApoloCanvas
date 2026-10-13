@@ -27,8 +27,12 @@ export interface DocumentContentBounds {
 
 export const FORBIDDEN_DOM_SELECTORS = [
     // Apolo Canvas UI overlays
+    '.apolo-ui',
     '.apolo-toolbar',
+    '.apolo-canvas-toolbar',
     '.apolo-estuche',
+    '.apolo-tool-estuche',
+    '.apolo-popover-panel',
     '.apolo-lasso-menu',
     '.apolo-more-menu',
     '.apolo-zoom-pill',

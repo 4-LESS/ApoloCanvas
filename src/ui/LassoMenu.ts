@@ -1,5 +1,5 @@
-import { BoundingBox, CanvasElement, StrokePattern } from '../core/types';
-import { ICONS, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createSvg, isDarkTheme, mapInkColorForDark } from './theme';
+import type { BoundingBox, CanvasElement, StrokePattern } from '../core/types.ts';
+import { ICONS, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
 
 export interface LassoMenuCallbacks {
     onCopy: () => void;
@@ -99,6 +99,10 @@ export class LassoMenu {
         if (!this.container.hidden && this.bounds) {
             this.updatePosition();
         }
+    }
+
+    isOpen(): boolean {
+        return !this.container.hidden && this.container.style.display !== 'none';
     }
 
     hide(): void {
