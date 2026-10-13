@@ -120,7 +120,7 @@ export class ApoloSpaceWidget extends WidgetType {
 
         // Subtle top-left 3-dots button for space settings
         const optionsBtn = document.createElement('button');
-        optionsBtn.className = 'apolo-box-options-btn';
+        optionsBtn.className = 'apolo-box-options-btn clickable-icon';
         optionsBtn.type = 'button';
         optionsBtn.dataset.apoloBoxId = this.id;
         optionsBtn.setAttribute('aria-label', 'Opciones del espacio');

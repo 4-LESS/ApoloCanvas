@@ -127,6 +127,7 @@ export class CanvasController {
     private readonly highlighterDryContext: CanvasRenderingContext2D;
 
     // UI Components
+    private readonly uiRoot = document.createElement('div');
     private toolbar: Toolbar | null = null;
     private estuche: ToolEstuche | null = null;
     private lassoMenu: LassoMenu | null = null;
@@ -298,7 +299,10 @@ export class CanvasController {
 
         // Mount decoupled UI components if not readonly
         if (!this.options.readonly) {
-            this.toast = new Toast(document.body);
+            this.uiRoot.className = 'apolo-ui';
+            document.body.appendChild(this.uiRoot);
+
+            this.toast = new Toast(this.uiRoot);
             this.initToolbar();
             this.initEstuche();
             this.initLassoMenu();
@@ -489,7 +493,7 @@ export class CanvasController {
             onInsertCanvas: () => {
                 void this.insertCanvas();
             },
-        });
+        }, this.uiRoot);
     }
 
     private initEstuche(): void {
@@ -544,6 +548,7 @@ export class CanvasController {
                 },
                 onClose: () => undefined,
             },
+            this.uiRoot,
         );
     }
 
@@ -574,7 +579,7 @@ export class CanvasController {
                 this.lassoMenu?.hide();
                 this.schedulePaint();
             },
-        });
+        }, this.uiRoot);
     }
 
     private initMoreMenu(): void {
@@ -601,7 +606,7 @@ export class CanvasController {
                 this.schedulePaint();
             },
             onClose: () => undefined,
-        });
+        }, this.uiRoot);
     }
 
     private initZoomPill(): void {
@@ -609,7 +614,7 @@ export class CanvasController {
             onZoomIn: () => this.stepZoom(1),
             onZoomOut: () => this.stepZoom(-1),
             onZoomFit: () => this.resetView(),
-        });
+        }, this.uiRoot);
     }
 
     private initBoxMenu(): void {
@@ -653,7 +658,7 @@ export class CanvasController {
             onExportSvg: () => {
                 this.toast?.show('Exportación SVGcompanion disponible en paso d');
             },
-        }, document.body);
+        }, this.uiRoot);
     }
 
     private findSpaceElementsById(boxId: string): HTMLElement[] {
@@ -1764,6 +1769,7 @@ export class CanvasController {
         this.zoomPill?.destroy();
         this.toast?.destroy();
         this.boxMenu?.destroy();
+        this.uiRoot.remove();
 
         this.layer.remove();
         const sizer = this.getSizerElement();

@@ -1,18 +1,31 @@
 /*
  * Apolo Canvas 2.0 – Design System (Samsung Notes aesthetic + Obsidian Flexibility)
- * Tailored for tablet usage (Galaxy Tab S10 horizontal) with 40-44px touch targets.
+ * Tailored for tablet usage (Galaxy Tab S10 horizontal) with 44px primary touch targets.
  */
 
 :root {
+  /* Tier 1 & 2: Surface & Background Semantics */
   --apolo-bg: var(--background-primary, #ffffff);
   --apolo-bg-alt: var(--background-secondary, #f2f3f5);
+  --apolo-bg-elevated: var(--background-primary-alt, #ffffff);
+  --apolo-bg-floating: rgba(255, 255, 255, 0.88);
+
+  /* Tier 1 & 2: Borders & Dividers */
   --apolo-border: var(--background-modifier-border, #dde0e6);
+  --apolo-border-subtle: rgba(0, 0, 0, 0.08);
+
+  /* Tier 1 & 2: Text Semantics */
   --apolo-text: var(--text-normal, #1e2330);
   --apolo-text-muted: var(--text-muted, #6b7280);
+  --apolo-text-faint: var(--text-faint, #9ca3af);
+
+  /* Tier 1 & 2: Interactive Accents */
   --apolo-accent: var(--interactive-accent, #2f6bff);
   --apolo-accent-hover: var(--interactive-accent-hover, #1f4fd8);
   --apolo-accent-light: rgba(47, 107, 255, 0.12);
   --apolo-accent-subtle: rgba(47, 107, 255, 0.06);
+
+  /* Functional Palettes */
   --apolo-purple: #6c3fd1;
   --apolo-purple-text: #5b2fc0;
   --apolo-purple-light: rgba(108, 63, 209, 0.14);
@@ -20,17 +33,64 @@
   --apolo-danger-light: rgba(201, 42, 42, 0.12);
   --apolo-amber: #d97706;
   --apolo-amber-bg: #fff1cc;
+
+  /* Tier 3: Closed Scale - Radii */
+  --apolo-radius-sm: 8px;
+  --apolo-radius-md: 12px;
+  --apolo-radius-lg: 16px;
+  --apolo-radius-xl: 20px;
+  --apolo-radius-pill: 22px;
+  --apolo-radius-toolbar: 29px;
+  --apolo-radius-full: 9999px;
+
+  /* Tier 3: Closed Scale - Spacing (Multiples of 4px) */
+  --apolo-space-1: 4px;
+  --apolo-space-2: 8px;
+  --apolo-space-3: 12px;
+  --apolo-space-4: 16px;
+  --apolo-space-5: 20px;
+  --apolo-space-6: 24px;
+
+  /* Tier 3: Closed Scale - Font Sizes */
+  --apolo-font-caption: 12px;
+  --apolo-font-ui-sm: 13px;
+  --apolo-font-ui: 14px;
+  --apolo-font-title: 16px;
+  --apolo-font-display-sm: 18px;
+
+  /* Tier 3: Touch Targets (Tab S10 ergonomic defaults) */
+  --apolo-touch-target: 44px;
+  --apolo-touch-target-compact: 36px;
+  --apolo-touch-target-sm: 32px;
+
+  /* Tier 3: Elevation & Shadows */
   --apolo-shadow-sm: 0 1px 3px rgba(20, 30, 60, 0.12);
   --apolo-shadow-md: 0 8px 28px rgba(20, 30, 60, 0.18);
   --apolo-shadow-lg: 0 16px 48px rgba(20, 30, 60, 0.24);
+
+  /* Tier 3: Motion & Transitions */
+  --apolo-transition-fast: 0.12s ease;
+  --apolo-transition-normal: 0.2s cubic-bezier(0.2, 0, 0, 1);
+
+  /* Tier 3: Named UI Layers (< 50, Obsidian modals = 50, notices = 60, menus = 65) */
+  --apolo-layer-zoom: calc(var(--layer-popover, 30) - 10);      /* 20 */
+  --apolo-layer-dots: calc(var(--layer-popover, 30) - 5);       /* 25 */
+  --apolo-layer-toolbar: calc(var(--layer-popover, 30) - 2);    /* 28 */
+  --apolo-layer-popover: var(--layer-popover, 30);              /* 30 */
+  --apolo-layer-subpopover: calc(var(--layer-popover, 30) + 5); /* 35 */
+  --apolo-layer-toast: calc(var(--layer-popover, 30) + 10);     /* 40 */
 }
 
 .theme-dark {
   --apolo-bg: var(--background-primary, #1e2330);
   --apolo-bg-alt: var(--background-secondary, #161922);
+  --apolo-bg-elevated: var(--background-primary-alt, #242938);
+  --apolo-bg-floating: rgba(30, 35, 48, 0.88);
   --apolo-border: var(--background-modifier-border, #2d3446);
+  --apolo-border-subtle: rgba(255, 255, 255, 0.08);
   --apolo-text: var(--text-normal, #f3f4f6);
   --apolo-text-muted: var(--text-muted, #9ca3af);
+  --apolo-text-faint: var(--text-faint, #6b7280);
   --apolo-accent: var(--interactive-accent, #3b82f6);
   --apolo-accent-hover: var(--interactive-accent-hover, #60a5fa);
   --apolo-accent-light: rgba(59, 130, 246, 0.2);
@@ -45,6 +105,68 @@
   --apolo-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --apolo-shadow-md: 0 8px 28px rgba(0, 0, 0, 0.5);
   --apolo-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.65);
+}
+
+/* ==========================================================================
+   Root Host Container (.apolo-ui)
+   Mounted in document.body for the active leaf.
+   Static positioning preserves root layer competition with Obsidian --layer-*
+   ========================================================================== */
+.apolo-ui {
+  position: static;
+  pointer-events: none;
+}
+
+.apolo-ui > * {
+  pointer-events: auto;
+}
+
+/* ==========================================================================
+   Scoped Button Reset (Zero !important, High Specificity against Obsidian)
+   Neutralizes Obsidian button:not(.clickable-icon) and .is-tablet styles.
+   ========================================================================== */
+.apolo-ui button,
+.apolo-space-block button,
+.apolo-ui button:not(.clickable-icon),
+.apolo-space-block button:not(.clickable-icon),
+.is-tablet .apolo-ui button,
+.is-tablet .apolo-space-block button,
+.is-tablet .apolo-ui button:not(.clickable-icon),
+.is-tablet .apolo-space-block button:not(.clickable-icon),
+.is-mobile .apolo-ui button,
+.is-mobile .apolo-space-block button,
+.is-mobile .apolo-ui button:not(.clickable-icon),
+.is-mobile .apolo-space-block button:not(.clickable-icon) {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.apolo-ui button:focus-visible,
+.apolo-space-block button:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: 2px;
+}
+
+.apolo-ui button:focus:not(:focus-visible),
+.apolo-space-block button:focus:not(:focus-visible) {
+  outline: none;
 }
 
 /* Universal dismissal for hidden elements and popovers */
@@ -96,7 +218,8 @@
    ========================================================================== */
 .apolo-canvas-toolbar {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--apolo-layer-toolbar);
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -105,7 +228,7 @@
   box-sizing: border-box;
   background: var(--apolo-bg);
   border: 1px solid var(--apolo-border);
-  border-radius: 29px;
+  border-radius: var(--apolo-radius-toolbar);
   box-shadow: var(--apolo-shadow-md);
   color: var(--apolo-text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -122,11 +245,11 @@
 }
 
 .apolo-canvas-toolbar.is-vertical {
-  flex-direction: column !important;
-  width: 58px !important;
-  height: auto !important;
-  padding: 8px 10px !important;
-  border-radius: 29px !important;
+  flex-direction: column;
+  width: 58px;
+  height: auto;
+  padding: 8px 10px;
+  border-radius: var(--apolo-radius-toolbar);
 }
 
 .apolo-toolbar-group {
@@ -158,80 +281,80 @@
 /* Base button styling overrides for Obsidian theme safety */
 .apolo-canvas-toolbar button,
 .apolo-toolbar-btn {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  color: var(--apolo-text) !important;
-  font-family: inherit !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 42px !important;
-  height: 42px !important;
-  border-radius: 14px !important;
-  cursor: pointer !important;
-  position: relative !important;
-  flex-shrink: 0 !important;
-  transition: background-color 0.12s ease, transform 0.1s ease !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  color: var(--apolo-text);
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background-color var(--apolo-transition-fast), transform 0.1s ease;
 }
 
 .apolo-canvas-toolbar.is-vertical .apolo-toolbar-btn {
-  width: 36px !important;
-  height: 36px !important;
+  width: 36px;
+  height: 36px;
 }
 
 .apolo-toolbar-btn:hover {
-  background: var(--apolo-bg-alt) !important;
+  background: var(--apolo-bg-alt);
 }
 
 .apolo-toolbar-btn:active {
-  transform: scale(0.93) !important;
+  transform: scale(0.93);
 }
 
 .apolo-toolbar-btn.is-disabled {
-  opacity: 0.35 !important;
-  cursor: default !important;
-  pointer-events: none !important;
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
 }
 
 /* Grip handle */
 .apolo-toolbar-grip {
-  width: 22px !important;
-  height: 42px !important;
-  cursor: grab !important;
-  touch-action: none !important;
-  color: var(--apolo-text-muted) !important;
-  padding: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  width: 22px;
+  height: 42px;
+  cursor: grab;
+  touch-action: none;
+  color: var(--apolo-text-muted);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .apolo-canvas-toolbar.is-vertical .apolo-toolbar-grip {
-  width: 36px !important;
-  height: 20px !important;
+  width: 36px;
+  height: 20px;
 }
 
 .apolo-toolbar-grip:active {
-  cursor: grabbing !important;
+  cursor: grabbing;
 }
 
 /* Keyboard Mode Button: active = pen OFF = highlighted in amber */
 .apolo-btn-keyboard.is-active {
-  background: var(--apolo-amber-bg) !important;
-  color: var(--apolo-amber) !important;
-  box-shadow: 0 0 0 1px var(--apolo-amber) !important;
+  background: var(--apolo-amber-bg);
+  color: var(--apolo-amber);
+  box-shadow: 0 0 0 1px var(--apolo-amber);
 }
 
 /* Tool Buttons & Triangle indicator on active */
 .apolo-tool-btn.is-active {
-  background: var(--apolo-accent-light) !important;
-  color: var(--apolo-accent) !important;
+  background: var(--apolo-accent-light);
+  color: var(--apolo-accent);
 }
 
 .apolo-tool-triangle {
@@ -251,13 +374,13 @@
 
 /* 4 Favorites Chips */
 .apolo-fav-chip {
-  width: 38px !important;
-  height: 42px !important;
+  width: 38px;
+  height: 42px;
 }
 
 .apolo-canvas-toolbar.is-vertical .apolo-fav-chip {
-  width: 34px !important;
-  height: 34px !important;
+  width: 34px;
+  height: 34px;
 }
 
 .apolo-fav-dot {
@@ -270,28 +393,28 @@
 }
 
 .apolo-fav-chip.is-active .apolo-fav-dot {
-  box-shadow: 0 0 0 2px var(--apolo-bg), 0 0 0 4px var(--apolo-accent) !important;
+  box-shadow: 0 0 0 2px var(--apolo-bg), 0 0 0 4px var(--apolo-accent);
   transform: scale(1.05);
 }
 
 /* Thickness preset buttons (fino, medio, grueso) */
 .apolo-thickness-btn {
-  width: 36px !important;
-  height: 42px !important;
+  width: 36px;
+  height: 42px;
 }
 
 .apolo-canvas-toolbar.is-vertical .apolo-thickness-btn {
-  width: 32px !important;
-  height: 32px !important;
+  width: 32px;
+  height: 32px;
 }
 
 .apolo-thickness-btn.is-active {
-  background: var(--apolo-accent-light) !important;
+  background: var(--apolo-accent-light);
 }
 
 .apolo-thickness-btn.is-dimmed {
-  opacity: 0.35 !important;
-  pointer-events: none !important;
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .apolo-thickness-dot {
@@ -306,15 +429,15 @@
 
 /* Grid button */
 .apolo-grid-btn.is-active {
-  background: var(--apolo-accent-light) !important;
-  color: var(--apolo-accent) !important;
+  background: var(--apolo-accent-light);
+  color: var(--apolo-accent);
 }
 
 /* Snap Guide Dots during toolbar drag */
 .apolo-snap-dots-container {
   position: fixed;
   inset: 0;
-  z-index: 999;
+  z-index: var(--apolo-layer-dots);
   pointer-events: none;
 }
 
@@ -342,7 +465,8 @@
    ========================================================================== */
 .apolo-popover-panel {
   position: fixed;
-  z-index: 1002;
+  z-index: var(--apolo-layer-popover);
+  pointer-events: auto;
   background: var(--apolo-bg);
   border: 1px solid var(--apolo-border);
   box-shadow: var(--apolo-shadow-lg);
@@ -793,12 +917,12 @@
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 1001;
+  z-index: var(--apolo-layer-popover);
 }
 
 .apolo-selection-floating-menu {
   position: fixed;
-  z-index: 1002;
+  z-index: var(--apolo-layer-popover);
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -812,36 +936,36 @@
 }
 
 .apolo-selection-action-btn {
-  border: none !important;
-  background: transparent !important;
-  height: 36px !important;
-  padding: 0 12px !important;
-  border-radius: 18px !important;
-  font-size: 14px !important;
-  font-weight: 500 !important;
-  color: var(--apolo-text) !important;
-  cursor: pointer !important;
-  white-space: nowrap !important;
-  transition: background-color 0.12s ease !important;
+  border: none;
+  background: transparent;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 18px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--apolo-text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.12s ease;
 }
 
 .apolo-selection-action-btn:hover {
-  background: var(--apolo-bg-alt) !important;
+  background: var(--apolo-bg-alt);
 }
 
 .apolo-selection-action-btn.is-accent-link {
-  background: var(--apolo-purple-light) !important;
-  color: var(--apolo-purple) !important;
-  font-weight: 700 !important;
+  background: var(--apolo-purple-light);
+  color: var(--apolo-purple);
+  font-weight: 700;
 }
 
 .apolo-selection-action-btn.is-danger {
-  color: var(--apolo-danger) !important;
+  color: var(--apolo-danger);
 }
 
 .apolo-anchor-pill {
   position: fixed;
-  z-index: 1002;
+  z-index: var(--apolo-layer-popover);
   pointer-events: none;
   background: var(--apolo-bg-alt);
   color: var(--apolo-text-muted);
@@ -854,7 +978,7 @@
 
 .apolo-selection-style-popover {
   position: fixed;
-  z-index: 1003;
+  z-index: var(--apolo-layer-subpopover);
   pointer-events: auto;
   width: 280px;
   border-radius: 18px;
@@ -887,7 +1011,7 @@
 
 .apolo-selection-link-card {
   position: fixed;
-  z-index: 1002;
+  z-index: var(--apolo-layer-subpopover);
   pointer-events: auto;
   width: 300px;
   border-radius: 16px;
@@ -998,7 +1122,8 @@
    ========================================================================== */
 .apolo-zoom-pill {
   position: fixed;
-  z-index: 998;
+  z-index: var(--apolo-layer-zoom);
+  pointer-events: auto;
   right: 20px;
   bottom: 40px;
   display: flex;
@@ -1013,23 +1138,23 @@
 }
 
 .apolo-zoom-btn {
-  border: none !important;
-  background: transparent !important;
-  width: 38px !important;
-  height: 38px !important;
-  border-radius: 19px !important;
-  font-size: 20px !important;
-  font-weight: 600 !important;
-  color: var(--apolo-text) !important;
-  cursor: pointer !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 0 !important;
+  border: none;
+  background: transparent;
+  width: 38px;
+  height: 38px;
+  border-radius: 19px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--apolo-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .apolo-zoom-btn:hover {
-  background: var(--apolo-bg-alt) !important;
+  background: var(--apolo-bg-alt);
 }
 
 .apolo-zoom-label {
@@ -1063,7 +1188,7 @@
    ========================================================================== */
 .apolo-toast {
   position: fixed;
-  z-index: 1005;
+  z-index: var(--apolo-layer-toast);
   left: 50%;
   bottom: 80px;
   transform: translateX(-50%) translateY(20px);
@@ -1403,28 +1528,28 @@
    Visible únicamente en Modo Edición
    ========================================================================== */
 .apolo-box-options-btn {
-  display: flex !important;
-  position: absolute !important;
-  top: 8px !important;
-  left: 10px !important;
-  width: 32px !important;
-  height: 32px !important;
-  border-radius: 8px !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: rgba(255, 255, 255, 0.06) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  color: var(--apolo-text-muted, #94a3b8) !important;
-  cursor: pointer !important;
-  z-index: 10 !important;
-  opacity: 0.65 !important;
-  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1) !important;
-  padding: 0 !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
-  pointer-events: auto !important;
-  touch-action: none !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
+  display: flex;
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  width: var(--apolo-touch-target-sm, 32px);
+  height: var(--apolo-touch-target-sm, 32px);
+  border-radius: var(--apolo-radius-sm, 8px);
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--apolo-text-muted, #94a3b8);
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0.65;
+  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .apolo-box-options-btn::before {
@@ -1435,27 +1560,27 @@
 
 .apolo-box-options-btn svg,
 .apolo-box-options-btn * {
-  pointer-events: none !important;
+  pointer-events: none;
 }
 
 .apolo-box-options-btn:hover,
 .apolo-box-options-btn:active {
-  opacity: 1 !important;
-  background: rgba(255, 255, 255, 0.14) !important;
-  color: var(--apolo-text, #ffffff) !important;
-  transform: scale(1.05) !important;
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--apolo-text, #ffffff);
+  transform: scale(1.05);
 }
 
 .theme-light .apolo-box-options-btn {
-  background: rgba(0, 0, 0, 0.05) !important;
-  border: 1px solid rgba(0, 0, 0, 0.1) !important;
-  color: var(--text-muted, #6b7280) !important;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: var(--text-muted, #6b7280);
 }
 
 .theme-light .apolo-box-options-btn:hover,
 .theme-light .apolo-box-options-btn:active {
-  background: rgba(0, 0, 0, 0.1) !important;
-  color: var(--text-normal, #111827) !important;
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--text-normal, #111827);
 }
 
 /* Ocultar en Modo Lectura */
@@ -1465,21 +1590,21 @@
 }
 
 .apolo-box-handle {
-  display: flex !important;
-  position: absolute !important;
-  bottom: 0 !important;
-  left: 50% !important;
-  transform: translateX(-50%) !important;
-  width: 140px !important;
-  height: 44px !important;
-  align-items: center !important;
-  justify-content: center !important;
-  pointer-events: auto !important;
-  cursor: ns-resize !important;
-  z-index: 10 !important;
-  touch-action: none !important;
-  user-select: none !important;
-  -webkit-user-select: none !important;
+  display: flex;
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140px;
+  height: var(--apolo-touch-target, 44px);
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: ns-resize;
+  z-index: 2;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .apolo-box-handle-bar {
@@ -1574,31 +1699,30 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  border: none !important;
-  background: #25262b !important;
-  color: #9ca3af !important;
-  cursor: pointer !important;
-  padding: 0 !important;
-  transition: all 0.15s ease !important;
-  pointer-events: auto !important;
-  z-index: 10 !important;
+  border: none;
+  background: #25262b;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+  pointer-events: auto;
 }
 
 .apolo-box-menu-close:hover,
 .apolo-box-menu-close:active {
-  background: #323339 !important;
-  color: #ffffff !important;
+  background: #323339;
+  color: #ffffff;
 }
 
 .theme-light .apolo-box-menu-close {
-  background: #f1f2f5 !important;
-  color: #4b5563 !important;
+  background: #f1f2f5;
+  color: #4b5563;
 }
 
 .theme-light .apolo-box-menu-close:hover,
 .theme-light .apolo-box-menu-close:active {
-  background: #e5e7eb !important;
-  color: #111827 !important;
+  background: #e5e7eb;
+  color: #111827;
 }
 
 /* Sections & Labels */
