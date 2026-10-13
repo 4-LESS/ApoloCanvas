@@ -174,6 +174,7 @@
 [hidden],
 .apolo-box-menu-container[hidden],
 .apolo-popover-panel[hidden],
+.apolo-popover-shell[hidden],
 .apolo-lasso-menu-container[hidden],
 .apolo-snap-dots-container[hidden],
 .apolo-more-menu-popover[hidden],
@@ -476,6 +477,462 @@
   user-select: none;
   -webkit-user-select: none;
   box-sizing: border-box;
+}
+
+/* ==========================================================================
+   Standard Popover Shell (.apolo-popover-shell)
+   ========================================================================== */
+.apolo-ui .apolo-popover-shell,
+.apolo-popover-shell {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--apolo-radius-xl, 20px);
+  overflow: hidden;
+  max-height: calc(100vh - 32px);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+}
+
+.apolo-ui .apolo-popover-header,
+.apolo-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--apolo-border-subtle);
+  flex-shrink: 0;
+}
+
+.apolo-ui .apolo-popover-title-group,
+.apolo-popover-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.apolo-ui .apolo-popover-title,
+.apolo-popover-title {
+  font-size: var(--apolo-font-display-sm, 18px);
+  font-weight: 700;
+  color: var(--apolo-text);
+  margin: 0;
+}
+
+.apolo-ui .apolo-popover-close-btn,
+.apolo-popover-close-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--apolo-text-muted);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: all var(--apolo-transition-fast, 0.12s ease);
+}
+
+.apolo-ui .apolo-popover-close-btn:hover,
+.apolo-popover-close-btn:hover {
+  background: var(--apolo-bg-alt);
+  color: var(--apolo-text);
+}
+
+.apolo-ui .apolo-popover-body,
+.apolo-popover-body {
+  padding: 16px 18px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ==========================================================================
+   UI Kit Primitives (.apolo-ui scoped, zero !important)
+   ========================================================================== */
+
+/* 1. Icon Button */
+.apolo-ui .apolo-icon-btn,
+.apolo-icon-btn {
+  width: var(--apolo-touch-target, 44px);
+  height: var(--apolo-touch-target, 44px);
+  border-radius: var(--apolo-radius-md, 12px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--apolo-text);
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--apolo-transition-fast, 0.12s ease);
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.apolo-ui .apolo-icon-btn:hover,
+.apolo-icon-btn:hover {
+  background: var(--apolo-bg-alt);
+  color: var(--apolo-text);
+}
+
+.apolo-ui .apolo-icon-btn.is-active,
+.apolo-icon-btn.is-active {
+  background: var(--apolo-accent-light);
+  color: var(--apolo-accent);
+}
+
+.apolo-ui .apolo-icon-btn.is-compact,
+.apolo-icon-btn.is-compact {
+  width: var(--apolo-touch-target-compact, 36px);
+  height: var(--apolo-touch-target-compact, 36px);
+}
+
+.apolo-ui .apolo-icon-btn.is-sm,
+.apolo-icon-btn.is-sm {
+  width: var(--apolo-touch-target-sm, 32px);
+  height: var(--apolo-touch-target-sm, 32px);
+}
+
+.apolo-ui .apolo-icon-btn.is-danger,
+.apolo-icon-btn.is-danger {
+  color: var(--apolo-danger);
+}
+
+.apolo-ui .apolo-icon-btn.is-danger:hover,
+.apolo-icon-btn.is-danger:hover {
+  background: var(--apolo-danger-light);
+}
+
+.apolo-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 2. Segmented Control */
+.apolo-ui .apolo-segmented,
+.apolo-segmented {
+  display: flex;
+  align-items: center;
+  background: var(--apolo-bg-alt);
+  border-radius: var(--apolo-radius-md, 12px);
+  padding: 3px;
+  gap: 2px;
+}
+
+.apolo-ui .apolo-segmented-btn,
+.apolo-segmented-btn {
+  flex: 1;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: var(--apolo-radius-sm, 8px);
+  font-size: var(--apolo-font-ui-sm, 13px);
+  font-weight: 500;
+  color: var(--apolo-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all var(--apolo-transition-fast, 0.12s ease);
+}
+
+.apolo-ui .apolo-segmented-btn:hover,
+.apolo-segmented-btn:hover {
+  color: var(--apolo-text);
+}
+
+.apolo-ui .apolo-segmented-btn.is-active,
+.apolo-segmented-btn.is-active {
+  background: var(--apolo-bg);
+  color: var(--apolo-accent);
+  font-weight: 600;
+  box-shadow: var(--apolo-shadow-sm);
+}
+
+/* 3. Color Swatches Row */
+.apolo-ui .apolo-swatches-row,
+.apolo-swatches-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.apolo-ui .apolo-swatch-btn,
+.apolo-swatch-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  transition: transform var(--apolo-transition-fast, 0.12s ease), box-shadow var(--apolo-transition-fast, 0.12s ease);
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+}
+
+.apolo-ui .apolo-swatch-btn:hover,
+.apolo-swatch-btn:hover {
+  transform: scale(1.12);
+}
+
+.apolo-ui .apolo-swatch-btn.is-active,
+.apolo-swatch-btn.is-active {
+  transform: scale(1.05);
+  box-shadow: 0 0 0 2px var(--apolo-bg), 0 0 0 4.5px var(--apolo-accent);
+}
+
+.apolo-ui .apolo-swatch-add-btn,
+.apolo-swatch-add-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--apolo-bg);
+  border: 1.5px dashed var(--apolo-text-muted);
+  color: var(--apolo-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--apolo-transition-fast, 0.12s ease);
+}
+
+.apolo-ui .apolo-swatch-add-btn:hover,
+.apolo-swatch-add-btn:hover {
+  border-color: var(--apolo-accent);
+  color: var(--apolo-accent);
+}
+
+/* 4. Slider Row */
+.apolo-ui .apolo-slider-row,
+.apolo-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.apolo-ui .apolo-slider-header,
+.apolo-slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.apolo-ui .apolo-slider-label,
+.apolo-slider-label {
+  font-size: var(--apolo-font-ui-sm, 13px);
+  font-weight: 500;
+  color: var(--apolo-text);
+}
+
+.apolo-ui .apolo-slider-val,
+.apolo-slider-val {
+  font-size: var(--apolo-font-ui-sm, 13px);
+  font-weight: 600;
+  color: var(--apolo-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.apolo-ui .apolo-slider-input,
+.apolo-slider-input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--apolo-border);
+  outline: none;
+  cursor: pointer;
+  margin: 8px 0;
+}
+
+.apolo-ui .apolo-slider-input::-webkit-slider-thumb,
+.apolo-slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--apolo-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform var(--apolo-transition-fast, 0.12s ease);
+}
+
+.apolo-ui .apolo-slider-input::-webkit-slider-thumb:hover,
+.apolo-slider-input::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+/* 5. Toggle Row */
+.apolo-ui .apolo-toggle-row,
+.apolo-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+}
+
+.apolo-ui .apolo-toggle-text-group,
+.apolo-toggle-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.apolo-ui .apolo-toggle-label,
+.apolo-toggle-label {
+  font-size: var(--apolo-font-ui, 14px);
+  font-weight: 500;
+  color: var(--apolo-text);
+}
+
+.apolo-ui .apolo-toggle-desc,
+.apolo-toggle-desc {
+  font-size: var(--apolo-font-caption, 12px);
+  color: var(--apolo-text-muted);
+}
+
+.apolo-ui .apolo-toggle-switch,
+.apolo-toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--apolo-border);
+  cursor: pointer;
+  transition: background var(--apolo-transition-fast, 0.12s ease);
+  flex-shrink: 0;
+}
+
+.apolo-ui .apolo-toggle-switch.is-checked,
+.apolo-toggle-switch.is-checked {
+  background: var(--apolo-accent);
+}
+
+.apolo-ui .apolo-toggle-thumb,
+.apolo-toggle-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform var(--apolo-transition-fast, 0.12s ease);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.apolo-ui .apolo-toggle-switch.is-checked .apolo-toggle-thumb,
+.apolo-toggle-switch.is-checked .apolo-toggle-thumb {
+  transform: translateX(18px);
+}
+
+/* 6. Option Card */
+.apolo-ui .apolo-option-card,
+.apolo-option-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--apolo-radius-md, 12px);
+  border: 1.5px solid var(--apolo-border);
+  background: var(--apolo-bg);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--apolo-transition-fast, 0.12s ease);
+  min-height: 64px;
+  box-sizing: border-box;
+}
+
+.apolo-ui .apolo-option-card:hover,
+.apolo-option-card:hover {
+  background: var(--apolo-bg-alt);
+}
+
+.apolo-ui .apolo-option-card.is-active,
+.apolo-option-card.is-active {
+  border-color: var(--apolo-accent);
+  background: var(--apolo-accent-subtle);
+}
+
+.apolo-ui .apolo-option-card-header,
+.apolo-option-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apolo-ui .apolo-option-card-title,
+.apolo-option-card-title {
+  font-size: var(--apolo-font-ui-sm, 13px);
+  font-weight: 600;
+  color: var(--apolo-text);
+}
+
+.apolo-ui .apolo-option-card-desc,
+.apolo-option-card-desc {
+  font-size: var(--apolo-font-caption, 12px);
+  color: var(--apolo-text-muted);
+}
+
+/* 7. Section Label */
+.apolo-ui .apolo-section-label,
+.apolo-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--apolo-text-muted);
+  margin-bottom: 6px;
+}
+
+/* 8. Action Row & Buttons */
+.apolo-ui .apolo-action-row,
+.apolo-action-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.apolo-ui .apolo-action-btn,
+.apolo-action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 10px 4px;
+  border-radius: var(--apolo-radius-md, 12px);
+  border: 1px solid var(--apolo-border);
+  background: var(--apolo-bg-alt);
+  color: var(--apolo-text);
+  cursor: pointer;
+  font-size: var(--apolo-font-caption, 12px);
+  font-weight: 500;
+  transition: all var(--apolo-transition-fast, 0.12s ease);
+  box-sizing: border-box;
+}
+
+.apolo-ui .apolo-action-btn:hover,
+.apolo-action-btn:hover {
+  background: var(--apolo-border);
+}
+
+.apolo-ui .apolo-action-btn.is-danger,
+.apolo-action-btn.is-danger {
+  color: var(--apolo-danger);
+  border-color: rgba(201, 42, 42, 0.25);
+  background: var(--apolo-danger-light);
+}
+
+.apolo-ui .apolo-action-btn.is-danger:hover,
+.apolo-action-btn.is-danger:hover {
+  background: rgba(201, 42, 42, 0.2);
 }
 
 .apolo-tool-estuche {
