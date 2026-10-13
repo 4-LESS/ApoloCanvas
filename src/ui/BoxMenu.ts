@@ -224,6 +224,7 @@ export class BoxMenu {
     private currentBoxId = '';
     private currentState: BoxMenuState | null = null;
     private callbacks: BoxMenuCallbacks;
+    private openedAt = 0;
 
     constructor(callbacks: BoxMenuCallbacks, parent: HTMLElement = document.body) {
         this.callbacks = callbacks;
@@ -247,24 +248,89 @@ export class BoxMenu {
         window.addEventListener('keydown', this.onKeyDown);
     }
 
-    private readonly onOutsidePointerDown = (e: PointerEvent): void => {
-        if (this.isOpen() && !this.container.contains(e.target as Node)) {
-            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
-            if (targetEl?.closest?.('.apolo-box-options-btn')) {
-                return;
-            }
-            this.hide();
+    private getEventCoords(e: Event): { x: number; y: number } | null {
+        const pe = e as PointerEvent;
+        if (typeof pe.clientX === 'number' && typeof pe.clientY === 'number') {
+            return { x: pe.clientX, y: pe.clientY };
         }
+        const te = e as TouchEvent;
+        const touch = te.touches?.[0] ?? te.changedTouches?.[0];
+        if (touch && typeof touch.clientX === 'number' && typeof touch.clientY === 'number') {
+            return { x: touch.clientX, y: touch.clientY };
+        }
+        return null;
+    }
+
+    private isEventInsideMenu(e: Event): boolean {
+        if (e.target && this.container.contains(e.target as Node)) {
+            return true;
+        }
+        if (typeof (e as any).composedPath === 'function') {
+            const path = (e as any).composedPath();
+            if (Array.isArray(path) && path.includes(this.container)) {
+                return true;
+            }
+        }
+        const coords = this.getEventCoords(e);
+        if (coords && typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function') {
+            const els = document.elementsFromPoint(coords.x, coords.y);
+            if (els.some(el => el === this.container || this.container.contains(el))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private isEventOnOptionsBtn(e: Event): boolean {
+        const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as Element) : null;
+        if (targetEl?.closest?.('.apolo-box-options-btn')) {
+            return true;
+        }
+        const coords = this.getEventCoords(e);
+        if (coords && typeof document !== 'undefined') {
+            if (typeof document.elementsFromPoint === 'function') {
+                const els = document.elementsFromPoint(coords.x, coords.y);
+                if (els.some(el => el.classList?.contains('apolo-box-options-btn') || Boolean((el as Element).closest?.('.apolo-box-options-btn')))) {
+                    return true;
+                }
+            }
+            if (typeof document.querySelectorAll === 'function') {
+                const buttons = document.querySelectorAll<HTMLElement>('.apolo-box-options-btn');
+                const tolerance = 8;
+                for (let i = 0; i < buttons.length; i++) {
+                    const rect = buttons[i].getBoundingClientRect();
+                    if (rect.width === 0 && rect.height === 0) continue;
+                    if (
+                        coords.x >= rect.left - tolerance &&
+                        coords.x <= rect.right + tolerance &&
+                        coords.y >= rect.top - tolerance &&
+                        coords.y <= rect.bottom + tolerance
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private readonly onOutsidePointerDown = (e: PointerEvent): void => {
+        if (!this.isOpen()) return;
+        if (this.isEventInsideMenu(e) || this.isEventOnOptionsBtn(e)) {
+            return;
+        }
+        this.hide();
     };
 
     private readonly onOutsideTouchStart = (e: TouchEvent): void => {
-        if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
-            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
-            if (targetEl?.closest?.('.apolo-box-options-btn')) {
-                return;
-            }
-            this.hide();
+        if (!this.isOpen()) return;
+        if (Date.now() - this.openedAt < 300) {
+            return;
         }
+        if (this.isEventInsideMenu(e) || this.isEventOnOptionsBtn(e)) {
+            return;
+        }
+        this.hide();
     };
 
     private readonly onKeyDown = (e: KeyboardEvent): void => {
@@ -282,6 +348,7 @@ export class BoxMenu {
     }
 
     show(boxId: string, anchorRect: DOMRect, state: BoxMenuState): void {
+        this.openedAt = Date.now();
         this.currentBoxId = boxId;
         this.currentState = { ...state };
         this.render(this.currentState);
@@ -320,6 +387,27 @@ export class BoxMenu {
         window.removeEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
         window.removeEventListener('keydown', this.onKeyDown);
         this.container.remove();
+    }
+
+    private bindButtonAction(btn: HTMLButtonElement, action: () => void): void {
+        let lastInvokedAt = 0;
+        const invoke = (e: Event): void => {
+            e.stopPropagation();
+            const now = Date.now();
+            if (now - lastInvokedAt < 250) return;
+            lastInvokedAt = now;
+            this.openedAt = now;
+            action();
+        };
+        btn.addEventListener('pointerup', (e: PointerEvent) => {
+            if (e.button !== undefined && e.button !== 0) return;
+            e.preventDefault();
+            invoke(e);
+        });
+        btn.addEventListener('click', (e: MouseEvent) => {
+            e.preventDefault();
+            invoke(e);
+        });
     }
 
     private render(state: BoxMenuState): void {
@@ -376,8 +464,7 @@ export class BoxMenu {
             else if (s.id === 'ruled') btn.appendChild(createRuledSvg());
             else btn.appendChild(createBlankSvg());
 
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
+            this.bindButtonAction(btn, () => {
                 state.gridStyle = s.id;
                 this.callbacks.onSetGridStyle(this.currentBoxId, s.id);
                 this.render(state);
@@ -406,8 +493,7 @@ export class BoxMenu {
             btn.type = 'button';
             btn.textContent = d.label;
 
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
+            this.bindButtonAction(btn, () => {
                 state.gridDensity = d.density;
                 this.callbacks.onSetGridDensity(this.currentBoxId, d.density);
                 this.render(state);
@@ -438,8 +524,7 @@ export class BoxMenu {
             btn.setAttribute('aria-label', a.label);
             btn.style.backgroundColor = a.color;
 
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
+            this.bindButtonAction(btn, () => {
                 state.accentColor = a.id;
                 this.callbacks.onSetAccentColor(this.currentBoxId, a.id);
                 this.render(state);
@@ -461,8 +546,7 @@ export class BoxMenu {
         const fitTxt = document.createElement('span');
         fitTxt.textContent = 'Ajustar altura';
         fitBtn.appendChild(fitTxt);
-        fitBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
+        this.bindButtonAction(fitBtn, () => {
             const id = this.currentBoxId;
             this.callbacks.onFitHeight(id);
             this.hide();
@@ -477,8 +561,7 @@ export class BoxMenu {
         const clearTxt = document.createElement('span');
         clearTxt.textContent = 'Limpiar trazos';
         clearBtn.appendChild(clearTxt);
-        clearBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
+        this.bindButtonAction(clearBtn, () => {
             const id = this.currentBoxId;
             this.callbacks.onClearContent(id);
             this.hide();
@@ -493,8 +576,7 @@ export class BoxMenu {
         const delTxt = document.createElement('span');
         delTxt.textContent = 'Eliminar';
         delBtn.appendChild(delTxt);
-        delBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
+        this.bindButtonAction(delBtn, () => {
             const id = this.currentBoxId;
             this.callbacks.onDeleteBox(id);
             this.hide();

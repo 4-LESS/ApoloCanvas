@@ -234,18 +234,39 @@ export default class ApoloCanvasPlugin extends Plugin {
                             previewSvgWrap.remove();
                         }
                     }
-                } else if (id && !existingHandle) {
-                    const handle = document.createElement('div');
-                    handle.className = 'apolo-box-handle';
-                    handle.dataset.apoloHandleId = id;
-                    handle.setAttribute('role', 'button');
-                    handle.setAttribute('aria-label', 'Redimensionar caja de dibujo');
+                } else if (id) {
+                    if (!existingOptions) {
+                        const optBtn = document.createElement('button');
+                        optBtn.className = 'apolo-box-options-btn';
+                        optBtn.type = 'button';
+                        optBtn.dataset.apoloBoxId = id;
+                        optBtn.setAttribute('aria-label', 'Opciones del espacio');
+                        const dotsSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                        dotsSvg.setAttribute('viewBox', '0 0 24 24');
+                        dotsSvg.setAttribute('width', '16');
+                        dotsSvg.setAttribute('height', '16');
+                        dotsSvg.setAttribute('fill', 'none');
+                        dotsSvg.setAttribute('stroke', 'currentColor');
+                        dotsSvg.setAttribute('stroke-width', '2');
+                        dotsSvg.setAttribute('stroke-linecap', 'round');
+                        dotsSvg.setAttribute('stroke-linejoin', 'round');
+                        dotsSvg.innerHTML = '<circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle><circle cx="5" cy="12" r="1.5"></circle>';
+                        optBtn.appendChild(dotsSvg);
+                        s.appendChild(optBtn);
+                    }
+                    if (!existingHandle) {
+                        const handle = document.createElement('div');
+                        handle.className = 'apolo-box-handle';
+                        handle.dataset.apoloHandleId = id;
+                        handle.setAttribute('role', 'button');
+                        handle.setAttribute('aria-label', 'Redimensionar caja de dibujo');
 
-                    const bar = document.createElement('div');
-                    bar.className = 'apolo-box-handle-bar';
+                        const bar = document.createElement('div');
+                        bar.className = 'apolo-box-handle-bar';
 
-                    handle.appendChild(bar);
-                    s.appendChild(handle);
+                        handle.appendChild(bar);
+                        s.appendChild(handle);
+                    }
                 }
             }
 

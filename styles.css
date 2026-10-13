@@ -1422,6 +1422,20 @@
   padding: 0 !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15) !important;
   pointer-events: auto !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.apolo-box-options-btn::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+
+.apolo-box-options-btn svg,
+.apolo-box-options-btn * {
+  pointer-events: none !important;
 }
 
 .apolo-box-options-btn:hover,

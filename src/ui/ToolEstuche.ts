@@ -40,6 +40,7 @@ export class ToolEstuche {
     private state: ToolEstucheState;
     private callbacks: ToolEstucheCallbacks;
     private isVisible = false;
+    private openedAt = 0;
 
     constructor(initialState: ToolEstucheState, callbacks: ToolEstucheCallbacks, parent: HTMLElement = document.body) {
         this.state = { ...initialState };
@@ -74,6 +75,9 @@ export class ToolEstuche {
 
     private readonly onOutsideTouchStart = (e: TouchEvent): void => {
         if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
+            if (Date.now() - this.openedAt < 300) {
+                return;
+            }
             const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
             if (targetEl?.closest?.('.apolo-tool-btn') || targetEl?.closest?.('.apolo-toolbar-btn')) {
                 return;
@@ -96,6 +100,7 @@ export class ToolEstuche {
             this.close();
             return;
         }
+        this.openedAt = Date.now();
         this.isVisible = true;
         this.container.hidden = false;
         this.container.style.display = 'block';

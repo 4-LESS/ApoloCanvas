@@ -16,6 +16,7 @@ export class MoreMenu {
     readonly container: HTMLElement;
     private options: MoreMenuOptions;
     private isVisible = false;
+    private openedAt = 0;
 
     constructor(options: MoreMenuOptions, parent: HTMLElement = document.body) {
         this.options = { ...options };
@@ -50,6 +51,9 @@ export class MoreMenu {
 
     private readonly onOutsideTouchStart = (e: TouchEvent): void => {
         if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
+            if (Date.now() - this.openedAt < 300) {
+                return;
+            }
             const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
             if (targetEl?.closest?.('.apolo-more-btn')) {
                 return;
@@ -68,6 +72,7 @@ export class MoreMenu {
         if (options) {
             this.options = { ...this.options, ...options };
         }
+        this.openedAt = Date.now();
         this.isVisible = true;
         this.container.hidden = false;
         this.container.style.display = 'block';

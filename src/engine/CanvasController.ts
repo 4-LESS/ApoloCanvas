@@ -225,6 +225,8 @@ export class CanvasController {
     private spacerDebounceTimer: number | null = null;
     private previewReanchorTimer: number | null = null;
     private pendingSpaceMutations: SpaceMutation[] = [];
+    private lastBoxOptionsTapAt = 0;
+    private readonly handledBoxEvents = new WeakSet<Event>();
     private destroyed = false;
 
     constructor(
@@ -304,6 +306,11 @@ export class CanvasController {
             this.initZoomPill();
             this.initBoxMenu();
 
+            this.scroller.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
+            this.scroller.addEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true, passive: false });
+            this.canvas.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
+            this.canvas.addEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true, passive: false });
+
             this.input = new InputManager(this.canvas, {
                 palmRejectionCooldownMs: options.palmRejectionCooldownMs,
                 enableMouseDrawing: options.enableMouseDrawing,
@@ -318,7 +325,6 @@ export class CanvasController {
                 onPenHoverOrContact: () => this.cancelSingleFingerTouch(),
             });
 
-            this.canvas.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
             window.addEventListener('pointermove', this.onWindowPointerMoveHandleDrag, { passive: false });
             window.addEventListener('pointerup', this.onWindowPointerUpHandleDrag, { passive: false });
             window.addEventListener('pointercancel', this.onWindowPointerUpHandleDrag, { passive: false });
@@ -865,57 +871,151 @@ export class CanvasController {
         }
     }
 
+    private findBoxOptionsButtonAt(clientX: number, clientY: number): HTMLElement | null {
+        if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+        if (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function') {
+            const elements = document.elementsFromPoint(clientX, clientY);
+            for (const el of elements) {
+                if (el.classList?.contains('apolo-box-options-btn')) {
+                    return el as HTMLElement;
+                }
+                const closest = (el as Element).closest?.('.apolo-box-options-btn');
+                if (closest) {
+                    return closest as HTMLElement;
+                }
+            }
+        }
+        if (typeof this.scroller?.querySelectorAll === 'function') {
+            const buttons = this.scroller.querySelectorAll<HTMLElement>('.apolo-box-options-btn');
+            const tolerance = 8;
+            for (let i = 0; i < buttons.length; i++) {
+                const btn = buttons[i];
+                const rect = btn.getBoundingClientRect();
+                if (rect.width === 0 && rect.height === 0) continue;
+                if (
+                    clientX >= rect.left - tolerance &&
+                    clientX <= rect.right + tolerance &&
+                    clientY >= rect.top - tolerance &&
+                    clientY <= rect.bottom + tolerance
+                ) {
+                    return btn;
+                }
+            }
+        }
+        return null;
+    }
+
+    private findBoxHandleAt(clientX: number, clientY: number): HTMLElement | null {
+        if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+        if (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function') {
+            const elements = document.elementsFromPoint(clientX, clientY);
+            for (const el of elements) {
+                if (el.classList?.contains('apolo-box-handle')) {
+                    return el as HTMLElement;
+                }
+                const closest = (el as Element).closest?.('.apolo-box-handle');
+                if (closest) {
+                    return closest as HTMLElement;
+                }
+            }
+        }
+        if (typeof this.scroller?.querySelectorAll === 'function') {
+            const handles = this.scroller.querySelectorAll<HTMLElement>('.apolo-box-handle');
+            const tolerance = 6;
+            for (let i = 0; i < handles.length; i++) {
+                const handle = handles[i];
+                const rect = handle.getBoundingClientRect();
+                if (rect.width === 0 && rect.height === 0) continue;
+                if (
+                    clientX >= rect.left - tolerance &&
+                    clientX <= rect.right + tolerance &&
+                    clientY >= rect.top - tolerance &&
+                    clientY <= rect.bottom + tolerance
+                ) {
+                    return handle;
+                }
+            }
+        }
+        return null;
+    }
+
+    private toggleBoxMenuFromButton(actualBtn: HTMLElement): void {
+        const now = Date.now();
+        if (now - this.lastBoxOptionsTapAt < 300) {
+            return;
+        }
+        this.lastBoxOptionsTapAt = now;
+        const boxId = actualBtn.dataset.apoloBoxId
+            || actualBtn.closest('.apolo-space-block')?.getAttribute('data-apolo-space-id')
+            || actualBtn.closest('.apolo-space-block')?.getAttribute('data-apolo-space')
+            || '';
+        if (boxId) {
+            if (this.boxMenu?.isOpen() && this.boxMenu.boxId === boxId) {
+                this.boxMenu.hide();
+            } else {
+                this.openBoxMenuFor(boxId, actualBtn);
+            }
+        }
+    }
+
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
-        if (typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return;
-        const elements = document.elementsFromPoint(event.clientX, event.clientY);
+        if (this.handledBoxEvents.has(event)) return;
+        const elements = (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function')
+            ? document.elementsFromPoint(event.clientX, event.clientY)
+            : [];
 
         // 1. Check if tap is on top-left 3-dots options button
-        const optionsBtn = elements.find(el =>
-            el.classList?.contains('apolo-box-options-btn') ||
-            (el as HTMLElement).closest?.('.apolo-box-options-btn') !== null
-        ) as HTMLElement | undefined;
+        const optionsBtn = this.findBoxOptionsButtonAt(event.clientX, event.clientY);
 
         // Instant menu dismissal if box menu is open and tap is outside it
         if (this.boxMenu?.isOpen()) {
-            const isInsideMenu = elements.some(el => this.boxMenu?.container.contains(el));
+            const isInsideMenu = (event.target instanceof Node && this.boxMenu.container.contains(event.target))
+                || elements.some(el => this.boxMenu?.container.contains(el));
             if (!isInsideMenu && !optionsBtn) {
                 this.boxMenu.hide();
             }
         }
 
         if (optionsBtn) {
-            const actualBtn = optionsBtn.classList.contains('apolo-box-options-btn')
-                ? optionsBtn
-                : (optionsBtn.closest('.apolo-box-options-btn') as HTMLElement);
+            this.handledBoxEvents.add(event);
             event.preventDefault();
             event.stopPropagation();
-            const boxId = actualBtn.dataset.apoloBoxId
-                || actualBtn.closest('.apolo-space-block')?.getAttribute('data-apolo-space-id')
-                || actualBtn.closest('.apolo-space-block')?.getAttribute('data-apolo-space')
-                || '';
-            if (boxId) {
-                if (this.boxMenu?.isOpen() && this.boxMenu.boxId === boxId) {
-                    this.boxMenu.hide();
-                } else {
-                    this.openBoxMenuFor(boxId, actualBtn);
-                }
-            }
+            event.stopImmediatePropagation?.();
+            this.toggleBoxMenuFromButton(optionsBtn);
             return;
         }
 
         // 2. Check if tap is on bottom drag handle
-        const handleEl = elements.find(el =>
-            el.classList?.contains('apolo-box-handle') ||
-            (el as HTMLElement).closest?.('.apolo-box-handle') !== null
-        ) as HTMLElement | undefined;
+        const handleEl = this.findBoxHandleAt(event.clientX, event.clientY);
 
         if (handleEl) {
-            const actualHandle = handleEl.classList.contains('apolo-box-handle')
-                ? handleEl
-                : (handleEl.closest('.apolo-box-handle') as HTMLElement);
+            this.handledBoxEvents.add(event);
             event.preventDefault();
             event.stopPropagation();
-            this.startHandleDrag(event, actualHandle);
+            event.stopImmediatePropagation?.();
+            this.startHandleDrag(event, handleEl);
+        }
+    };
+
+    private readonly onCanvasTouchStartHandleCheck = (event: TouchEvent): void => {
+        if (this.handledBoxEvents.has(event)) return;
+        const touch = event.touches?.[0] ?? event.changedTouches?.[0];
+        if (!touch) return;
+
+        const optionsBtn = this.findBoxOptionsButtonAt(touch.clientX, touch.clientY);
+        if (optionsBtn) {
+            this.handledBoxEvents.add(event);
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            this.toggleBoxMenuFromButton(optionsBtn);
+            return;
+        }
+
+        const handleEl = this.findBoxHandleAt(touch.clientX, touch.clientY);
+        if (handleEl) {
+            this.handledBoxEvents.add(event);
+            event.stopPropagation();
         }
     };
 
@@ -1629,7 +1729,10 @@ export class CanvasController {
         this.resizeObserver?.disconnect();
         this.sizerObserver?.disconnect();
 
+        this.scroller.removeEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true });
+        this.scroller.removeEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true });
         this.canvas.removeEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true });
+        this.canvas.removeEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true });
         window.removeEventListener('pointermove', this.onWindowPointerMoveHandleDrag);
         window.removeEventListener('pointerup', this.onWindowPointerUpHandleDrag);
         window.removeEventListener('pointercancel', this.onWindowPointerUpHandleDrag);
@@ -1666,21 +1769,64 @@ export class CanvasController {
         this.scroller.style.userSelect = this.originalScrollerUserSelect;
     }
 
-    private readonly onDocumentPointerDown = (event: PointerEvent): void => {
+    private isEventInOverlayOrMenuButton(event: PointerEvent | TouchEvent): boolean {
         const target = event.target;
-        if (!(target instanceof Node)) return;
-        if (
-            this.toolbar?.container.contains(target) ||
-            this.estuche?.container.contains(target) ||
-            this.lassoMenu?.container.contains(target) ||
-            this.moreMenu?.container.contains(target) ||
-            this.zoomPill?.container.contains(target) ||
-            this.boxMenu?.container.contains(target)
-        ) {
-            return;
+        if (target instanceof Node) {
+            if (
+                this.toolbar?.container.contains(target) ||
+                this.estuche?.container.contains(target) ||
+                this.lassoMenu?.container.contains(target) ||
+                this.moreMenu?.container.contains(target) ||
+                this.zoomPill?.container.contains(target) ||
+                this.boxMenu?.container.contains(target)
+            ) {
+                return true;
+            }
+            const targetEl = typeof (target as any).closest === 'function' ? (target as Element) : null;
+            if (targetEl?.closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn')) {
+                return true;
+            }
         }
-        const targetEl = (target && typeof (target as any).closest === 'function') ? (target as any) : null;
-        if (targetEl?.closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn')) {
+        const pe = event as PointerEvent;
+        const te = event as TouchEvent;
+        const touch = te.touches?.[0] ?? te.changedTouches?.[0];
+        const clientX = typeof pe.clientX === 'number' ? pe.clientX : touch?.clientX;
+        const clientY = typeof pe.clientY === 'number' ? pe.clientY : touch?.clientY;
+
+        if (typeof clientX === 'number' && typeof clientY === 'number') {
+            if (this.findBoxOptionsButtonAt(clientX, clientY)) {
+                return true;
+            }
+            if (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function') {
+                const hits = document.elementsFromPoint(clientX, clientY);
+                for (const el of hits) {
+                    if (
+                        this.toolbar?.container.contains(el) ||
+                        this.estuche?.container.contains(el) ||
+                        this.lassoMenu?.container.contains(el) ||
+                        this.moreMenu?.container.contains(el) ||
+                        this.zoomPill?.container.contains(el) ||
+                        this.boxMenu?.container.contains(el)
+                    ) {
+                        return true;
+                    }
+                    if (
+                        el.classList?.contains('apolo-box-options-btn') ||
+                        el.classList?.contains('apolo-more-btn') ||
+                        el.classList?.contains('apolo-tool-btn') ||
+                        Boolean((el as Element).closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn'))
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private readonly onDocumentPointerDown = (event: PointerEvent): void => {
+        if (!(event.target instanceof Node)) return;
+        if (this.isEventInOverlayOrMenuButton(event)) {
             return;
         }
         this.estuche?.close();
@@ -1689,25 +1835,15 @@ export class CanvasController {
     };
 
     private readonly onDocumentTouchStart = (event: TouchEvent): void => {
-        const target = event.target;
-        if (!(target instanceof Node)) return;
-        if (
-            this.toolbar?.container.contains(target) ||
-            this.estuche?.container.contains(target) ||
-            this.lassoMenu?.container.contains(target) ||
-            this.moreMenu?.container.contains(target) ||
-            this.zoomPill?.container.contains(target) ||
-            this.boxMenu?.container.contains(target)
-        ) {
-            return;
-        }
-        const targetEl = (target && typeof (target as any).closest === 'function') ? (target as any) : null;
-        if (targetEl?.closest?.('.apolo-box-options-btn, .apolo-more-btn, .apolo-tool-btn')) {
+        if (!(event.target instanceof Node)) return;
+        if (this.isEventInOverlayOrMenuButton(event)) {
             return;
         }
         this.estuche?.close();
         this.moreMenu?.close();
-        this.boxMenu?.hide();
+        if (Date.now() - this.lastBoxOptionsTapAt >= 300) {
+            this.boxMenu?.hide();
+        }
     };
 
     private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
@@ -1801,6 +1937,10 @@ export class CanvasController {
     private shouldAcceptDrawingPointer(event: PointerEvent): boolean {
         if (!this.penEnabled) return false;
 
+        if (this.findBoxOptionsButtonAt(event.clientX, event.clientY) || this.findBoxHandleAt(event.clientX, event.clientY)) {
+            return false;
+        }
+
         // 1. Check if the screen pointer hit a forbidden DOM element (toolbar, estuche, menus, frontmatter, gutters, interactive controls)
         if (isScreenPointForbidden(event.clientX, event.clientY)) {
             return false;
@@ -1838,13 +1978,16 @@ export class CanvasController {
     // Drawing input lifecycle (normalized to content column width & anchor block)
     private begin(rawPoint: Point, barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.penEnabled) return;
+        const screenX = rawEvent ? rawEvent.clientX : rawPoint.x;
+        const screenY = rawEvent ? rawEvent.clientY : rawPoint.y;
+        if (this.findBoxOptionsButtonAt(screenX, screenY) || this.findBoxHandleAt(screenX, screenY)) {
+            return;
+        }
         if (this.boxMenu?.isOpen()) {
             this.boxMenu.hide();
         }
 
         // 1. Check if screen pointer hit a forbidden DOM element
-        const screenX = rawEvent ? rawEvent.clientX : rawPoint.x;
-        const screenY = rawEvent ? rawEvent.clientY : rawPoint.y;
         if (isScreenPointForbidden(screenX, screenY)) {
             return;
         }

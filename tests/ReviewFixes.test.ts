@@ -1171,8 +1171,146 @@ describe('Code Review Fixes Verification', () => {
                 input.destroy();
             }
         });
+
+        test('Mobile S-Pen and Finger tap on .apolo-box-options-btn under canvas overlay keeps BoxMenu open across trailing touchstart', () => {
+            const winListeners = new Map<string, Set<Function>>();
+            const mockWindow = {
+                innerWidth: 1024,
+                innerHeight: 768,
+                addEventListener: (type: string, fn: Function) => {
+                    if (!winListeners.has(type)) winListeners.set(type, new Set());
+                    winListeners.get(type)!.add(fn);
+                },
+                removeEventListener: (type: string, fn: Function) => {
+                    winListeners.get(type)?.delete(fn);
+                },
+                dispatch: (type: string, ev: any) => {
+                    const set = winListeners.get(type);
+                    if (set) {
+                        for (const fn of set) fn(ev);
+                    }
+                },
+            };
+
+            const createEl = (tag: string): any => {
+                const classes = new Set<string>();
+                const children: any[] = [];
+                const listeners = new Map<string, Set<Function>>();
+                const el: any = {
+                    tagName: tag.toUpperCase(),
+                    hidden: false,
+                    style: { display: '' },
+                    dataset: {},
+                    children,
+                    get className() { return [...classes].join(' '); },
+                    set className(val: string) {
+                        classes.clear();
+                        val.split(/\s+/).filter(Boolean).forEach(c => classes.add(c));
+                    },
+                    classList: {
+                        add: (c: string) => classes.add(c),
+                        remove: (c: string) => classes.delete(c),
+                        contains: (c: string) => classes.has(c),
+                    },
+                    setAttribute: () => {},
+                    getAttribute: () => null,
+                    appendChild: (c: any) => { children.push(c); return c; },
+                    append: (...args: any[]) => { children.push(...args); },
+                    replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); },
+                    remove: () => {},
+                    contains: (t: any) => t === el || children.some(c => c === t || c.contains?.(t)),
+                    addEventListener: (type: string, fn: Function) => {
+                        if (!listeners.has(type)) listeners.set(type, new Set());
+                        listeners.get(type)!.add(fn);
+                    },
+                    removeEventListener: (type: string, fn: Function) => {
+                        listeners.get(type)?.delete(fn);
+                    },
+                    dispatch: (type: string, ev: any) => {
+                        const set = listeners.get(type);
+                        if (set) {
+                            for (const fn of set) fn(ev);
+                        }
+                    },
+                    closest: (sel: string) => (sel.includes('apolo-box-options-btn') && classes.has('apolo-box-options-btn') ? el : null),
+                    getBoundingClientRect: () => ({ left: 20, top: 20, right: 52, bottom: 52, width: 32, height: 32 }),
+                };
+                return el;
+            };
+
+            const canvasEl = createEl('canvas');
+            canvasEl.className = 'apolo-canvas-surface apolo-canvas-wet';
+            const optionsBtn = createEl('button');
+            optionsBtn.className = 'apolo-box-options-btn';
+
+            const mockDocument = {
+                body: createEl('body'),
+                createElement: createEl,
+                createElementNS: () => createEl('svg'),
+                elementsFromPoint: (x: number, y: number) => {
+                    if (x >= 20 && x <= 52 && y >= 20 && y <= 52) {
+                        return [canvasEl, optionsBtn];
+                    }
+                    return [canvasEl];
+                },
+                querySelectorAll: (sel: string) => (sel.includes('apolo-box-options-btn') ? [optionsBtn] : []),
+            };
+
+            const prevWindow = (globalThis as any).window;
+            const prevDocument = (globalThis as any).document;
+            (globalThis as any).window = mockWindow;
+            (globalThis as any).document = mockDocument;
+
+            try {
+                let selectedStyle = '';
+                const menu = new BoxMenu({
+                    onSetGridStyle: (_id, style) => { selectedStyle = style; },
+                    onSetGridDensity: () => {},
+                    onSetAccentColor: () => {},
+                    onFitHeight: () => {},
+                    onClearContent: () => {},
+                    onDeleteBox: () => {},
+                }, mockDocument.body as any);
+
+                const anchorRect = { left: 20, top: 20, bottom: 52, right: 52 } as DOMRect;
+
+                // Simulate mobile finger / S-Pen tap on .apolo-box-options-btn where canvas is event.target:
+                // 1. pointerdown opens menu
+                menu.show('box-mobile-1', anchorRect, { gridStyle: 'dots', gridDensity: 32 });
+                assert.strictEqual(menu.isOpen(), true);
+
+                // 2. Trailing touchstart fires 1ms later with target = canvasEl at (30, 30)
+                mockWindow.dispatch('touchstart', {
+                    target: canvasEl,
+                    touches: [{ clientX: 30, clientY: 30 }],
+                });
+                assert.strictEqual(menu.isOpen(), true, 'BoxMenu must NOT close on trailing touchstart from the same tap');
+
+                // 3. Even if another pointerdown on canvas over the options button hits window capture, BoxMenu detects optionsBtn under canvas
+                mockWindow.dispatch('pointerdown', {
+                    target: canvasEl,
+                    clientX: 30,
+                    clientY: 30,
+                    pointerType: 'pen',
+                });
+                assert.strictEqual(menu.isOpen(), true, 'BoxMenu window capture must recognize .apolo-box-options-btn underneath canvas overlay');
+
+                // 4. Tapping a tile inside BoxMenu via pointerup (mobile S-Pen / finger) triggers callback without double-firing on subsequent click
+                const fondoSection = menu.container.children[1];
+                const fondoGrid = fondoSection.children[1];
+                const gridTileBtn = fondoGrid.children[1]; // 'grid'
+                gridTileBtn.dispatch('pointerup', {
+                    button: 0,
+                    stopPropagation: () => {},
+                    preventDefault: () => {},
+                });
+                assert.strictEqual(selectedStyle, 'grid', 'BoxMenu tile button must respond immediately to pointerup on mobile');
+
+                menu.destroy();
+            } finally {
+                (globalThis as any).window = prevWindow;
+                (globalThis as any).document = prevDocument;
+            }
+        });
     });
 });
-
-
-
