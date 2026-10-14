@@ -1,5 +1,5 @@
 import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, StrokePattern, ToolbarSlot, ToolType } from '../core/types.ts';
-import { HIGHLIGHTER_PALETTE, ICONS, PRIMARY_PALETTE, createSvg } from './theme.ts';
+import { ICONS, createSvg } from './theme.ts';
 import type { PopoverController, PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { applyPopoverGeometry } from './popover/PopoverGeometry.ts';
@@ -158,6 +158,13 @@ export class ToolEstuche implements PopoverInstance {
             link: 'Enlazar',
         };
         return titles[tool] || 'Estuche';
+    }
+
+    private getOpacityPercent(): number {
+        if (this.state.opacity !== undefined) {
+            return this.state.opacity <= 1 ? Math.round(this.state.opacity * 100) : Math.round(this.state.opacity);
+        }
+        return Math.round((this.state.pressureSensitivity ?? 0.75) * 100);
     }
 
     open(state?: Partial<ToolEstucheState>, anchorEl?: HTMLElement | null): void {
@@ -593,7 +600,7 @@ export class ToolEstuche implements PopoverInstance {
         // 3. Slider Opacidad (10% to 100%)
         const opacitySlider = this.createSlider(
             'Opacidad',
-            Math.round((this.state.opacity ?? this.state.pressureSensitivity ?? 1) * 100),
+            this.getOpacityPercent(),
             10,
             100,
             5,
@@ -1069,12 +1076,23 @@ export class ToolEstuche implements PopoverInstance {
                     this.state.pressureSensitivity = Math.max(0, Math.min(1, opacity / 100));
                     this.pushRecentColor(newColor);
                     this.currentPageIndex = 0;
+
+                    const nextOpacity = this.getOpacityPercent();
+                    if (this.opacityInput && this.opacityBubble) {
+                        this.opacityInput.value = String(nextOpacity);
+                        this.opacityBubble.textContent = String(nextOpacity);
+                        const ratio = Math.max(0, Math.min(1, nextOpacity / 100));
+                        this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+                        this.opacityBubble.style.backgroundColor = newColor;
+                        this.opacityBubble.style.opacity = String(Math.max(0.35, nextOpacity / 100));
+                    }
+
                     this.updateColorsUI();
                     this.callbacks.onChangeColor(newColor);
                     this.callbacks.onChangeOpacity?.(opacity);
                 },
                 null,
-                Math.round(this.state.opacity ?? (this.state.pressureSensitivity * 100))
+                this.getOpacityPercent()
             );
         };
         this.swatchRowEl.appendChild(addBtn);

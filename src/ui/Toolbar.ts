@@ -1,5 +1,5 @@
 import type { EraserMode, PenFavorite, PenProfileId, ShapeType, ThicknessPreset, ToolbarSlot, ToolType } from '../core/types.ts';
-import { ICONS, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
+import { ICONS, createSvg } from './theme.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { ThicknessPopover } from './popover/ThicknessPopover.ts';
 
@@ -219,14 +219,16 @@ export class Toolbar {
 
     private readonly onWindowPointerDown = (e: PointerEvent): void => {
         const target = e.target as HTMLElement | null;
-        if (target && typeof target.closest === 'function' && target.closest('[data-apolo-popover-trigger="true"]')) {
-            return;
-        }
-        if (this.thicknessPopover?.isOpen() && !this.thicknessPopover.el.contains(target as Node)) {
+        if (!target || typeof target.closest !== 'function') return;
+
+        const thicknessHit = this.thicknessTriggerBtn?.contains(target) ?? false;
+        if (this.thicknessPopover?.isOpen() && !thicknessHit && !this.thicknessPopover.el.contains(target as Node)) {
             this.thicknessPopover.close();
             this.thicknessTriggerBtn?.classList.remove('is-open');
         }
-        if (this.colorPickerPopover?.isOpen() && !this.colorPickerPopover.el.contains(target as Node)) {
+
+        const colorHit = this.favGroup?.contains(target) ?? false;
+        if (this.colorPickerPopover?.isOpen() && !colorHit && !this.colorPickerPopover.el.contains(target as Node)) {
             this.colorPickerPopover.close();
         }
     };
@@ -348,6 +350,7 @@ export class Toolbar {
             size: 14,
             width: 14,
             height: 14,
+            viewBox: '0 0 14 14',
             fill: 'currentColor',
             stroke: 'none',
             strokeWidth: 0,

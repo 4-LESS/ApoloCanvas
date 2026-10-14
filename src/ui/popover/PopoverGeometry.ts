@@ -84,27 +84,22 @@ export function applyPopoverGeometry(
 
     if (isBottom) {
         const minTop = vpTop + margin;
-        const maxTop = vpTop + vpH - popH - margin;
         if (top < minTop) {
             top = minTop;
-            const availableH = tbRect.top - offset - margin;
+            const availableH = tbRect.top - offset - minTop;
             if (popH > availableH && availableH > 220) {
                 popoverEl.style.maxHeight = `${availableH}px`;
                 popoverEl.style.overflowY = 'auto';
             }
         }
-        if (top > maxTop) top = maxTop;
     } else if (isTop) {
         const topMin = vpTop + margin;
-        if (top + popH > vpTop + vpH - margin) {
-            const availableH = vpTop + vpH - margin - top;
-            if (popH > availableH && availableH > 220) {
-                popoverEl.style.maxHeight = `${availableH}px`;
-                popoverEl.style.overflowY = 'auto';
-            }
+        const availableH = vpTop + vpH - margin - top;
+        if (popH > availableH && availableH > 220) {
+            popoverEl.style.maxHeight = `${availableH}px`;
+            popoverEl.style.overflowY = 'auto';
         }
         if (top < topMin) top = topMin;
-        if (top + popH > vpTop + vpH - margin) top = vpTop + vpH - popH - margin;
     } else {
         const minTop = vpTop + margin;
         const maxTop = vpTop + vpH - popH - margin;
