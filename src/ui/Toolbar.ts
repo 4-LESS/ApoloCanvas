@@ -78,6 +78,8 @@ export const TOOLBAR_PRIORITIES = {
 } as const;
 
 const SNAP_SLOTS: ToolbarSlot[] = ['tc', 'bc', 'ml', 'mr'];
+const EDGE_THRESHOLD = 36;
+const UNLOCK_DELTA = 44;
 
 export interface ToolbarItemDefinition {
     id: ToolbarItemId;
@@ -96,8 +98,12 @@ interface DragState {
     startY: number;
     origLeft: number;
     origTop: number;
-    pointerOffsetX: number;
-    pointerOffsetY: number;
+}
+
+interface LockedSnap {
+    slot: ToolbarSlot;
+    pointerX: number;
+    pointerY: number;
 }
 
 export class Toolbar {
@@ -105,6 +111,7 @@ export class Toolbar {
     private readonly dotsContainer: HTMLElement;
     private options: ToolbarOptions;
     private dragState: DragState | null = null;
+    private lockedSnap: LockedSnap | null = null;
     private currentDragPos: { x: number; y: number } | null = null;
     private resizeObserver: ResizeObserver | null = null;
 
@@ -345,59 +352,66 @@ export class Toolbar {
         return { x, y, width, height };
     }
 
-    private getNearestSlot(
+    private getLeadingEdgeSnapSlot(
         pointerX: number,
         pointerY: number,
         toolbarRect: { left: number; top: number; right: number; bottom: number },
-    ): ToolbarSlot {
+    ): ToolbarSlot | null {
         const bounds = this.getEditingBounds();
-        let bestSlot = this.options.slot;
-        let bestDistance = Number.POSITIVE_INFINITY;
-        const barWidth = Math.min(220, Math.round(bounds.width * 0.32));
-        const barHeight = Math.min(220, Math.round(bounds.height * 0.32));
+        const cx = bounds.left + bounds.width / 2;
+        const cy = bounds.top + bounds.height / 2;
+        const horizSpan = Math.min(240, Math.max(140, Math.round(bounds.width * 0.34)));
+        const vertSpan = Math.min(240, Math.max(140, Math.round(bounds.height * 0.34)));
+        const centerX = toolbarRect.left + (toolbarRect.right - toolbarRect.left) / 2;
+        const centerY = toolbarRect.top + (toolbarRect.bottom - toolbarRect.top) / 2;
+        const topDist = toolbarRect.top - bounds.top;
+        const bottomDist = bounds.bottom - toolbarRect.bottom;
+        const leftDist = toolbarRect.left - bounds.left;
+        const rightDist = bounds.right - toolbarRect.right;
+        const inHorizCenter = Math.abs((this.isVertical() ? centerX : pointerX) - cx) <= horizSpan / 2;
+        const inVertCenter = Math.abs((this.isVertical() ? pointerY : centerY) - cy) <= vertSpan / 2;
+        const deltaX = pointerX - (this.dragState?.startX ?? pointerX);
+        const deltaY = pointerY - (this.dragState?.startY ?? pointerY);
 
-        for (const slot of SNAP_SLOTS) {
-            const isHorizontal = slot === 'tc' || slot === 'bc';
-            const segmentStart = isHorizontal
-                ? bounds.left + (bounds.width - barWidth) / 2
-                : bounds.top + (bounds.height - barHeight) / 2;
-            const segmentEnd = segmentStart + (isHorizontal ? barWidth : barHeight);
-            const edge = slot === 'tc' ? bounds.top + 14
-                : slot === 'bc' ? bounds.bottom - 18
-                    : slot === 'ml' ? bounds.left + 14
-                        : bounds.right - 18;
-            const pointerAlong = isHorizontal ? pointerX : pointerY;
-            const pointerAcross = isHorizontal ? pointerY : pointerX;
-            const pointerAlongClamped = Math.max(segmentStart, Math.min(segmentEnd, pointerAlong));
-            const pointerDistance = Math.hypot(pointerAlong - pointerAlongClamped, pointerAcross - edge);
-
-            const rectAlongStart = isHorizontal ? toolbarRect.left : toolbarRect.top;
-            const rectAlongEnd = isHorizontal ? toolbarRect.right : toolbarRect.bottom;
-            const rectAcrossStart = isHorizontal ? toolbarRect.top : toolbarRect.left;
-            const rectAcrossEnd = isHorizontal ? toolbarRect.bottom : toolbarRect.right;
-            const rectDx = Math.max(rectAlongStart - segmentEnd, 0, segmentStart - rectAlongEnd);
-            const rectDy = Math.max(rectAcrossStart - edge, 0, edge - rectAcrossEnd);
-            const rectDistance = Math.hypot(rectDx, rectDy);
-            const distance = Math.min(pointerDistance, rectDistance);
-
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestSlot = slot;
-            }
-        }
-        return bestSlot;
+        if (inHorizCenter && topDist <= EDGE_THRESHOLD && topDist < bottomDist && deltaY < 0) return 'tc';
+        if (inHorizCenter && bottomDist <= EDGE_THRESHOLD && bottomDist < topDist && deltaY > 0) return 'bc';
+        if (inVertCenter && leftDist <= EDGE_THRESHOLD && leftDist < rightDist && deltaX < 0) return 'ml';
+        if (inVertCenter && rightDist <= EDGE_THRESHOLD && rightDist < leftDist && deltaX > 0) return 'mr';
+        return null;
     }
 
-    private getGripOffsetInToolbar(): { x: number; y: number } {
-        const grip = this.container.querySelector<HTMLElement>('.apolo-toolbar-grip');
-        if (grip) {
-            const gripRect = grip.getBoundingClientRect();
-            const toolbarRect = this.container.getBoundingClientRect();
-            if (gripRect.width > 0 && gripRect.height > 0) {
-                return { x: gripRect.left - toolbarRect.left, y: gripRect.top - toolbarRect.top };
-            }
+    private shouldKeepLockedSnap(pointerX: number, pointerY: number): boolean {
+        if (!this.lockedSnap) return false;
+        const bounds = this.getEditingBounds();
+        const cx = bounds.left + bounds.width / 2;
+        const cy = bounds.top + bounds.height / 2;
+        const horizSpan = Math.min(240, Math.max(140, Math.round(bounds.width * 0.34)));
+        const vertSpan = Math.min(240, Math.max(140, Math.round(bounds.height * 0.34)));
+
+        switch (this.lockedSnap.slot) {
+            case 'tc':
+                return pointerY <= this.lockedSnap.pointerY + UNLOCK_DELTA
+                    && Math.abs(pointerX - cx) <= horizSpan / 2 + 30;
+            case 'bc':
+                return pointerY >= this.lockedSnap.pointerY - UNLOCK_DELTA
+                    && Math.abs(pointerX - cx) <= horizSpan / 2 + 30;
+            case 'ml':
+                return pointerX <= this.lockedSnap.pointerX + UNLOCK_DELTA
+                    && Math.abs(pointerY - cy) <= vertSpan / 2 + 30;
+            case 'mr':
+                return pointerX >= this.lockedSnap.pointerX - UNLOCK_DELTA
+                    && Math.abs(pointerY - cy) <= vertSpan / 2 + 30;
         }
-        return this.isVertical() ? { x: 10, y: 20 } : { x: 20, y: 10 };
+        return false;
+    }
+
+    private anchorToSnapSlot(slot: ToolbarSlot): void {
+        this.options.slot = slot;
+        this.applyOrientationStyles();
+        this.evaluateOverflow();
+        const coords = this.getSlotCoordinates(slot);
+        this.currentDragPos = { x: coords.x, y: coords.y };
+        this.updatePosition();
     }
 
     private clampPosition(x: number, y: number, width: number, height: number): { x: number; y: number } {
@@ -1046,11 +1060,9 @@ export class Toolbar {
 
         const el = e.currentTarget as HTMLElement;
         const rect = this.container.getBoundingClientRect();
-        const scale = (rect.width / this.container.offsetWidth) || 1;
-        const grip = this.container.querySelector<HTMLElement>('.apolo-toolbar-grip');
-        const gripRect = grip?.getBoundingClientRect();
-        const hasGripBounds = !!gripRect && gripRect.width > 0 && gripRect.height > 0;
-        const gripOffset = this.getGripOffsetInToolbar();
+        const measuredScale = this.container.offsetWidth > 0 ? rect.width / this.container.offsetWidth : 1;
+        const scale = Number.isFinite(measuredScale) && measuredScale > 0 ? measuredScale : 1;
+        this.lockedSnap = null;
 
         this.dragState = {
             pointerId: e.pointerId,
@@ -1060,8 +1072,6 @@ export class Toolbar {
             startY: e.clientY,
             origLeft: rect.left,
             origTop: rect.top,
-            pointerOffsetX: hasGripBounds ? e.clientX - gripRect!.left : 0,
-            pointerOffsetY: hasGripBounds ? e.clientY - gripRect!.top : 0,
         };
 
         try {
@@ -1098,51 +1108,56 @@ export class Toolbar {
         this.currentDragPos = { x: newX, y: newY };
         this.updatePosition();
 
-        const nearest = this.getNearestSlot(e.clientX, e.clientY, {
+        const candidateRect = {
             left: newX,
             top: newY,
             right: newX + curWidth,
             bottom: newY + curHeight,
-        });
-        const targetVert = nearest === 'ml' || nearest === 'mr';
-        if (targetVert !== this.isVertical()) {
-            this.options.slot = nearest;
-            this.applyOrientationStyles();
-            this.evaluateOverflow();
+        };
 
-            const nextDimensions = this.getDimensions();
-            const gripOffset = this.getGripOffsetInToolbar();
-            const anchored = this.clampPosition(
-                e.clientX - this.dragState.pointerOffsetX - gripOffset.x,
-                e.clientY - this.dragState.pointerOffsetY - gripOffset.y,
-                nextDimensions.width,
-                nextDimensions.height,
-            );
-            this.currentDragPos = anchored;
+        if (this.lockedSnap) {
+            if (this.shouldKeepLockedSnap(e.clientX, e.clientY)) {
+                this.anchorToSnapSlot(this.lockedSnap.slot);
+                this.highlightSnapDot(this.lockedSnap.slot);
+                return;
+            }
+
+            this.lockedSnap = null;
+            const unlockedPosition = this.currentDragPos ?? { x: newX, y: newY };
+            this.dragState.origLeft = unlockedPosition.x;
+            this.dragState.origTop = unlockedPosition.y;
             this.dragState.startX = e.clientX;
             this.dragState.startY = e.clientY;
-            this.dragState.origLeft = anchored.x;
-            this.dragState.origTop = anchored.y;
+            this.currentDragPos = unlockedPosition;
             this.updatePosition();
-            this.showSnapDots();
+            this.highlightSnapDot(null);
+            return;
         }
-        this.highlightSnapDot(nearest);
+
+        const triggeredSlot = this.getLeadingEdgeSnapSlot(e.clientX, e.clientY, candidateRect);
+        if (triggeredSlot) {
+            this.lockedSnap = { slot: triggeredSlot, pointerX: e.clientX, pointerY: e.clientY };
+            this.anchorToSnapSlot(triggeredSlot);
+            this.dragState.startX = e.clientX;
+            this.dragState.startY = e.clientY;
+            this.dragState.origLeft = this.currentDragPos!.x;
+            this.dragState.origTop = this.currentDragPos!.y;
+            this.showSnapDots();
+            this.highlightSnapDot(triggeredSlot);
+            return;
+        }
+
+        this.highlightSnapDot(null);
     };
 
     private readonly onGripPointerUp = (e: PointerEvent): void => {
         if (!this.dragState || e.pointerId !== this.dragState.pointerId) return;
 
-        const { width: curWidth, height: curHeight } = this.getDimensions();
         const initialSlot = this.dragState.initialSlot;
-        const lastPos = this.currentDragPos || { x: this.dragState.origLeft, y: this.dragState.origTop };
-        const nearest = this.getNearestSlot(e.clientX, e.clientY, {
-            left: lastPos.x,
-            top: lastPos.y,
-            right: lastPos.x + curWidth,
-            bottom: lastPos.y + curHeight,
-        });
+        const targetSlot = this.lockedSnap?.slot ?? this.options.slot;
 
         this.dragState = null;
+        this.lockedSnap = null;
         this.currentDragPos = null;
         this.hideSnapDots();
 
@@ -1150,14 +1165,8 @@ export class Toolbar {
         window.removeEventListener('pointerup', this.onGripPointerUp);
         window.removeEventListener('pointercancel', this.onGripPointerUp);
 
-        if (this.options.slot !== nearest) {
-            this.setSlot(nearest);
-        }
-        if (initialSlot !== nearest) {
-            this.options.onSlotChange(nearest);
-        } else {
-            this.updatePosition();
-        }
+        this.setSlot(targetSlot);
+        if (initialSlot !== targetSlot) this.options.onSlotChange(targetSlot);
     };
 
     private showSnapDots(): void {
@@ -1188,7 +1197,7 @@ export class Toolbar {
         }
     }
 
-    private highlightSnapDot(activeSlot: ToolbarSlot): void {
+    private highlightSnapDot(activeSlot: ToolbarSlot | null): void {
         this.dotsContainer.querySelectorAll<HTMLElement>('.apolo-snap-dot').forEach(dot => {
             dot.classList.toggle('is-nearest', dot.dataset.slot === activeSlot);
         });

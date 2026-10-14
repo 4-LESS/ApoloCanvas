@@ -691,6 +691,136 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
         assert.equal(changedSlot, 'mr');
     });
 
+    await t.test('Vertical bottom-tip contact locks the preview to bc until reverse movement', () => {
+        toolbar.setSlot('mr');
+        const dimensions = toolbar.getDimensions();
+        const left = Number.parseFloat(toolbar.container.style.left);
+        const top = Number.parseFloat(toolbar.container.style.top);
+        (toolbar.container as any).getBoundingClientRect = () => ({
+            left,
+            top,
+            right: left + dimensions.width,
+            bottom: top + dimensions.height,
+            width: dimensions.width,
+            height: dimensions.height,
+        });
+
+        const grip = toolbar.container.querySelector('.apolo-toolbar-grip');
+        assert.ok(grip);
+        const pointerStartX = left + 4;
+        const pointerStartY = top + 8;
+        const edgePointerX = pointerStartX + (window.innerWidth - dimensions.width) / 2 - left;
+        const edgePointerY = pointerStartY + window.innerHeight - dimensions.height - 8 - top;
+        grip.dispatchEvent({
+            type: 'pointerdown',
+            pointerId: 78,
+            clientX: pointerStartX,
+            clientY: pointerStartY,
+            currentTarget: grip,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+
+        (window as any).dispatchEvent({
+            type: 'pointermove',
+            pointerId: 78,
+            clientX: edgePointerX,
+            clientY: edgePointerY,
+            preventDefault: () => {},
+        });
+
+        assert.equal(toolbar.getSlot(), 'bc');
+        assert.equal(toolbar.container.classList.contains('is-vertical'), false);
+        const dockedTop = Number.parseFloat(toolbar.container.style.top);
+        assert.ok(dockedTop > 650, 'Horizontal preview remains docked to the bottom edge');
+
+        (window as any).dispatchEvent({
+            type: 'pointermove',
+            pointerId: 78,
+            clientX: edgePointerX + 1,
+            clientY: edgePointerY + 1,
+            preventDefault: () => {},
+        });
+        assert.equal(Number.parseFloat(toolbar.container.style.top), dockedTop, 'Holding near bc keeps the preview docked');
+        assert.equal((toolbar as any).lockedSnap?.slot, 'bc');
+
+        (window as any).dispatchEvent({
+            type: 'pointermove',
+            pointerId: 78,
+            clientX: edgePointerX + 1,
+            clientY: edgePointerY - 45,
+            preventDefault: () => {},
+        });
+        assert.equal((toolbar as any).lockedSnap, null, 'Reverse movement past the unlock delta releases the edge lock');
+
+        (window as any).dispatchEvent({ type: 'pointerup', pointerId: 78, clientX: edgePointerX + 1, clientY: edgePointerY - 45 });
+    });
+
+    await t.test('Horizontal right-tip contact locks the preview to mr until reverse movement', () => {
+        toolbar.setSlot('tc');
+        const dimensions = toolbar.getDimensions();
+        const left = Number.parseFloat(toolbar.container.style.left);
+        const top = Number.parseFloat(toolbar.container.style.top);
+        (toolbar.container as any).getBoundingClientRect = () => ({
+            left,
+            top,
+            right: left + dimensions.width,
+            bottom: top + dimensions.height,
+            width: dimensions.width,
+            height: dimensions.height,
+        });
+
+        const grip = toolbar.container.querySelector('.apolo-toolbar-grip');
+        assert.ok(grip);
+        const pointerStartX = left + 8;
+        const pointerStartY = top + 8;
+        const edgePointerX = pointerStartX + window.innerWidth - 8 - left - dimensions.width;
+        const edgePointerY = pointerStartY + (window.innerHeight - dimensions.height) / 2 - top;
+        grip.dispatchEvent({
+            type: 'pointerdown',
+            pointerId: 79,
+            clientX: pointerStartX,
+            clientY: pointerStartY,
+            currentTarget: grip,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+
+        (window as any).dispatchEvent({
+            type: 'pointermove',
+            pointerId: 79,
+            clientX: edgePointerX,
+            clientY: edgePointerY,
+            preventDefault: () => {},
+        });
+
+        assert.equal(toolbar.getSlot(), 'mr');
+        assert.equal(toolbar.container.classList.contains('is-vertical'), true);
+        const dockedLeft = Number.parseFloat(toolbar.container.style.left);
+        assert.ok(dockedLeft > 1100, 'Vertical preview remains docked to the right edge');
+
+        (window as any).dispatchEvent({
+            type: 'pointermove',
+            pointerId: 79,
+            clientX: edgePointerX + 1,
+            clientY: edgePointerY + 1,
+            preventDefault: () => {},
+        });
+        assert.equal(Number.parseFloat(toolbar.container.style.left), dockedLeft, 'Holding near mr keeps the preview docked');
+        assert.equal((toolbar as any).lockedSnap?.slot, 'mr');
+
+        (window as any).dispatchEvent({
+            type: 'pointermove',
+            pointerId: 79,
+            clientX: edgePointerX - 45,
+            clientY: edgePointerY + 1,
+            preventDefault: () => {},
+        });
+        assert.equal((toolbar as any).lockedSnap, null, 'Reverse movement past the unlock delta releases the edge lock');
+
+        (window as any).dispatchEvent({ type: 'pointerup', pointerId: 79, clientX: edgePointerX - 45, clientY: edgePointerY + 1 });
+    });
+
     await t.test('Legacy corner slots normalize to their cardinal edges', () => {
         toolbar.setSlot('tr');
         assert.equal(toolbar.getSlot(), 'tc');
