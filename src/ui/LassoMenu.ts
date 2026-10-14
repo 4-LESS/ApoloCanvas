@@ -28,6 +28,7 @@ export class LassoMenu {
     private bounds: BoundingBox | null = null;
     private anchorBlockName = 'bloque 1';
     private isStyleOpen = false;
+    private styleButtonEl: HTMLElement | null = null;
     private zoom = 1;
     private scrollLeft = 0;
     private scrollTop = 0;
@@ -112,6 +113,19 @@ export class LassoMenu {
         this.isStyleOpen = false;
         this.stylePopoverEl.hidden = true;
         this.linkCardEl.hidden = true;
+        this.styleButtonEl?.classList.remove('is-active');
+    }
+
+    private formatAnchorName(name: string): string {
+        if (!name) return 'Nota';
+        if (name.startsWith('lines:')) {
+            const lineNum = parseInt(name.slice(6), 10);
+            return isNaN(lineNum) ? 'Nota' : `Línea ${lineNum + 1}`;
+        }
+        if (name.startsWith('space:')) {
+            return 'Espacio';
+        }
+        return name;
     }
 
     private updatePosition(): void {
@@ -129,7 +143,8 @@ export class LassoMenu {
         const vpHeight = typeof window !== 'undefined' ? window.innerHeight : 768;
 
         // Safe margin clamping horizontally for 1:1 scale menu
-        const centerX = Math.max(160, Math.min(vpWidth - 160, rawCenterX));
+        const halfMenuWidth = Math.min(240, (vpWidth - 24) / 2);
+        const centerX = Math.max(halfMenuWidth + 12, Math.min(vpWidth - halfMenuWidth - 12, rawCenterX));
 
         const menuHeight = 44;
         const isAbove = minY - menuHeight - 16 > 48; // room above
@@ -143,7 +158,11 @@ export class LassoMenu {
         this.menuEl.style.transformOrigin = `50% ${isAbove ? '100%' : '0%'}`;
 
         // 2. Position Anchor Pill at 1:1 scale
-        this.anchorPillEl.textContent = `ancla · ${this.anchorBlockName}`;
+        this.anchorPillEl.replaceChildren();
+        const anchorIcon = createSvg(ICONS.bookmark, { size: 12, strokeWidth: 2 });
+        const anchorText = document.createElement('span');
+        anchorText.textContent = this.formatAnchorName(this.anchorBlockName);
+        this.anchorPillEl.append(anchorIcon, anchorText);
         this.anchorPillEl.style.position = 'fixed';
         this.anchorPillEl.style.left = `${Math.round(Math.max(12, minX - 10))}px`;
         this.anchorPillEl.style.top = `${Math.round(centerY)}px`;
@@ -225,54 +244,96 @@ export class LassoMenu {
     private renderMenu(): void {
         this.menuEl.replaceChildren();
 
-        const btnDefs: Array<{
-            label: string;
-            className?: string;
-            isPopoverTrigger?: boolean;
-            onClick: () => void;
-        }> = [
-            { label: 'Copiar', onClick: () => this.callbacks.onCopy() },
-            { label: 'Pegar', onClick: () => this.callbacks.onPaste() },
+        interface ActionGroup {
+            actions: Array<{
+                label: string;
+                icon: string;
+                className?: string;
+                isPopoverTrigger?: boolean;
+                onClick: () => void;
+            }>;
+        }
+
+        const groups: ActionGroup[] = [
             {
-                label: 'Enlazar',
-                className: 'is-accent-link',
-                onClick: () => this.callbacks.onLink(),
-            },
-            { label: 'Al frente', onClick: () => this.callbacks.onBringToFront() },
-            { label: 'Al fondo', onClick: () => this.callbacks.onSendToBack() },
-            {
-                label: 'Estilo',
-                isPopoverTrigger: true,
-                onClick: () => {
-                    this.isStyleOpen = !this.isStyleOpen;
-                    this.stylePopoverEl.hidden = !this.isStyleOpen;
-                    if (this.isStyleOpen) {
-                        this.linkCardEl.hidden = true;
-                    } else {
-                        this.updateLinkCard();
-                    }
-                    this.updatePosition();
-                },
+                actions: [
+                    { label: 'Copiar', icon: ICONS.copy, onClick: () => this.callbacks.onCopy() },
+                    { label: 'Pegar', icon: ICONS.paste, onClick: () => this.callbacks.onPaste() },
+                ],
             },
             {
-                label: 'Eliminar',
-                className: 'is-danger',
-                onClick: () => this.callbacks.onDelete(),
+                actions: [
+                    {
+                        label: 'Enlazar',
+                        icon: ICONS.link,
+                        className: 'is-accent-link',
+                        onClick: () => this.callbacks.onLink(),
+                    },
+                    { label: 'Al frente', icon: ICONS.bringToFront, onClick: () => this.callbacks.onBringToFront() },
+                    { label: 'Al fondo', icon: ICONS.sendToBack, onClick: () => this.callbacks.onSendToBack() },
+                ],
+            },
+            {
+                actions: [
+                    {
+                        label: 'Estilo',
+                        icon: ICONS.sliders,
+                        isPopoverTrigger: true,
+                        onClick: () => {
+                            this.isStyleOpen = !this.isStyleOpen;
+                            this.stylePopoverEl.hidden = !this.isStyleOpen;
+                            this.styleButtonEl?.classList.toggle('is-active', this.isStyleOpen);
+                            if (this.isStyleOpen) {
+                                this.linkCardEl.hidden = true;
+                            } else {
+                                this.updateLinkCard();
+                            }
+                            this.updatePosition();
+                        },
+                    },
+                ],
+            },
+            {
+                actions: [
+                    {
+                        label: 'Eliminar',
+                        icon: ICONS.trash,
+                        className: 'is-danger',
+                        onClick: () => this.callbacks.onDelete(),
+                    },
+                ],
             },
         ];
 
-        for (const def of btnDefs) {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = `apolo-selection-action-btn ${def.className ?? ''}`;
-            btn.textContent = def.label;
-            btn.setAttribute('aria-label', def.label);
-            if (def.isPopoverTrigger) {
-                btn.setAttribute('data-apolo-popover-trigger', 'true');
+        groups.forEach((group, groupIdx) => {
+            if (groupIdx > 0) {
+                const divider = document.createElement('div');
+                divider.className = 'apolo-selection-divider';
+                divider.setAttribute('aria-hidden', 'true');
+                this.menuEl.appendChild(divider);
             }
-            btn.addEventListener('click', def.onClick);
-            this.menuEl.appendChild(btn);
-        }
+            for (const def of group.actions) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `apolo-selection-action-btn ${def.className ?? ''}`;
+                btn.setAttribute('aria-label', def.label);
+                btn.setAttribute('title', def.label);
+                if (def.isPopoverTrigger) {
+                    btn.setAttribute('data-apolo-popover-trigger', 'true');
+                    this.styleButtonEl = btn;
+                    if (this.isStyleOpen) btn.classList.add('is-active');
+                }
+
+                const iconSvg = createSvg(def.icon, { size: 15, strokeWidth: 1.9 });
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'apolo-action-label';
+                labelSpan.textContent = def.label;
+
+                btn.append(iconSvg, labelSpan);
+                btn.addEventListener('click', def.onClick);
+                this.menuEl.appendChild(btn);
+            }
+        });
     }
 
     private renderStylePopover(): void {

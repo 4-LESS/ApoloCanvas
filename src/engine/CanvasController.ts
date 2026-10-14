@@ -38,7 +38,7 @@ import { ZoomPill } from '../ui/ZoomPill';
 import { Toast } from '../ui/Toast';
 import { PopoverController } from '../ui/kit';
 import { LinkSuggestModal, openLocalGraph } from '../ui/LinkSuggestModal';
-import { DEFAULT_FAVORITES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
+import { DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
 import { calculateNaturalPressureScale, smoothPressure } from './input/PressureCurve';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser';
 import {
@@ -89,9 +89,19 @@ export interface CanvasControllerOptions {
     readonly?: boolean;
     toolbarSlot?: ToolbarSlot;
     favorites?: PenFavorite[];
+    toolPalettes?: {
+        pen?: { colors: string[]; opacities: number[] };
+        highlighter?: { colors: string[]; opacities: number[] };
+        shape?: { colors: string[]; opacities: number[] };
+    };
     onPenEnabledChange?: (enabled: boolean) => void;
     onToolbarSlotChange?: (slot: ToolbarSlot) => void;
     onFavoritesChange?: (favorites: PenFavorite[]) => void;
+    onToolPalettesChange?: (palettes: {
+        pen: { colors: string[]; opacities: number[] };
+        highlighter: { colors: string[]; opacities: number[] };
+        shape: { colors: string[]; opacities: number[] };
+    }) => void;
 }
 
 interface Anchor {
@@ -199,6 +209,12 @@ export class CanvasController {
     private previousPenColor = '#1F4FD8';
     private favorites: PenFavorite[];
     private activeFavoriteIndex = 0;
+    private toolPalettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }>;
+    private activeColorSlots: Record<'pen' | 'highlighter' | 'shape', number> = {
+        pen: 0,
+        highlighter: 0,
+        shape: 0,
+    };
     private toolbarSlot: ToolbarSlot = 'tc';
 
     // Selection & Manipulation
@@ -261,6 +277,35 @@ export class CanvasController {
         this.favorites = options.favorites && options.favorites.length === 4
             ? [...options.favorites]
             : [...DEFAULT_FAVORITES];
+
+        this.toolPalettes = {
+            pen: {
+                colors: options.toolPalettes?.pen?.colors && options.toolPalettes.pen.colors.length === 4
+                    ? [...options.toolPalettes.pen.colors]
+                    : (options.favorites && options.favorites.length === 4
+                        ? options.favorites.map(f => f.color)
+                        : [...DEFAULT_TOOL_PALETTES.pen.colors]),
+                opacities: options.toolPalettes?.pen?.opacities && options.toolPalettes.pen.opacities.length === 4
+                    ? [...options.toolPalettes.pen.opacities]
+                    : [...DEFAULT_TOOL_PALETTES.pen.opacities],
+            },
+            highlighter: {
+                colors: options.toolPalettes?.highlighter?.colors && options.toolPalettes.highlighter.colors.length === 4
+                    ? [...options.toolPalettes.highlighter.colors]
+                    : [...DEFAULT_TOOL_PALETTES.highlighter.colors],
+                opacities: options.toolPalettes?.highlighter?.opacities && options.toolPalettes.highlighter.opacities.length === 4
+                    ? [...options.toolPalettes.highlighter.opacities]
+                    : [...DEFAULT_TOOL_PALETTES.highlighter.opacities],
+            },
+            shape: {
+                colors: options.toolPalettes?.shape?.colors && options.toolPalettes.shape.colors.length === 4
+                    ? [...options.toolPalettes.shape.colors]
+                    : [...DEFAULT_TOOL_PALETTES.shape.colors],
+                opacities: options.toolPalettes?.shape?.opacities && options.toolPalettes.shape.opacities.length === 4
+                    ? [...options.toolPalettes.shape.opacities]
+                    : [...DEFAULT_TOOL_PALETTES.shape.opacities],
+            },
+        };
 
         this.style = {
             color: options.defaultPenColor,
@@ -378,7 +423,9 @@ export class CanvasController {
             this.renderDirty = true;
             this.schedulePaint();
             this.toolbar?.setSlot(this.toolbarSlot);
-            this.estuche?.position();
+            if (this.estuche?.isOpen()) {
+                this.estuche.position();
+            }
             this.lassoMenu?.updateViewport(this.zoom, this.currentScrollLeft, this.currentScrollTop);
         });
         this.resizeObserver.observe(scroller);
@@ -454,6 +501,7 @@ export class CanvasController {
             activeProfileId: this.penProfileId,
             activeFavoriteIndex: this.activeFavoriteIndex,
             favorites: this.favorites,
+            toolPalettes: this.toolPalettes,
             snapGrid: this.snapGrid,
             canUndo: this.history.length > 0,
             canRedo: this.future.length > 0,
@@ -499,7 +547,11 @@ export class CanvasController {
             },
             onUndo: () => this.performUndo(),
             onRedo: () => this.performRedo(),
-            onSelectFavorite: (index) => this.applyFavorite(index),
+            onSelectFavorite: (index) => this.selectColorSlot(index),
+            onChangeColor: (color) => this.setInkColor(color),
+            onUpdatePaletteColor: (toolKey, slotIdx, newColor, opacity) => {
+                this.updateToolPaletteColor(toolKey, slotIdx, newColor, opacity);
+            },
             onSelectThickness: (preset) => this.applyThicknessPreset(preset),
             onToggleSnapGrid: () => {
                 this.snapGrid = !this.snapGrid;
@@ -1424,6 +1476,37 @@ export class CanvasController {
         }
     }
 
+    private selectColorSlot(index: number): void {
+        const paletteKey = this.tool === 'highlighter' ? 'highlighter' : (this.tool === 'shape' ? 'shape' : 'pen');
+        this.activeColorSlots[paletteKey] = index;
+        this.activeFavoriteIndex = index;
+        const color = this.toolPalettes[paletteKey]?.colors[index] ?? this.favorites[index]?.color ?? '#1F4FD8';
+        this.setInkColor(color);
+        // Note: strictly only changes ink color; does NOT alter current tool, profile, or width
+    }
+
+    private updateToolPaletteColor(
+        toolKey: 'pen' | 'highlighter' | 'shape',
+        slotIdx: number,
+        newColor: string,
+        opacity: number
+    ): void {
+        if (!this.toolPalettes[toolKey]) return;
+        this.toolPalettes[toolKey].colors[slotIdx] = newColor;
+        this.toolPalettes[toolKey].opacities[slotIdx] = opacity;
+        this.activeColorSlots[toolKey] = slotIdx;
+        this.activeFavoriteIndex = slotIdx;
+
+        // Keep favorites in sync if pen palette changed
+        if (toolKey === 'pen' && this.favorites[slotIdx]) {
+            this.favorites[slotIdx].color = newColor;
+            this.options.onFavoritesChange?.(this.favorites);
+        }
+
+        this.options.onToolPalettesChange?.(this.toolPalettes);
+        this.setInkColor(newColor);
+    }
+
     private applyFavorite(index: number): void {
         const fav = this.favorites[index];
         if (!fav) return;
@@ -1615,25 +1698,36 @@ export class CanvasController {
         const previousTool = this.tool;
         this.tool = tool;
 
-        // Auto color and mode switch when moving between pen and highlighter
+        // Auto color and mode switch when moving between pen, highlighter, and shape
         if (tool === 'highlighter' && previousTool !== 'highlighter') {
             this.previousPenColor = this.style.color;
-            if (this.style.color === '#111827' || this.style.color === '#1F4FD8' || !this.style.color) {
-                this.style.color = '#F5C400';
-            }
-            this.style.opacity = 0.45;
+            const hlSlot = this.activeColorSlots.highlighter ?? 0;
+            const hlColor = this.toolPalettes?.highlighter?.colors[hlSlot] || '#FDD835';
+            this.style.color = hlColor;
+            this.style.opacity = (this.toolPalettes?.highlighter?.opacities[hlSlot] ?? 75) / 100;
             this.style.isHighlighter = true;
             if (this.style.width < 8) {
                 this.style.width = 20;
             }
             this.canvas.classList.add('is-highlighter-mode');
         } else if (previousTool === 'highlighter' && tool === 'pen') {
-            this.style.color = this.previousPenColor || '#1F4FD8';
-            this.style.opacity = 1.0;
+            const penSlot = this.activeColorSlots.pen ?? 0;
+            this.style.color = this.toolPalettes?.pen?.colors[penSlot] || this.previousPenColor || '#1F4FD8';
+            this.style.opacity = (this.toolPalettes?.pen?.opacities[penSlot] ?? 100) / 100;
             this.style.isHighlighter = false;
             if (this.style.width > 10) {
                 this.style.width = 3.2;
             }
+            this.canvas.classList.remove('is-highlighter-mode');
+        } else if (tool === 'shape' && previousTool !== 'shape') {
+            const shapeSlot = this.activeColorSlots.shape ?? 0;
+            this.style.color = this.toolPalettes?.shape?.colors[shapeSlot] || '#2F6BFF';
+            this.style.opacity = (this.toolPalettes?.shape?.opacities[shapeSlot] ?? 100) / 100;
+            this.canvas.classList.remove('is-highlighter-mode');
+        } else if (previousTool === 'shape' && tool === 'pen') {
+            const penSlot = this.activeColorSlots.pen ?? 0;
+            this.style.color = this.toolPalettes?.pen?.colors[penSlot] || this.previousPenColor || '#1F4FD8';
+            this.style.opacity = (this.toolPalettes?.pen?.opacities[penSlot] ?? 100) / 100;
             this.canvas.classList.remove('is-highlighter-mode');
         } else if (tool === 'eraser') {
             this.selection = [];
@@ -2031,10 +2125,10 @@ export class CanvasController {
         this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
 
         // Moving existing selection if tapped inside bounds
-        this.movingSelection = this.tool === 'lasso' && this.selection.some(element => {
-            const docBounds = this.getElementDocBounds(element);
-            return contains(docBounds, docX, docY, 6);
-        });
+        const selectionBounds = this.getSelectionDocBounds();
+        this.movingSelection = this.tool === 'lasso' && Boolean(
+            selectionBounds && contains(selectionBounds, docX, docY, 12)
+        );
         this.barrelActive = barrel;
 
         this.pushWorldPoint(rawPoint);
@@ -2098,6 +2192,7 @@ export class CanvasController {
             this.reanchorSelection();
             this.rebuildIndex();
             this.emitSelection();
+            this.renderDirty = true;
             this.persistSoon();
             this.toast?.show('Selección reubicada');
         } else if (this.tool === 'lasso') {
@@ -2880,6 +2975,7 @@ export class CanvasController {
         }
         this.rebuildIndex();
         this.emitSelection();
+        this.renderDirty = true;
         if (persist) this.persistSoon();
         this.schedulePaint();
     }
@@ -3706,7 +3802,9 @@ export class CanvasController {
 
         if (this.points.size > 0 && this.activeStart) {
             if (this.tool === 'lasso') {
-                this.paintLasso();
+                if (!this.movingSelection) {
+                    this.paintLasso();
+                }
             } else {
                 this.paintActive();
             }

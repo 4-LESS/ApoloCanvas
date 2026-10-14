@@ -1,5 +1,7 @@
 import type { EraserMode, PenFavorite, PenProfileId, ShapeType, ThicknessPreset, ToolbarSlot, ToolType } from '../core/types.ts';
 import { ICONS, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
+import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
+import { ThicknessPopover } from './popover/ThicknessPopover.ts';
 
 export interface ToolbarOptions {
     slot: ToolbarSlot;
@@ -28,6 +30,25 @@ export interface ToolbarOptions {
     onToggleSnapGrid: () => void;
     onToggleMoreMenu?: () => void;
     onInsertCanvas?: () => void;
+    onChangeColor?: (color: string) => void;
+    onChangeWidth?: (width: number) => void;
+    onSelectColorSlot?: (
+        toolKey: 'pen' | 'highlighter' | 'shape',
+        slotIndex: number,
+        color: string,
+        opacity: number
+    ) => void;
+    onUpdatePaletteColor?: (
+        toolKey: 'pen' | 'highlighter' | 'shape',
+        slotIndex: number,
+        color: string,
+        opacity: number
+    ) => void;
+    toolPalettes?: {
+        pen?: { colors: string[]; opacities: number[] };
+        highlighter?: { colors: string[]; opacities: number[] };
+        shape?: { colors: string[]; opacities: number[] };
+    };
 }
 
 export type ToolbarItemId =
@@ -85,6 +106,27 @@ export class Toolbar {
     // Set of currently overflowed items (hidden from toolbar, delegated to MoreMenu)
     private overflowedItemIds = new Set<string>();
 
+    // Tool palettes per core tool with 4 slots and opacities (Samsung Notes style)
+    readonly toolPalettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }> = {
+        pen: {
+            colors: ['#E53935', '#1F4FD8', '#10B981', '#111827'],
+            opacities: [100, 100, 100, 100],
+        },
+        highlighter: {
+            colors: ['#1E88E5', '#FDD835', '#43A047', '#00ACC1'],
+            opacities: [75, 75, 75, 75],
+        },
+        shape: {
+            colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
+            opacities: [100, 100, 100, 100],
+        },
+    };
+    readonly activeColorSlots: Record<'pen' | 'highlighter' | 'shape', number> = {
+        pen: 0,
+        highlighter: 0,
+        shape: 0,
+    };
+
     // DOM references for instant state updating
     private keyboardBtn!: HTMLButtonElement;
     private toolButtons = new Map<ToolType, HTMLButtonElement>();
@@ -95,11 +137,51 @@ export class Toolbar {
     private favGroup!: HTMLElement;
     private favButtons: HTMLButtonElement[] = [];
     private thicknessGroup!: HTMLElement;
+    private thicknessTriggerBtn!: HTMLButtonElement;
+    private thickLinePreview!: HTMLElement;
     private thicknessButtons: HTMLButtonElement[] = [];
     private gridBtn!: HTMLButtonElement;
 
+    // Modular Popovers
+    readonly thicknessPopover: ThicknessPopover;
+    readonly colorPickerPopover: ColorPickerPopover;
+
     constructor(options: ToolbarOptions, parent: HTMLElement = document.body) {
         this.options = { ...options };
+
+        if (options.toolPalettes) {
+            if (options.toolPalettes.pen) {
+                this.toolPalettes.pen = {
+                    colors: [...options.toolPalettes.pen.colors],
+                    opacities: [...options.toolPalettes.pen.opacities],
+                };
+            }
+            if (options.toolPalettes.highlighter) {
+                this.toolPalettes.highlighter = {
+                    colors: [...options.toolPalettes.highlighter.colors],
+                    opacities: [...options.toolPalettes.highlighter.opacities],
+                };
+            }
+            if (options.toolPalettes.shape) {
+                this.toolPalettes.shape = {
+                    colors: [...options.toolPalettes.shape.colors],
+                    opacities: [...options.toolPalettes.shape.opacities],
+                };
+            }
+        } else if (options.favorites && options.favorites.length > 0) {
+            this.toolPalettes.pen.colors = options.favorites.slice(0, 4).map(f => f.color);
+        }
+        if (options.activeFavoriteIndex !== undefined) {
+            this.activeColorSlots.pen = Math.max(0, Math.min(3, options.activeFavoriteIndex));
+        }
+
+        this.thicknessPopover = new ThicknessPopover((width: number) => {
+            this.options.activeWidth = width;
+            this.updateThicknessVisual();
+            this.options.onChangeWidth?.(width);
+        }, parent);
+
+        this.colorPickerPopover = new ColorPickerPopover(parent);
 
         this.container = document.createElement('div');
         this.container.className = 'apolo-canvas-toolbar';
@@ -131,8 +213,23 @@ export class Toolbar {
         }
         if (typeof window !== 'undefined') {
             window.addEventListener('resize', this.onWindowResize);
+            window.addEventListener('pointerdown', this.onWindowPointerDown, { capture: true });
         }
     }
+
+    private readonly onWindowPointerDown = (e: PointerEvent): void => {
+        const target = e.target as HTMLElement | null;
+        if (target && typeof target.closest === 'function' && target.closest('[data-apolo-popover-trigger="true"]')) {
+            return;
+        }
+        if (this.thicknessPopover?.isOpen() && !this.thicknessPopover.el.contains(target as Node)) {
+            this.thicknessPopover.close();
+            this.thicknessTriggerBtn?.classList.remove('is-open');
+        }
+        if (this.colorPickerPopover?.isOpen() && !this.colorPickerPopover.el.contains(target as Node)) {
+            this.colorPickerPopover.close();
+        }
+    };
 
     private readonly onWindowResize = (): void => {
         this.recalculateLayout();
@@ -303,23 +400,17 @@ export class Toolbar {
                 this.shapeBtnIcon = iconContainer;
             }
 
-            // Triangle indicator for estuche on active tool
-            const tri = document.createElement('span');
-            tri.className = 'apolo-tool-triangle';
-            tri.setAttribute('data-apolo-popover-trigger', 'true');
-            tri.title = `Abrir opciones de ${def.label}`;
-            tri.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.options.onToggleEstuche(def.tool);
-            });
-            btn.appendChild(tri);
 
             btn.setAttribute('data-apolo-popover-trigger', 'true');
-            btn.addEventListener('click', () => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeAllPopovers();
                 // Second tap on the active tool toggles its estuche (including eraser!)
                 if (this.options.activeTool === def.tool && this.options.penEnabled) {
                     this.options.onToggleEstuche(def.tool);
                 } else {
+                    this.options.penEnabled = true;
+                    this.setTool(def.tool);
                     this.options.onSelectTool(def.tool);
                 }
             });
@@ -398,7 +489,7 @@ export class Toolbar {
 
         this.container.appendChild(this.createDivider());
 
-        // 6. Four Favorites (Priority 30: candidate for overflow)
+        // 6. Dynamic Color slots per tool (Priority 30: candidate for overflow)
         const favGroup = document.createElement('div');
         favGroup.className = 'apolo-toolbar-group apolo-favs-group';
         this.favGroup = favGroup;
@@ -407,15 +498,87 @@ export class Toolbar {
         for (let i = 0; i < 4; i++) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'apolo-toolbar-btn apolo-fav-chip';
-            btn.setAttribute('aria-label', `Favorito ${i + 1}`);
-            btn.title = `Favorito ${i + 1}`;
+            btn.className = 'apolo-toolbar-btn apolo-color-slot-btn apolo-fav-chip';
+            btn.setAttribute('data-apolo-popover-trigger', 'true');
+            btn.setAttribute('aria-label', `Color ${i + 1}`);
+            btn.title = `Color ${i + 1} (Clic para seleccionar, clic de nuevo para editar)`;
 
             const dot = document.createElement('span');
-            dot.className = 'apolo-fav-dot';
+            dot.className = 'apolo-color-dot apolo-fav-dot';
             btn.appendChild(dot);
 
-            btn.addEventListener('click', () => this.options.onSelectFavorite(i));
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const paletteKey = this.getToolbarPaletteKey();
+                const currentActiveSlot = this.activeColorSlots[paletteKey] ?? 0;
+
+                if (currentActiveSlot === i) {
+                    // 2nd tap on already active slot: toggle ColorPickerPopover
+                    if (this.colorPickerPopover.isOpen()) {
+                        this.colorPickerPopover.close();
+                    } else {
+                        this.closeAllPopovers();
+                        const currentColor = this.toolPalettes[paletteKey].colors[i] || '#E53935';
+                        const currentOpacity = this.toolPalettes[paletteKey].opacities[i] ?? 100;
+                        this.colorPickerPopover.open(
+                            btn,
+                            this.options.slot,
+                            this.container,
+                            currentColor,
+                            (newColor: string, opacity: number, slotIdx: number | null) => {
+                                const targetIdx = slotIdx !== null ? slotIdx : i;
+                                this.toolPalettes[paletteKey].colors[targetIdx] = newColor;
+                                this.toolPalettes[paletteKey].opacities[targetIdx] = opacity;
+                                this.options.activeColor = newColor;
+                                this.updateFavoritesVisual();
+                                this.options.onChangeColor?.(newColor);
+                                this.options.onUpdatePaletteColor?.(paletteKey, targetIdx, newColor, opacity);
+                            },
+                            i,
+                            currentOpacity
+                        );
+                    }
+                } else {
+                    // 1st tap: select slot (strictly changes active color without resetting tool configuration)
+                    this.closeAllPopovers();
+                    this.activeColorSlots[paletteKey] = i;
+                    const color = this.toolPalettes[paletteKey].colors[i] || '#E53935';
+                    const opacity = this.toolPalettes[paletteKey].opacities[i] ?? 100;
+                    this.options.activeColor = color;
+                    this.updateFavoritesVisual();
+                    this.options.onChangeColor?.(color);
+                    this.options.onSelectFavorite?.(i);
+                    this.options.onSelectColorSlot?.(paletteKey, i, color, opacity);
+                }
+            });
+
+            btn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const paletteKey = this.getToolbarPaletteKey();
+                this.activeColorSlots[paletteKey] = i;
+                this.closeAllPopovers();
+                const currentColor = this.toolPalettes[paletteKey].colors[i] || '#E53935';
+                const currentOpacity = this.toolPalettes[paletteKey].opacities[i] ?? 100;
+                this.colorPickerPopover.open(
+                    btn,
+                    this.options.slot,
+                    this.container,
+                    currentColor,
+                    (newColor: string, opacity: number, slotIdx: number | null) => {
+                        const targetIdx = slotIdx !== null ? slotIdx : i;
+                        this.toolPalettes[paletteKey].colors[targetIdx] = newColor;
+                        this.toolPalettes[paletteKey].opacities[targetIdx] = opacity;
+                        this.options.activeColor = newColor;
+                        this.updateFavoritesVisual();
+                        this.options.onChangeColor?.(newColor);
+                        this.options.onUpdatePaletteColor?.(paletteKey, targetIdx, newColor, opacity);
+                    },
+                    i,
+                    currentOpacity
+                );
+            });
+
             this.favButtons.push(btn);
             favGroup.appendChild(btn);
         }
@@ -424,34 +587,42 @@ export class Toolbar {
 
         this.container.appendChild(this.createDivider());
 
-        // 7. Thickness preset dots: fine (4px), medium (8px), thick (14px) (Priority 20: candidate for overflow)
+        // 7. Single Thickness trigger button (Priority 20: candidate for overflow)
         const thicknessGroup = document.createElement('div');
         thicknessGroup.className = 'apolo-toolbar-group apolo-thickness-group';
         this.thicknessGroup = thicknessGroup;
-        this.thicknessButtons = [];
 
-        const presets: Array<{ id: ThicknessPreset; label: string; tooltip: string }> = [
-            { id: 'fine', label: 'Fino', tooltip: 'Grosor fino (letra pequeña)' },
-            { id: 'medium', label: 'Normal', tooltip: 'Grosor normal (texto)' },
-            { id: 'thick', label: 'Grueso', tooltip: 'Grosor grueso (títulos)' },
-        ];
+        const thickBtn = document.createElement('button');
+        thickBtn.type = 'button';
+        thickBtn.className = 'apolo-toolbar-btn apolo-thickness-trigger-btn apolo-thickness-btn';
+        thickBtn.setAttribute('data-apolo-popover-trigger', 'true');
+        thickBtn.setAttribute('aria-label', 'Grosor de trazo');
+        thickBtn.title = 'Grosor de trazo (Clic para abrir o cerrar barra deslizable)';
 
-        for (let i = 0; i < presets.length; i++) {
-            const preset = presets[i];
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = `apolo-toolbar-btn apolo-thickness-btn apolo-thick-${preset.id}`;
-            btn.setAttribute('aria-label', preset.tooltip);
-            btn.title = preset.tooltip;
+        this.thickLinePreview = document.createElement('span');
+        this.thickLinePreview.className = 'apolo-thickness-line-preview apolo-thickness-dot';
+        thickBtn.appendChild(this.thickLinePreview);
 
-            const dot = document.createElement('span');
-            dot.className = 'apolo-thickness-dot';
-            btn.appendChild(dot);
+        thickBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this.thicknessPopover.isOpen()) {
+                this.thicknessPopover.close();
+                thickBtn.classList.remove('is-open');
+            } else {
+                this.closeAllPopovers();
+                thickBtn.classList.add('is-open');
+                this.thicknessPopover.open(
+                    thickBtn,
+                    this.options.slot,
+                    this.container,
+                    this.options.activeWidth
+                );
+            }
+        });
 
-            btn.addEventListener('click', () => this.options.onSelectThickness(preset.id));
-            this.thicknessButtons.push(btn);
-            thicknessGroup.appendChild(btn);
-        }
+        this.thicknessTriggerBtn = thickBtn;
+        this.thicknessButtons = [thickBtn];
+        thicknessGroup.appendChild(thickBtn);
         this.container.appendChild(thicknessGroup);
         this.updateThicknessVisual();
 
@@ -589,69 +760,69 @@ export class Toolbar {
     }
 
     computeIntrinsicWidth(): number {
-        let width = 24; // padding left & right (12px * 2)
+        let width = 40; // padding left & right (20px * 2)
         // grip
-        width += 22 + 2;
+        width += 20 + 8;
         // keyboard
-        width += 42 + 2;
+        width += 40 + 8;
         // divider
-        width += 13;
+        width += 17;
         // 5 tools
-        width += 5 * 42 + 4 * 2;
+        width += 5 * 40 + 4 * 10;
         // divider
-        width += 13;
+        width += 17;
         // insert canvas
-        width += 42 + 2;
+        width += 40 + 8;
         // divider
-        width += 13;
+        width += 17;
         // history (undo, redo)
-        width += 2 * 42 + 2;
+        width += 2 * 40 + 6;
 
         if (!this.overflowedItemIds.has('favorites')) {
-            width += 13; // divider
-            width += 4 * 38 + 3 * 2;
+            width += 17; // divider
+            width += 4 * 36 + 3 * 10;
         }
         if (!this.overflowedItemIds.has('thickness')) {
-            width += 13; // divider
-            width += 3 * 36 + 2 * 2;
+            width += 17; // divider
+            width += 3 * 36 + 2 * 8;
         }
         if (!this.overflowedItemIds.has('snapGrid')) {
-            width += 13; // divider
-            width += 42 + 2;
+            width += 17; // divider
+            width += 40;
         }
         return width;
     }
 
     computeIntrinsicHeight(): number {
-        let height = 16; // padding top & bottom (8px * 2)
+        let height = 40; // padding top & bottom (20px * 2)
         // grip
-        height += 20 + 2;
+        height += 20 + 8;
         // keyboard
-        height += 36 + 2;
+        height += 40 + 8;
         // divider
-        height += 9;
+        height += 17;
         // 5 tools
-        height += 5 * 36 + 4 * 2;
+        height += 5 * 40 + 4 * 10;
         // divider
-        height += 9;
+        height += 17;
         // insert canvas
-        height += 36 + 2;
+        height += 40 + 8;
         // divider
-        height += 9;
+        height += 17;
         // history
-        height += 2 * 36 + 2;
+        height += 2 * 40 + 6;
 
         if (!this.overflowedItemIds.has('favorites')) {
-            height += 9;
-            height += 4 * 34 + 3 * 2;
+            height += 17;
+            height += 4 * 36 + 3 * 10;
         }
         if (!this.overflowedItemIds.has('thickness')) {
-            height += 9;
-            height += 3 * 32 + 2 * 2;
+            height += 17;
+            height += 3 * 36 + 2 * 8;
         }
         if (!this.overflowedItemIds.has('snapGrid')) {
-            height += 9; // divider
-            height += 36 + 2;
+            height += 17; // divider
+            height += 40;
         }
         return height;
     }
@@ -703,65 +874,64 @@ export class Toolbar {
         this.redoBtn.classList.toggle('is-disabled', !this.options.canRedo);
     }
 
+    private getToolbarPaletteKey(): 'pen' | 'highlighter' | 'shape' {
+        if (this.options.activeTool === 'highlighter' || this.options.activeTool === 'shape') {
+            return this.options.activeTool;
+        }
+        return 'pen';
+    }
+
+    private syncToolbarPaletteFromTool(): void {
+        const key = this.getToolbarPaletteKey();
+        const palette = this.toolPalettes[key];
+        const slotIdx = this.activeColorSlots[key] ?? 0;
+        const color = palette.colors[slotIdx] ?? palette.colors[0];
+        if (color) {
+            this.options.activeColor = color;
+        }
+    }
+
     private updateFavoritesVisual(): void {
-        const dark = isDarkTheme();
-        const activeFav = this.options.activeFavoriteIndex;
+        const paletteKey = this.getToolbarPaletteKey();
+        const activeSlot = this.activeColorSlots[paletteKey] ?? 0;
+        const palette = this.toolPalettes[paletteKey];
 
         this.favButtons.forEach((btn, index) => {
-            const fav = this.options.favorites[index];
-            if (!fav) return;
-            const dot = btn.querySelector<HTMLElement>('.apolo-fav-dot');
+            const color = palette.colors[index] || '#1E2330';
+            const opacity = palette.opacities[index] ?? 100;
+            const dot = btn.querySelector<HTMLElement>('.apolo-color-dot');
             if (dot) {
-                dot.style.background = mapInkColorForDark(fav.color, dark);
+                dot.style.backgroundColor = color;
+                dot.style.opacity = String(opacity / 100);
             }
-            const isActive = activeFav === index && this.options.activeTool === 'pen';
-            btn.classList.toggle('is-active', isActive);
-            btn.setAttribute('aria-pressed', String(isActive));
+            const isSelected = activeSlot === index;
+            btn.classList.toggle('is-selected', isSelected);
+            btn.classList.toggle('is-active', isSelected);
+            btn.setAttribute('aria-pressed', String(isSelected));
         });
     }
 
     private updateThicknessVisual(): void {
         const isEraser = this.options.activeTool === 'eraser';
-        const isHighlighter = this.options.activeTool === 'highlighter';
         const isDimmed = !this.options.penEnabled || this.options.activeTool === 'lasso';
-        const dark = isDarkTheme();
+        const w = this.options.activeWidth;
 
-        let activeIdx = 1; // default medium
-        if (isEraser) {
-            const r = this.options.eraserRadius;
-            if (r <= 12) activeIdx = 0;
-            else if (r <= 25) activeIdx = 1;
-            else activeIdx = 2;
-        } else if (isHighlighter) {
-            const w = this.options.activeWidth;
-            if (w <= 15) activeIdx = 0;
-            else if (w <= 25) activeIdx = 1;
-            else activeIdx = 2;
-        } else {
-            const w = this.options.activeWidth;
-            if (w <= 2.5) activeIdx = 0;
-            else if (w <= 4.5) activeIdx = 1;
-            else activeIdx = 2;
+        if (this.thicknessTriggerBtn) {
+            this.thicknessTriggerBtn.classList.toggle('is-dimmed', isDimmed);
+            this.thicknessTriggerBtn.classList.toggle('is-eraser', isEraser);
+            this.thicknessTriggerBtn.classList.toggle('is-active', !isDimmed);
         }
 
-        this.thicknessButtons.forEach((btn, index) => {
-            btn.classList.toggle('is-dimmed', isDimmed);
-            btn.classList.toggle('is-eraser', isEraser);
-            btn.classList.toggle('is-active', !isDimmed && activeIdx === index);
-
-            const dot = btn.querySelector<HTMLElement>('.apolo-thickness-dot');
-            if (dot) {
-                if (isEraser) {
-                    dot.style.background = 'transparent';
-                    dot.style.border = '2px solid currentColor';
-                } else {
-                    dot.style.border = 'none';
-                    dot.style.background = activeIdx === index
-                        ? mapInkColorForDark(this.options.activeColor, dark)
-                        : 'currentColor';
-                }
+        if (this.thickLinePreview) {
+            const h = Math.min(10, Math.max(2, Math.round(w)));
+            this.thickLinePreview.style.height = `${h}px`;
+            this.thickLinePreview.style.backgroundColor = isEraser ? 'transparent' : 'var(--apolo-text)';
+            if (isEraser) {
+                this.thickLinePreview.style.border = '2px solid currentColor';
+            } else {
+                this.thickLinePreview.style.border = 'none';
             }
-        });
+        }
     }
 
     private updateSnapGridVisual(): void {
@@ -894,7 +1064,9 @@ export class Toolbar {
         if (shapeType) {
             this.setShape(shapeType);
         }
+        this.syncToolbarPaletteFromTool();
         this.updateToolButtonsVisual();
+        this.updateFavoritesVisual();
         this.updateThicknessVisual();
     }
 
@@ -909,18 +1081,65 @@ export class Toolbar {
         this.options.activeColor = color;
         this.options.activeWidth = width;
         if (profileId) this.options.activeProfileId = profileId;
+        const paletteKey = this.getToolbarPaletteKey();
+        const matchingIndex = this.toolPalettes[paletteKey].colors.findIndex(
+            (c) => c.toLowerCase() === color.toLowerCase()
+        );
+        if (matchingIndex !== -1) {
+            this.activeColorSlots[paletteKey] = matchingIndex;
+        }
+        this.updateFavoritesVisual();
         this.updateThicknessVisual();
     }
 
     setFavorites(favorites: PenFavorite[], activeIndex: number): void {
         this.options.favorites = [...favorites];
         this.options.activeFavoriteIndex = activeIndex;
+        if (favorites.length > 0 && !this.options.toolPalettes?.pen) {
+            this.toolPalettes.pen.colors = favorites.slice(0, 4).map(f => f.color);
+        }
+        this.activeColorSlots.pen = Math.max(0, Math.min(3, activeIndex));
         this.updateFavoritesVisual();
+    }
+
+    setToolPalettes(palettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }>): void {
+        if (palettes.pen) {
+            this.toolPalettes.pen = {
+                colors: [...palettes.pen.colors],
+                opacities: [...palettes.pen.opacities],
+            };
+        }
+        if (palettes.highlighter) {
+            this.toolPalettes.highlighter = {
+                colors: [...palettes.highlighter.colors],
+                opacities: [...palettes.highlighter.opacities],
+            };
+        }
+        if (palettes.shape) {
+            this.toolPalettes.shape = {
+                colors: [...palettes.shape.colors],
+                opacities: [...palettes.shape.opacities],
+            };
+        }
+        this.updateFavoritesVisual();
+    }
+
+    getToolPalettes(): Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }> {
+        return {
+            pen: { colors: [...this.toolPalettes.pen.colors], opacities: [...this.toolPalettes.pen.opacities] },
+            highlighter: { colors: [...this.toolPalettes.highlighter.colors], opacities: [...this.toolPalettes.highlighter.opacities] },
+            shape: { colors: [...this.toolPalettes.shape.colors], opacities: [...this.toolPalettes.shape.opacities] },
+        };
     }
 
     setThicknessValues(width: number, eraserRadius: number): void {
         this.options.activeWidth = width;
         this.options.eraserRadius = eraserRadius;
+        this.updateThicknessVisual();
+    }
+
+    setWidth(width: number): void {
+        this.options.activeWidth = width;
         this.updateThicknessVisual();
     }
 
@@ -944,18 +1163,32 @@ export class Toolbar {
         return this.toolButtons.get(tool);
     }
 
+    closeAllPopovers(): void {
+        if (this.thicknessPopover?.isOpen()) {
+            this.thicknessPopover.close();
+            this.thicknessTriggerBtn?.classList.remove('is-open');
+        }
+        if (this.colorPickerPopover?.isOpen()) {
+            this.colorPickerPopover.close();
+        }
+    }
+
     setVisible(visible: boolean): void {
         this.container.hidden = !visible;
     }
 
     destroy(): void {
+        this.closeAllPopovers();
         this.resizeObserver?.disconnect();
         if (typeof window !== 'undefined') {
             window.removeEventListener('resize', this.onWindowResize);
+            window.removeEventListener('pointerdown', this.onWindowPointerDown, { capture: true });
             window.removeEventListener('pointermove', this.onGripPointerMove);
             window.removeEventListener('pointerup', this.onGripPointerUp);
             window.removeEventListener('pointercancel', this.onGripPointerUp);
         }
+        this.thicknessPopover.destroy();
+        this.colorPickerPopover.destroy();
         this.dotsContainer.remove();
         this.container.remove();
     }

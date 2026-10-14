@@ -72,6 +72,11 @@ export class ColorSwatchRow {
             }
             btn.style.backgroundColor = s.color;
 
+            const inner = document.createElement('span');
+            inner.className = 'popover-swatch-inner';
+            inner.style.backgroundColor = s.color;
+            btn.appendChild(inner);
+
             btn.addEventListener('click', () => {
                 this.setColor(s.color);
                 this.options.onChange?.(s.color);

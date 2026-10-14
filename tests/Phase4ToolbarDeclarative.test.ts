@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Toolbar, TOOLBAR_PRIORITIES } from '../src/ui/Toolbar.ts';
+import { LassoMenu } from '../src/ui/LassoMenu.ts';
 import type { ToolbarOptions } from '../src/ui/Toolbar.ts';
 import type { ToolbarSlot, ToolType, ShapeType } from '../src/core/types.ts';
 
@@ -35,6 +36,14 @@ function createMockElement(tag: string): any {
         className: '',
         children,
         parentElement: null,
+        _textContent: undefined as string | undefined,
+        get textContent(): string {
+            if (this._textContent !== undefined) return this._textContent;
+            return children.map(c => c.textContent || '').join('');
+        },
+        set textContent(val: string) {
+            this._textContent = String(val);
+        },
         offsetWidth: 0,
         offsetHeight: 0,
         scrollWidth: 0,
@@ -261,6 +270,8 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
     let undoTriggered = false;
     let redoTriggered = false;
     let favoriteSelected: number | null = null;
+    let colorChanged: string | null = null;
+    let paletteUpdated: { toolKey: string; slotIndex: number; color: string; opacity: number } | null = null;
     let thicknessSelected: string | null = null;
     let snapGridToggled = false;
     let moreMenuToggled = false;
@@ -273,6 +284,8 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
         onUndo: () => { undoTriggered = true; },
         onRedo: () => { redoTriggered = true; },
         onSelectFavorite: (idx) => { favoriteSelected = idx; },
+        onChangeColor: (c) => { colorChanged = c; },
+        onUpdatePaletteColor: (k, idx, col, op) => { paletteUpdated = { toolKey: k, slotIndex: idx, color: col, opacity: op }; },
         onSelectThickness: (preset) => { thicknessSelected = preset; },
         onToggleSnapGrid: () => { snapGridToggled = true; },
         onToggleMoreMenu: () => { moreMenuToggled = true; },
@@ -308,16 +321,12 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
         assert.equal(kbBtn?.classList.contains('is-active'), false);
     });
 
-    await t.test('Core tools (pen, highlighter, eraser, lasso, shape) and estuche corner triggers', () => {
+    await t.test('Core tools (pen, highlighter, eraser, lasso, shape) and trigger attributes', () => {
         const tools: ToolType[] = ['pen', 'highlighter', 'eraser', 'lasso', 'shape'];
         for (const tool of tools) {
             const btn = toolbar.getToolButton(tool);
             assert.ok(btn, `Button for ${tool} exists`);
             assert.equal(btn?.getAttribute('data-apolo-popover-trigger'), 'true');
-
-            const triangle = btn?.querySelector('.apolo-tool-triangle');
-            assert.ok(triangle, `Triangle trigger for ${tool} exists`);
-            assert.equal(triangle?.getAttribute('data-apolo-popover-trigger'), 'true');
         }
     });
 
@@ -339,12 +348,6 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
         const eraserBtn = toolbar.getToolButton('eraser')!;
         eraserBtn.click();
         assert.equal(estucheToggled, 'eraser', 'Second tap on eraser toggles eraser estuche');
-
-        // 4. Clicking the corner triangle on eraser directly also toggles estuche
-        estucheToggled = null;
-        const eraserTriangle = eraserBtn.querySelector('.apolo-tool-triangle')!;
-        eraserTriangle.click();
-        assert.equal(estucheToggled, 'eraser');
     });
 
     await t.test('Shape tool dynamically reflects active shape icon', () => {
@@ -396,34 +399,72 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
 
     await t.test('4 Favorites chips render with ink colors and highlight active favorite', () => {
         toolbar.setTool('pen');
-        const chips = toolbar.container.querySelectorAll('.apolo-fav-chip');
+        const chips = toolbar.container.querySelectorAll<HTMLButtonElement>('.apolo-fav-chip');
         assert.equal(chips.length, 4);
 
         chips[1].click();
         assert.equal(favoriteSelected, 1);
+        assert.ok(colorChanged, 'onChangeColor was called');
 
         // Active index 1 is highlighted
         toolbar.setFavorites(options.favorites, 1);
         assert.equal(chips[1].classList.contains('is-active'), true);
         assert.equal(chips[0].classList.contains('is-active'), false);
+
+        // 2nd tap on already active slot toggles ColorPickerPopover
+        assert.equal(toolbar.colorPickerPopover.isOpen(), false);
+        chips[1].click();
+        assert.equal(toolbar.colorPickerPopover.isOpen(), true);
+
+        // Close popover
+        toolbar.colorPickerPopover.close();
+        assert.equal(toolbar.colorPickerPopover.isOpen(), false);
     });
 
-    await t.test('Thickness presets (fine, medium, thick) respond to tools and radius', () => {
-        const thickBtns = toolbar.container.querySelectorAll('.apolo-thickness-btn');
-        assert.equal(thickBtns.length, 3);
+    await t.test('Quick color bar is strictly for colors: setToolPalettes updates palette and colors are accessible per tool', () => {
+        const customPalettes = {
+            pen: { colors: ['#111111', '#222222', '#333333', '#444444'], opacities: [100, 100, 100, 100] },
+            highlighter: { colors: ['#FFFF00', '#00FF00', '#00FFFF', '#FF00FF'], opacities: [75, 75, 75, 75] },
+            shape: { colors: ['#AA0000', '#00AA00', '#0000AA', '#AAAA00'], opacities: [100, 100, 100, 100] },
+        };
+        toolbar.setToolPalettes(customPalettes);
+        const retrieved = toolbar.getToolPalettes();
+        assert.deepEqual(retrieved.pen.colors, customPalettes.pen.colors);
+        assert.deepEqual(retrieved.highlighter.colors, customPalettes.highlighter.colors);
+        assert.deepEqual(retrieved.shape.colors, customPalettes.shape.colors);
 
-        thickBtns[0].click();
-        assert.equal(thicknessSelected, 'fine');
+        // Switching tools updates the visible palette without losing tool identity
+        toolbar.setTool('highlighter');
+        const hlChips = toolbar.container.querySelectorAll<HTMLButtonElement>('.apolo-fav-chip');
+        const hlDot = hlChips[0].querySelector('.apolo-color-dot') as HTMLElement;
+        assert.ok(hlDot.style.backgroundColor === '#FFFF00' || hlDot.style.backgroundColor === 'rgb(255, 255, 0)');
 
-        // With eraser active, thickness buttons adapt to eraser mode
+        toolbar.setTool('pen');
+        const penDot = hlChips[0].querySelector('.apolo-color-dot') as HTMLElement;
+        assert.ok(penDot.style.backgroundColor === '#111111' || penDot.style.backgroundColor === 'rgb(17, 17, 17)');
+    });
+
+    await t.test('Thickness trigger button and line preview respond to tools and radius', () => {
+        const thickBtn = toolbar.container.querySelector('.apolo-thickness-trigger-btn');
+        assert.ok(thickBtn, 'Thickness trigger button exists');
+        assert.equal(thickBtn?.getAttribute('data-apolo-popover-trigger'), 'true');
+
+        const preview = thickBtn?.querySelector('.apolo-thickness-line-preview') as HTMLElement;
+        assert.ok(preview, 'Line preview element exists');
+
+        // With eraser active, thickness button adapts to eraser mode
         toolbar.setTool('eraser');
-        toolbar.setThicknessValues(2, 8); // radius 8 is fine
-        assert.equal(thickBtns[0].classList.contains('is-eraser'), true);
-        assert.equal(thickBtns[0].classList.contains('is-active'), true);
+        toolbar.setThicknessValues(2, 8);
+        assert.equal(thickBtn?.classList.contains('is-eraser'), true);
 
-        // With lasso active, thickness buttons are dimmed
+        // With lasso active, thickness button is dimmed
         toolbar.setTool('lasso');
-        assert.equal(thickBtns[0].classList.contains('is-dimmed'), true);
+        assert.equal(thickBtn?.classList.contains('is-dimmed'), true);
+
+        // Restore pen tool
+        toolbar.setTool('pen');
+        toolbar.setWidth(4);
+        assert.equal(preview.style.height, '4px');
     });
 
     await t.test('Magnetic Grid toggle (and More Menu ⋯ button is removed)', () => {
@@ -464,9 +505,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 1: Priority 10 (snapGrid) overflows first when width is constrained', () => {
-        // Full width is ~832px. Without snapGrid is ~775px.
-        // At innerWidth = 830px, availableSpace = 798px. SnapGrid overflows, thickness fits.
-        (global as any).window.innerWidth = 830;
+        // Full width is ~930px. Without snapGrid is ~873px.
+        // At innerWidth = 910px, availableSpace = 878px. SnapGrid overflows, thickness fits.
+        (global as any).window.innerWidth = 910;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true, 'snapGrid overflows first');
@@ -479,9 +520,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 2: Priority 20 (thickness) overflows second when width drops further', () => {
-        // Without snapGrid is ~775px. Without thickness is ~650px.
-        // At innerWidth = 750px, availableSpace = 718px. Thickness overflows, favorites fits.
-        (global as any).window.innerWidth = 750;
+        // Without snapGrid is ~873px. Without thickness is ~732px.
+        // At innerWidth = 850px, availableSpace = 818px. Thickness overflows, favorites fits.
+        (global as any).window.innerWidth = 850;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true);
@@ -494,9 +535,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 3: Priority 30 (favorites) overflows third when width drops very narrow', () => {
-        // Without favorites is ~479px.
-        // At innerWidth = 580px, availableSpace = 548px. Favorites overflows.
-        (global as any).window.innerWidth = 580;
+        // Without favorites is ~541px.
+        // At innerWidth = 700px, availableSpace = 668px. Favorites overflows.
+        (global as any).window.innerWidth = 700;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true);
@@ -599,4 +640,77 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
     });
 
     toolbar.destroy();
+});
+
+test('LassoMenu: Modernized UI with icons, grouped dividers, and clean anchor formatting', async (t) => {
+    ensureDomEnvironment();
+
+    let copied = false;
+    let deleted = false;
+    let linked = false;
+
+    const lasso = new LassoMenu(
+        {
+            onCopy: () => { copied = true; },
+            onPaste: () => {},
+            onLink: () => { linked = true; },
+            onBringToFront: () => {},
+            onSendToBack: () => {},
+            onDelete: () => { deleted = true; },
+            onApplyColor: () => {},
+            onApplyWidth: () => {},
+            onApplyPattern: () => {},
+            onOpenLinkedNote: () => {},
+            onUnlink: () => {},
+            onDeselect: () => {},
+        },
+        (document as any).body,
+    );
+
+    await t.test('Renders action buttons with SVG icons, dividers, and proper aria-labels', () => {
+        lasso.setSelection(
+            [{ id: 's1', type: 'stroke', points: [], color: '#000', width: 2 } as any],
+            { minX: 100, minY: 100, maxX: 300, maxY: 300 },
+            'lines:0',
+            1.0,
+            0,
+            0,
+        );
+
+        assert.equal(lasso.isOpen(), true);
+        const floatingMenu = lasso.container.children[1];
+
+        // Check that copy button is first and clickable
+        const copyBtn = floatingMenu.children[0];
+        assert.equal(copyBtn.getAttribute('aria-label'), 'Copiar');
+        copyBtn.dispatchEvent({ type: 'click' });
+        assert.equal(copied, true);
+
+        // Check dividers exist between action groups
+        const dividers = Array.from(floatingMenu.children).filter((c: any) =>
+            c.classList?.contains('apolo-selection-divider')
+        );
+        assert.equal(dividers.length, 3, 'Expect exactly 3 dividers separating 4 action groups');
+
+        // Check anchor pill has formatted text
+        const anchorPill = lasso.container.children[0];
+        assert.ok(anchorPill.textContent.includes('Línea 1'), 'lines:0 formatted as Línea 1');
+    });
+
+    await t.test('Formats space anchors as Espacio', () => {
+        lasso.setSelection(
+            [{ id: 's1', type: 'stroke', points: [], color: '#000', width: 2 } as any],
+            { minX: 100, minY: 100, maxX: 300, maxY: 300 },
+            'space:abc1234',
+            1.0,
+            0,
+            0,
+        );
+        const anchorPill = lasso.container.children[0];
+        assert.ok(anchorPill.textContent.includes('Espacio'), 'space:abc1234 formatted as Espacio');
+    });
+
+    lasso.hide();
+    assert.equal(lasso.isOpen(), false);
+    lasso.destroy();
 });

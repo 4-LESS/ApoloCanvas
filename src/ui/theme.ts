@@ -94,6 +94,21 @@ export const DEFAULT_FAVORITES: PenFavorite[] = [
     { profile: 'pencil', color: '#111827', width: 3 },
 ];
 
+export const DEFAULT_TOOL_PALETTES: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }> = {
+    pen: {
+        colors: ['#E53935', '#1F4FD8', '#10B981', '#111827'],
+        opacities: [100, 100, 100, 100],
+    },
+    highlighter: {
+        colors: ['#1E88E5', '#FDD835', '#43A047', '#00ACC1'],
+        opacities: [75, 75, 75, 75],
+    },
+    shape: {
+        colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
+        opacities: [100, 100, 100, 100],
+    },
+};
+
 /**
  * 24x24 px linear SVG icons with stroke-width 1.8, stroke-linecap round, stroke-linejoin round.
  */
@@ -121,6 +136,23 @@ export const ICONS = {
     close: 'M6 6l12 12 M18 6L6 18',
     check: 'M5 13l4 4L19 7',
     dragGrip: '<circle cx="4" cy="3" r="1.5"></circle><circle cx="10" cy="3" r="1.5"></circle><circle cx="4" cy="7" r="1.5"></circle><circle cx="10" cy="7" r="1.5"></circle><circle cx="4" cy="11" r="1.5"></circle><circle cx="10" cy="11" r="1.5"></circle>',
+    feather: 'M20.24 12.24a6 6 0 00-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9',
+    highlighterChisel: 'M7 17l-3 4h6l-1-2 M11 4l8 8-6 6-8-8z M15 3l4 4',
+    highlighterRound: 'M12 2a4 4 0 00-4 4v7l2 2v6h4v-6l2-2V6a4 4 0 00-4-4z',
+    pencil: 'M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z',
+    bookmark: 'M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z',
+    star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+    plus: 'M12 5v14 M5 12h14',
+    minus: 'M5 12h14',
+    clock: 'M12 6v6l4 2 M12 22a10 10 0 100-20 10 10 0 000 20z',
+    plusCircle: 'M12 8v8 M8 12h8 M12 22a10 10 0 100-20 10 10 0 000 20z',
+    eyedropper: 'M19 3a2.5 2.5 0 010 3.5l-2.5 2.5-3.5-3.5 2.5-2.5a2.5 2.5 0 013.5 0z M11.5 7L3 15.5V19h3.5L15 10.5',
+    copy: 'M9 9h11a2 2 0 012 2v9a2 2 0 01-2 2H9a2 2 0 01-2-2v-9a2 2 0 012-2z M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v2',
+    paste: 'M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2 M9 2h6a1 1 0 011 1v2a1 1 0 01-1 1H9a1 1 0 01-1-1V3a1 1 0 011-1z',
+    bringToFront: 'M12 21V7m-5 5l5-5 5 5 M4 3h16',
+    sendToBack: 'M12 3v14m5-5l-5 5-5-5 M4 21h16',
+    sliders: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6',
+    trash: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
 };
 
 export interface SvgOptions {
