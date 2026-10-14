@@ -89,10 +89,13 @@ export interface ToolbarItemDefinition {
 interface DragState {
     pointerId: number;
     scale: number;
+    initialSlot: ToolbarSlot;
     startX: number;
     startY: number;
     origLeft: number;
     origTop: number;
+    pointerOffsetX: number;
+    pointerOffsetY: number;
 }
 
 export class Toolbar {
@@ -206,6 +209,12 @@ export class Toolbar {
                     this.recalculateLayout();
                 });
                 this.resizeObserver.observe(document.documentElement);
+                if (typeof document.querySelector === 'function') {
+                    for (const selector of ['.workspace-split.mod-vertical.mod-root', '.workspace-leaf.mod-active']) {
+                        const workspaceEl = document.querySelector<HTMLElement>(selector);
+                        if (workspaceEl) this.resizeObserver.observe(workspaceEl);
+                    }
+                }
             } catch {
                 // best effort in testing environments
             }
@@ -240,18 +249,45 @@ export class Toolbar {
         return this.options.slot === 'ml' || this.options.slot === 'mr';
     }
 
+    private getActiveEditingElement(): HTMLElement | null {
+        if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return null;
+        return document.querySelector<HTMLElement>('.workspace-leaf.mod-active .view-content')
+            ?? document.querySelector<HTMLElement>('.workspace-split.mod-vertical.mod-root')
+            ?? document.querySelector<HTMLElement>('.mod-root');
+    }
+
+    private getEditingBounds(): { left: number; top: number; right: number; bottom: number; width: number; height: number } {
+        const editEl = this.getActiveEditingElement();
+        if (editEl) {
+            const rect = editEl.getBoundingClientRect();
+            if (rect.width > 100 && rect.height > 100) {
+                return {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                    width: rect.width,
+                    height: rect.height,
+                };
+            }
+        }
+
+        const viewport = typeof window !== 'undefined' ? window.visualViewport : null;
+        const width = viewport?.width ?? (typeof window !== 'undefined' ? window.innerWidth : 1280);
+        const height = viewport?.height ?? (typeof window !== 'undefined' ? window.innerHeight : 800);
+        return { left: 0, top: 0, right: width, bottom: height, width, height };
+    }
+
     getDimensions(slot?: ToolbarSlot): { width: number; height: number } {
         const targetSlot = slot ?? this.options.slot;
         const vert = targetSlot === 'ml' || targetSlot === 'mr';
         const isCurrentOrientation = vert === this.isVertical();
+        const bounds = this.getEditingBounds();
         if (vert) {
             const h = isCurrentOrientation && this.container.offsetHeight > 64
                 ? this.container.offsetHeight
                 : this.computeIntrinsicHeight();
-            const viewportHeight = typeof window !== 'undefined'
-                ? window.visualViewport?.height ?? window.innerHeight
-                : 696;
-            const maxH = viewportHeight - 96;
+            const maxH = bounds.height - 96;
             return {
                 width: 58,
                 height: Math.min(h, maxH),
@@ -260,10 +296,7 @@ export class Toolbar {
         const w = isCurrentOrientation && this.container.offsetWidth > 64
             ? this.container.offsetWidth
             : this.computeIntrinsicWidth();
-        const viewportWidth = typeof window !== 'undefined'
-            ? window.visualViewport?.width ?? window.innerWidth
-            : 1280;
-        const maxW = viewportWidth - 32;
+        const maxW = bounds.width - 32;
         return {
             width: Math.min(w, maxW),
             height: 58,
@@ -272,60 +305,98 @@ export class Toolbar {
 
     getSlotCoordinates(slot: ToolbarSlot): { x: number; y: number; width: number; height: number } {
         const { width, height } = this.getDimensions(slot);
-
+        const bounds = this.getEditingBounds();
+        const editEl = this.getActiveEditingElement();
         const marginX = 16;
-        const marginY = 56; // Leave room for Obsidian header / tabs
-        const marginBottom = slot === 'bl' || slot === 'bc' || slot === 'br' ? 56 : marginY;
-
-        const winW = typeof window !== 'undefined'
-            ? window.visualViewport?.width ?? window.innerWidth
-            : 1280;
-        const winH = typeof window !== 'undefined'
-            ? window.visualViewport?.height ?? window.innerHeight
-            : 800;
+        const marginY = editEl?.classList.contains('view-content') ? 16 : 56;
+        const marginBottom = 56;
 
         let x = 0;
         if (slot === 'tl' || slot === 'ml' || slot === 'bl') {
-            x = marginX;
+            x = bounds.left + marginX;
         } else if (slot === 'tc' || slot === 'bc') {
-            x = Math.round((winW - width) / 2);
+            x = Math.round(bounds.left + (bounds.width - width) / 2);
         } else {
             // 'tr', 'mr', 'br'
-            x = winW - width - marginX;
+            x = bounds.right - width - marginX;
         }
 
         let y = 0;
         if (slot === 'tl' || slot === 'tc' || slot === 'tr') {
-            y = marginY;
+            y = bounds.top + marginY;
         } else if (slot === 'ml' || slot === 'mr') {
-            y = Math.round((winH - height) / 2);
+            y = Math.round(bounds.top + (bounds.height - height) / 2);
         } else {
             // 'bl', 'bc', 'br'
-            y = winH - height - marginBottom;
+            y = bounds.bottom - height - marginBottom;
         }
 
-        x = Math.max(marginX, Math.min(winW - width - marginX, x));
-        y = Math.max(marginY, Math.min(winH - height - marginBottom, y));
+        x = Math.max(bounds.left + 8, Math.min(Math.max(bounds.left + 8, bounds.right - width - 8), x));
+        y = Math.max(bounds.top + 8, Math.min(Math.max(bounds.top + 8, bounds.bottom - height - 8), y));
 
         return { x, y, width, height };
     }
 
-    private getNearestSlot(centerX: number, centerY: number): ToolbarSlot {
+    private getHoveredOrNearestSlot(
+        pointerX: number,
+        pointerY: number,
+        toolbarRect: { left: number; top: number; right: number; bottom: number },
+    ): ToolbarSlot {
         const slots: ToolbarSlot[] = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br'];
         let bestSlot = this.options.slot;
-        let minDistance = Number.POSITIVE_INFINITY;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        let bestPointerDistance = Number.POSITIVE_INFINITY;
+        let foundActivatedZone = false;
+        const zoneThreshold = 72;
 
         for (const s of slots) {
             const coords = this.getSlotCoordinates(s);
-            const slotCenterX = coords.x + coords.width / 2;
-            const slotCenterY = coords.y + coords.height / 2;
-            const dist = Math.hypot(slotCenterX - centerX, slotCenterY - centerY);
-            if (dist < minDistance) {
-                minDistance = dist;
+            const dotX = coords.x + coords.width / 2;
+            const dotY = coords.y + coords.height / 2;
+            const pointerDistance = Math.hypot(dotX - pointerX, dotY - pointerY);
+            const rectDx = Math.max(toolbarRect.left - dotX, 0, dotX - toolbarRect.right);
+            const rectDy = Math.max(toolbarRect.top - dotY, 0, dotY - toolbarRect.bottom);
+            const rectDistance = Math.hypot(rectDx, rectDy);
+            const isActivated = pointerDistance <= zoneThreshold || rectDistance <= zoneThreshold;
+            const distance = isActivated ? Math.min(pointerDistance, rectDistance) : pointerDistance + rectDistance;
+
+            const shouldReplace = isActivated && !foundActivatedZone
+                || isActivated === foundActivatedZone && (
+                    distance < bestDistance ||
+                    distance === bestDistance && pointerDistance < bestPointerDistance
+                );
+            if (shouldReplace) {
+                foundActivatedZone = isActivated;
+                bestDistance = distance;
+                bestPointerDistance = pointerDistance;
                 bestSlot = s;
             }
         }
         return bestSlot;
+    }
+
+    private getGripOffsetInToolbar(): { x: number; y: number } {
+        const grip = this.container.querySelector<HTMLElement>('.apolo-toolbar-grip');
+        if (grip) {
+            const gripRect = grip.getBoundingClientRect();
+            const toolbarRect = this.container.getBoundingClientRect();
+            if (gripRect.width > 0 && gripRect.height > 0) {
+                return { x: gripRect.left - toolbarRect.left, y: gripRect.top - toolbarRect.top };
+            }
+        }
+        return this.isVertical() ? { x: 10, y: 20 } : { x: 20, y: 10 };
+    }
+
+    private clampPosition(x: number, y: number, width: number, height: number): { x: number; y: number } {
+        const bounds = this.getEditingBounds();
+        const minX = bounds.left + 8;
+        const minY = bounds.top + 8;
+        const maxX = Math.max(minX, bounds.right - width - 8);
+        const maxY = Math.max(minY, bounds.bottom - height - 8);
+        return {
+            x: Math.max(minX, Math.min(maxX, x)),
+            y: Math.max(minY, Math.min(maxY, y)),
+        };
     }
 
     private applyOrientationStyles(): void {
@@ -341,18 +412,7 @@ export class Toolbar {
         this.applyOrientationStyles();
         if (this.currentDragPos) {
             const { width, height } = this.getDimensions();
-            const winW = typeof window !== 'undefined'
-                ? window.visualViewport?.width ?? window.innerWidth
-                : 1280;
-            const winH = typeof window !== 'undefined'
-                ? window.visualViewport?.height ?? window.innerHeight
-                : 800;
-            const maxX = Math.max(8, winW - width - 8);
-            const maxY = Math.max(8, winH - height - 8);
-            this.currentDragPos = {
-                x: Math.max(8, Math.min(maxX, this.currentDragPos.x)),
-                y: Math.max(8, Math.min(maxY, this.currentDragPos.y)),
-            };
+            this.currentDragPos = this.clampPosition(this.currentDragPos.x, this.currentDragPos.y, width, height);
             this.container.style.left = `${this.currentDragPos.x}px`;
             this.container.style.top = `${this.currentDragPos.y}px`;
             this.container.style.transform = 'none';
@@ -373,8 +433,6 @@ export class Toolbar {
         const grip = document.createElement('button');
         grip.type = 'button';
         grip.className = 'apolo-toolbar-grip';
-        grip.setAttribute('aria-label', 'Arrastrar barra de herramientas a una esquina o borde');
-        grip.title = 'Arrastra para mover la barra';
         grip.appendChild(createSvg(ICONS.dragGrip, {
             size: 18,
             width: 18,
@@ -695,12 +753,11 @@ export class Toolbar {
 
     private evaluateOverflow(): void {
         const vert = this.isVertical();
-        const winW = typeof window !== 'undefined' ? window.innerWidth : 1280;
-        const winH = typeof window !== 'undefined' ? window.innerHeight : 800;
+        const bounds = this.getEditingBounds();
 
         const availableSpace = vert
-            ? Math.max(300, winH - 96)
-            : Math.max(300, winW - 32);
+            ? Math.max(0, bounds.height - 96)
+            : Math.max(0, bounds.width - 32);
 
         // Reset visibility before measuring
         this.overflowedItemIds.clear();
@@ -977,14 +1034,21 @@ export class Toolbar {
         const el = e.currentTarget as HTMLElement;
         const rect = this.container.getBoundingClientRect();
         const scale = (rect.width / this.container.offsetWidth) || 1;
+        const grip = this.container.querySelector<HTMLElement>('.apolo-toolbar-grip');
+        const gripRect = grip?.getBoundingClientRect();
+        const hasGripBounds = !!gripRect && gripRect.width > 0 && gripRect.height > 0;
+        const gripOffset = this.getGripOffsetInToolbar();
 
         this.dragState = {
             pointerId: e.pointerId,
             scale,
+            initialSlot: this.options.slot,
             startX: e.clientX,
             startY: e.clientY,
             origLeft: rect.left,
             origTop: rect.top,
+            pointerOffsetX: hasGripBounds ? e.clientX - gripRect!.left : 0,
+            pointerOffsetY: hasGripBounds ? e.clientY - gripRect!.top : 0,
         };
 
         try {
@@ -1009,27 +1073,61 @@ export class Toolbar {
         const dy = (e.clientY - this.dragState.startY) / this.dragState.scale;
 
         const { width: curWidth, height: curHeight } = this.getDimensions();
-        const winW = window.visualViewport?.width ?? window.innerWidth;
-        const winH = window.visualViewport?.height ?? window.innerHeight;
-        const maxX = Math.max(8, winW - curWidth - 8);
-        const maxY = Math.max(8, winH - curHeight - 8);
-        const newX = Math.max(8, Math.min(maxX, this.dragState.origLeft + dx));
-        const newY = Math.max(8, Math.min(maxY, this.dragState.origTop + dy));
+        const position = this.clampPosition(
+            this.dragState.origLeft + dx,
+            this.dragState.origTop + dy,
+            curWidth,
+            curHeight,
+        );
+        const newX = position.x;
+        const newY = position.y;
 
         this.currentDragPos = { x: newX, y: newY };
         this.updatePosition();
 
-        const nearest = this.getNearestSlot(newX + curWidth / 2, newY + curHeight / 2);
+        const nearest = this.getHoveredOrNearestSlot(e.clientX, e.clientY, {
+            left: newX,
+            top: newY,
+            right: newX + curWidth,
+            bottom: newY + curHeight,
+        });
+        const targetVert = nearest === 'ml' || nearest === 'mr';
+        if (targetVert !== this.isVertical()) {
+            this.options.slot = nearest;
+            this.applyOrientationStyles();
+            this.evaluateOverflow();
+
+            const nextDimensions = this.getDimensions();
+            const gripOffset = this.getGripOffsetInToolbar();
+            const anchored = this.clampPosition(
+                e.clientX - this.dragState.pointerOffsetX - gripOffset.x,
+                e.clientY - this.dragState.pointerOffsetY - gripOffset.y,
+                nextDimensions.width,
+                nextDimensions.height,
+            );
+            this.currentDragPos = anchored;
+            this.dragState.startX = e.clientX;
+            this.dragState.startY = e.clientY;
+            this.dragState.origLeft = anchored.x;
+            this.dragState.origTop = anchored.y;
+            this.updatePosition();
+            this.showSnapDots();
+        }
         this.highlightSnapDot(nearest);
     };
 
     private readonly onGripPointerUp = (e: PointerEvent): void => {
         if (!this.dragState || e.pointerId !== this.dragState.pointerId) return;
 
-        const curWidth = this.container.offsetWidth || this.computeIntrinsicWidth();
-        const curHeight = this.container.offsetHeight || this.computeIntrinsicHeight();
+        const { width: curWidth, height: curHeight } = this.getDimensions();
+        const initialSlot = this.dragState.initialSlot;
         const lastPos = this.currentDragPos || { x: this.dragState.origLeft, y: this.dragState.origTop };
-        const nearest = this.getNearestSlot(lastPos.x + curWidth / 2, lastPos.y + curHeight / 2);
+        const nearest = this.getHoveredOrNearestSlot(e.clientX, e.clientY, {
+            left: lastPos.x,
+            top: lastPos.y,
+            right: lastPos.x + curWidth,
+            bottom: lastPos.y + curHeight,
+        });
 
         this.dragState = null;
         this.currentDragPos = null;
@@ -1041,6 +1139,8 @@ export class Toolbar {
 
         if (this.options.slot !== nearest) {
             this.setSlot(nearest);
+        }
+        if (initialSlot !== nearest) {
             this.options.onSlotChange(nearest);
         } else {
             this.updatePosition();

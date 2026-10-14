@@ -208,6 +208,10 @@ function ensureDomEnvironment(): void {
                 if (idx !== -1) list.splice(idx, 1);
             }
         },
+        dispatchEvent: (event: any) => {
+            for (const item of [...(listeners.get(event.type) || [])]) item.listener(event);
+            return true;
+        },
     };
 
     (global as any).document = {
@@ -647,6 +651,68 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
 
             assert.ok(left + dimensions.width <= window.innerWidth - 8, `${slot} toolbar must fit within the right viewport edge`);
             assert.ok(top + dimensions.height <= window.innerHeight - 8, `${slot} toolbar must fit within the bottom viewport edge`);
+        }
+    });
+
+    await t.test('Dragging into a side snap zone switches orientation before pointerup', () => {
+        toolbar.setSlot('br');
+        const grip = toolbar.container.querySelector('.apolo-toolbar-grip');
+        assert.ok(grip);
+        grip.dispatchEvent({
+            type: 'pointerdown',
+            pointerId: 77,
+            clientX: 20,
+            clientY: 10,
+            currentTarget: grip,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+
+        (window as any).dispatchEvent({
+            type: 'pointermove',
+            pointerId: 77,
+            clientX: 1240,
+            clientY: 400,
+            preventDefault: () => {},
+        });
+
+        assert.equal(toolbar.container.classList.contains('is-vertical'), true);
+
+        (window as any).dispatchEvent({
+            type: 'pointerup',
+            pointerId: 77,
+            clientX: 1240,
+            clientY: 400,
+        });
+        assert.equal(changedSlot, 'mr');
+    });
+
+    await t.test('Slot coordinates use the active view-content bounds', () => {
+        const previousQuerySelector = (document as any).querySelector;
+        const viewContent = createMockElement('div');
+        viewContent.className = 'view-content';
+        viewContent.getBoundingClientRect = () => ({
+            left: 200,
+            top: 80,
+            right: 900,
+            bottom: 720,
+            width: 700,
+            height: 640,
+        });
+        (document as any).querySelector = (selector: string) =>
+            selector === '.workspace-leaf.mod-active .view-content' ? viewContent : null;
+
+        try {
+            const topLeft = toolbar.getSlotCoordinates('tl');
+            const bottomRight = toolbar.getSlotCoordinates('br');
+            assert.equal(topLeft.x, 216);
+            assert.equal(topLeft.y, 96);
+            assert.ok(toolbar.getDimensions('br').width <= 668);
+            assert.ok(bottomRight.x >= 208);
+            assert.ok(bottomRight.x + bottomRight.width <= 892);
+            assert.ok(bottomRight.y + bottomRight.height <= 712);
+        } finally {
+            (document as any).querySelector = previousQuerySelector;
         }
     });
 
