@@ -167,6 +167,68 @@ export interface SvgOptions {
     className?: string;
 }
 
+export function createDotsIcon(): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    const positions = [
+        { cx: 12, cy: 12, r: 1.5 },
+        { cx: 19, cy: 12, r: 1.5 },
+        { cx: 5, cy: 12, r: 1.5 },
+    ];
+    for (const point of positions) {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(point.cx));
+        circle.setAttribute('cy', String(point.cy));
+        circle.setAttribute('r', String(point.r));
+        svg.appendChild(circle);
+    }
+    return svg;
+}
+
+function applySvgAttributes(node: Element, attributeString: string): void {
+    const attrRegex = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+    let attrMatch: RegExpExecArray | null;
+    while ((attrMatch = attrRegex.exec(attributeString)) !== null) {
+        const [, name, doubleQuoted, singleQuoted, bare] = attrMatch;
+        const value = doubleQuoted ?? singleQuoted ?? bare ?? '';
+        node.setAttribute(name, value);
+    }
+}
+
+function appendSvgMarkup(parent: Element, markup: string): void {
+    const tagRegex = /<([A-Za-z0-9:-]+)([^>]*)>([\s\S]*?)<\/\1>|<([A-Za-z0-9:-]+)([^>]*)\s*\/?>/g;
+    let tagMatch: RegExpExecArray | null;
+    while ((tagMatch = tagRegex.exec(markup)) !== null) {
+        const tagName = tagMatch[1] ?? tagMatch[4];
+        const attributeString = tagMatch[2] ?? tagMatch[5] ?? '';
+        const innerMarkup = tagMatch[3] ?? '';
+        const node = document.createElementNS('http://www.w3.org/2000/svg', tagName);
+        applySvgAttributes(node, attributeString);
+        if (innerMarkup) appendSvgMarkup(node, innerMarkup);
+        parent.appendChild(node);
+    }
+}
+
+export function createSvgFromMarkup(markup: string): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const rootTag = /^<svg\b/i.test(markup) ? /<svg\b([^>]*)>/i.exec(markup) : null;
+    if (rootTag) {
+        applySvgAttributes(svg, rootTag[1]);
+        const innerMarkup = markup.slice(markup.indexOf('>') + 1, markup.lastIndexOf('</svg>'));
+        appendSvgMarkup(svg, innerMarkup);
+    } else {
+        appendSvgMarkup(svg, markup);
+    }
+    return svg;
+}
+
 export function createSvg(pathD: string, options: SvgOptions = {}): SVGSVGElement {
     const size = options.size ?? 24;
     const w = options.width ?? size;
@@ -185,13 +247,11 @@ export function createSvg(pathD: string, options: SvgOptions = {}): SVGSVGElemen
     svg.setAttribute('aria-hidden', 'true');
     if (options.className) svg.setAttribute('class', options.className);
 
-    // If path starts with an SVG tag, parse it into actual SVG nodes without assigning raw markup.
     if (pathD.startsWith('<')) {
-        const markup = `<svg xmlns="http://www.w3.org/2000/svg">${pathD}</svg>`;
-        const parsed = new DOMParser().parseFromString(markup, 'image/svg+xml');
-        const fragment = parsed.documentElement;
-        for (const child of Array.from(fragment.childNodes)) {
-            svg.appendChild(child.cloneNode(true));
+        const markup = pathD.startsWith('<svg') ? pathD : `<svg xmlns="http://www.w3.org/2000/svg">${pathD}</svg>`;
+        const parsedSvg = createSvgFromMarkup(markup);
+        for (const child of Array.from(parsedSvg.children ?? [])) {
+            svg.appendChild(child);
         }
     } else {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');

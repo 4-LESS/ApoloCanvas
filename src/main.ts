@@ -3,7 +3,7 @@ import { EngineEventBus } from './core/events';
 import { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot } from './core/types';
 import { CanvasController } from './engine/CanvasController';
 import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue';
-import { DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme';
+import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme';
 import { openLocalGraph } from './ui/LinkSuggestModal';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension';
 
@@ -244,7 +244,9 @@ export default class ApoloCanvasPlugin extends Plugin {
                                 previewSvgWrap.className = 'apolo-box-preview-svg';
                                 s.appendChild(previewSvgWrap);
                             }
-                            previewSvgWrap.innerHTML = renderBoxSvg(id, boxElements, 800, h);
+                            const svgMarkup = renderBoxSvg(id, boxElements, 800, h);
+                            const parsedSvg = createSvgFromMarkup(svgMarkup);
+                            previewSvgWrap.replaceChildren(...Array.from(parsedSvg.children ?? []));
                         } else if (previewSvgWrap) {
                             previewSvgWrap.remove();
                         }
@@ -256,17 +258,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                         optBtn.type = 'button';
                         optBtn.dataset.apoloBoxId = id;
                         optBtn.setAttribute('aria-label', 'Opciones del espacio');
-                        const dotsSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                        dotsSvg.setAttribute('viewBox', '0 0 24 24');
-                        dotsSvg.setAttribute('width', '16');
-                        dotsSvg.setAttribute('height', '16');
-                        dotsSvg.setAttribute('fill', 'none');
-                        dotsSvg.setAttribute('stroke', 'currentColor');
-                        dotsSvg.setAttribute('stroke-width', '2');
-                        dotsSvg.setAttribute('stroke-linecap', 'round');
-                        dotsSvg.setAttribute('stroke-linejoin', 'round');
-                        dotsSvg.innerHTML = '<circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle><circle cx="5" cy="12" r="1.5"></circle>';
-                        optBtn.appendChild(dotsSvg);
+                        optBtn.appendChild(createDotsIcon());
                         s.appendChild(optBtn);
                     }
                     if (!existingHandle) {
