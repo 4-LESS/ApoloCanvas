@@ -1,4 +1,4 @@
-import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, ToolbarSlot, ToolType } from '../core/types.ts';
+import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, StrokePattern, ToolbarSlot, ToolType } from '../core/types.ts';
 import { HIGHLIGHTER_PALETTE, ICONS, PRIMARY_PALETTE, createSvg } from './theme.ts';
 import type { PopoverController, PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
@@ -12,6 +12,11 @@ export interface ToolEstucheState {
     profileId: PenProfileId;
     smoothing: number; // 0..1
     pressureSensitivity: number; // 0..1
+    opacity?: number;
+    lineStyle?: StrokePattern;
+    pattern?: StrokePattern;
+    straightenLines?: boolean;
+    onlyHighlighter?: boolean;
     favorites: PenFavorite[];
     eraserMode: EraserMode;
     eraserRadius: number;
@@ -27,6 +32,10 @@ export interface ToolEstucheCallbacks {
     onChangeWidth: (width: number) => void;
     onChangeSmoothing: (smoothing: number) => void;
     onChangePressure: (pressure: number) => void;
+    onChangeOpacity?: (opacity: number) => void;
+    onChangeLineStyle?: (pattern: StrokePattern) => void;
+    onToggleStraighten?: (enabled: boolean) => void;
+    onToggleOnlyHighlighter?: (enabled: boolean) => void;
     onUseFavorite: (index: number) => void;
     onSaveFavorite: (index: number) => void;
     onSelectEraserMode: (mode: EraserMode) => void;
@@ -66,6 +75,8 @@ export class ToolEstuche implements PopoverInstance {
     private lassoModeButtons: Map<string, HTMLElement> = new Map();
     private shapeButtons: Map<string, HTMLElement> = new Map();
     private lineStyleChips: Map<string, HTMLElement> = new Map();
+    private straightenSwitch?: HTMLElement;
+    private onlyHighlighterSwitch?: HTMLElement;
     private swatchRowEl?: HTMLElement;
     private paginationEl?: HTMLElement;
     private swatchButtons: Map<string, HTMLElement> = new Map();
@@ -250,7 +261,15 @@ export class ToolEstuche implements PopoverInstance {
             this.smoothingBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
         }
 
-        if (partial.pressureSensitivity !== undefined && this.opacityInput && this.opacityBubble) {
+        if (partial.opacity !== undefined && this.opacityInput && this.opacityBubble) {
+            const val = Math.round(partial.opacity);
+            this.opacityInput.value = String(val);
+            this.opacityBubble.textContent = String(val);
+            const ratio = Math.max(0, Math.min(1, val / 100));
+            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.opacityBubble.style.backgroundColor = this.state.color;
+            this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
+        } else if (partial.pressureSensitivity !== undefined && this.opacityInput && this.opacityBubble) {
             const val = Math.round(partial.pressureSensitivity * 100);
             this.opacityInput.value = String(val);
             this.opacityBubble.textContent = String(val);
@@ -258,6 +277,23 @@ export class ToolEstuche implements PopoverInstance {
             this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
             this.opacityBubble.style.backgroundColor = this.state.color;
             this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
+        }
+
+        if ((partial.lineStyle !== undefined || partial.pattern !== undefined) && this.lineStyleChips.size > 0) {
+            const nextPattern = (partial.pattern ?? partial.lineStyle ?? this.state.pattern ?? this.state.lineStyle ?? 'solid') as StrokePattern;
+            this.state.lineStyle = nextPattern;
+            this.state.pattern = nextPattern;
+            for (const [pattern, btn] of this.lineStyleChips) {
+                btn.classList.toggle('is-active', pattern === nextPattern);
+            }
+        }
+
+        if (partial.straightenLines !== undefined && this.straightenSwitch) {
+            this.straightenSwitch.classList.toggle('is-checked', partial.straightenLines);
+        }
+
+        if (partial.onlyHighlighter !== undefined && this.onlyHighlighterSwitch) {
+            this.onlyHighlighterSwitch.classList.toggle('is-checked', partial.onlyHighlighter);
         }
 
         if (partial.profileId !== undefined) {
@@ -479,10 +515,23 @@ export class ToolEstuche implements PopoverInstance {
         this.bodyEl.appendChild(smoothingSlider.element);
 
         // 4. Line styles grid (solid, dashed, dotted)
-        this.bodyEl.appendChild(this.createLineStylesGrid());
+        this.bodyEl.appendChild(this.createLineStylesGrid((pattern) => {
+            this.state.lineStyle = pattern;
+            this.state.pattern = pattern;
+            this.callbacks.onChangeLineStyle?.(pattern);
+        }));
 
         // 5. Toggle Row: "Enderezar líneas"
-        this.bodyEl.appendChild(this.createToggleRow('Enderezar líneas', false));
+        const straightenRow = this.createToggleRow(
+            'Enderezar líneas',
+            !!this.state.straightenLines,
+            (checked) => {
+                this.state.straightenLines = checked;
+                this.callbacks.onToggleStraighten?.(checked);
+            }
+        );
+        this.straightenSwitch = (straightenRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(straightenRow);
 
         // 6. Paleta de Colores
         this.bodyEl.appendChild(this.createPaletteSection());
@@ -544,13 +593,14 @@ export class ToolEstuche implements PopoverInstance {
         // 3. Slider Opacidad (10% to 100%)
         const opacitySlider = this.createSlider(
             'Opacidad',
-            Math.round(this.state.pressureSensitivity * 100),
+            Math.round((this.state.opacity ?? this.state.pressureSensitivity ?? 1) * 100),
             10,
             100,
             5,
             (val) => {
+                this.state.opacity = val;
                 this.state.pressureSensitivity = val / 100;
-                this.callbacks.onChangePressure(this.state.pressureSensitivity);
+                this.callbacks.onChangeOpacity?.(val);
             },
             true
         );
@@ -559,7 +609,16 @@ export class ToolEstuche implements PopoverInstance {
         this.bodyEl.appendChild(opacitySlider.element);
 
         // 4. Toggle Row: "Enderezar líneas"
-        this.bodyEl.appendChild(this.createToggleRow('Enderezar líneas', false));
+        const straightenRow = this.createToggleRow(
+            'Enderezar líneas',
+            !!this.state.straightenLines,
+            (checked) => {
+                this.state.straightenLines = checked;
+                this.callbacks.onToggleStraighten?.(checked);
+            }
+        );
+        this.straightenSwitch = (straightenRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(straightenRow);
 
         // 5. Paleta de Colores
         this.bodyEl.appendChild(this.createPaletteSection());
@@ -631,7 +690,16 @@ export class ToolEstuche implements PopoverInstance {
         this.bodyEl.appendChild(radiusSlider.element);
 
         // 3. Toggle Row: "Borrar resaltador solamente"
-        this.bodyEl.appendChild(this.createToggleRow('Borrar resaltador solamente', false));
+        const onlyHighlighterRow = this.createToggleRow(
+            'Borrar resaltador solamente',
+            !!this.state.onlyHighlighter,
+            (checked) => {
+                this.state.onlyHighlighter = checked;
+                this.callbacks.onToggleOnlyHighlighter?.(checked);
+            }
+        );
+        this.onlyHighlighterSwitch = (onlyHighlighterRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(onlyHighlighterRow);
 
         // 4. Toggle Row: "Garabato para borrar"
         const scribbleRow = this.createToggleRow(
@@ -642,7 +710,7 @@ export class ToolEstuche implements PopoverInstance {
                 this.callbacks.onToggleScribble(checked);
             }
         );
-        this.scribbleSwitch = scribbleRow.querySelector('.popover-switch') as HTMLElement;
+        this.scribbleSwitch = (scribbleRow as any).__switch as HTMLElement;
         this.bodyEl.appendChild(scribbleRow);
     }
 
@@ -699,7 +767,11 @@ export class ToolEstuche implements PopoverInstance {
         this.bodyEl.appendChild(widthSlider.element);
 
         // 3. Line styles grid
-        this.bodyEl.appendChild(this.createLineStylesGrid());
+        this.bodyEl.appendChild(this.createLineStylesGrid((pattern) => {
+            this.state.lineStyle = pattern;
+            this.state.pattern = pattern;
+            this.callbacks.onChangeLineStyle?.(pattern);
+        }));
 
         // 4. Toggle Row: "Imán de cuadrícula"
         const snapRow = this.createToggleRow(
@@ -710,7 +782,7 @@ export class ToolEstuche implements PopoverInstance {
                 this.callbacks.onToggleSnapGrid(checked);
             }
         );
-        this.snapGridSwitch = snapRow.querySelector('.popover-switch') as HTMLElement;
+        this.snapGridSwitch = (snapRow as any).__switch as HTMLElement;
         this.bodyEl.appendChild(snapRow);
 
         // 5. Paleta de Colores
@@ -850,20 +922,21 @@ export class ToolEstuche implements PopoverInstance {
         return { element: wrap, input, bubble };
     }
 
-    private createLineStylesGrid(): HTMLElement {
+    private createLineStylesGrid(onSelect?: (pattern: StrokePattern) => void): HTMLElement {
         const stylesRow = document.createElement('div');
         stylesRow.className = 'popover-lines-grid';
 
-        const styles: Array<{ id: 'solid' | 'dashed' | 'dotted'; cls: string }> = [
+        const styles: Array<{ id: StrokePattern; cls: string }> = [
             { id: 'solid', cls: '' },
             { id: 'dashed', cls: 'is-dashed' },
             { id: 'dotted', cls: 'is-dotted' },
         ];
+        const activePattern = this.state.lineStyle ?? this.state.pattern ?? 'solid';
 
         for (const s of styles) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `popover-line-chip ${s.id === 'solid' ? 'is-active' : ''}`;
+            btn.className = `popover-line-chip ${s.id === activePattern ? 'is-active' : ''}`;
 
             const bar = document.createElement('div');
             bar.className = `popover-line-bar ${s.cls}`;
@@ -872,6 +945,9 @@ export class ToolEstuche implements PopoverInstance {
             btn.onclick = () => {
                 for (const [, b] of this.lineStyleChips) b.classList.remove('is-active');
                 btn.classList.add('is-active');
+                this.state.lineStyle = s.id;
+                this.state.pattern = s.id;
+                onSelect?.(s.id);
             };
 
             this.lineStyleChips.set(s.id, btn);
@@ -901,6 +977,7 @@ export class ToolEstuche implements PopoverInstance {
             onToggle?.(next);
         };
 
+        (toggleRow as any).__switch = sw;
         toggleRow.append(tTitle, sw);
         return toggleRow;
     }
@@ -988,13 +1065,16 @@ export class ToolEstuche implements PopoverInstance {
                 this.state.color,
                 (newColor, opacity) => {
                     this.state.color = newColor;
+                    this.state.opacity = opacity;
+                    this.state.pressureSensitivity = Math.max(0, Math.min(1, opacity / 100));
                     this.pushRecentColor(newColor);
                     this.currentPageIndex = 0;
                     this.updateColorsUI();
                     this.callbacks.onChangeColor(newColor);
+                    this.callbacks.onChangeOpacity?.(opacity);
                 },
                 null,
-                Math.round(this.state.pressureSensitivity * 100) || 100
+                Math.round(this.state.opacity ?? (this.state.pressureSensitivity * 100))
             );
         };
         this.swatchRowEl.appendChild(addBtn);
