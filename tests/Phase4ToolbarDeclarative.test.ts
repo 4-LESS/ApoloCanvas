@@ -613,7 +613,7 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
         assert.equal(tc.x, expectedCenterX);
         assert.equal(bc.x, expectedCenterX);
         assert.equal(tc.y, 56); // margin top
-        assert.equal(bc.y, 800 - bc.height - 36); // margin bottom
+        assert.equal(bc.y, 800 - bc.height - 56); // reserved bottom space
     });
 
     await t.test('Mid Left (ml) and Mid Right (mr) are vertical and vertically centered', () => {
@@ -636,6 +636,18 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
         // Switch back to horizontal
         toolbar.setSlot('tc');
         assert.equal(toolbar.container.classList.contains('is-vertical'), false);
+    });
+
+    await t.test('Switching between vertical and horizontal slots stays within viewport bounds', () => {
+        for (const slot of ['mr', 'br', 'mr', 'br'] as const) {
+            toolbar.setSlot(slot);
+            const dimensions = toolbar.getDimensions(slot);
+            const left = Number.parseFloat(toolbar.container.style.left);
+            const top = Number.parseFloat(toolbar.container.style.top);
+
+            assert.ok(left + dimensions.width <= window.innerWidth - 8, `${slot} toolbar must fit within the right viewport edge`);
+            assert.ok(top + dimensions.height <= window.innerHeight - 8, `${slot} toolbar must fit within the bottom viewport edge`);
+        }
     });
 
     toolbar.destroy();

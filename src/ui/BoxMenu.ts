@@ -281,7 +281,7 @@ function createDensitySparseSvg(): SVGSVGElement {
 
 /**
  * Visual floating inspector panel for drawing boxes.
- * Opens exclusively via the top-left 3-dots button (.apolo-box-options-btn).
+ * Opens exclusively via the top-right 3-dots button (.apolo-box-options-btn).
  * Adheres to UI Kit architecture with PopoverShell styling and smart anchor positioning.
  */
 export class BoxMenu implements PopoverInstance {
@@ -429,6 +429,7 @@ export class BoxMenu implements PopoverInstance {
             anchorRect,
             popoverSize: { width: 288, height: 295 },
             preferredPlacement: 'bottom',
+            horizontalAlignment: 'right',
             offset: 6,
             padding: 8,
         });

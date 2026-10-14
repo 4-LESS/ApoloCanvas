@@ -13,6 +13,7 @@ export interface AnchorPositionOptions {
     anchorRect: RectLike;
     popoverSize: { width: number; height: number };
     preferredPlacement?: PopoverPlacement;
+    horizontalAlignment?: 'center' | 'right';
     offset?: number;
     padding?: number;
 }
@@ -93,7 +94,9 @@ export function calculateAnchorPosition(options: AnchorPositionOptions): AnchorP
         }
 
         // Center horizontally on anchor
-        left = anchorRect.left + (anchorRect.width / 2) - (popoverSize.width / 2);
+        left = options.horizontalAlignment === 'right'
+            ? anchorRect.right - popoverSize.width
+            : anchorRect.left + (anchorRect.width / 2) - (popoverSize.width / 2);
     }
 
     // Clamp within viewport safe margin

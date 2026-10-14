@@ -2141,28 +2141,29 @@
 }
 
 /* ==========================================================================
-   Drawing Box Options Button (Top-left 3-dots) & Resize Handle (Bottom)
+   Drawing Box Options Button (Top-right 3-dots) & Resize Handle (Bottom)
    Visible únicamente en Modo Edición
    ========================================================================== */
 .apolo-box-options-btn {
-  display: flex;
+  display: inline-flex;
   position: absolute;
   top: 8px;
-  left: 10px;
-  width: var(--apolo-touch-target-sm, 32px);
-  height: var(--apolo-touch-target-sm, 32px);
-  border-radius: var(--apolo-radius-sm, 8px);
+  right: 10px;
+  left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--apolo-text-muted, #94a3b8);
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--text-muted);
   cursor: pointer;
-  z-index: 2;
-  opacity: 0.65;
-  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+  z-index: 5;
+  opacity: 0.35;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   padding: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   pointer-events: auto;
   touch-action: none;
   user-select: none;
@@ -2181,23 +2182,12 @@
 }
 
 .apolo-box-options-btn:hover,
+.apolo-box-options-btn:focus-visible,
+.apolo-box-options-btn.is-active,
 .apolo-box-options-btn:active {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.14);
-  color: var(--apolo-text, #ffffff);
-  transform: scale(1.05);
-}
-
-.theme-light .apolo-box-options-btn {
-  background: rgba(0, 0, 0, 0.05);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  color: var(--text-muted, #6b7280);
-}
-
-.theme-light .apolo-box-options-btn:hover,
-.theme-light .apolo-box-options-btn:active {
-  background: rgba(0, 0, 0, 0.1);
-  color: var(--text-normal, #111827);
+  background: rgba(128, 128, 128, 0.12);
+  color: var(--text-normal);
 }
 
 /* Ocultar en Modo Lectura */

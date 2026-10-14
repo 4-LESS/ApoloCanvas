@@ -354,7 +354,18 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
         });
         assert.ok(pos3.left >= 12, 'Left must be clamped to safe viewport padding');
 
-        // 4. Test applyPopoverPosition
+        // 4. A right-corner trigger right-aligns its popover and clamps at the viewport edge
+        const pos4 = calculateAnchorPosition({
+            anchorRect: { left: 990, top: 100, right: 1018, bottom: 128, width: 28, height: 28 },
+            popoverSize: { width: 288, height: 200 },
+            preferredPlacement: 'bottom',
+            horizontalAlignment: 'right',
+        });
+        assert.strictEqual(pos4.placement, 'bottom');
+        assert.strictEqual(pos4.left, 724, 'Right-aligned popover should clamp to the viewport padding');
+        assert.ok(pos4.left + 288 <= 1024 - 12, 'Popover must not overflow the viewport right edge');
+
+        // 5. Test applyPopoverPosition
         const { mockDocument } = createMockEnvironment();
         const testEl = mockDocument.createElement('div');
         applyPopoverPosition(testEl as any, pos1);

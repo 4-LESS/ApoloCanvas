@@ -243,20 +243,27 @@ export class Toolbar {
     getDimensions(slot?: ToolbarSlot): { width: number; height: number } {
         const targetSlot = slot ?? this.options.slot;
         const vert = targetSlot === 'ml' || targetSlot === 'mr';
+        const isCurrentOrientation = vert === this.isVertical();
         if (vert) {
-            const h = (this.container.offsetHeight && this.container.offsetHeight > 0)
+            const h = isCurrentOrientation && this.container.offsetHeight > 64
                 ? this.container.offsetHeight
                 : this.computeIntrinsicHeight();
-            const maxH = typeof window !== 'undefined' ? window.innerHeight - 96 : 600;
+            const viewportHeight = typeof window !== 'undefined'
+                ? window.visualViewport?.height ?? window.innerHeight
+                : 696;
+            const maxH = viewportHeight - 96;
             return {
                 width: 58,
                 height: Math.min(h, maxH),
             };
         }
-        const w = (this.container.offsetWidth && this.container.offsetWidth > 0)
+        const w = isCurrentOrientation && this.container.offsetWidth > 64
             ? this.container.offsetWidth
             : this.computeIntrinsicWidth();
-        const maxW = typeof window !== 'undefined' ? window.innerWidth - 32 : 1200;
+        const viewportWidth = typeof window !== 'undefined'
+            ? window.visualViewport?.width ?? window.innerWidth
+            : 1280;
+        const maxW = viewportWidth - 32;
         return {
             width: Math.min(w, maxW),
             height: 58,
@@ -268,10 +275,14 @@ export class Toolbar {
 
         const marginX = 16;
         const marginY = 56; // Leave room for Obsidian header / tabs
-        const marginBottom = 36;
+        const marginBottom = slot === 'bl' || slot === 'bc' || slot === 'br' ? 56 : marginY;
 
-        const winW = typeof window !== 'undefined' ? window.innerWidth : 1280;
-        const winH = typeof window !== 'undefined' ? window.innerHeight : 800;
+        const winW = typeof window !== 'undefined'
+            ? window.visualViewport?.width ?? window.innerWidth
+            : 1280;
+        const winH = typeof window !== 'undefined'
+            ? window.visualViewport?.height ?? window.innerHeight
+            : 800;
 
         let x = 0;
         if (slot === 'tl' || slot === 'ml' || slot === 'bl') {
@@ -293,7 +304,10 @@ export class Toolbar {
             y = winH - height - marginBottom;
         }
 
-        return { x: Math.max(8, x), y: Math.max(8, y), width, height };
+        x = Math.max(marginX, Math.min(winW - width - marginX, x));
+        y = Math.max(marginY, Math.min(winH - height - marginBottom, y));
+
+        return { x, y, width, height };
     }
 
     private getNearestSlot(centerX: number, centerY: number): ToolbarSlot {
@@ -314,11 +328,31 @@ export class Toolbar {
         return bestSlot;
     }
 
-    private updatePosition(): void {
+    private applyOrientationStyles(): void {
         const vert = this.isVertical();
         this.container.classList.toggle('is-vertical', vert);
+        this.container.style.width = vert ? '58px' : 'fit-content';
+        this.container.style.maxWidth = 'calc(100vw - 32px)';
+        this.container.style.height = vert ? 'fit-content' : '58px';
+        this.container.style.maxHeight = 'calc(100vh - 96px)';
+    }
 
+    private updatePosition(): void {
+        this.applyOrientationStyles();
         if (this.currentDragPos) {
+            const { width, height } = this.getDimensions();
+            const winW = typeof window !== 'undefined'
+                ? window.visualViewport?.width ?? window.innerWidth
+                : 1280;
+            const winH = typeof window !== 'undefined'
+                ? window.visualViewport?.height ?? window.innerHeight
+                : 800;
+            const maxX = Math.max(8, winW - width - 8);
+            const maxY = Math.max(8, winH - height - 8);
+            this.currentDragPos = {
+                x: Math.max(8, Math.min(maxX, this.currentDragPos.x)),
+                y: Math.max(8, Math.min(maxY, this.currentDragPos.y)),
+            };
             this.container.style.left = `${this.currentDragPos.x}px`;
             this.container.style.top = `${this.currentDragPos.y}px`;
             this.container.style.transform = 'none';
@@ -327,10 +361,6 @@ export class Toolbar {
             const coords = this.getSlotCoordinates(this.options.slot);
             this.container.style.left = `${coords.x}px`;
             this.container.style.top = `${coords.y}px`;
-            this.container.style.width = vert ? '58px' : 'fit-content';
-            this.container.style.maxWidth = 'calc(100vw - 32px)';
-            this.container.style.height = vert ? 'fit-content' : '58px';
-            this.container.style.maxHeight = 'calc(100vh - 96px)';
             this.container.style.transform = 'none';
             this.container.style.transition = 'left 0.25s cubic-bezier(0.2, 0, 0, 1), top 0.25s cubic-bezier(0.2, 0, 0, 1)';
         }
@@ -658,6 +688,7 @@ export class Toolbar {
 
     // Responsive overflow evaluation
     recalculateLayout(): void {
+        this.applyOrientationStyles();
         this.evaluateOverflow();
         this.updatePosition();
     }
@@ -977,14 +1008,17 @@ export class Toolbar {
         const dx = (e.clientX - this.dragState.startX) / this.dragState.scale;
         const dy = (e.clientY - this.dragState.startY) / this.dragState.scale;
 
-        const newX = this.dragState.origLeft + dx;
-        const newY = this.dragState.origTop + dy;
+        const { width: curWidth, height: curHeight } = this.getDimensions();
+        const winW = window.visualViewport?.width ?? window.innerWidth;
+        const winH = window.visualViewport?.height ?? window.innerHeight;
+        const maxX = Math.max(8, winW - curWidth - 8);
+        const maxY = Math.max(8, winH - curHeight - 8);
+        const newX = Math.max(8, Math.min(maxX, this.dragState.origLeft + dx));
+        const newY = Math.max(8, Math.min(maxY, this.dragState.origTop + dy));
 
         this.currentDragPos = { x: newX, y: newY };
         this.updatePosition();
 
-        const curWidth = this.container.offsetWidth || this.computeIntrinsicWidth();
-        const curHeight = this.container.offsetHeight || this.computeIntrinsicHeight();
         const nearest = this.getNearestSlot(newX + curWidth / 2, newY + curHeight / 2);
         this.highlightSnapDot(nearest);
     };
