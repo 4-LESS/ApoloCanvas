@@ -210,7 +210,7 @@ export class ToolEstuche implements PopoverInstance {
         if (!this.isOpen()) return;
         const anchor = anchorEl ?? this.currentAnchorEl;
         if (!anchor) return;
-        const toolbarEl = (anchor?.closest?.('.apolo-toolbar') as HTMLElement) || anchor?.parentElement || null;
+        const toolbarEl = (anchor?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || anchor?.parentElement || null;
         const w = this.state.tool === 'eraser' ? 290 : (this.state.tool === 'shape' ? 330 : 320);
         this.container.style.width = `${w}px`;
         applyPopoverGeometry(this.container, anchor, toolbarEl, this.state.slot, {
@@ -819,7 +819,7 @@ export class ToolEstuche implements PopoverInstance {
         row.append(minusBtn, track, plusBtn);
         wrap.appendChild(row);
 
-        const updateVal = (val: number) => {
+        const updateVal = (val: number, notify = true) => {
             val = Math.max(min, Math.min(max, val));
             if (step < 1) val = Math.round(val * 10) / 10;
             input.value = String(val);
@@ -830,7 +830,7 @@ export class ToolEstuche implements PopoverInstance {
                 bubble.style.backgroundColor = this.state.color;
                 bubble.style.opacity = String(Math.max(0.35, val / 100));
             }
-            onChange(val);
+            if (notify) onChange(val);
         };
 
         input.oninput = () => updateVal(Number(input.value));
@@ -845,14 +845,7 @@ export class ToolEstuche implements PopoverInstance {
             updateVal(next);
         };
 
-        setTimeout(() => {
-            const ratio = Math.max(0, Math.min(1, (currentVal - min) / (max - min)));
-            bubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
-            if (isOpacity) {
-                bubble.style.backgroundColor = this.state.color;
-                bubble.style.opacity = String(Math.max(0.35, currentVal / 100));
-            }
-        }, 0);
+        setTimeout(() => updateVal(currentVal, false), 0);
 
         return { element: wrap, input, bubble };
     }
@@ -987,7 +980,7 @@ export class ToolEstuche implements PopoverInstance {
 
         addBtn.onclick = (e) => {
             e.stopPropagation();
-            const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
+            const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
             this.colorPicker.open(
                 addBtn,
                 this.state.slot,

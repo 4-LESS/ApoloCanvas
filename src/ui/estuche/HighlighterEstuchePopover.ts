@@ -311,21 +311,21 @@ export class HighlighterEstuchePopover {
         row.append(minusBtn, track, plusBtn);
         wrap.appendChild(row);
 
-        const updateVal = (val: number) => {
+        const updateVal = (val: number, notify = true) => {
             val = Math.max(opts.min, Math.min(opts.max, val));
             input.value = String(val);
             bubble.textContent = String(val);
             const ratio = Math.max(0, Math.min(1, (val - opts.min) / (opts.max - opts.min)));
             bubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
             if (opts.isOpacity) this.updateOpacityBubbleVisual(val);
-            opts.onChange(val);
+            if (notify) opts.onChange(val);
         };
 
         input.oninput = () => updateVal(Number(input.value));
         minusBtn.onclick = () => updateVal(Number(input.value) - 1);
         plusBtn.onclick = () => updateVal(Number(input.value) + 1);
 
-        setTimeout(() => updateVal(opts.currentVal), 0);
+        setTimeout(() => updateVal(opts.currentVal, false), 0);
         this.el.appendChild(wrap);
     }
 

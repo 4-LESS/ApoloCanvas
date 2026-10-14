@@ -453,11 +453,6 @@ export class Toolbar {
         undoBtn.setAttribute('aria-label', 'Deshacer (Ctrl+Z)');
         undoBtn.title = 'Deshacer (Ctrl+Z)';
         undoBtn.appendChild(createSvg(ICONS.undo));
-        undoBtn.addEventListener('pointerdown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (this.options.canUndo) this.options.onUndo();
-        });
         undoBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -471,11 +466,6 @@ export class Toolbar {
         redoBtn.setAttribute('aria-label', 'Rehacer (Ctrl+Y / Ctrl+Shift+Z)');
         redoBtn.title = 'Rehacer (Ctrl+Y / Ctrl+Shift+Z)';
         redoBtn.appendChild(createSvg(ICONS.redo));
-        redoBtn.addEventListener('pointerdown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (this.options.canRedo) this.options.onRedo();
-        });
         redoBtn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -784,7 +774,7 @@ export class Toolbar {
         }
         if (!this.overflowedItemIds.has('thickness')) {
             width += 17; // divider
-            width += 3 * 36 + 2 * 8;
+            width += 36;
         }
         if (!this.overflowedItemIds.has('snapGrid')) {
             width += 17; // divider
@@ -818,7 +808,7 @@ export class Toolbar {
         }
         if (!this.overflowedItemIds.has('thickness')) {
             height += 17;
-            height += 3 * 36 + 2 * 8;
+            height += 36;
         }
         if (!this.overflowedItemIds.has('snapGrid')) {
             height += 17; // divider

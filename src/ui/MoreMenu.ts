@@ -276,10 +276,10 @@ export class MoreMenu {
         btn.innerHTML = '<span class="apolo-switch-track"><span class="apolo-switch-thumb"></span></span>';
 
         btn.addEventListener('click', () => {
-            const next = !active;
-            btn.classList.toggle('is-off', !next);
-            btn.setAttribute('aria-pressed', String(next));
-            onChange(next);
+            active = !active;
+            btn.classList.toggle('is-off', !active);
+            btn.setAttribute('aria-pressed', String(active));
+            onChange(active);
         });
 
         row.append(textWrap, btn);

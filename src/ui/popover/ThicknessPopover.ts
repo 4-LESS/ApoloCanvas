@@ -116,14 +116,14 @@ export class ThicknessPopover {
         plusBtn.setAttribute('aria-label', 'Aumentar grosor');
         plusBtn.appendChild(createSvg(ICONS.plus, { size: 16 }));
 
-        const updateVal = (val: number) => {
+        const updateVal = (val: number, notify = true) => {
             val = Math.max(this.min, Math.min(this.max, val));
             this.currentValue = val;
             input.value = String(val);
             bubble.textContent = String(val);
             const ratio = Math.max(0, Math.min(1, (val - this.min) / (this.max - this.min)));
             bubble.style.left = `calc(${ratio * 100}% - ${ratio * 32}px)`;
-            this.onWidthChange(val);
+            if (notify) this.onWidthChange(val);
         };
 
         input.oninput = () => updateVal(Number(input.value));
@@ -132,7 +132,7 @@ export class ThicknessPopover {
 
         this.el.append(minusBtn, trackWrap, plusBtn);
         // Initial bubble position
-        setTimeout(() => updateVal(this.currentValue), 0);
+        setTimeout(() => updateVal(this.currentValue, false), 0);
     }
 
     destroy(): void {

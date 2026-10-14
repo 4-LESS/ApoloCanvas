@@ -364,14 +364,23 @@ export class ColorPickerPopover {
             const handlePointer = (e: PointerEvent) => {
                 if (e.buttons !== 1) return;
                 const rect = canvas.getBoundingClientRect();
-                const x = Math.max(0, Math.min(canvas.width - 1, e.clientX - rect.left));
-                const y = Math.max(0, Math.min(canvas.height - 1, e.clientY - rect.top));
+                const scaleX = canvas.width / (rect.width || canvas.width);
+                const scaleY = canvas.height / (rect.height || canvas.height);
+                const x = Math.max(0, Math.min(canvas.width - 1, (e.clientX - rect.left) * scaleX));
+                const y = Math.max(0, Math.min(canvas.height - 1, (e.clientY - rect.top) * scaleY));
                 const p = ctx.getImageData(x, y, 1, 1).data;
                 this.currentColor = this.rgbToHex(p[0], p[1], p[2]);
                 this.updateReadoutVisual();
             };
 
-            canvas.onpointerdown = handlePointer;
+            canvas.onpointerdown = (e) => {
+                try {
+                    canvas.setPointerCapture(e.pointerId);
+                } catch {
+                    // no-op: pointer capture is best-effort only
+                }
+                handlePointer(e);
+            };
             canvas.onpointermove = handlePointer;
         }
 

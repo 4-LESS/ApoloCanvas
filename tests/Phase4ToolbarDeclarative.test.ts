@@ -505,9 +505,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 1: Priority 10 (snapGrid) overflows first when width is constrained', () => {
-        // Full width is ~930px. Without snapGrid is ~873px.
-        // At innerWidth = 910px, availableSpace = 878px. SnapGrid overflows, thickness fits.
-        (global as any).window.innerWidth = 910;
+        // With the single-thickness trigger, the toolbar footprint is smaller.
+        // At innerWidth = 820px, availableSpace = 788px. SnapGrid overflows, thickness fits.
+        (global as any).window.innerWidth = 820;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true, 'snapGrid overflows first');
@@ -520,9 +520,9 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 2: Priority 20 (thickness) overflows second when width drops further', () => {
-        // Without snapGrid is ~873px. Without thickness is ~732px.
-        // At innerWidth = 850px, availableSpace = 818px. Thickness overflows, favorites fits.
-        (global as any).window.innerWidth = 850;
+        // The single-thickness trigger reduces the footprint enough that 800px is still enough
+        // to keep favorites visible while thickness is the next item to hide.
+        (global as any).window.innerWidth = 800;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true);
@@ -535,9 +535,8 @@ test('Fase 4: Responsive Overflow Prioritization (10: snapGrid -> 20: thickness 
     });
 
     await t.test('Step 3: Priority 30 (favorites) overflows third when width drops very narrow', () => {
-        // Without favorites is ~541px.
-        // At innerWidth = 700px, availableSpace = 668px. Favorites overflows.
-        (global as any).window.innerWidth = 700;
+        // Once the lower-priority controls are hidden, favorites is the final item to overflow.
+        (global as any).window.innerWidth = 650;
         toolbar.recalculateLayout();
 
         assert.equal(toolbar.isItemOverflowed('snapGrid'), true);

@@ -445,20 +445,20 @@ export class ShapeEstuchePopover {
         row.append(minusBtn, track, plusBtn);
         wrap.appendChild(row);
 
-        const updateVal = (val: number) => {
+        const updateVal = (val: number, notify = true) => {
             val = Math.max(min, Math.min(max, val));
             input.value = String(val);
             bubble.textContent = String(val);
             const ratio = Math.max(0, Math.min(1, (val - min) / (max - min)));
             bubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
-            onChange(val);
+            if (notify) onChange(val);
         };
 
         input.oninput = () => updateVal(Number(input.value));
         minusBtn.onclick = () => updateVal(Number(input.value) - 1);
         plusBtn.onclick = () => updateVal(Number(input.value) + 1);
 
-        setTimeout(() => updateVal(currentVal), 0);
+        setTimeout(() => updateVal(currentVal, false), 0);
         this.el.appendChild(wrap);
     }
 
