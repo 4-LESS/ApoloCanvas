@@ -40,8 +40,11 @@ export function applyPopoverGeometry(
         : { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
     const tbRect = toolbarEl ? toolbarEl.getBoundingClientRect() : anchorRect;
 
-    const vpW = typeof window !== 'undefined' ? window.innerWidth : 1280;
-    const vpH = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const vp = typeof window !== 'undefined' ? window.visualViewport : null;
+    const vpW = vp?.width ?? (typeof window !== 'undefined' ? window.innerWidth : 1280);
+    const vpH = vp?.height ?? (typeof window !== 'undefined' ? window.innerHeight : 800);
+    const vpLeft = vp?.offsetLeft ?? 0;
+    const vpTop = vp?.offsetTop ?? 0;
 
     let left = 0;
     let top = 0;
@@ -74,29 +77,39 @@ export function applyPopoverGeometry(
         originY = 'top';
     }
 
-    if (left < margin) left = margin;
-    if (left + popW > vpW - margin) left = vpW - popW - margin;
+    const minLeft = vpLeft + margin;
+    const maxLeft = vpLeft + vpW - popW - margin;
+    if (left < minLeft) left = minLeft;
+    if (left > maxLeft) left = maxLeft;
 
     if (isBottom) {
-        if (top < margin) {
-            top = margin;
+        const minTop = vpTop + margin;
+        const maxTop = vpTop + vpH - popH - margin;
+        if (top < minTop) {
+            top = minTop;
             const availableH = tbRect.top - offset - margin;
             if (popH > availableH && availableH > 220) {
                 popoverEl.style.maxHeight = `${availableH}px`;
                 popoverEl.style.overflowY = 'auto';
             }
         }
+        if (top > maxTop) top = maxTop;
     } else if (isTop) {
-        if (top + popH > vpH - margin) {
-            const availableH = vpH - margin - top;
+        const topMin = vpTop + margin;
+        if (top + popH > vpTop + vpH - margin) {
+            const availableH = vpTop + vpH - margin - top;
             if (popH > availableH && availableH > 220) {
                 popoverEl.style.maxHeight = `${availableH}px`;
                 popoverEl.style.overflowY = 'auto';
             }
         }
+        if (top < topMin) top = topMin;
+        if (top + popH > vpTop + vpH - margin) top = vpTop + vpH - popH - margin;
     } else {
-        if (top < margin) top = margin;
-        if (top + popH > vpH - margin) top = vpH - popH - margin;
+        const minTop = vpTop + margin;
+        const maxTop = vpTop + vpH - popH - margin;
+        if (top < minTop) top = minTop;
+        if (top > maxTop) top = maxTop;
     }
 
     popoverEl.style.left = `${Math.round(left)}px`;

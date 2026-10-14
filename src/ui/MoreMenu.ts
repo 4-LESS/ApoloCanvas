@@ -1,4 +1,5 @@
 import type { ToolbarSlot } from '../core/types.ts';
+import { createSvg } from './theme.ts';
 
 export interface MoreMenuOptions {
     slot: ToolbarSlot;
@@ -150,7 +151,13 @@ export class MoreMenu {
         closeBtn.className = 'apolo-box-menu-close';
         closeBtn.type = 'button';
         closeBtn.setAttribute('aria-label', 'Cerrar');
-        closeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+        closeBtn.appendChild(createSvg('M6 6L18 18 M18 6L6 18', {
+            size: 14,
+            width: 14,
+            height: 14,
+            stroke: 'currentColor',
+            strokeWidth: 2.5,
+        }));
         const handleClose = (e: Event): void => {
             e.stopPropagation();
             e.preventDefault();
@@ -273,7 +280,13 @@ export class MoreMenu {
         btn.type = 'button';
         btn.className = `apolo-switch-btn ${active ? '' : 'is-off'}`;
         btn.setAttribute('aria-pressed', String(active));
-        btn.innerHTML = '<span class="apolo-switch-track"><span class="apolo-switch-thumb"></span></span>';
+
+        const track = document.createElement('span');
+        track.className = 'apolo-switch-track';
+        const thumb = document.createElement('span');
+        thumb.className = 'apolo-switch-thumb';
+        track.appendChild(thumb);
+        btn.appendChild(track);
 
         btn.addEventListener('click', () => {
             active = !active;

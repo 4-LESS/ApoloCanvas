@@ -5,6 +5,7 @@ import { BoxMenu } from '../src/ui/BoxMenu.ts';
 import { LassoMenu } from '../src/ui/LassoMenu.ts';
 import { ZoomPill } from '../src/ui/ZoomPill.ts';
 import { PopoverController } from '../src/ui/kit/index.ts';
+import { applyPopoverGeometry } from '../src/ui/popover/PopoverGeometry.ts';
 
 function createMockEnvironment() {
     const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
@@ -222,6 +223,48 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
 
             estuche.destroy();
             popoverController.destroy();
+        } finally {
+            (globalThis as any).window = prevWin;
+            (globalThis as any).document = prevDoc;
+        }
+    });
+
+    test('Popover geometry respects visualViewport bounds when keyboard reduces available space', () => {
+        const { mockWindow, mockDocument } = createMockEnvironment();
+        const prevWin = (globalThis as any).window;
+        const prevDoc = (globalThis as any).document;
+        (globalThis as any).window = {
+            ...mockWindow,
+            innerWidth: 1200,
+            innerHeight: 900,
+            visualViewport: { width: 420, height: 560, offsetLeft: 24, offsetTop: 0 },
+        };
+        (globalThis as any).document = mockDocument;
+
+        try {
+            const popover = mockDocument.createElement('div');
+            popover.style.width = '300px';
+            popover.style.height = '260px';
+            Object.defineProperty(popover, 'getBoundingClientRect', {
+                value: () => ({ left: 0, top: 0, right: 300, bottom: 260, width: 300, height: 260 }),
+            });
+            const anchor = mockDocument.createElement('button');
+            Object.defineProperty(anchor, 'getBoundingClientRect', {
+                value: () => ({ left: 380, top: 540, right: 424, bottom: 584, width: 44, height: 44 }),
+            });
+            const toolbar = mockDocument.createElement('div');
+            Object.defineProperty(toolbar, 'getBoundingClientRect', {
+                value: () => ({ left: 300, top: 520, right: 700, bottom: 620, width: 400, height: 100 }),
+            });
+
+            applyPopoverGeometry(popover as any, anchor as any, toolbar as any, 'bc', { fallbackWidth: 300, fallbackHeight: 260 });
+
+            const left = Number.parseFloat(popover.style.left || '0');
+            const top = Number.parseFloat(popover.style.top || '0');
+
+            assert.ok(left >= 24 + 16, 'Popover should not exceed the active visual viewport left edge');
+            assert.ok(left + 300 <= 24 + 420 - 16, 'Popover should respect the active visual viewport width');
+            assert.ok(top >= 16, 'Popover should not drift above the visual viewport');
         } finally {
             (globalThis as any).window = prevWin;
             (globalThis as any).document = prevDoc;

@@ -344,7 +344,14 @@ export class Toolbar {
         grip.className = 'apolo-toolbar-grip';
         grip.setAttribute('aria-label', 'Arrastrar barra de herramientas a una esquina o borde');
         grip.title = 'Arrastra para mover la barra';
-        grip.innerHTML = `<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">${ICONS.dragGrip}</svg>`;
+        grip.appendChild(createSvg(ICONS.dragGrip, {
+            size: 14,
+            width: 14,
+            height: 14,
+            fill: 'currentColor',
+            stroke: 'none',
+            strokeWidth: 0,
+        }));
         grip.addEventListener('pointerdown', this.onGripPointerDown);
         this.container.appendChild(grip);
 

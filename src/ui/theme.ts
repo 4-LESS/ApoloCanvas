@@ -185,9 +185,14 @@ export function createSvg(pathD: string, options: SvgOptions = {}): SVGSVGElemen
     svg.setAttribute('aria-hidden', 'true');
     if (options.className) svg.setAttribute('class', options.className);
 
-    // If path starts with an SVG tag, inject directly, else create path
+    // If path starts with an SVG tag, parse it into actual SVG nodes without assigning raw markup.
     if (pathD.startsWith('<')) {
-        svg.innerHTML = pathD;
+        const markup = `<svg xmlns="http://www.w3.org/2000/svg">${pathD}</svg>`;
+        const parsed = new DOMParser().parseFromString(markup, 'image/svg+xml');
+        const fragment = parsed.documentElement;
+        for (const child of Array.from(fragment.childNodes)) {
+            svg.appendChild(child.cloneNode(true));
+        }
     } else {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', pathD);

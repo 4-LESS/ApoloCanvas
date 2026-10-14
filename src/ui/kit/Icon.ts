@@ -3,7 +3,7 @@
  *
  * Implements Architecture Rule 8:
  * "Una sola función que crea SVG por DOM a partir de un registro de íconos
- *  (cuadrícula de 24 px, trazo 1,8, extremos redondeados). Sin innerHTML;
+ *  (cuadrícula de 24 px, trazo 1,8, extremos redondeados). Sin asignación directa de markup;
  *  sin estilos en línea salvo variables CSS de posición."
  */
 
@@ -221,7 +221,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
  * Creates a pure DOM SVG element from the icon registry.
- * Absolutely ZERO innerHTML used.
+ * Absolutely zero direct DOM markup assignment used.
  */
 export function createSvgIcon(name: IconName, options: IconOptions = {}): SVGSVGElement {
     const size = options.size ?? 24;
