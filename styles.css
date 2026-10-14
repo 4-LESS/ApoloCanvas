@@ -256,6 +256,33 @@
   touch-action: none;
 }
 
+@keyframes apoloToolbarOrientationMorph {
+  0% {
+    transform: scale(0.91);
+    opacity: 0.76;
+  }
+  65% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.apolo-canvas-toolbar.is-flipping-orientation {
+  animation: apoloToolbarOrientationMorph 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.apolo-canvas-toolbar.is-dragging {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.apolo-canvas-toolbar.is-snap-locked {
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.22), 0 0 0 1.5px rgba(59, 130, 246, 0.35);
+}
+
 .apolo-canvas-toolbar .is-overflowed {
   display: none;
 }
@@ -577,17 +604,27 @@
   border-radius: 999px;
   background: var(--apolo-accent, #3b82f6);
   opacity: 0.22;
-  transition: opacity 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, width 0.18s ease, height 0.18s ease;
+  transition: opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1), transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), width 0.22s cubic-bezier(0.22, 1, 0.36, 1), height 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
+
+.apolo-snap-zone.is-horizontal { transform: translateX(-50%); }
+.apolo-snap-zone.is-vertical { transform: translateY(-50%); }
 
 .apolo-snap-zone.is-nearest {
   opacity: 0.85;
   box-shadow: 0 0 14px rgba(59, 130, 246, 0.45);
 }
 
-.apolo-snap-zone.is-nearest.is-horizontal { height: 8px; }
-.apolo-snap-zone.is-nearest.is-vertical { width: 8px; }
+.apolo-snap-zone.is-nearest.is-horizontal {
+  height: 8px;
+  transform: translateX(-50%) scaleX(1.12);
+}
+
+.apolo-snap-zone.is-nearest.is-vertical {
+  width: 8px;
+  transform: translateY(-50%) scaleY(1.12);
+}
 
 /* ==========================================================================
    Tool Estuche Popover (Pencil Case Card)

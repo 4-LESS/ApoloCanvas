@@ -113,6 +113,7 @@ export class Toolbar {
     private dragState: DragState | null = null;
     private lockedSnap: LockedSnap | null = null;
     private currentDragPos: { x: number; y: number } | null = null;
+    private unlockTransitionUntil = 0;
     private resizeObserver: ResizeObserver | null = null;
 
     // Set of currently overflowed items (hidden from toolbar, delegated to MoreMenu)
@@ -406,7 +407,9 @@ export class Toolbar {
     }
 
     private anchorToSnapSlot(slot: ToolbarSlot): void {
+        const wasVertical = this.isVertical();
         this.options.slot = slot;
+        if (wasVertical !== this.isVertical()) this.triggerOrientationAnimation();
         this.applyOrientationStyles();
         this.evaluateOverflow();
         const coords = this.getSlotCoordinates(slot);
@@ -435,21 +438,36 @@ export class Toolbar {
         this.container.style.maxHeight = 'calc(100vh - 96px)';
     }
 
+    private triggerOrientationAnimation(): void {
+        this.container.classList.remove('is-flipping-orientation');
+        void this.container.offsetWidth;
+        this.container.classList.add('is-flipping-orientation');
+    }
+
     private updatePosition(): void {
         this.applyOrientationStyles();
+        const isSnapLocked = this.lockedSnap !== null;
+        this.container.classList.toggle('is-snap-locked', isSnapLocked);
         if (this.currentDragPos) {
+            this.container.classList.toggle('is-dragging', !isSnapLocked);
             const { width, height } = this.getDimensions();
             this.currentDragPos = this.clampPosition(this.currentDragPos.x, this.currentDragPos.y, width, height);
             this.container.style.left = `${this.currentDragPos.x}px`;
             this.container.style.top = `${this.currentDragPos.y}px`;
             this.container.style.transform = 'none';
-            this.container.style.transition = 'none';
+            const isUnlocking = this.unlockTransitionUntil > Date.now();
+            this.container.style.transition = isSnapLocked
+                ? 'left 0.24s cubic-bezier(0.22, 1, 0.36, 1), top 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)'
+                : isUnlocking
+                    ? 'left 0.16s cubic-bezier(0.22, 1, 0.36, 1), top 0.16s cubic-bezier(0.22, 1, 0.36, 1)'
+                    : 'box-shadow 0.2s ease';
         } else {
+            this.container.classList.remove('is-dragging', 'is-snap-locked');
             const coords = this.getSlotCoordinates(this.options.slot);
             this.container.style.left = `${coords.x}px`;
             this.container.style.top = `${coords.y}px`;
             this.container.style.transform = 'none';
-            this.container.style.transition = 'left 0.25s cubic-bezier(0.2, 0, 0, 1), top 0.25s cubic-bezier(0.2, 0, 0, 1)';
+            this.container.style.transition = 'left 0.24s cubic-bezier(0.22, 1, 0.36, 1), top 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)';
         }
     }
 
@@ -1123,6 +1141,7 @@ export class Toolbar {
             }
 
             this.lockedSnap = null;
+            this.unlockTransitionUntil = Date.now() + 150;
             const unlockedPosition = this.currentDragPos ?? { x: newX, y: newY };
             this.dragState.origLeft = unlockedPosition.x;
             this.dragState.origTop = unlockedPosition.y;
@@ -1159,6 +1178,7 @@ export class Toolbar {
         this.dragState = null;
         this.lockedSnap = null;
         this.currentDragPos = null;
+        this.container.classList.remove('is-dragging', 'is-snap-locked');
         this.hideSnapDots();
 
         window.removeEventListener('pointermove', this.onGripPointerMove);
@@ -1187,11 +1207,9 @@ export class Toolbar {
             if (slot === 'tc' || slot === 'bc') {
                 dot.style.left = `${bounds.left + bounds.width / 2}px`;
                 dot.style.top = `${slot === 'tc' ? bounds.top + 14 : bounds.bottom - 18}px`;
-                dot.style.transform = 'translateX(-50%)';
             } else {
                 dot.style.left = `${slot === 'ml' ? bounds.left + 14 : bounds.right - 18}px`;
                 dot.style.top = `${bounds.top + bounds.height / 2}px`;
-                dot.style.transform = 'translateY(-50%)';
             }
             this.dotsContainer.appendChild(dot);
         }
@@ -1214,9 +1232,7 @@ export class Toolbar {
         const wasVert = this.isVertical();
         this.options.slot = slot;
         const nowVert = this.isVertical();
-        if (wasVert !== nowVert) {
-            this.render();
-        }
+        if (wasVert !== nowVert) this.triggerOrientationAnimation();
         this.recalculateLayout();
     }
 

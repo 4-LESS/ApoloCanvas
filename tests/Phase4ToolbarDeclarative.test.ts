@@ -621,8 +621,11 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
     });
 
     await t.test('Mid Left (ml) and Mid Right (mr) are vertical and vertically centered', () => {
+        const grip = toolbar.container.querySelector('.apolo-toolbar-grip');
         toolbar.setSlot('ml');
         assert.equal(toolbar.container.classList.contains('is-vertical'), true);
+        assert.equal(toolbar.container.classList.contains('is-flipping-orientation'), true);
+        assert.equal(toolbar.container.querySelector('.apolo-toolbar-grip'), grip, 'Orientation changes preserve the grip DOM node');
 
         const ml = toolbar.getSlotCoordinates('ml');
         assert.equal(ml.width, 58);
@@ -640,6 +643,7 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
         // Switch back to horizontal
         toolbar.setSlot('tc');
         assert.equal(toolbar.container.classList.contains('is-vertical'), false);
+        assert.equal(toolbar.container.querySelector('.apolo-toolbar-grip'), grip, 'Switching back preserves the grip DOM node');
     });
 
     await t.test('Switching between vertical and horizontal slots stays within viewport bounds', () => {
@@ -731,6 +735,9 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
 
         assert.equal(toolbar.getSlot(), 'bc');
         assert.equal(toolbar.container.classList.contains('is-vertical'), false);
+        assert.equal(toolbar.container.classList.contains('is-snap-locked'), true);
+        assert.equal(toolbar.container.classList.contains('is-dragging'), false);
+        assert.match(toolbar.container.style.transition, /left 0\.24s/);
         const dockedTop = Number.parseFloat(toolbar.container.style.top);
         assert.ok(dockedTop > 650, 'Horizontal preview remains docked to the bottom edge');
 
@@ -752,8 +759,13 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
             preventDefault: () => {},
         });
         assert.equal((toolbar as any).lockedSnap, null, 'Reverse movement past the unlock delta releases the edge lock');
+        assert.equal(toolbar.container.classList.contains('is-dragging'), true);
+        assert.equal(toolbar.container.classList.contains('is-snap-locked'), false);
+        assert.match(toolbar.container.style.transition, /left 0\.16s/);
 
         (window as any).dispatchEvent({ type: 'pointerup', pointerId: 78, clientX: edgePointerX + 1, clientY: edgePointerY - 45 });
+        assert.equal(toolbar.container.classList.contains('is-dragging'), false);
+        assert.equal(toolbar.container.classList.contains('is-snap-locked'), false);
     });
 
     await t.test('Horizontal right-tip contact locks the preview to mr until reverse movement', () => {
