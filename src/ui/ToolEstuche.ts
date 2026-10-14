@@ -551,6 +551,8 @@ export class ToolEstuche implements PopoverInstance {
         // 1. Selector de Puntas (Chisel & Round)
         const toolsRow = document.createElement('div');
         toolsRow.className = 'popover-tools-selector';
+        const activeTip: PenProfileId =
+            this.state.profileId === 'hlf' || this.state.profileId === 'hlr' ? this.state.profileId : 'hlf';
 
         const tips: Array<{ id: PenProfileId; label: string; iconD: string }> = [
             { id: 'hlf', label: 'Marcador Biselado', iconD: ICONS.highlighterChisel },
@@ -560,7 +562,7 @@ export class ToolEstuche implements PopoverInstance {
         for (const t of tips) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `popover-tool-opt ${this.state.profileId === t.id ? 'is-active' : ''}`;
+            btn.className = `popover-tool-opt ${activeTip === t.id ? 'is-active' : ''}`;
             btn.title = t.label;
             btn.setAttribute('aria-label', t.label);
 

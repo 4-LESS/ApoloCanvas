@@ -293,9 +293,9 @@ test('Fase 4: Declarative Toolbar Item Order & Structure', async (t) => {
 
     const toolbar = new Toolbar(options, (document as any).body);
 
-    await t.test('Toolbar renders with role="toolbar" and aria-label', () => {
+    await t.test('Toolbar renders with role="toolbar" without a hover-triggering label', () => {
         assert.equal(toolbar.container.getAttribute('role'), 'toolbar');
-        assert.equal(toolbar.container.getAttribute('aria-label'), 'Herramientas Apolo Canvas');
+        assert.equal(toolbar.container.hasAttribute('aria-label'), false);
         assert.ok(toolbar.container.classList.contains('apolo-canvas-toolbar'));
     });
 

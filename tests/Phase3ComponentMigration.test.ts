@@ -216,6 +216,11 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             const afterFirstChild = body.children[0];
             assert.strictEqual(initialFirstChild, afterFirstChild, 'DOM nodes must NOT be recreated during width slider update');
 
+            estuche.updateState({ tool: 'highlighter' });
+            const highlighterTips = body.children[0].children;
+            assert.ok(highlighterTips[0].classList.contains('is-active'), 'Chisel is selected when entering highlighter mode from a pen profile');
+            assert.ok(!highlighterTips[1].classList.contains('is-active'), 'Only one highlighter tip is active');
+
             // 4. Close estuche
             estuche.close();
             assert.strictEqual(estuche.isOpen(), false);

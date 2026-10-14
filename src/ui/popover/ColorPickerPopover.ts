@@ -270,7 +270,7 @@ export class ColorPickerPopover {
         const confirmBtn = document.createElement('button');
         confirmBtn.type = 'button';
         confirmBtn.className = 'color-action-btn is-confirm';
-        confirmBtn.textContent = 'Realiz.';
+        confirmBtn.textContent = 'Listo';
         confirmBtn.onclick = () => {
             if (this.onConfirmCallback) {
                 this.onConfirmCallback(this.currentColor, this.currentOpacity, this.currentSlotIndex);

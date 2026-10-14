@@ -186,7 +186,6 @@ export class Toolbar {
         this.container = document.createElement('div');
         this.container.className = 'apolo-canvas-toolbar';
         this.container.setAttribute('role', 'toolbar');
-        this.container.setAttribute('aria-label', 'Herramientas Apolo Canvas');
 
         this.dotsContainer = document.createElement('div');
         this.dotsContainer.className = 'apolo-snap-dots-container';
@@ -347,9 +346,9 @@ export class Toolbar {
         grip.setAttribute('aria-label', 'Arrastrar barra de herramientas a una esquina o borde');
         grip.title = 'Arrastra para mover la barra';
         grip.appendChild(createSvg(ICONS.dragGrip, {
-            size: 14,
-            width: 14,
-            height: 14,
+            size: 18,
+            width: 18,
+            height: 18,
             viewBox: '0 0 14 14',
             fill: 'currentColor',
             stroke: 'none',

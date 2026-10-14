@@ -408,11 +408,21 @@
   margin-right: 2px;
 }
 
+.apolo-canvas-toolbar button.apolo-toolbar-grip {
+  width: 20px;
+  height: 38px;
+}
+
 .apolo-canvas-toolbar.is-vertical .apolo-toolbar-grip {
   width: 38px;
   height: 20px;
   margin-right: 0;
   margin-bottom: 2px;
+}
+
+.apolo-canvas-toolbar.is-vertical button.apolo-toolbar-grip {
+  width: 38px;
+  height: 20px;
 }
 
 .apolo-toolbar-grip:hover {
@@ -2291,11 +2301,15 @@
 /* Header (Compact right-aligned close button) */
 .apolo-ui .apolo-box-menu-header,
 .apolo-box-menu-header {
+  position: absolute;
+  top: 8px;
+  right: 10px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  width: 24px;
   height: 24px;
-  margin: 0 0 -4px 0;
+  margin: 0;
   padding: 0;
   border: none;
 }
@@ -3021,19 +3035,20 @@ button.apolo-box-menu-swatch,
 .popover-line-chip {
   all: unset;
   background: var(--apolo-bg-alt);
-  border-radius: 18px;
+  border-radius: 12px;
   height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 2px solid transparent;
+  border: 1px solid var(--apolo-border-subtle);
   transition: all 0.15s ease;
 }
 
 .popover-line-chip.is-active {
   border-color: var(--apolo-accent);
-  background: var(--apolo-bg);
+  background: var(--apolo-accent-light);
+  box-shadow: 0 0 0 1px var(--apolo-accent);
 }
 
 .popover-line-bar {
@@ -3044,7 +3059,10 @@ button.apolo-box-menu-swatch,
 }
 
 .popover-line-bar.is-dashed { background: none; border-top: 3px dashed var(--apolo-text); }
-.popover-line-bar.is-dotted { background: none; border-top: 3px dotted var(--apolo-text); }
+.popover-line-bar.is-dotted {
+  height: 3px;
+  background: radial-gradient(circle, var(--apolo-text) 1px, transparent 1.5px) left center / 5px 3px repeat-x;
+}
 
 .popover-toggle-row {
   display: flex;
@@ -3096,7 +3114,7 @@ button.apolo-box-menu-swatch,
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 7px;
+  gap: 4px;
   overflow: visible;
   width: 100%;
   box-sizing: border-box;
@@ -3112,10 +3130,10 @@ button.apolo-box-menu-swatch,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  min-height: 24px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
   border-radius: 50%;
   background: var(--swatch-color);
   background-color: var(--swatch-color);
@@ -3151,10 +3169,10 @@ button.apolo-box-menu-swatch,
 .popover-color-add {
   all: unset;
   box-sizing: border-box;
-  width: 24px;
-  height: 24px;
-  min-width: 24px;
-  min-height: 24px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -3241,6 +3259,7 @@ button.apolo-box-menu-swatch,
 .eraser-modes-list {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 14px;
   padding: 6px 2px;
 }
@@ -3250,7 +3269,12 @@ button.apolo-box-menu-swatch,
   all: unset;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  text-align: left;
   cursor: pointer;
   font-size: 15px;
   font-weight: 500;
@@ -3308,8 +3332,9 @@ button.apolo-box-menu-swatch,
 .shape-grid-btn:hover { color: var(--apolo-text); background: rgba(128,128,128,0.1); }
 .shape-grid-btn.is-active {
   color: var(--apolo-accent);
-  background: var(--apolo-bg);
-  box-shadow: var(--apolo-shadow-sm);
+  background: var(--apolo-accent-light);
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--apolo-accent), var(--apolo-shadow-sm);
 }
 
 .shape-fill-subpanel {
@@ -3351,6 +3376,8 @@ button.apolo-box-menu-swatch,
 
 .color-picker-tabs {
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
   background: var(--apolo-bg-alt);
   border-radius: 14px;
   padding: 3px;
@@ -3361,9 +3388,11 @@ button.apolo-box-menu-swatch,
 .color-picker-tab-btn {
   all: unset;
   flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
   text-align: center;
-  padding: 8px 0;
-  border-radius: 11px;
+  padding: 6px 12px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
   color: var(--apolo-text-muted);
@@ -3372,8 +3401,9 @@ button.apolo-box-menu-swatch,
 }
 
 .color-picker-tab-btn.is-active {
-  background: var(--apolo-bg);
+  background: var(--apolo-bg-elevated);
   color: var(--apolo-text);
+  font-weight: 600;
   box-shadow: var(--apolo-shadow-sm);
 }
 
