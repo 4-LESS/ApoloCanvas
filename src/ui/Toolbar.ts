@@ -77,6 +77,8 @@ export const TOOLBAR_PRIORITIES = {
     grip: 100,
 } as const;
 
+const SNAP_SLOTS: ToolbarSlot[] = ['tc', 'bc', 'ml', 'mr'];
+
 export interface ToolbarItemDefinition {
     id: ToolbarItemId;
     priority: number;
@@ -150,7 +152,7 @@ export class Toolbar {
     readonly colorPickerPopover: ColorPickerPopover;
 
     constructor(options: ToolbarOptions, parent: HTMLElement = document.body) {
-        this.options = { ...options };
+        this.options = { ...options, slot: this.normalizeSlot(options.slot) };
 
         if (options.toolPalettes) {
             if (options.toolPalettes.pen) {
@@ -210,7 +212,7 @@ export class Toolbar {
                 });
                 this.resizeObserver.observe(document.documentElement);
                 if (typeof document.querySelector === 'function') {
-                    for (const selector of ['.workspace-split.mod-vertical.mod-root', '.workspace-leaf.mod-active']) {
+                    for (const selector of ['.workspace-split.mod-root', '.workspace-leaf.mod-active']) {
                         const workspaceEl = document.querySelector<HTMLElement>(selector);
                         if (workspaceEl) this.resizeObserver.observe(workspaceEl);
                     }
@@ -247,6 +249,12 @@ export class Toolbar {
 
     private isVertical(): boolean {
         return this.options.slot === 'ml' || this.options.slot === 'mr';
+    }
+
+    private normalizeSlot(slot: ToolbarSlot): ToolbarSlot {
+        if (slot === 'tl' || slot === 'tr') return 'tc';
+        if (slot === 'bl' || slot === 'br') return 'bc';
+        return slot;
     }
 
     private getActiveEditingElement(): HTMLElement | null {
@@ -337,39 +345,44 @@ export class Toolbar {
         return { x, y, width, height };
     }
 
-    private getHoveredOrNearestSlot(
+    private getNearestSlot(
         pointerX: number,
         pointerY: number,
         toolbarRect: { left: number; top: number; right: number; bottom: number },
     ): ToolbarSlot {
-        const slots: ToolbarSlot[] = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br'];
+        const bounds = this.getEditingBounds();
         let bestSlot = this.options.slot;
         let bestDistance = Number.POSITIVE_INFINITY;
-        let bestPointerDistance = Number.POSITIVE_INFINITY;
-        let foundActivatedZone = false;
-        const zoneThreshold = 72;
+        const barWidth = Math.min(220, Math.round(bounds.width * 0.32));
+        const barHeight = Math.min(220, Math.round(bounds.height * 0.32));
 
-        for (const s of slots) {
-            const coords = this.getSlotCoordinates(s);
-            const dotX = coords.x + coords.width / 2;
-            const dotY = coords.y + coords.height / 2;
-            const pointerDistance = Math.hypot(dotX - pointerX, dotY - pointerY);
-            const rectDx = Math.max(toolbarRect.left - dotX, 0, dotX - toolbarRect.right);
-            const rectDy = Math.max(toolbarRect.top - dotY, 0, dotY - toolbarRect.bottom);
+        for (const slot of SNAP_SLOTS) {
+            const isHorizontal = slot === 'tc' || slot === 'bc';
+            const segmentStart = isHorizontal
+                ? bounds.left + (bounds.width - barWidth) / 2
+                : bounds.top + (bounds.height - barHeight) / 2;
+            const segmentEnd = segmentStart + (isHorizontal ? barWidth : barHeight);
+            const edge = slot === 'tc' ? bounds.top + 14
+                : slot === 'bc' ? bounds.bottom - 18
+                    : slot === 'ml' ? bounds.left + 14
+                        : bounds.right - 18;
+            const pointerAlong = isHorizontal ? pointerX : pointerY;
+            const pointerAcross = isHorizontal ? pointerY : pointerX;
+            const pointerAlongClamped = Math.max(segmentStart, Math.min(segmentEnd, pointerAlong));
+            const pointerDistance = Math.hypot(pointerAlong - pointerAlongClamped, pointerAcross - edge);
+
+            const rectAlongStart = isHorizontal ? toolbarRect.left : toolbarRect.top;
+            const rectAlongEnd = isHorizontal ? toolbarRect.right : toolbarRect.bottom;
+            const rectAcrossStart = isHorizontal ? toolbarRect.top : toolbarRect.left;
+            const rectAcrossEnd = isHorizontal ? toolbarRect.bottom : toolbarRect.right;
+            const rectDx = Math.max(rectAlongStart - segmentEnd, 0, segmentStart - rectAlongEnd);
+            const rectDy = Math.max(rectAcrossStart - edge, 0, edge - rectAcrossEnd);
             const rectDistance = Math.hypot(rectDx, rectDy);
-            const isActivated = pointerDistance <= zoneThreshold || rectDistance <= zoneThreshold;
-            const distance = isActivated ? Math.min(pointerDistance, rectDistance) : pointerDistance + rectDistance;
+            const distance = Math.min(pointerDistance, rectDistance);
 
-            const shouldReplace = isActivated && !foundActivatedZone
-                || isActivated === foundActivatedZone && (
-                    distance < bestDistance ||
-                    distance === bestDistance && pointerDistance < bestPointerDistance
-                );
-            if (shouldReplace) {
-                foundActivatedZone = isActivated;
+            if (distance < bestDistance) {
                 bestDistance = distance;
-                bestPointerDistance = pointerDistance;
-                bestSlot = s;
+                bestSlot = slot;
             }
         }
         return bestSlot;
@@ -1085,7 +1098,7 @@ export class Toolbar {
         this.currentDragPos = { x: newX, y: newY };
         this.updatePosition();
 
-        const nearest = this.getHoveredOrNearestSlot(e.clientX, e.clientY, {
+        const nearest = this.getNearestSlot(e.clientX, e.clientY, {
             left: newX,
             top: newY,
             right: newX + curWidth,
@@ -1122,7 +1135,7 @@ export class Toolbar {
         const { width: curWidth, height: curHeight } = this.getDimensions();
         const initialSlot = this.dragState.initialSlot;
         const lastPos = this.currentDragPos || { x: this.dragState.origLeft, y: this.dragState.origTop };
-        const nearest = this.getHoveredOrNearestSlot(e.clientX, e.clientY, {
+        const nearest = this.getNearestSlot(e.clientX, e.clientY, {
             left: lastPos.x,
             top: lastPos.y,
             right: lastPos.x + curWidth,
@@ -1151,14 +1164,26 @@ export class Toolbar {
         this.dotsContainer.replaceChildren();
         this.dotsContainer.hidden = false;
 
-        const slots: ToolbarSlot[] = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br'];
-        for (const s of slots) {
-            const coords = this.getSlotCoordinates(s);
+        const bounds = this.getEditingBounds();
+        const horizontalWidth = Math.min(220, Math.round(bounds.width * 0.32));
+        const verticalHeight = Math.min(220, Math.round(bounds.height * 0.32));
+        for (const slot of SNAP_SLOTS) {
             const dot = document.createElement('div');
-            dot.className = 'apolo-snap-dot';
-            dot.dataset.slot = s;
-            dot.style.left = `${coords.x + coords.width / 2}px`;
-            dot.style.top = `${coords.y + coords.height / 2}px`;
+            const isHorizontal = slot === 'tc' || slot === 'bc';
+            dot.className = `apolo-snap-dot apolo-snap-zone ${isHorizontal ? 'is-horizontal' : 'is-vertical'}`;
+            dot.dataset.slot = slot;
+            dot.style.setProperty('--apolo-snap-zone-width', `${isHorizontal ? horizontalWidth : 6}px`);
+            dot.style.setProperty('--apolo-snap-zone-height', `${isHorizontal ? 6 : verticalHeight}px`);
+
+            if (slot === 'tc' || slot === 'bc') {
+                dot.style.left = `${bounds.left + bounds.width / 2}px`;
+                dot.style.top = `${slot === 'tc' ? bounds.top + 14 : bounds.bottom - 18}px`;
+                dot.style.transform = 'translateX(-50%)';
+            } else {
+                dot.style.left = `${slot === 'ml' ? bounds.left + 14 : bounds.right - 18}px`;
+                dot.style.top = `${bounds.top + bounds.height / 2}px`;
+                dot.style.transform = 'translateY(-50%)';
+            }
             this.dotsContainer.appendChild(dot);
         }
     }
@@ -1176,6 +1201,7 @@ export class Toolbar {
 
     // Public update API
     setSlot(slot: ToolbarSlot): void {
+        slot = this.normalizeSlot(slot);
         const wasVert = this.isVertical();
         this.options.slot = slot;
         const nowVert = this.isVertical();

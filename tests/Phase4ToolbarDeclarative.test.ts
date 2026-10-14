@@ -668,6 +668,10 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
             stopPropagation: () => {},
         });
 
+        const zones = (toolbar as any).dotsContainer.children as any[];
+        assert.deepEqual(zones.map(zone => zone.dataset.slot), ['tc', 'bc', 'ml', 'mr']);
+        assert.ok(zones.every(zone => zone.classList.contains('apolo-snap-zone')));
+
         (window as any).dispatchEvent({
             type: 'pointermove',
             pointerId: 77,
@@ -685,6 +689,13 @@ test('Fase 4: 8 Docking Slots & Natural Dimensions', async (t) => {
             clientY: 400,
         });
         assert.equal(changedSlot, 'mr');
+    });
+
+    await t.test('Legacy corner slots normalize to their cardinal edges', () => {
+        toolbar.setSlot('tr');
+        assert.equal(toolbar.getSlot(), 'tc');
+        toolbar.setSlot('bl');
+        assert.equal(toolbar.getSlot(), 'bc');
     });
 
     await t.test('Slot coordinates use the active view-content bounds', () => {
