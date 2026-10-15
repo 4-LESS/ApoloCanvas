@@ -66,11 +66,14 @@ export interface InkElementBase {
     zIndex: number;
 }
 
+export type StrokeCache = Map<string, HTMLCanvasElement>;
+
 export interface StrokeElement extends InkElementBase {
     type: 'stroke';
     points: number[];       // Interleaved: [u0, v0, p0, t0, u1, v1, p1, t1, ...] normalized by column width
     style: StrokeStyle;
     bounds: BoundingBox;    // Normalized bounds: minU, minV, maxU, maxV
+    cacheCanvas?: HTMLCanvasElement;
 }
 
 export interface ShapeElement extends InkElementBase {

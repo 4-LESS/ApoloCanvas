@@ -16,6 +16,7 @@ import {
     Point,
     ShapeElement,
     ShapeType,
+    StrokeCache,
     StrokeElement,
     StrokePattern,
     StrokeStyle,
@@ -167,6 +168,7 @@ export class CanvasController {
     private readonly history: HistorySnapshot[] = [];
     private readonly future: HistorySnapshot[] = [];
     private readonly touches = new Map<number, TouchPoint>();
+    private readonly strokeCache: StrokeCache = new Map<string, HTMLCanvasElement>();
     private singleTouchStartCoords: { x: number; y: number; time: number } | null = null;
     private lastSingleTouch: { x: number; y: number } | null = null;
     private singleTouchPanned = false;
@@ -414,6 +416,7 @@ export class CanvasController {
         window.addEventListener('scroll', this.scrollHandler, { capture: true, passive: true });
 
         this.resizeObserver = new ResizeObserver(() => {
+            this.strokeCache.clear();
             this.positionLayer();
             this.resize();
             if (this.options.readonly) {
@@ -1817,6 +1820,7 @@ export class CanvasController {
         if (this.destroyed) return;
         this.destroyed = true;
 
+        this.strokeCache.clear();
         this.input?.destroy();
         if (this.scrollHandler) {
             this.scroller.removeEventListener('scroll', this.scrollHandler);
@@ -2352,6 +2356,9 @@ export class CanvasController {
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
         this.document.elements.push(element);
+        if (element.style.profile === 'pencil' && element.style.pattern === 'solid') {
+            this.getOrCreatePencilCache(element);
+        }
     }
 
     private isScribble(points: Point[]): boolean {
@@ -2770,6 +2777,12 @@ export class CanvasController {
         }
 
         if (modified) {
+            const keptIds = new Set(kept.map(el => el.id));
+            for (const el of this.document.elements) {
+                if (!keptIds.has(el.id)) {
+                    this.strokeCache.delete(el.id);
+                }
+            }
             this.document.elements = kept;
             this.selection = [];
             this.lassoMenu?.hide();
@@ -2930,6 +2943,9 @@ export class CanvasController {
         if (this.selection.length === 0) return;
         this.recordHistory();
         const ids = new Set(this.selection.map(element => element.id));
+        for (const id of ids) {
+            this.strokeCache.delete(id);
+        }
         this.document.elements = this.document.elements.filter(element => !ids.has(element.id));
         this.selection = [];
         this.lassoMenu?.hide();
@@ -2946,6 +2962,7 @@ export class CanvasController {
             if (patch.color) element.style.color = patch.color;
             if (patch.width !== undefined) element.style.width = patch.width;
             if (patch.pattern) element.style.pattern = patch.pattern;
+            this.strokeCache.delete(element.id);
         }
         this.rebuildIndex();
         this.emitSelection();
@@ -2975,6 +2992,7 @@ export class CanvasController {
         const dv = dy / contentWidth;
         for (const element of this.selection) {
             this.shiftElementNormalized(element, du, dv);
+            this.strokeCache.delete(element.id);
         }
         this.rebuildIndex();
         this.emitSelection();
@@ -3382,6 +3400,7 @@ export class CanvasController {
         }
         this.selection = [];
         this.lassoMenu?.hide();
+        this.strokeCache.clear();
         this.rebuildIndex();
         this.renderDirty = true;
         this.paint();
@@ -3405,6 +3424,7 @@ export class CanvasController {
         }
         this.selection = [];
         this.lassoMenu?.hide();
+        this.strokeCache.clear();
         this.rebuildIndex();
         this.renderDirty = true;
         this.paint();
@@ -3868,6 +3888,27 @@ export class CanvasController {
             if (data.length >= 4) {
                 if (element.style.pattern !== 'solid') {
                     drawPatternedStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
+                } else if (element.style.profile === 'pencil') {
+                    const cacheCanvas = this.getOrCreatePencilCache(element);
+                    if (cacheCanvas && typeof context.drawImage === 'function') {
+                        const pad = Math.max(16, Math.ceil(element.style.width + 4));
+                        const docMinX = contentLeft + element.bounds.minX * contentWidth;
+                        const docMinY = blockTop + element.bounds.minY * contentWidth;
+                        context.save();
+                        context.globalAlpha = 1;
+                        context.drawImage(cacheCanvas, docMinX - pad, docMinY - pad);
+                        context.restore();
+                    } else {
+                        const points: { x: number; y: number; pressure?: number }[] = [];
+                        for (let i = 0; i < data.length; i += 4) {
+                            points.push({
+                                x: contentLeft + data[i] * contentWidth,
+                                y: blockTop + data[i + 1] * contentWidth,
+                                pressure: data[i + 2],
+                            });
+                        }
+                        renderContinuousSolidStroke(context, points, element.style);
+                    }
                 } else {
                     const points: { x: number; y: number; pressure?: number }[] = [];
                     for (let i = 0; i < data.length; i += 4) {
@@ -3886,6 +3927,48 @@ export class CanvasController {
 
         context.setLineDash([]);
         context.restore();
+    }
+
+    private getOrCreatePencilCache(el: StrokeElement): HTMLCanvasElement | null {
+        if (this.strokeCache.has(el.id)) {
+            return this.strokeCache.get(el.id)!;
+        }
+
+        if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+            return null;
+        }
+
+        const geom = this.getElementAnchorGeometry(el.blockId, el.anchorText);
+        const contentWidth = geom.scaleWidth;
+
+        const pad = Math.max(16, Math.ceil(el.style.width + 4));
+        const strokeW = Math.max(1, (el.bounds.maxX - el.bounds.minX) * contentWidth);
+        const strokeH = Math.max(1, (el.bounds.maxY - el.bounds.minY) * contentWidth);
+        const width = Math.ceil(strokeW + pad * 2);
+        const height = Math.ceil(strokeH + pad * 2);
+
+        const offscreen = document.createElement('canvas');
+        offscreen.width = Math.max(1, width);
+        offscreen.height = Math.max(1, height);
+        const oCtx = offscreen.getContext('2d');
+
+        if (oCtx) {
+            oCtx.save();
+            const localPoints: { x: number; y: number; pressure?: number }[] = [];
+            for (let i = 0; i < el.points.length; i += 4) {
+                localPoints.push({
+                    x: pad + (el.points[i] - el.bounds.minX) * contentWidth,
+                    y: pad + (el.points[i + 1] - el.bounds.minY) * contentWidth,
+                    pressure: el.points[i + 2],
+                });
+            }
+            renderContinuousSolidStroke(oCtx, localPoints, el.style);
+            oCtx.restore();
+        }
+
+        this.strokeCache.set(el.id, offscreen);
+        el.cacheCanvas = offscreen;
+        return offscreen;
     }
 
     private isHighlighter(element: CanvasElement): boolean {
@@ -4104,7 +4187,36 @@ export class CanvasController {
             );
             const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
             for (const run of validRuns) {
-                renderContinuousSolidStroke(context, run, activeStyle);
+                if (this.penProfileId === 'pencil') {
+                    // Lightweight continuous path preview during live dragging for zero input latency
+                    context.save();
+                    context.strokeStyle = this.style.color;
+                    context.fillStyle = this.style.color;
+                    context.lineWidth = Math.max(1, this.style.width);
+                    context.globalAlpha = this.style.opacity * 0.75;
+                    context.lineCap = 'round';
+                    context.lineJoin = 'round';
+                    if (run.length === 1) {
+                        context.beginPath();
+                        context.arc(run[0].x, run[0].y, Math.max(1, this.style.width / 2), 0, Math.PI * 2);
+                        context.fill();
+                    } else if (run.length > 1) {
+                        context.beginPath();
+                        context.moveTo(run[0].x, run[0].y);
+                        for (let i = 1; i < run.length; i++) {
+                            const prev = run[i - 1];
+                            const curr = run[i];
+                            const mx = (prev.x + curr.x) / 2;
+                            const my = (prev.y + curr.y) / 2;
+                            context.quadraticCurveTo(prev.x, prev.y, mx, my);
+                        }
+                        context.lineTo(run[run.length - 1].x, run[run.length - 1].y);
+                        context.stroke();
+                    }
+                    context.restore();
+                } else {
+                    renderContinuousSolidStroke(context, run, activeStyle);
+                }
             }
         }
         context.restore();
