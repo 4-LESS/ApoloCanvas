@@ -1,6 +1,6 @@
 import type { StrokePattern, StrokeStyle } from '../core/types';
 
-// Cache para el patrón de textura de grafito (evita recrearlo en cada frame)
+// Patrón de textura estocástica para lápiz de mina (grafito orgánico)
 let graphitePatternCache: { color: string; pattern: CanvasPattern } | null = null;
 
 export function resetGraphitePatternCacheForTesting(): void {
@@ -12,25 +12,33 @@ function getGraphitePattern(ctx: CanvasRenderingContext2D, color: string): Canva
         return graphitePatternCache.pattern;
     }
     try {
+        const size = 64; // Textura más amplia y de alta resolución
         const patternCanvas = document.createElement('canvas');
-        patternCanvas.width = 24;
-        patternCanvas.height = 24;
+        patternCanvas.width = size;
+        patternCanvas.height = size;
         const pCtx = patternCanvas.getContext('2d');
         if (!pCtx) return null;
 
         pCtx.fillStyle = color;
-        // Generar puntos de porosidad estilo Kangax (deterministicos / bayer-like)
-        const density = 0.38;
-        for (let x = 0; x < 24; x += 2) {
-            for (let y = 0; y < 24; y += 2) {
-                // Pseudo-random hash basado en coordenadas
-                const rnd = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-                if ((rnd - Math.floor(rnd)) < density) {
-                    pCtx.globalAlpha = 0.45 + 0.5 * (rnd - Math.floor(rnd));
-                    pCtx.fillRect(x + (x % 3 === 0 ? 1 : 0), y + (y % 2 === 0 ? 1 : 0), 1.2, 1.2);
-                }
-            }
+        
+        // Distribución estocástica (ruido de dispersión por partículas aleatorias)
+        const particleCount = 450; // Cantidad de motas de grafito por celda
+        for (let i = 0; i < particleCount; i++) {
+            // Posición pseudo-aleatoria pero determinista para evitar parpadeos al hacer zoom
+            const rx = (Math.sin(i * 12.9898 + i * 78.233) * 43758.5453) % 1;
+            const ry = (Math.sin(i * 78.233 + i * 15.127) * 12345.6789) % 1;
+            const x = Math.abs(rx) * size;
+            const y = Math.abs(ry) * size;
+            
+            // Tamaño de mota variable para simular el poro del papel
+            const radius = 0.4 + ((i * 9301 + 49297) % 233280) / 233280 * 0.9;
+            
+            pCtx.globalAlpha = 0.15 + 0.45 * (((i * 3 + 7) % 100) / 100);
+            pCtx.beginPath();
+            pCtx.arc(x, y, radius, 0, Math.PI * 2);
+            pCtx.fill();
         }
+
         const pattern = ctx.createPattern(patternCanvas, 'repeat');
         if (pattern) {
             graphitePatternCache = { color, pattern };
@@ -135,32 +143,25 @@ export function renderContinuousSolidStroke(
         ctx.stroke();
 
     } else if (profile === 'pencil') {
-        // Lápiz de mina: Receta Kangax (Patrón poroso + 2 pasadas continuas sin superposición de vértices)
+        // Lápiz de mina: Textura difusa y suave multicanal
         const grainPattern = getGraphitePattern(ctx, color);
 
-        // Pasada 1: Núcleo de grafito translúcido
-        ctx.lineWidth = Math.max(1, baseWidth * 0.95);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        if (grainPattern) {
-            ctx.strokeStyle = grainPattern;
-        }
-        ctx.globalAlpha = opacity * 0.65;
+
+        // Pasada 1: Sombra base difusa (ancho mayor, opacidad baja)
+        ctx.lineWidth = Math.max(1, baseWidth * 1.3);
+        if (grainPattern) ctx.strokeStyle = grainPattern;
+        ctx.globalAlpha = opacity * 0.35;
         buildContinuousPath();
         ctx.stroke();
 
-        // Pasada 2: Textura de fibras exteriores desfasadas
-        if (grainPattern) {
-            ctx.strokeStyle = grainPattern;
-            ctx.lineWidth = Math.max(1, baseWidth * 1.25);
-            ctx.globalAlpha = opacity * 0.35;
-            // Dibujar ligeramente desplazado para dar aspecto fibroso de mina
-            ctx.save();
-            ctx.translate(0.35, -0.35);
-            buildContinuousPath();
-            ctx.stroke();
-            ctx.restore();
-        }
+        // Pasada 2: Núcleo de grafito principal
+        ctx.lineWidth = Math.max(1, baseWidth * 0.9);
+        if (grainPattern) ctx.strokeStyle = grainPattern;
+        ctx.globalAlpha = opacity * 0.75;
+        buildContinuousPath();
+        ctx.stroke();
     }
 
     ctx.restore();

@@ -99,6 +99,9 @@ test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and Ka
                     fillStyle: '',
                     globalAlpha: 1,
                     fillRect: () => undefined,
+                    beginPath: () => undefined,
+                    arc: () => undefined,
+                    fill: () => undefined,
                 }),
             };
         },
@@ -107,11 +110,11 @@ test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and Ka
         resetGraphitePatternCacheForTesting();
         drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
         drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
-        assert.equal(pencil.strokes.length, 4, 'each pencil render uses one core and one grain pass');
+        assert.equal(pencil.strokes.length, 4, 'each pencil render uses one diffuse base and one core pass');
         assert.equal(pencil.patternCalls, 1, 'graphite pattern is cached per color');
         assert.equal(tileCount, 1);
-        assert.equal(pencil.strokes[0].lineWidth, baseStyle.width * 0.95);
-        assert.equal(pencil.strokes[1].lineWidth, baseStyle.width * 1.25);
+        assert.equal(pencil.strokes[0].lineWidth, baseStyle.width * 1.3);
+        assert.equal(pencil.strokes[1].lineWidth, baseStyle.width * 0.9);
         assert.equal(pencil.strokes[0].strokeStyle, patternToken);
         assert.equal(pencil.strokes[1].strokeStyle, patternToken);
     } finally {
@@ -119,7 +122,7 @@ test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and Ka
     }
 });
 
-test('pencil renders single core pass when CanvasPattern is unavailable', () => {
+test('pencil renders both diffuse and core passes when CanvasPattern is unavailable', () => {
     resetGraphitePatternCacheForTesting();
     const pencil = createRecordingContext(null);
     const previousDocument = (globalThis as any).document;
@@ -130,9 +133,11 @@ test('pencil renders single core pass when CanvasPattern is unavailable', () => 
         drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, {
             color: '#222222', width: 4, opacity: 0.8, pattern: 'solid', profile: 'pencil',
         });
-        assert.equal(pencil.strokes.length, 1, 'single translucent core pass renders safely when pattern unavailable');
-        assert.equal(pencil.strokes[0].lineWidth, 4 * 0.95);
+        assert.equal(pencil.strokes.length, 2, 'diffuse base and core pass render safely when pattern unavailable');
+        assert.equal(pencil.strokes[0].lineWidth, 4 * 1.3);
+        assert.equal(pencil.strokes[1].lineWidth, 4 * 0.9);
         assert.equal(pencil.strokes[0].strokeStyle, '#222222');
+        assert.equal(pencil.strokes[1].strokeStyle, '#222222');
     } finally {
         (globalThis as any).document = previousDocument;
     }
