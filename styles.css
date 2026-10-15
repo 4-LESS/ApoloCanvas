@@ -3098,10 +3098,25 @@ button.apolo-box-menu-swatch,
   background-color: rgba(148, 163, 184, 0.12);
 }
 
-.apolo-estuche-popover .popover-lines-grid .popover-line-chip.is-active {
-  background-color: rgba(47, 107, 255, 0.12);
-  border-color: rgba(47, 107, 255, 0.32);
+.apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active[aria-pressed="true"] {
+  background-color: rgba(47, 107, 255, 0.22);
+  border: 2px solid #2f6bff;
   color: #2f6bff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 0 2px rgba(47, 107, 255, 0.16);
+}
+
+.apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active[aria-pressed="true"] .popover-line-bar {
+  color: #2f6bff;
+  background-color: #2f6bff;
+}
+
+.apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active[aria-pressed="true"] .popover-line-bar.is-dashed {
+  background: none;
+  border-top-color: #2f6bff;
+}
+
+.apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active[aria-pressed="true"] .popover-line-bar.is-dotted {
+  background-image: radial-gradient(circle, #2f6bff 1px, transparent 1.5px);
 }
 
 .popover-line-bar {
@@ -3390,10 +3405,10 @@ button.apolo-box-menu-swatch,
   box-shadow: inset 0 0 0 1px var(--apolo-accent), var(--apolo-shadow-sm);
 }
 
-.apolo-estuche-popover .shape-grid-selector .shape-grid-btn.is-active {
+.apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active {
   color: #2f6bff;
-  background-color: rgba(47, 107, 255, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(47, 107, 255, 0.32);
+  background-color: rgba(47, 107, 255, 0.22);
+  box-shadow: inset 0 0 0 1px #2f6bff, 0 0 0 2px rgba(47, 107, 255, 0.16);
 }
 
 .shape-fill-subpanel {
