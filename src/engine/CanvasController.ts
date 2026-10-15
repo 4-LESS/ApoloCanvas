@@ -25,7 +25,7 @@ import {
 } from '../core/types';
 import { InputManager } from './input/InputManager';
 import { PointBuffer } from './input/PointBuffer';
-import { applyStrokePattern, drawPatternedStrokePath, getSolidProfileSegmentStyle } from './PatternedStrokeRenderer';
+import { applyStrokePattern, drawPatternedStrokePath, drawSolidProfileStrokePath } from './PatternedStrokeRenderer';
 import { SpatialGrid } from './spatial/SpatialGrid';
 import { PersistenceQueue } from '../io/PersistenceQueue';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer';
@@ -3868,55 +3868,8 @@ export class CanvasController {
             if (data.length >= 4) {
                 if (element.style.pattern !== 'solid') {
                     drawPatternedStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
-                } else if (data.length === 4) {
-                    const profileId = element.style.profile || 'fountain';
-                    const segmentStyle = getSolidProfileSegmentStyle(
-                        profileId,
-                        element.style.width,
-                        data[2],
-                        element.style.opacity,
-                        data[0],
-                        data[1],
-                        data[0],
-                        data[1],
-                        0,
-                    );
-                    context.lineWidth = segmentStyle.width;
-                    context.globalAlpha = segmentStyle.opacity;
-                    context.lineCap = segmentStyle.lineCap;
-                    context.beginPath();
-                    context.arc(
-                        contentLeft + data[0] * contentWidth,
-                        blockTop + data[1] * contentWidth,
-                        context.lineWidth / 2,
-                        0,
-                        Math.PI * 2,
-                    );
-                    context.fillStyle = element.style.color;
-                    context.fill();
                 } else {
-                    const profileId = element.style.profile || 'fountain';
-                    for (let i = 4; i < data.length; i += 4) {
-                        const avgP = (data[i - 2] + data[i + 2]) / 2;
-                        const segmentStyle = getSolidProfileSegmentStyle(
-                            profileId,
-                            element.style.width,
-                            avgP,
-                            element.style.opacity,
-                            data[i - 4],
-                            data[i - 3],
-                            data[i],
-                            data[i + 1],
-                            i / 4,
-                        );
-                        context.lineWidth = segmentStyle.width;
-                        context.globalAlpha = segmentStyle.opacity;
-                        context.lineCap = segmentStyle.lineCap;
-                        context.beginPath();
-                        context.moveTo(contentLeft + data[i - 4] * contentWidth, blockTop + data[i - 3] * contentWidth);
-                        context.lineTo(contentLeft + data[i] * contentWidth, blockTop + data[i + 1] * contentWidth);
-                        context.stroke();
-                    }
+                    drawSolidProfileStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
                 }
             }
         } else {
@@ -4135,89 +4088,32 @@ export class CanvasController {
             return;
         }
 
-        // Regular Pen / Stylus stroke rendering with natural pressure dynamics
-        context.strokeStyle = this.style.color;
-        context.lineWidth = this.style.width;
-        context.globalAlpha = this.style.opacity;
-        context.lineCap = this.style.lineCap ?? 'round';
-        context.lineJoin = 'round';
-        applyStrokePattern(context, this.style.pattern, this.style.width, this.style.lineCap ?? 'round');
-
-        if (this.points.size === 1) {
-            const isForbidden = bounds.contentTop > 0 && this.points.getY(0) < forbiddenY;
-
-            if (isForbidden) {
-                context.strokeStyle = 'rgba(140, 149, 159, 0.45)';
-                context.globalAlpha = 1;
-                context.setLineDash([4, 6]);
-                context.lineWidth = Math.max(1.5, this.style.width);
-                context.beginPath();
-                context.arc(this.points.getX(0), this.points.getY(0), Math.max(1, this.style.width / 2), 0, Math.PI * 2);
-                context.stroke();
-            } else {
-                const pointStyle = getSolidProfileSegmentStyle(
-                    this.penProfileId,
-                    this.style.width,
-                    this.points.getPressure(0),
-                    this.style.opacity,
-                    this.points.getX(0),
-                    this.points.getY(0),
-                    this.points.getX(0),
-                    this.points.getY(0),
-                    0,
-                );
-                context.lineWidth = pointStyle.width;
-                context.globalAlpha = pointStyle.opacity;
-                context.lineCap = pointStyle.lineCap;
-                context.beginPath();
-                context.arc(this.points.getX(0), this.points.getY(0), context.lineWidth / 2, 0, Math.PI * 2);
-                context.fillStyle = this.style.color;
-                context.fill();
-            }
-        } else {
-            for (let i = 1; i < this.points.size; i++) {
-                const y0 = this.points.getY(i - 1);
-                const y1 = this.points.getY(i);
-                const isForbidden = bounds.contentTop > 0 && (y0 < forbiddenY || y1 < forbiddenY);
-
-                context.save();
-                if (isForbidden) {
-                    // Fixed semi-transparent gray with wider dash spacing (6px dash, 10px gap)
-                    context.strokeStyle = 'rgba(140, 149, 159, 0.45)';
-                    context.globalAlpha = 1;
-                    context.setLineDash([6, 10]);
-                    context.lineWidth = Math.max(1.5, Math.min(3, this.style.width));
-                } else {
-                    applyStrokePattern(context, this.style.pattern, this.style.width, this.style.lineCap ?? 'round');
-                    if (this.style.pattern !== 'solid') {
-                        context.strokeStyle = this.style.color;
-                        context.globalAlpha = this.style.opacity;
-                        context.lineWidth = this.style.width;
-                    } else {
-                        const avgP = (this.points.getPressure(i - 1) + this.points.getPressure(i)) / 2;
-                        const segmentStyle = getSolidProfileSegmentStyle(
-                            this.penProfileId,
-                            this.style.width,
-                            avgP,
-                            this.style.opacity,
-                            this.points.getX(i - 1),
-                            y0,
-                            this.points.getX(i),
-                            y1,
-                            i,
-                        );
-                        context.strokeStyle = this.style.color;
-                        context.globalAlpha = segmentStyle.opacity;
-                        context.lineWidth = segmentStyle.width;
-                        context.lineCap = segmentStyle.lineCap;
-                    }
+        if (this.activeAnchor) {
+            const geometry = this.getElementAnchorGeometry(this.activeAnchor.blockId, this.activeAnchor.text);
+            const validRuns = splitStrokeIntoValidRuns(
+                this.readActivePoints(),
+                bounds.contentTop,
+                DEFAULT_INK_LIMITS.topMarginPx,
+            );
+            const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
+            for (const run of validRuns) {
+                const data: number[] = [];
+                for (const point of run) {
+                    data.push(
+                        (point.x - geometry.originX) / geometry.scaleWidth,
+                        (point.y - geometry.originY) / geometry.scaleWidth,
+                        point.pressure ?? 0.5,
+                        point.time ?? 0,
+                    );
                 }
-
-                context.beginPath();
-                context.moveTo(this.points.getX(i - 1), this.points.getY(i - 1));
-                context.lineTo(this.points.getX(i), this.points.getY(i));
-                context.stroke();
-                context.restore();
+                drawSolidProfileStrokePath(
+                    context,
+                    data,
+                    geometry.originX,
+                    geometry.scaleWidth,
+                    geometry.originY,
+                    activeStyle,
+                );
             }
         }
         context.restore();
