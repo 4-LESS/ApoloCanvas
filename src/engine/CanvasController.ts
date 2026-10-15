@@ -121,6 +121,24 @@ interface HistorySnapshot {
     boxHeights?: Record<string, number>;
 }
 
+function applyStrokePattern(
+    context: CanvasRenderingContext2D,
+    pattern: StrokePattern,
+    width: number,
+    solidLineCap: CanvasLineCap,
+): void {
+    if (pattern === 'dashed') {
+        context.lineCap = 'butt';
+        context.setLineDash([Math.max(6, width * 3), Math.max(4, width * 2)]);
+    } else if (pattern === 'dotted') {
+        context.lineCap = 'round';
+        context.setLineDash([0.5, Math.max(4, width * 2.2)]);
+    } else {
+        context.lineCap = solidLineCap;
+        context.setLineDash([]);
+    }
+}
+
 /**
  * High-performance engineering canvas controller.
  * Manages the double-buffered rendering motor, 120Hz input loop, spatial indexing,
@@ -535,6 +553,8 @@ export class CanvasController {
                         profileId: this.penProfileId,
                         smoothing: this.smoothing,
                         pressureSensitivity: this.pressureSensitivity,
+                        lineStyle: this.style.pattern,
+                        pattern: this.style.pattern,
                         favorites: this.favorites,
                         eraserMode: this.eraserMode,
                         eraserRadius: this.eraserRadius,
@@ -578,6 +598,8 @@ export class CanvasController {
                 profileId: this.penProfileId,
                 smoothing: this.smoothing,
                 pressureSensitivity: this.pressureSensitivity,
+                lineStyle: this.style.pattern,
+                pattern: this.style.pattern,
                 favorites: this.favorites,
                 eraserMode: this.eraserMode,
                 eraserRadius: this.eraserRadius,
@@ -594,6 +616,12 @@ export class CanvasController {
                 onChangePressure: (pressure) => {
                     this.pressureSensitivity = pressure;
                     this.renderDirty = true;
+                    this.schedulePaint();
+                },
+                onChangeLineStyle: (pattern) => {
+                    this.style.pattern = pattern;
+                    this.estuche?.updateState({ lineStyle: pattern, pattern });
+                    this.options.eventBus?.emit('style:changed', { pattern });
                     this.schedulePaint();
                 },
                 onUseFavorite: (index) => this.applyFavorite(index),
@@ -1574,6 +1602,8 @@ export class CanvasController {
             tool: this.tool,
             profileId: this.penProfileId,
             width: this.style.width,
+            lineStyle: this.style.pattern,
+            pattern: this.style.pattern,
         });
         this.options.eventBus?.emit('tool:changed', this.tool);
         this.options.eventBus?.emit('style:changed', this.style, this.penProfileId);
@@ -3846,7 +3876,7 @@ export class CanvasController {
         context.globalAlpha = element.style.opacity;
         context.lineCap = element.style.lineCap ?? 'round';
         context.lineJoin = 'round';
-        context.setLineDash(element.style.pattern === 'dashed' ? [8, 6] : element.style.pattern === 'dotted' ? [1, 5] : []);
+        applyStrokePattern(context, element.style.pattern, element.style.width, element.style.lineCap ?? 'round');
 
         if (element.type === 'stroke') {
             const data = element.points;
@@ -4100,6 +4130,7 @@ export class CanvasController {
         context.globalAlpha = this.style.opacity;
         context.lineCap = this.style.lineCap ?? 'round';
         context.lineJoin = 'round';
+        applyStrokePattern(context, this.style.pattern, this.style.width, this.style.lineCap ?? 'round');
 
         if (this.points.size === 1) {
             const isForbidden = bounds.contentTop > 0 && this.points.getY(0) < forbiddenY;
@@ -4139,14 +4170,10 @@ export class CanvasController {
                 } else {
                     context.strokeStyle = this.style.color;
                     context.globalAlpha = this.style.opacity;
-                    if (this.style.pattern === 'dashed') {
-                        context.setLineDash([8, 6]);
-                        context.lineWidth = this.style.width;
-                    } else if (this.style.pattern === 'dotted') {
-                        context.setLineDash([1, 5]);
+                    applyStrokePattern(context, this.style.pattern, this.style.width, this.style.lineCap ?? 'round');
+                    if (this.style.pattern !== 'solid') {
                         context.lineWidth = this.style.width;
                     } else {
-                        context.setLineDash([]);
                         const avgP = (this.points.getPressure(i - 1) + this.points.getPressure(i)) / 2;
                         const scale = calculateNaturalPressureScale(
                             avgP,

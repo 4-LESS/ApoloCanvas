@@ -578,21 +578,29 @@ function renderSvg(document: PageDocument): string {
 }
 
 function renderElement(element: CanvasElement, scale = 800): string {
-    const style = `stroke="${escapeXml(element.style.color)}" opacity="${element.style.opacity}" stroke-linecap="${element.style.lineCap ?? 'round'}" stroke-linejoin="round"`;
+    const strokeWidth = element.style.width;
+    const pattern = element.style.pattern;
+    const lineCap = pattern === 'dashed' ? 'butt' : pattern === 'dotted' ? 'round' : element.style.lineCap ?? 'round';
+    const dashArray = pattern === 'dashed'
+        ? `${Math.max(6, strokeWidth * 3)} ${Math.max(4, strokeWidth * 2)}`
+        : pattern === 'dotted'
+            ? `0.5 ${Math.round(Math.max(4, strokeWidth * 2.2) * 10) / 10}`
+            : '';
+    const dash = dashArray ? ` stroke-dasharray="${dashArray}"` : '';
+    const style = `stroke="${escapeXml(element.style.color)}" opacity="${element.style.opacity}" stroke-linecap="${lineCap}" stroke-linejoin="round"${dash}`;
     if (element.type === 'stroke') {
         const points = element.points;
         if (points.length < 4) return '';
-        const dash = element.style.pattern === 'dashed' ? ' stroke-dasharray="8 6"' : element.style.pattern === 'dotted' ? ' stroke-dasharray="1 5"' : '';
         if (points.length === 4) return `<circle cx="${points[0] * scale}" cy="${points[1] * scale}" r="${element.style.width * pressureScale(points[2]) / 2}" fill="${escapeXml(element.style.color)}" opacity="${element.style.opacity}"/>`;
         if (element.style.pattern !== 'solid') {
             let path = `M ${points[0] * scale} ${points[1] * scale}`;
             for (let i = 4; i < points.length; i += 4) path += ` L ${points[i] * scale} ${points[i + 1] * scale}`;
-            return `<path d="${path}" ${style} stroke-width="${element.style.width}"${dash}/>`;
+            return `<path d="${path}" ${style} stroke-width="${element.style.width}"/>`;
         }
         let paths = '';
         for (let i = 4; i < points.length; i += 4) {
             const width = element.style.width * pressureScale((points[i - 2] + points[i + 2]) / 2);
-            paths += `<path d="M ${points[i - 4] * scale} ${points[i - 3] * scale} L ${points[i] * scale} ${points[i + 1] * scale}" ${style} stroke-width="${width}"${dash}/>`;
+            paths += `<path d="M ${points[i - 4] * scale} ${points[i - 3] * scale} L ${points[i] * scale} ${points[i + 1] * scale}" ${style} stroke-width="${width}"/>`;
         }
         return paths;
     }

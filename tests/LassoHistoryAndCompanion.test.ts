@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { boxCompanionPath, companionPath, renderBoxSvg } from '../src/io/PersistenceQueue.ts';
 import { BoxRegistry } from '../src/core/BoxRegistry.ts';
-import type { CanvasElement, PageDocument, StrokeElement } from '../src/core/types.ts';
+import type { CanvasElement, PageDocument, ShapeElement, StrokeElement } from '../src/core/types.ts';
 
 describe('(c4) Herramienta Lazo y Pila de Deshacer integrada', () => {
     test('Lasso re-anchoring: Dragging freehand ink into a box assigns space blockId and normalizes coordinates', () => {
@@ -299,5 +299,38 @@ describe('(d) Exportador SVG companion por caja y (e) Modo lectura integral', ()
         assert.ok(svg.includes('viewBox="0 0 800 240"'));
         assert.ok(svg.includes('pattern id="apolo-grid-box-test-svg"'));
         assert.ok(svg.includes('stroke="#1F4FD8"'));
+    });
+
+    test('renderBoxSvg applies width-scaled dash patterns and matching line caps to strokes and shapes', () => {
+        const dashedStroke: StrokeElement = {
+            id: 's-svg-dashed',
+            type: 'stroke',
+            timestamp: 1000,
+            zIndex: 0,
+            blockId: 'space:box-test-patterns',
+            points: [0.1, 0.1, 0.5, 1000, 0.5, 0.5, 0.5, 1010],
+            style: { color: '#1F4FD8', width: 3, opacity: 1, pattern: 'dashed' },
+            bounds: { minX: 0.1, maxX: 0.5, minY: 0.1, maxY: 0.5 },
+        };
+        const dottedShape: ShapeElement = {
+            id: 'shape-svg-dotted',
+            type: 'shape',
+            shapeType: 'line',
+            timestamp: 1001,
+            zIndex: 1,
+            blockId: 'space:box-test-patterns',
+            startX: 0.1,
+            startY: 0.6,
+            endX: 0.8,
+            endY: 0.6,
+            style: { color: '#D9480F', width: 3, opacity: 1, pattern: 'dotted' },
+            bounds: { minX: 0.1, maxX: 0.8, minY: 0.6, maxY: 0.6 },
+        };
+
+        const svg = renderBoxSvg('box-test-patterns', [dashedStroke, dottedShape], 800, 240);
+        assert.ok(svg.includes('stroke-dasharray="9 6"'));
+        assert.ok(svg.includes('stroke-dasharray="0.5 6.6"'));
+        assert.ok(svg.includes('stroke-linecap="butt"'));
+        assert.ok(svg.includes('stroke-linecap="round"'));
     });
 });
