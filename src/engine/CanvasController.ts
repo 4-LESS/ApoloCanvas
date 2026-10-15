@@ -25,6 +25,7 @@ import {
 } from '../core/types';
 import { InputManager } from './input/InputManager';
 import { PointBuffer } from './input/PointBuffer';
+import { applyStrokePattern, drawPatternedStrokePath } from './PatternedStrokeRenderer';
 import { SpatialGrid } from './spatial/SpatialGrid';
 import { PersistenceQueue } from '../io/PersistenceQueue';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer';
@@ -119,24 +120,6 @@ interface TouchPoint {
 interface HistorySnapshot {
     elements: CanvasElement[];
     boxHeights?: Record<string, number>;
-}
-
-function applyStrokePattern(
-    context: CanvasRenderingContext2D,
-    pattern: StrokePattern,
-    width: number,
-    solidLineCap: CanvasLineCap,
-): void {
-    if (pattern === 'dashed') {
-        context.lineCap = 'butt';
-        context.setLineDash([Math.max(6, width * 3), Math.max(4, width * 2)]);
-    } else if (pattern === 'dotted') {
-        context.lineCap = 'round';
-        context.setLineDash([0.5, Math.max(4, width * 2.2)]);
-    } else {
-        context.lineCap = solidLineCap;
-        context.setLineDash([]);
-    }
 }
 
 /**
@@ -3876,19 +3859,15 @@ export class CanvasController {
         context.globalAlpha = element.style.opacity;
         context.lineCap = element.style.lineCap ?? 'round';
         context.lineJoin = 'round';
-        applyStrokePattern(context, element.style.pattern, element.style.width, element.style.lineCap ?? 'round');
+        if (element.type !== 'stroke' || element.style.pattern === 'solid') {
+            applyStrokePattern(context, element.style.pattern, element.style.width, element.style.lineCap ?? 'round');
+        }
 
         if (element.type === 'stroke') {
             const data = element.points;
             if (data.length >= 4) {
                 if (element.style.pattern !== 'solid') {
-                    context.lineWidth = element.style.width;
-                    context.beginPath();
-                    context.moveTo(contentLeft + data[0] * contentWidth, blockTop + data[1] * contentWidth);
-                    for (let i = 4; i < data.length; i += 4) {
-                        context.lineTo(contentLeft + data[i] * contentWidth, blockTop + data[i + 1] * contentWidth);
-                    }
-                    context.stroke();
+                    drawPatternedStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
                 } else if (data.length === 4) {
                     const profileId = element.style.profile || 'fountain';
                     const scale = calculateNaturalPressureScale(data[2], profileId, this.pressureSensitivity);
@@ -3920,6 +3899,7 @@ export class CanvasController {
             this.paintShape(element, context, contentLeft, contentWidth, blockTop);
         }
 
+        context.setLineDash([]);
         context.restore();
     }
 
@@ -4124,6 +4104,13 @@ export class CanvasController {
             return;
         }
 
+        if (this.style.pattern !== 'solid') {
+            this.paintActivePatternedStroke(context);
+            context.setLineDash([]);
+            context.restore();
+            return;
+        }
+
         // Regular Pen / Stylus stroke rendering with natural pressure dynamics
         context.strokeStyle = this.style.color;
         context.lineWidth = this.style.width;
@@ -4134,6 +4121,7 @@ export class CanvasController {
 
         if (this.points.size === 1) {
             const isForbidden = bounds.contentTop > 0 && this.points.getY(0) < forbiddenY;
+
             if (isForbidden) {
                 context.strokeStyle = 'rgba(140, 149, 159, 0.45)';
                 context.globalAlpha = 1;
@@ -4212,6 +4200,31 @@ export class CanvasController {
             context.stroke();
             context.restore();
         }
+    }
+
+    private paintActivePatternedStroke(context: CanvasRenderingContext2D): void {
+        if (!this.activeAnchor || this.points.size === 0) return;
+
+        const anchor = this.activeAnchor;
+        const geometry = this.getElementAnchorGeometry(anchor.blockId, anchor.text);
+        const points = this.points.toArray();
+
+        for (let i = 0; i < points.length; i += 4) {
+            const x = (points[i] - geometry.originX) / geometry.scaleWidth;
+            const y = (points[i + 1] - geometry.originY) / geometry.scaleWidth;
+            points[i] = x;
+            points[i + 1] = y;
+        }
+
+        const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
+        drawPatternedStrokePath(
+            context,
+            points,
+            geometry.originX,
+            geometry.scaleWidth,
+            geometry.originY,
+            activeStyle,
+        );
     }
 
     private paintLasso(): void {
