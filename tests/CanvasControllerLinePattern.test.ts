@@ -11,6 +11,7 @@ import {
 function createRecordingContext(pattern: CanvasPattern | null = null) {
     const strokes: Array<{ lineWidth: number; globalAlpha: number; lineCap: string; strokeStyle: unknown; dash: number[] }> = [];
     const fills: Array<{ globalAlpha: number; fillStyle: unknown }> = [];
+    const fillRects: Array<{ x: number; y: number; w: number; h: number; globalAlpha: number; fillStyle: unknown }> = [];
     const arcs: number[][] = [];
     const commands: string[] = [];
     const dashCalls: number[][] = [];
@@ -34,7 +35,9 @@ function createRecordingContext(pattern: CanvasPattern | null = null) {
         arc: (...values: number[]) => { arcs.push(values); commands.push('arc'); },
         stroke: () => strokes.push({ lineWidth, globalAlpha, lineCap, strokeStyle, dash: [...dash] }),
         fill: () => fills.push({ globalAlpha, fillStyle }),
-        fillRect: () => undefined,
+        fillRect: (x: number, y: number, w: number, h: number) => {
+            fillRects.push({ x, y, w, h, globalAlpha, fillStyle });
+        },
         setLineDash: (value: number[]) => {
             dash = [...value];
             dashCalls.push([...value]);
@@ -52,12 +55,12 @@ function createRecordingContext(pattern: CanvasPattern | null = null) {
         set fillStyle(value: unknown) { fillStyle = value; },
     } as unknown as CanvasRenderingContext2D;
 
-    return { context, strokes, fills, arcs, commands, dashCalls, get patternCalls() { return patternCalls; } };
+    return { context, strokes, fills, fillRects, arcs, commands, dashCalls, get patternCalls() { return patternCalls; } };
 }
 
 const solidPoints = [0.1, 0.5, 0.9, 0, 0.4, 0.5, 0.6, 100, 0.8, 0.25, 0.5, 200];
 
-test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and Kangax graphite texture passes', () => {
+test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and dual-layer soft graphite with scatter', () => {
     const baseStyle = { color: '#222222', width: 4, opacity: 0.8, pattern: 'solid' as const };
 
     const ball = createRecordingContext();
@@ -85,62 +88,18 @@ test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and Ka
     assert.equal(calli.strokes[0].lineCap, 'butt');
     assert.equal(calli.strokes[0].lineWidth, 1);
 
-    const patternToken = { kind: 'graphite-pattern' } as unknown as CanvasPattern;
-    const pencil = createRecordingContext(patternToken);
-    const previousDocument = (globalThis as any).document;
-    let tileCount = 0;
-    (globalThis as any).document = {
-        createElement: () => {
-            tileCount++;
-            return {
-                width: 0,
-                height: 0,
-                getContext: () => ({
-                    fillStyle: '',
-                    globalAlpha: 1,
-                    fillRect: () => undefined,
-                    beginPath: () => undefined,
-                    arc: () => undefined,
-                    fill: () => undefined,
-                }),
-            };
-        },
-    };
-    try {
-        resetGraphitePatternCacheForTesting();
-        drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
-        drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
-        assert.equal(pencil.strokes.length, 4, 'each pencil render uses one diffuse base and one core pass');
-        assert.equal(pencil.patternCalls, 1, 'graphite pattern is cached per color');
-        assert.equal(tileCount, 1);
-        assert.equal(pencil.strokes[0].lineWidth, baseStyle.width * 1.3);
-        assert.equal(pencil.strokes[1].lineWidth, baseStyle.width * 0.9);
-        assert.equal(pencil.strokes[0].strokeStyle, patternToken);
-        assert.equal(pencil.strokes[1].strokeStyle, patternToken);
-    } finally {
-        (globalThis as any).document = previousDocument;
-    }
-});
-
-test('pencil renders both diffuse and core passes when CanvasPattern is unavailable', () => {
-    resetGraphitePatternCacheForTesting();
-    const pencil = createRecordingContext(null);
-    const previousDocument = (globalThis as any).document;
-    (globalThis as any).document = {
-        createElement: () => ({ width: 0, height: 0, getContext: () => null }),
-    };
-    try {
-        drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, {
-            color: '#222222', width: 4, opacity: 0.8, pattern: 'solid', profile: 'pencil',
-        });
-        assert.equal(pencil.strokes.length, 2, 'diffuse base and core pass render safely when pattern unavailable');
-        assert.equal(pencil.strokes[0].lineWidth, 4 * 1.3);
-        assert.equal(pencil.strokes[1].lineWidth, 4 * 0.9);
-        assert.equal(pencil.strokes[0].strokeStyle, '#222222');
-        assert.equal(pencil.strokes[1].strokeStyle, '#222222');
-    } finally {
-        (globalThis as any).document = previousDocument;
-    }
+    const pencil = createRecordingContext();
+    drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
+    drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
+    assert.equal(pencil.strokes.length, 4, 'each pencil render uses soft diffuse base and dense core pass');
+    assert.equal(pencil.strokes[0].lineWidth, baseStyle.width * 1.1);
+    assert.equal(pencil.strokes[1].lineWidth, baseStyle.width * 0.65);
+    assert.equal(pencil.strokes[0].globalAlpha, baseStyle.opacity * 0.45);
+    assert.equal(pencil.strokes[1].globalAlpha, baseStyle.opacity * 0.85);
+    assert.ok(pencil.fillRects.length > 0, 'micro-particle scatter layer was rendered');
+    assert.equal(pencil.fillRects[0].w, 1.2);
+    assert.equal(pencil.fillRects[0].h, 1.2);
+    assert.equal(pencil.fillRects[0].globalAlpha, baseStyle.opacity * 0.30);
 });
 
 test('renderContinuousSolidStroke handles single point touches with arc and fill', () => {

@@ -143,25 +143,54 @@ export function renderContinuousSolidStroke(
         ctx.stroke();
 
     } else if (profile === 'pencil') {
-        // Lápiz de mina: Textura difusa y suave multicanal
-        const grainPattern = getGraphitePattern(ctx, color);
-
+        // Lápiz de mina: Núcleo suave y difuso + dispersión estocástica de grafito
+        
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
-        // Pasada 1: Sombra base difusa (ancho mayor, opacidad baja)
-        ctx.lineWidth = Math.max(1, baseWidth * 1.3);
-        if (grainPattern) ctx.strokeStyle = grainPattern;
-        ctx.globalAlpha = opacity * 0.35;
+        // 1. Capa base de grafito suave y difusa (Cuerpo denso del lápiz)
+        ctx.lineWidth = Math.max(1, baseWidth * 1.1);
+        ctx.globalAlpha = opacity * 0.45;
         buildContinuousPath();
         ctx.stroke();
 
-        // Pasada 2: Núcleo de grafito principal
-        ctx.lineWidth = Math.max(1, baseWidth * 0.9);
-        if (grainPattern) ctx.strokeStyle = grainPattern;
-        ctx.globalAlpha = opacity * 0.75;
+        // 2. Núcleo central más denso
+        ctx.lineWidth = Math.max(1, baseWidth * 0.65);
+        ctx.globalAlpha = opacity * 0.85;
         buildContinuousPath();
         ctx.stroke();
+
+        // 3. Capa de textura superficial (Motas de grafito orgánico con dispersión aleatoria)
+        ctx.save();
+        ctx.globalAlpha = opacity * 0.30;
+        ctx.fillStyle = color;
+        
+        // Generar puntos de textura a lo largo del camino interpolado
+        const step = Math.max(2, baseWidth * 0.4);
+        for (let i = 0; i < points.length - 1; i++) {
+            const p1 = points[i];
+            const p2 = points[i + 1];
+            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            const stepsCount = Math.ceil(dist / step);
+            
+            for (let s = 0; s <= stepsCount; s++) {
+                const t = stepsCount === 0 ? 0 : s / stepsCount;
+                const cx = p1.x + (p2.x - p1.x) * t;
+                const cy = p1.y + (p2.y - p1.y) * t;
+                
+                // Dispersión lateral dentro del radio del lápiz
+                const scatterCount = 3;
+                for (let c = 0; c < scatterCount; c++) {
+                    const angle = ((c * 137.5 + i * 45) % 360) * (Math.PI / 180);
+                    const r = (baseWidth * 0.5) * Math.sqrt(((c * 7 + s * 13) % 100) / 100);
+                    const px = cx + Math.cos(angle) * r;
+                    const py = cy + Math.sin(angle) * r;
+                    
+                    ctx.fillRect(px, py, 1.2, 1.2);
+                }
+            }
+        }
+        ctx.restore();
     }
 
     ctx.restore();
