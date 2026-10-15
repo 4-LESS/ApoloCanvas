@@ -951,6 +951,11 @@ export class ToolEstuche implements PopoverInstance {
             btn.className = `popover-line-chip ${isActive ? 'is-active' : ''}`;
             btn.setAttribute('aria-pressed', String(isActive));
 
+            const pill = document.createElement('span');
+            pill.className = 'popover-line-chip-pill';
+            pill.setAttribute('aria-hidden', 'true');
+            btn.appendChild(pill);
+
             const bar = document.createElement('div');
             bar.className = `popover-line-bar ${s.cls}`;
             btn.appendChild(bar);

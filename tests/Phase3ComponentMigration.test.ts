@@ -219,6 +219,7 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             };
             const lineStyleButtons = findButtons(body, 'popover-line-chip');
             assert.equal(lineStyleButtons.length, 3);
+            assert.ok(lineStyleButtons.every((button) => button.children.some((child: any) => child.className === 'popover-line-chip-pill')));
             assert.equal(lineStyleButtons[0].getAttribute('aria-pressed'), 'false');
             assert.equal(lineStyleButtons[1].getAttribute('aria-pressed'), 'true');
             assert.equal(lineStyleButtons[1].classList.contains('is-active'), true);
