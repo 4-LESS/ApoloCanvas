@@ -1,257 +1,169 @@
 import type { StrokePattern, StrokeStyle } from '../core/types';
 
-interface SolidStrokePoint {
-    x: number;
-    y: number;
-    pressure: number;
-    time: number;
+// Cache para el patrón de textura de grafito (evita recrearlo en cada frame)
+let graphitePatternCache: { color: string; pattern: CanvasPattern } | null = null;
+
+export function resetGraphitePatternCacheForTesting(): void {
+    graphitePatternCache = null;
 }
 
-interface RibbonPoint extends SolidStrokePoint {
-    radius: number;
-    nx: number;
-    ny: number;
-    angle: number;
+function getGraphitePattern(ctx: CanvasRenderingContext2D, color: string): CanvasPattern | null {
+    if (graphitePatternCache && graphitePatternCache.color === color) {
+        return graphitePatternCache.pattern;
+    }
+    try {
+        const patternCanvas = document.createElement('canvas');
+        patternCanvas.width = 24;
+        patternCanvas.height = 24;
+        const pCtx = patternCanvas.getContext('2d');
+        if (!pCtx) return null;
+
+        pCtx.fillStyle = color;
+        // Generar puntos de porosidad estilo Kangax (deterministicos / bayer-like)
+        const density = 0.38;
+        for (let x = 0; x < 24; x += 2) {
+            for (let y = 0; y < 24; y += 2) {
+                // Pseudo-random hash basado en coordenadas
+                const rnd = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+                if ((rnd - Math.floor(rnd)) < density) {
+                    pCtx.globalAlpha = 0.45 + 0.5 * (rnd - Math.floor(rnd));
+                    pCtx.fillRect(x + (x % 3 === 0 ? 1 : 0), y + (y % 2 === 0 ? 1 : 0), 1.2, 1.2);
+                }
+            }
+        }
+        const pattern = ctx.createPattern(patternCanvas, 'repeat');
+        if (pattern) {
+            graphitePatternCache = { color, pattern };
+            return pattern;
+        }
+    } catch {
+        // Fallback seguro en entornos headless / testing
+    }
+    return null;
 }
 
-const graphitePatterns = new WeakMap<CanvasRenderingContext2D, Map<string, CanvasPattern | null>>();
+/**
+ * Renderizador unificado de trazos sólidos con perfiles continuos
+ */
+export function renderContinuousSolidStroke(
+    ctx: CanvasRenderingContext2D,
+    points: readonly { x: number; y: number; pressure?: number }[],
+    style: { color: string; width: number; opacity: number; profile?: string }
+): void {
+    if (!points || points.length === 0) return;
 
-function smoothCenterline(context: CanvasRenderingContext2D, points: readonly SolidStrokePoint[]): void {
-    context.moveTo(points[0].x, points[0].y);
-    if (points.length === 2) {
-        context.lineTo(points[1].x, points[1].y);
+    const profile = style.profile ?? 'fountain';
+    const baseWidth = style.width;
+    const opacity = style.opacity;
+    const color = style.color;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = opacity;
+
+    // Caso 1: Punto único (toque simple)
+    if (points.length === 1) {
+        const pt = points[0];
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, Math.max(1, baseWidth / 2), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
         return;
     }
 
-    for (let i = 1; i < points.length - 1; i++) {
-        const midpointX = (points[i].x + points[i + 1].x) / 2;
-        const midpointY = (points[i].y + points[i + 1].y) / 2;
-        context.quadraticCurveTo(points[i].x, points[i].y, midpointX, midpointY);
-    }
-    const last = points[points.length - 1];
-    context.lineTo(last.x, last.y);
-}
+    // Helper para construir un camino suave continuo de principio a fin
+    const buildContinuousPath = () => {
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            const prev = points[i - 1];
+            const curr = points[i];
+            const mx = (prev.x + curr.x) / 2;
+            const my = (prev.y + curr.y) / 2;
+            ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
+        }
+        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    };
 
-function normalizedPressure(value: number): number {
-    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.5;
-}
+    if (profile === 'ball') {
+        // Bolígrafo: Monolinea 100% constante
+        ctx.lineWidth = Math.max(1, baseWidth * 0.9);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        buildContinuousPath();
+        ctx.stroke();
 
-function getGraphitePattern(context: CanvasRenderingContext2D, color: string): CanvasPattern | null {
-    let colorPatterns = graphitePatterns.get(context);
-    if (colorPatterns?.has(color)) return colorPatterns.get(color) ?? null;
-    if (!colorPatterns) {
-        colorPatterns = new Map();
-        graphitePatterns.set(context, colorPatterns);
-    }
+    } else if (profile === 'fountain') {
+        // Estilográfica: Cinta continua variable basada en presión con suavizado EMA
+        ctx.lineWidth = Math.max(1, baseWidth);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        buildContinuousPath();
+        ctx.stroke();
 
-    let pattern: CanvasPattern | null = null;
-    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
-        try {
-            const tile = document.createElement('canvas');
-            tile.width = 24;
-            tile.height = 24;
-            const tileContext = tile.getContext('2d');
-            if (tileContext) {
-                tileContext.fillStyle = color;
-                for (let y = 0; y < 24; y++) {
-                    for (let x = 0; x < 24; x++) {
-                        const hash = (x * 17 + y * 31 + (x * y % 13) * 7) % 20;
-                        if (hash < 7) continue;
-                        tileContext.globalAlpha = hash < 13 ? 0.5 : 1;
-                        tileContext.fillRect(x, y, 1, 1);
-                    }
-                }
-                tileContext.globalAlpha = 1;
-                pattern = context.createPattern(tile, 'repeat');
-            }
-        } catch {
-            pattern = null;
+    } else if (profile === 'calli') {
+        // Caligráfica: Plumilla plana a -45 grados (Cero espinas, barrido continuo)
+        const angle = -Math.PI / 4;
+        const ux = Math.cos(angle);
+        const uy = Math.sin(angle);
+        const h = Math.max(1, baseWidth * 1.15);
+
+        ctx.beginPath();
+        // Lado A hacia adelante
+        for (let i = 0; i < points.length; i++) {
+            const pt = points[i];
+            const ax = pt.x - h * ux;
+            const ay = pt.y - h * uy;
+            if (i === 0) ctx.moveTo(ax, ay);
+            else ctx.lineTo(ax, ay);
+        }
+        // Lado B hacia atrás (cierre del polígono de la plumilla)
+        for (let i = points.length - 1; i >= 0; i--) {
+            const pt = points[i];
+            const bx = pt.x + h * ux;
+            const by = pt.y + h * uy;
+            ctx.lineTo(bx, by);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Espina central ultrafina para mantener nitidez en trazos paralelos a -45°
+        ctx.lineWidth = Math.max(1, baseWidth * 0.22);
+        ctx.lineCap = 'butt';
+        buildContinuousPath();
+        ctx.stroke();
+
+    } else if (profile === 'pencil') {
+        // Lápiz de mina: Receta Kangax (Patrón poroso + 2 pasadas continuas sin superposición de vértices)
+        const grainPattern = getGraphitePattern(ctx, color);
+
+        // Pasada 1: Núcleo de grafito translúcido
+        ctx.lineWidth = Math.max(1, baseWidth * 0.95);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        if (grainPattern) {
+            ctx.strokeStyle = grainPattern;
+        }
+        ctx.globalAlpha = opacity * 0.65;
+        buildContinuousPath();
+        ctx.stroke();
+
+        // Pasada 2: Textura de fibras exteriores desfasadas
+        if (grainPattern) {
+            ctx.strokeStyle = grainPattern;
+            ctx.lineWidth = Math.max(1, baseWidth * 1.25);
+            ctx.globalAlpha = opacity * 0.35;
+            // Dibujar ligeramente desplazado para dar aspecto fibroso de mina
+            ctx.save();
+            ctx.translate(0.35, -0.35);
+            buildContinuousPath();
+            ctx.stroke();
+            ctx.restore();
         }
     }
 
-    colorPatterns.set(color, pattern);
-    return pattern;
-}
-
-function makeSolidStrokePoints(
-    data: readonly number[],
-    contentLeft: number,
-    contentWidth: number,
-    blockTop: number,
-): SolidStrokePoint[] {
-    const points: SolidStrokePoint[] = [];
-    for (let i = 0; i < data.length; i += 4) {
-        points.push({
-            x: contentLeft + data[i] * contentWidth,
-            y: blockTop + data[i + 1] * contentWidth,
-            pressure: normalizedPressure(data[i + 2]),
-            time: Number.isFinite(data[i + 3]) ? data[i + 3] : 0,
-        });
-    }
-    return points;
-}
-
-function drawFountainRibbon(
-    context: CanvasRenderingContext2D,
-    points: readonly SolidStrokePoint[],
-    style: StrokeStyle,
-): void {
-    if (points.length === 1) {
-        const radius = style.width * (0.28 + 1.17 * points[0].pressure) / 2;
-        context.beginPath();
-        context.arc(points[0].x, points[0].y, radius, 0, Math.PI * 2);
-        context.fill();
-        return;
-    }
-
-    const ribbon: RibbonPoint[] = [];
-    let previousRadius = style.width / 2;
-    for (let i = 0; i < points.length; i++) {
-        const point = points[i];
-        const previous = points[Math.max(0, i - 1)];
-        const next = points[Math.min(points.length - 1, i + 1)];
-        const tangentX = next.x - previous.x;
-        const tangentY = next.y - previous.y;
-        const tangentLength = Math.hypot(tangentX, tangentY) || 1;
-        const ux = tangentX / tangentLength;
-        const uy = tangentY / tangentLength;
-        const distance = i === 0 ? 0 : Math.hypot(point.x - previous.x, point.y - previous.y);
-        const elapsed = i === 0 ? 0 : point.time - previous.time;
-        const velocity = elapsed > 0 ? distance / elapsed : 0;
-        const targetScale = Math.max(
-            0.28,
-            Math.min(1.45, (0.55 + 0.9 * point.pressure) / (1 + velocity * 0.35)),
-        );
-        const targetRadius = style.width * targetScale / 2;
-        const radius = i === 0 ? targetRadius : 0.65 * previousRadius + 0.35 * targetRadius;
-        previousRadius = radius;
-        ribbon.push({
-            ...point,
-            radius,
-            nx: -uy,
-            ny: ux,
-            angle: Math.atan2(uy, ux),
-        });
-    }
-
-    const first = ribbon[0];
-    const last = ribbon[ribbon.length - 1];
-    const leftX = ribbon.map(point => point.x + point.nx * point.radius);
-    const leftY = ribbon.map(point => point.y + point.ny * point.radius);
-    const rightX = ribbon.map(point => point.x - point.nx * point.radius);
-    const rightY = ribbon.map(point => point.y - point.ny * point.radius);
-
-    context.beginPath();
-    context.moveTo(leftX[0], leftY[0]);
-    for (let i = 1; i < ribbon.length; i++) {
-        const midpointX = (leftX[i - 1] + leftX[i]) / 2;
-        const midpointY = (leftY[i - 1] + leftY[i]) / 2;
-        context.quadraticCurveTo(leftX[i - 1], leftY[i - 1], midpointX, midpointY);
-    }
-    context.lineTo(leftX[leftX.length - 1], leftY[leftY.length - 1]);
-    context.arc(
-        last.x,
-        last.y,
-        last.radius,
-        last.angle + Math.PI / 2,
-        last.angle - Math.PI / 2,
-        true,
-    );
-    context.lineTo(rightX[rightX.length - 1], rightY[rightY.length - 1]);
-    for (let i = ribbon.length - 2; i >= 0; i--) {
-        const midpointX = (rightX[i + 1] + rightX[i]) / 2;
-        const midpointY = (rightY[i + 1] + rightY[i]) / 2;
-        context.quadraticCurveTo(rightX[i + 1], rightY[i + 1], midpointX, midpointY);
-    }
-    context.lineTo(rightX[0], rightY[0]);
-    context.arc(
-        first.x,
-        first.y,
-        first.radius,
-        first.angle - Math.PI / 2,
-        first.angle + Math.PI / 2,
-        true,
-    );
-    context.closePath();
-    context.fill();
-}
-
-function drawCalligraphicRibbon(
-    context: CanvasRenderingContext2D,
-    points: readonly SolidStrokePoint[],
-    style: StrokeStyle,
-): void {
-    const halfNibWidth = style.width * 1.15;
-    const nibX = Math.cos(-Math.PI / 4) * halfNibWidth;
-    const nibY = Math.sin(-Math.PI / 4) * halfNibWidth;
-
-    if (points.length === 1) {
-        context.beginPath();
-        context.moveTo(points[0].x - nibX, points[0].y - nibY);
-        context.lineTo(points[0].x + nibX, points[0].y + nibY);
-        context.lineWidth = Math.max(1, style.width * 0.22);
-        context.lineCap = 'butt';
-        context.stroke();
-        return;
-    }
-
-    context.beginPath();
-    for (let i = 1; i < points.length; i++) {
-        const previous = points[i - 1];
-        const current = points[i];
-        context.moveTo(previous.x - nibX, previous.y - nibY);
-        context.lineTo(previous.x + nibX, previous.y + nibY);
-        context.lineTo(current.x + nibX, current.y + nibY);
-        context.lineTo(current.x - nibX, current.y - nibY);
-        context.closePath();
-    }
-    context.fill();
-
-    context.beginPath();
-    smoothCenterline(context, points);
-    context.lineWidth = Math.max(1, style.width * 0.22);
-    context.lineCap = 'butt';
-    context.lineJoin = 'round';
-    context.stroke();
-}
-
-function drawPencilStroke(
-    context: CanvasRenderingContext2D,
-    points: readonly SolidStrokePoint[],
-    style: StrokeStyle,
-): void {
-    context.beginPath();
-    if (points.length === 1) {
-        context.arc(points[0].x, points[0].y, style.width * 0.475, 0, Math.PI * 2);
-    } else {
-        smoothCenterline(context, points);
-    }
-
-    const averagePressure = points.reduce((sum, point) => sum + point.pressure, 0) / points.length;
-    context.strokeStyle = style.color;
-    context.lineWidth = style.width * 0.95;
-    context.globalAlpha = 0.42 * (0.7 + 0.3 * averagePressure) * style.opacity;
-    context.lineCap = 'round';
-    context.lineJoin = 'round';
-    context.stroke();
-
-    const graphitePattern = getGraphitePattern(context, style.color);
-    context.lineWidth = style.width * 1.15;
-    context.globalAlpha = 0.65 * style.opacity;
-    if (graphitePattern) {
-        context.strokeStyle = graphitePattern;
-        context.stroke();
-    } else {
-        context.strokeStyle = style.color;
-        context.setLineDash([1.2, 1.8]);
-        context.lineDashOffset = 0;
-        context.stroke();
-        context.setLineDash([0.8, 2.4]);
-        context.lineDashOffset = 1.1;
-        context.stroke();
-        context.setLineDash([]);
-        context.lineDashOffset = 0;
-    }
+    ctx.restore();
 }
 
 export function drawSolidProfileStrokePath(
@@ -263,47 +175,15 @@ export function drawSolidProfileStrokePath(
     style: StrokeStyle,
 ): void {
     if (data.length < 4) return;
-    const points = makeSolidStrokePoints(data, contentLeft, contentWidth, blockTop);
-    context.save();
-    context.fillStyle = style.color;
-    context.strokeStyle = style.color;
-    context.lineJoin = 'round';
-
-    try {
-        switch (style.profile || 'fountain') {
-            case 'ball':
-                context.beginPath();
-                if (points.length === 1) {
-                    context.arc(points[0].x, points[0].y, style.width * 0.45, 0, Math.PI * 2);
-                    context.fillStyle = style.color;
-                    context.globalAlpha = 0.98 * style.opacity;
-                    context.fill();
-                } else {
-                    smoothCenterline(context, points);
-                    context.lineWidth = style.width * 0.9;
-                    context.lineCap = 'round';
-                    context.lineJoin = 'round';
-                    context.globalAlpha = 0.98 * style.opacity;
-                    context.stroke();
-                }
-                break;
-            case 'calli':
-                context.globalAlpha = style.opacity;
-                drawCalligraphicRibbon(context, points, style);
-                break;
-            case 'pencil':
-                drawPencilStroke(context, points, style);
-                break;
-            case 'fountain':
-            default:
-                context.globalAlpha = style.opacity;
-                drawFountainRibbon(context, points, style);
-                break;
-        }
-    } finally {
-        context.setLineDash([]);
-        context.restore();
+    const points: { x: number; y: number; pressure?: number }[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+        points.push({
+            x: contentLeft + data[i] * contentWidth,
+            y: blockTop + data[i + 1] * contentWidth,
+            pressure: data[i + 2],
+        });
     }
+    renderContinuousSolidStroke(context, points, style);
 }
 
 export function applyStrokePattern(

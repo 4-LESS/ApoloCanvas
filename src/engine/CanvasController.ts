@@ -25,7 +25,7 @@ import {
 } from '../core/types';
 import { InputManager } from './input/InputManager';
 import { PointBuffer } from './input/PointBuffer';
-import { applyStrokePattern, drawPatternedStrokePath, drawSolidProfileStrokePath } from './PatternedStrokeRenderer';
+import { applyStrokePattern, drawPatternedStrokePath, renderContinuousSolidStroke } from './PatternedStrokeRenderer';
 import { SpatialGrid } from './spatial/SpatialGrid';
 import { PersistenceQueue } from '../io/PersistenceQueue';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer';
@@ -3869,7 +3869,15 @@ export class CanvasController {
                 if (element.style.pattern !== 'solid') {
                     drawPatternedStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
                 } else {
-                    drawSolidProfileStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
+                    const points: { x: number; y: number; pressure?: number }[] = [];
+                    for (let i = 0; i < data.length; i += 4) {
+                        points.push({
+                            x: contentLeft + data[i] * contentWidth,
+                            y: blockTop + data[i + 1] * contentWidth,
+                            pressure: data[i + 2],
+                        });
+                    }
+                    renderContinuousSolidStroke(context, points, element.style);
                 }
             }
         } else {
@@ -4089,7 +4097,6 @@ export class CanvasController {
         }
 
         if (this.activeAnchor) {
-            const geometry = this.getElementAnchorGeometry(this.activeAnchor.blockId, this.activeAnchor.text);
             const validRuns = splitStrokeIntoValidRuns(
                 this.readActivePoints(),
                 bounds.contentTop,
@@ -4097,23 +4104,7 @@ export class CanvasController {
             );
             const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
             for (const run of validRuns) {
-                const data: number[] = [];
-                for (const point of run) {
-                    data.push(
-                        (point.x - geometry.originX) / geometry.scaleWidth,
-                        (point.y - geometry.originY) / geometry.scaleWidth,
-                        point.pressure ?? 0.5,
-                        point.time ?? 0,
-                    );
-                }
-                drawSolidProfileStrokePath(
-                    context,
-                    data,
-                    geometry.originX,
-                    geometry.scaleWidth,
-                    geometry.originY,
-                    activeStyle,
-                );
+                renderContinuousSolidStroke(context, run, activeStyle);
             }
         }
         context.restore();

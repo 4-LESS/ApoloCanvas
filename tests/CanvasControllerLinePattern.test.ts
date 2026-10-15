@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { drawPatternedStrokePath, drawSolidProfileStrokePath } from '../src/engine/PatternedStrokeRenderer.ts';
+import {
+    applyStrokePattern,
+    drawPatternedStrokePath,
+    drawSolidProfileStrokePath,
+    renderContinuousSolidStroke,
+    resetGraphitePatternCacheForTesting,
+} from '../src/engine/PatternedStrokeRenderer.ts';
 
 function createRecordingContext(pattern: CanvasPattern | null = null) {
     const strokes: Array<{ lineWidth: number; globalAlpha: number; lineCap: string; strokeStyle: unknown; dash: number[] }> = [];
@@ -19,6 +25,7 @@ function createRecordingContext(pattern: CanvasPattern | null = null) {
     const context = {
         save: () => undefined,
         restore: () => undefined,
+        translate: () => undefined,
         beginPath: () => { commands.push('beginPath'); },
         moveTo: () => { commands.push('moveTo'); },
         lineTo: () => { commands.push('lineTo'); },
@@ -50,7 +57,7 @@ function createRecordingContext(pattern: CanvasPattern | null = null) {
 
 const solidPoints = [0.1, 0.5, 0.9, 0, 0.4, 0.5, 0.6, 100, 0.8, 0.25, 0.5, 200];
 
-test('solid profiles use continuous strokes, ribbon fills, fixed-nib quads, and graphite texture passes', () => {
+test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and Kangax graphite texture passes', () => {
     const baseStyle = { color: '#222222', width: 4, opacity: 0.8, pattern: 'solid' as const };
 
     const ball = createRecordingContext();
@@ -59,21 +66,22 @@ test('solid profiles use continuous strokes, ribbon fills, fixed-nib quads, and 
     assert.equal(ball.fills.length, 0);
     assert.equal(ball.strokes[0].lineWidth, 3.6);
     assert.equal(ball.strokes[0].lineCap, 'round');
-    assert.equal(ball.strokes[0].globalAlpha, 0.98 * baseStyle.opacity);
+    assert.equal(ball.strokes[0].globalAlpha, baseStyle.opacity);
     assert.ok(ball.commands.includes('quadraticCurveTo'));
 
     const fountain = createRecordingContext();
     drawSolidProfileStrokePath(fountain.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'fountain' });
-    assert.equal(fountain.fills.length, 1, 'fountain is one filled ribbon');
-    assert.equal(fountain.strokes.length, 0);
-    assert.equal(fountain.arcs.length, 2, 'ribbon has round endcaps');
-    assert.ok(fountain.commands.includes('quadraticCurveTo'), 'ribbon edges are smoothed');
+    assert.equal(fountain.strokes.length, 1, 'fountain uses one continuous stroke');
+    assert.equal(fountain.fills.length, 0);
+    assert.equal(fountain.strokes[0].lineWidth, 4);
+    assert.equal(fountain.strokes[0].lineCap, 'round');
+    assert.ok(fountain.commands.includes('quadraticCurveTo'), 'fountain path is smoothed');
 
     const calli = createRecordingContext();
     drawSolidProfileStrokePath(calli.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'calli' });
-    assert.equal(calli.fills.length, 1, 'all adjacent nib quads are filled together');
-    assert.equal(calli.strokes.length, 1, 'calligraphy uses one continuous spine');
-    assert.equal(calli.commands.filter(command => command === 'closePath').length, 2);
+    assert.equal(calli.fills.length, 1, 'nib quad polygon is filled');
+    assert.equal(calli.strokes.length, 1, 'calligraphy uses one central spine stroke');
+    assert.equal(calli.commands.filter(command => command === 'closePath').length, 1);
     assert.equal(calli.strokes[0].lineCap, 'butt');
     assert.equal(calli.strokes[0].lineWidth, 1);
 
@@ -96,20 +104,23 @@ test('solid profiles use continuous strokes, ribbon fills, fixed-nib quads, and 
         },
     };
     try {
+        resetGraphitePatternCacheForTesting();
         drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
         drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
         assert.equal(pencil.strokes.length, 4, 'each pencil render uses one core and one grain pass');
-        assert.equal(pencil.patternCalls, 1, 'graphite pattern is cached per color and context');
+        assert.equal(pencil.patternCalls, 1, 'graphite pattern is cached per color');
         assert.equal(tileCount, 1);
         assert.equal(pencil.strokes[0].lineWidth, baseStyle.width * 0.95);
-        assert.equal(pencil.strokes[1].lineWidth, baseStyle.width * 1.15);
+        assert.equal(pencil.strokes[1].lineWidth, baseStyle.width * 1.25);
+        assert.equal(pencil.strokes[0].strokeStyle, patternToken);
         assert.equal(pencil.strokes[1].strokeStyle, patternToken);
     } finally {
         (globalThis as any).document = previousDocument;
     }
 });
 
-test('pencil uses continuous micro-dash grain when CanvasPattern is unavailable', () => {
+test('pencil renders single core pass when CanvasPattern is unavailable', () => {
+    resetGraphitePatternCacheForTesting();
     const pencil = createRecordingContext(null);
     const previousDocument = (globalThis as any).document;
     (globalThis as any).document = {
@@ -119,12 +130,25 @@ test('pencil uses continuous micro-dash grain when CanvasPattern is unavailable'
         drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, {
             color: '#222222', width: 4, opacity: 0.8, pattern: 'solid', profile: 'pencil',
         });
-        assert.equal(pencil.strokes.length, 3, 'core and both continuous fallback grain passes render');
-        assert.deepEqual(pencil.strokes[1].dash, [1.2, 1.8]);
-        assert.deepEqual(pencil.strokes[2].dash, [0.8, 2.4]);
+        assert.equal(pencil.strokes.length, 1, 'single translucent core pass renders safely when pattern unavailable');
+        assert.equal(pencil.strokes[0].lineWidth, 4 * 0.95);
+        assert.equal(pencil.strokes[0].strokeStyle, '#222222');
     } finally {
         (globalThis as any).document = previousDocument;
     }
+});
+
+test('renderContinuousSolidStroke handles single point touches with arc and fill', () => {
+    const recording = createRecordingContext();
+    renderContinuousSolidStroke(recording.context, [{ x: 50, y: 50 }], {
+        color: '#ff0000',
+        width: 6,
+        opacity: 0.9,
+        profile: 'ball',
+    });
+    assert.equal(recording.fills.length, 1);
+    assert.equal(recording.arcs.length, 1);
+    assert.deepEqual(recording.arcs[0], [50, 50, 3, 0, Math.PI * 2]);
 });
 
 test('live dashed pointer drag redraws one continuous path before pointerup', () => {
