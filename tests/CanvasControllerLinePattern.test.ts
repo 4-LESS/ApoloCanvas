@@ -1,6 +1,38 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { drawPatternedStrokePath } from '../src/engine/PatternedStrokeRenderer.ts';
+import { drawPatternedStrokePath, getSolidProfileSegmentStyle } from '../src/engine/PatternedStrokeRenderer.ts';
+
+test('solid profiles apply distinct width, opacity, direction, and grain dynamics', () => {
+    const baseWidth = 4;
+    const baseOpacity = 0.8;
+    const ballLight = getSolidProfileSegmentStyle('ball', baseWidth, 0, baseOpacity, 0, 0, 10, 0, 0);
+    const ballHeavy = getSolidProfileSegmentStyle('ball', baseWidth, 1, baseOpacity, 0, 0, 10, 0, 0);
+    assert.equal(ballLight.width, baseWidth * 0.95);
+    assert.equal(ballHeavy.width, baseWidth * 1.05);
+    assert.equal(ballLight.opacity, 0.98 * baseOpacity);
+    assert.equal(ballLight.lineCap, 'round');
+
+    const fountainLight = getSolidProfileSegmentStyle('fountain', baseWidth, 0, baseOpacity, 0, 0, 10, 0, 0);
+    const fountainMiddle = getSolidProfileSegmentStyle('fountain', baseWidth, 0.5, baseOpacity, 0, 0, 10, 0, 0);
+    const fountainHeavy = getSolidProfileSegmentStyle('fountain', baseWidth, 1, baseOpacity, 0, 0, 10, 0, 0);
+    assert.equal(fountainLight.width, baseWidth * 0.45);
+    assert.equal(fountainMiddle.width, baseWidth * 0.9);
+    assert.equal(fountainHeavy.width, baseWidth * 1.35);
+
+    const calliDiagonal = getSolidProfileSegmentStyle('calli', baseWidth, 0.5, baseOpacity, 0, 0, 10, 10, 0);
+    const calliHorizontal = getSolidProfileSegmentStyle('calli', baseWidth, 0.5, baseOpacity, 0, 0, 10, 0, 0);
+    assert.ok(Math.abs(calliDiagonal.width - baseWidth * 0.3) < 1e-9);
+    assert.ok(calliHorizontal.width > calliDiagonal.width);
+    assert.equal(calliDiagonal.lineCap, 'butt');
+
+    const pencilLight = getSolidProfileSegmentStyle('pencil', baseWidth, 0, baseOpacity, 0, 0, 10, 0, 0);
+    const pencilHeavy = getSolidProfileSegmentStyle('pencil', baseWidth, 1, baseOpacity, 0, 0, 10, 0, 0);
+    const pencilGrain = getSolidProfileSegmentStyle('pencil', baseWidth, 0, baseOpacity, 0, 0, 5, 5, 1);
+    assert.equal(pencilLight.opacity, 0.38 * baseOpacity);
+    assert.equal(pencilHeavy.opacity, 0.86 * baseOpacity);
+    assert.notEqual(pencilLight.width, pencilGrain.width);
+    assert.ok(pencilGrain.width >= baseWidth * 0.97 && pencilGrain.width <= baseWidth * 1.03);
+});
 
 test('live dashed pointer drag redraws one continuous path before pointerup', () => {
     const points: number[] = [];

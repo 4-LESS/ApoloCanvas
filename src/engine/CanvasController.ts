@@ -25,7 +25,7 @@ import {
 } from '../core/types';
 import { InputManager } from './input/InputManager';
 import { PointBuffer } from './input/PointBuffer';
-import { applyStrokePattern, drawPatternedStrokePath } from './PatternedStrokeRenderer';
+import { applyStrokePattern, drawPatternedStrokePath, getSolidProfileSegmentStyle } from './PatternedStrokeRenderer';
 import { SpatialGrid } from './spatial/SpatialGrid';
 import { PersistenceQueue } from '../io/PersistenceQueue';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer';
@@ -40,7 +40,7 @@ import { Toast } from '../ui/Toast';
 import { PopoverController } from '../ui/kit';
 import { LinkSuggestModal, openLocalGraph } from '../ui/LinkSuggestModal';
 import { createDotsIcon, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
-import { calculateNaturalPressureScale, smoothPressure } from './input/PressureCurve';
+import { smoothPressure } from './input/PressureCurve';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser';
 import {
     cleanAnchorText,
@@ -3870,8 +3870,20 @@ export class CanvasController {
                     drawPatternedStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
                 } else if (data.length === 4) {
                     const profileId = element.style.profile || 'fountain';
-                    const scale = calculateNaturalPressureScale(data[2], profileId, this.pressureSensitivity);
-                    context.lineWidth = element.style.width * scale;
+                    const segmentStyle = getSolidProfileSegmentStyle(
+                        profileId,
+                        element.style.width,
+                        data[2],
+                        element.style.opacity,
+                        data[0],
+                        data[1],
+                        data[0],
+                        data[1],
+                        0,
+                    );
+                    context.lineWidth = segmentStyle.width;
+                    context.globalAlpha = segmentStyle.opacity;
+                    context.lineCap = segmentStyle.lineCap;
                     context.beginPath();
                     context.arc(
                         contentLeft + data[0] * contentWidth,
@@ -3886,8 +3898,20 @@ export class CanvasController {
                     const profileId = element.style.profile || 'fountain';
                     for (let i = 4; i < data.length; i += 4) {
                         const avgP = (data[i - 2] + data[i + 2]) / 2;
-                        const scale = calculateNaturalPressureScale(avgP, profileId, this.pressureSensitivity);
-                        context.lineWidth = element.style.width * scale;
+                        const segmentStyle = getSolidProfileSegmentStyle(
+                            profileId,
+                            element.style.width,
+                            avgP,
+                            element.style.opacity,
+                            data[i - 4],
+                            data[i - 3],
+                            data[i],
+                            data[i + 1],
+                            i / 4,
+                        );
+                        context.lineWidth = segmentStyle.width;
+                        context.globalAlpha = segmentStyle.opacity;
+                        context.lineCap = segmentStyle.lineCap;
                         context.beginPath();
                         context.moveTo(contentLeft + data[i - 4] * contentWidth, blockTop + data[i - 3] * contentWidth);
                         context.lineTo(contentLeft + data[i] * contentWidth, blockTop + data[i + 1] * contentWidth);
@@ -4131,12 +4155,20 @@ export class CanvasController {
                 context.arc(this.points.getX(0), this.points.getY(0), Math.max(1, this.style.width / 2), 0, Math.PI * 2);
                 context.stroke();
             } else {
-                const scale = calculateNaturalPressureScale(
-                    this.points.getPressure(0),
+                const pointStyle = getSolidProfileSegmentStyle(
                     this.penProfileId,
-                    this.pressureSensitivity,
+                    this.style.width,
+                    this.points.getPressure(0),
+                    this.style.opacity,
+                    this.points.getX(0),
+                    this.points.getY(0),
+                    this.points.getX(0),
+                    this.points.getY(0),
+                    0,
                 );
-                context.lineWidth = this.style.width * scale;
+                context.lineWidth = pointStyle.width;
+                context.globalAlpha = pointStyle.opacity;
+                context.lineCap = pointStyle.lineCap;
                 context.beginPath();
                 context.arc(this.points.getX(0), this.points.getY(0), context.lineWidth / 2, 0, Math.PI * 2);
                 context.fillStyle = this.style.color;
@@ -4156,19 +4188,28 @@ export class CanvasController {
                     context.setLineDash([6, 10]);
                     context.lineWidth = Math.max(1.5, Math.min(3, this.style.width));
                 } else {
-                    context.strokeStyle = this.style.color;
-                    context.globalAlpha = this.style.opacity;
                     applyStrokePattern(context, this.style.pattern, this.style.width, this.style.lineCap ?? 'round');
                     if (this.style.pattern !== 'solid') {
+                        context.strokeStyle = this.style.color;
+                        context.globalAlpha = this.style.opacity;
                         context.lineWidth = this.style.width;
                     } else {
                         const avgP = (this.points.getPressure(i - 1) + this.points.getPressure(i)) / 2;
-                        const scale = calculateNaturalPressureScale(
-                            avgP,
+                        const segmentStyle = getSolidProfileSegmentStyle(
                             this.penProfileId,
-                            this.pressureSensitivity,
+                            this.style.width,
+                            avgP,
+                            this.style.opacity,
+                            this.points.getX(i - 1),
+                            y0,
+                            this.points.getX(i),
+                            y1,
+                            i,
                         );
-                        context.lineWidth = this.style.width * scale;
+                        context.strokeStyle = this.style.color;
+                        context.globalAlpha = segmentStyle.opacity;
+                        context.lineWidth = segmentStyle.width;
+                        context.lineCap = segmentStyle.lineCap;
                     }
                 }
 

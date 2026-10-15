@@ -1,5 +1,63 @@
 import type { StrokePattern, StrokeStyle } from '../core/types';
 
+export interface SolidProfileSegmentStyle {
+    width: number;
+    opacity: number;
+    lineCap: CanvasLineCap;
+}
+
+export function getSolidProfileSegmentStyle(
+    profile: StrokeStyle['profile'],
+    baseWidth: number,
+    pressure: number,
+    opacity: number,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    segmentIndex: number,
+): SolidProfileSegmentStyle {
+    const p = Number.isFinite(pressure) ? Math.max(0, Math.min(1, pressure)) : 0.5;
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+
+    switch (profile) {
+        case 'ball':
+            return {
+                width: baseWidth * Math.max(0.95, Math.min(1.05, 0.95 + p * 0.1)),
+                opacity: 0.98 * opacity,
+                lineCap: 'round',
+            };
+        case 'calli': {
+            const angle = Math.atan2(dy, dx);
+            return {
+                width: baseWidth * (0.3 + 0.9 * Math.abs(Math.sin(angle - Math.PI / 4))),
+                opacity,
+                lineCap: 'butt',
+            };
+        }
+        case 'pencil': {
+            const grainWave = (Math.sin(
+                x0 * 12.9898 + y0 * 78.233 + x1 * 37.719 + y1 * 11.13 + segmentIndex * 19.19,
+            ) + 1) / 2;
+            return {
+                width: baseWidth * (0.97 + grainWave * 0.06),
+                opacity: (0.38 + 0.48 * p) * opacity,
+                lineCap: 'round',
+            };
+        }
+        case 'fountain':
+        default: {
+            const easedPressure = p * p * (3 - 2 * p);
+            return {
+                width: baseWidth * (0.45 + 0.9 * easedPressure),
+                opacity,
+                lineCap: 'round',
+            };
+        }
+    }
+}
+
 export function applyStrokePattern(
     context: CanvasRenderingContext2D,
     pattern: StrokePattern,
