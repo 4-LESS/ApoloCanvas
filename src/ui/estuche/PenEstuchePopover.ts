@@ -56,7 +56,7 @@ export class PenEstuchePopover {
     private readonly tools: Array<{ id: PenProfileId; label: string; iconD: string }> = [
         { id: 'fountain', label: 'Estilográfica', iconD: ICONS.pen },
         { id: 'calli', label: 'Caligráfica', iconD: ICONS.feather },
-        { id: 'hlr', label: 'Rotulador', iconD: ICONS.highlighter },
+        { id: 'ball', label: 'Bolígrafo', iconD: ICONS.ballpoint },
         { id: 'pencil', label: 'Lápiz de mina', iconD: ICONS.pencil },
     ];
 
