@@ -3081,6 +3081,8 @@ button.apolo-box-menu-swatch,
   appearance: none;
   -webkit-appearance: none;
   height: 36px;
+  position: relative;
+  isolation: isolate;
   border-radius: 10px;
   padding: 0 10px;
   background-color: transparent;
@@ -3094,6 +3096,18 @@ button.apolo-box-menu-swatch,
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
+.apolo-estuche-popover .popover-lines-grid button.popover-line-chip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 1.5px solid transparent;
+  border-radius: inherit;
+  background-color: transparent;
+  pointer-events: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
 .apolo-estuche-popover .popover-lines-grid .popover-line-chip:hover {
   background-color: rgba(148, 163, 184, 0.12);
 }
@@ -3105,9 +3119,17 @@ button.apolo-box-menu-swatch,
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 0 2px rgba(47, 107, 255, 0.16);
 }
 
+.apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active[aria-pressed="true"]::before {
+  background-color: rgba(47, 107, 255, 0.2);
+  border: 2px solid #2f6bff;
+  box-shadow: 0 0 0 2px rgba(47, 107, 255, 0.16);
+}
+
 .apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active[aria-pressed="true"] .popover-line-bar {
   color: #2f6bff;
   background-color: #2f6bff;
+  position: relative;
+  z-index: 1;
 }
 
 .apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active[aria-pressed="true"] .popover-line-bar.is-dashed {
