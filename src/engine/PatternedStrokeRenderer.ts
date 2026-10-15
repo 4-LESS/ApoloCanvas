@@ -143,50 +143,50 @@ export function renderContinuousSolidStroke(
         ctx.stroke();
 
     } else if (profile === 'pencil') {
-        // Lápiz de mina: Núcleo suave y difuso + dispersión estocástica de grafito
-        
+        // Lápiz de mina: Renderizado orgánico por dispersión estocástica gaussiana (sin contornos sólidos)
+        ctx.save();
+        ctx.fillStyle = color;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
-        // 1. Capa base de grafito suave y difusa (Cuerpo denso del lápiz)
-        ctx.lineWidth = Math.max(1, baseWidth * 1.1);
-        ctx.globalAlpha = opacity * 0.45;
-        buildContinuousPath();
-        ctx.stroke();
+        // Determinar paso y densidad de partículas según el grosor
+        const step = Math.max(1.5, baseWidth * 0.25);
+        const radius = Math.max(1, baseWidth * 0.5);
 
-        // 2. Núcleo central más denso
-        ctx.lineWidth = Math.max(1, baseWidth * 0.65);
-        ctx.globalAlpha = opacity * 0.85;
-        buildContinuousPath();
-        ctx.stroke();
-
-        // 3. Capa de textura superficial (Motas de grafito orgánico con dispersión aleatoria)
-        ctx.save();
-        ctx.globalAlpha = opacity * 0.30;
-        ctx.fillStyle = color;
-        
-        // Generar puntos de textura a lo largo del camino interpolado
-        const step = Math.max(2, baseWidth * 0.4);
         for (let i = 0; i < points.length - 1; i++) {
             const p1 = points[i];
             const p2 = points[i + 1];
             const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
             const stepsCount = Math.ceil(dist / step);
-            
+
             for (let s = 0; s <= stepsCount; s++) {
                 const t = stepsCount === 0 ? 0 : s / stepsCount;
                 const cx = p1.x + (p2.x - p1.x) * t;
                 const cy = p1.y + (p2.y - p1.y) * t;
-                
-                // Dispersión lateral dentro del radio del lápiz
-                const scatterCount = 3;
-                for (let c = 0; c < scatterCount; c++) {
-                    const angle = ((c * 137.5 + i * 45) % 360) * (Math.PI / 180);
-                    const r = (baseWidth * 0.5) * Math.sqrt(((c * 7 + s * 13) % 100) / 100);
+
+                // Densidad proporcional al área para que grosores altos mantengan textura rica
+                const density = Math.max(4, Math.round(baseWidth * 1.5));
+
+                for (let c = 0; c < density; c++) {
+                    // Distribución gaussiana / radial aproximada (más denso al centro, difuso en el radio)
+                    const u1 = ((c * 93.13 + i * 41.2 + s * 17.3) % 100) / 100;
+                    const u2 = ((c * 47.7 + i * 83.9 + s * 29.1) % 100) / 100;
+                    
+                    const angle = u1 * Math.PI * 2;
+                    // Raíz cuadrada de u2 concentra las partículas hacia el centro (distribución natural de mina)
+                    const r = radius * Math.sqrt(u2);
+
                     const px = cx + Math.cos(angle) * r;
                     const py = cy + Math.sin(angle) * r;
-                    
-                    ctx.fillRect(px, py, 1.2, 1.2);
+
+                    // Opacidad individual variable para dar el efecto de grano de papel
+                    const particleAlpha = opacity * (0.12 + 0.38 * (((c * 7 + s * 3) % 10) / 10));
+                    ctx.globalAlpha = particleAlpha;
+
+                    // Usar círculos pequeños en lugar de rectángulos para evitar esquinas cuadradas
+                    ctx.beginPath();
+                    ctx.arc(px, py, 0.85 + (c % 2) * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
                 }
             }
         }

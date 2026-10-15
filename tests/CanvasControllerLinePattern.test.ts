@@ -90,16 +90,11 @@ test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and du
 
     const pencil = createRecordingContext();
     drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
-    drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
-    assert.equal(pencil.strokes.length, 4, 'each pencil render uses soft diffuse base and dense core pass');
-    assert.equal(pencil.strokes[0].lineWidth, baseStyle.width * 1.1);
-    assert.equal(pencil.strokes[1].lineWidth, baseStyle.width * 0.65);
-    assert.equal(pencil.strokes[0].globalAlpha, baseStyle.opacity * 0.45);
-    assert.equal(pencil.strokes[1].globalAlpha, baseStyle.opacity * 0.85);
-    assert.ok(pencil.fillRects.length > 0, 'micro-particle scatter layer was rendered');
-    assert.equal(pencil.fillRects[0].w, 1.2);
-    assert.equal(pencil.fillRects[0].h, 1.2);
-    assert.equal(pencil.fillRects[0].globalAlpha, baseStyle.opacity * 0.30);
+    assert.equal(pencil.strokes.length, 0, 'pencil has zero solid stroke outlines to prevent cartoon borders');
+    assert.ok(pencil.fills.length > 0, 'pencil particles are rendered as soft filled circles');
+    assert.ok(pencil.arcs.length > 0, 'each particle is rendered with an arc');
+    assert.ok(pencil.fills.every(f => f.fillStyle === baseStyle.color), 'particles use the stroke color');
+    assert.ok(pencil.arcs.every(a => a[2] >= 0.85 && a[2] <= 1.25), 'particle radii simulate organic paper grain');
 });
 
 test('renderContinuousSolidStroke handles single point touches with arc and fill', () => {
