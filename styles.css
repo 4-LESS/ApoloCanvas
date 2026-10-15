@@ -3077,37 +3077,44 @@ button.apolo-box-menu-swatch,
   gap: 8px;
 }
 
-.apolo-ui .popover-line-chip,
-.popover-line-chip {
-  all: unset;
-  background: var(--apolo-bg-alt);
-  border-radius: 12px;
+.apolo-estuche-popover .popover-lines-grid .popover-line-chip {
+  appearance: none;
+  -webkit-appearance: none;
   height: 36px;
+  border-radius: 10px;
+  padding: 0 10px;
+  background-color: transparent;
+  border: 1.5px solid transparent;
+  box-shadow: none;
+  color: var(--apolo-text, #1e293b);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 1px solid var(--apolo-border-subtle);
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.popover-line-chip.is-active {
-  border-color: var(--apolo-accent);
-  background: var(--apolo-accent-light);
-  box-shadow: 0 0 0 1px var(--apolo-accent);
+.apolo-estuche-popover .popover-lines-grid .popover-line-chip:hover {
+  background-color: rgba(148, 163, 184, 0.12);
+}
+
+.apolo-estuche-popover .popover-lines-grid .popover-line-chip.is-active {
+  background-color: rgba(47, 107, 255, 0.12);
+  border-color: rgba(47, 107, 255, 0.32);
+  color: #2f6bff;
 }
 
 .popover-line-bar {
   width: 50%;
   height: 3px;
-  background-color: var(--apolo-text);
+  background-color: currentColor;
   border-radius: 2px;
 }
 
-.popover-line-bar.is-dashed { background: none; border-top: 3px dashed var(--apolo-text); }
+.popover-line-bar.is-dashed { background: none; border-top: 3px dashed currentColor; }
 .popover-line-bar.is-dotted {
   height: 3px;
-  background: radial-gradient(circle, var(--apolo-text) 1px, transparent 1.5px) left center / 5px 3px repeat-x;
+  background: radial-gradient(circle, currentColor 1px, transparent 1.5px) left center / 5px 3px repeat-x;
 }
 
 .popover-toggle-row {
@@ -3381,6 +3388,12 @@ button.apolo-box-menu-swatch,
   background: var(--apolo-accent-light);
   border-radius: 12px;
   box-shadow: inset 0 0 0 1px var(--apolo-accent), var(--apolo-shadow-sm);
+}
+
+.apolo-estuche-popover .shape-grid-selector .shape-grid-btn.is-active {
+  color: #2f6bff;
+  background-color: rgba(47, 107, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(47, 107, 255, 0.32);
 }
 
 .shape-fill-subpanel {

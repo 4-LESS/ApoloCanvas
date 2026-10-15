@@ -291,7 +291,9 @@ export class ToolEstuche implements PopoverInstance {
             this.state.lineStyle = nextPattern;
             this.state.pattern = nextPattern;
             for (const [pattern, btn] of this.lineStyleChips) {
-                btn.classList.toggle('is-active', pattern === nextPattern);
+                const isActive = pattern === nextPattern;
+                btn.classList.toggle('is-active', isActive);
+                btn.setAttribute('aria-pressed', String(isActive));
             }
         }
 
@@ -945,15 +947,20 @@ export class ToolEstuche implements PopoverInstance {
         for (const s of styles) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `popover-line-chip ${s.id === activePattern ? 'is-active' : ''}`;
+            const isActive = s.id === activePattern;
+            btn.className = `popover-line-chip ${isActive ? 'is-active' : ''}`;
+            btn.setAttribute('aria-pressed', String(isActive));
 
             const bar = document.createElement('div');
             bar.className = `popover-line-bar ${s.cls}`;
             btn.appendChild(bar);
 
             btn.onclick = () => {
-                for (const [, b] of this.lineStyleChips) b.classList.remove('is-active');
-                btn.classList.add('is-active');
+                for (const [pattern, lineStyleButton] of this.lineStyleChips) {
+                    const isActive = pattern === s.id;
+                    lineStyleButton.classList.toggle('is-active', isActive);
+                    lineStyleButton.setAttribute('aria-pressed', String(isActive));
+                }
                 this.state.lineStyle = s.id;
                 this.state.pattern = s.id;
                 onSelect?.(s.id);

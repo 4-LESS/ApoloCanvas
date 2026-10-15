@@ -161,6 +161,8 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
                 color: '#212529',
                 width: 3.5,
                 profileId: 'fountain',
+                lineStyle: 'dashed',
+                pattern: 'dashed',
                 smoothing: 0.5,
                 pressureSensitivity: 0.8,
                 favorites: [],
@@ -209,6 +211,25 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             // Verify body contains profile cards and slider rows
             const body = estuche.container.children[1];
             assert.ok(body.children.length >= 3, 'Estuche body must contain profiles, sliders, and color section');
+
+            const findButtons = (node: any, className: string): any[] => {
+                const matches = node.className?.split(/\s+/).includes(className) ? [node] : [];
+                for (const child of node.children || []) matches.push(...findButtons(child, className));
+                return matches;
+            };
+            const lineStyleButtons = findButtons(body, 'popover-line-chip');
+            assert.equal(lineStyleButtons.length, 3);
+            assert.equal(lineStyleButtons[0].getAttribute('aria-pressed'), 'false');
+            assert.equal(lineStyleButtons[1].getAttribute('aria-pressed'), 'true');
+            assert.equal(lineStyleButtons[1].classList.contains('is-active'), true);
+
+            lineStyleButtons[2].onclick();
+            assert.equal(lineStyleButtons[1].getAttribute('aria-pressed'), 'false');
+            assert.equal(lineStyleButtons[2].getAttribute('aria-pressed'), 'true');
+            estuche.updateState({ lineStyle: 'solid', pattern: 'solid' });
+            assert.equal(lineStyleButtons[0].getAttribute('aria-pressed'), 'true');
+            assert.equal(lineStyleButtons[0].classList.contains('is-active'), true);
+            assert.equal(lineStyleButtons[2].getAttribute('aria-pressed'), 'false');
 
             // 3. Test In-Place Update (Zero DOM destruction during slider adjustments)
             const initialFirstChild = body.children[0];
