@@ -5,6 +5,7 @@
 export class Toast {
     private readonly element = document.createElement('div');
     private hideTimer: number | null = null;
+    private transitionTimer: number | null = null;
 
     constructor(parent: HTMLElement = document.body) {
         this.element.className = 'apolo-toast';
@@ -20,10 +21,7 @@ export class Toast {
             return;
         }
 
-        if (this.hideTimer !== null) {
-            window.clearTimeout(this.hideTimer);
-            this.hideTimer = null;
-        }
+        this.clearTimers();
 
         this.element.textContent = message;
         this.element.hidden = false;
@@ -37,22 +35,33 @@ export class Toast {
     }
 
     hide(): void {
-        if (this.hideTimer !== null) {
-            window.clearTimeout(this.hideTimer);
-            this.hideTimer = null;
-        }
+        this.clearHideTimer();
         this.element.classList.remove('is-visible');
-        window.setTimeout(() => {
+        this.transitionTimer = window.setTimeout(() => {
             if (!this.element.classList.contains('is-visible')) {
                 this.element.hidden = true;
             }
+            this.transitionTimer = null;
         }, 250);
     }
 
     destroy(): void {
+        this.clearTimers();
+        this.element.remove();
+    }
+
+    private clearHideTimer(): void {
         if (this.hideTimer !== null) {
             window.clearTimeout(this.hideTimer);
+            this.hideTimer = null;
         }
-        this.element.remove();
+    }
+
+    private clearTimers(): void {
+        this.clearHideTimer();
+        if (this.transitionTimer !== null) {
+            window.clearTimeout(this.transitionTimer);
+            this.transitionTimer = null;
+        }
     }
 }

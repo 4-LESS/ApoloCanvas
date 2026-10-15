@@ -1,4 +1,4 @@
-import { App, FuzzyMatch, FuzzySuggestModal, Notice, SuggestModal, TFile } from 'obsidian';
+import { App, Notice, SuggestModal, TFile } from 'obsidian';
 
 export interface LinkItem {
     file?: TFile;

@@ -10,6 +10,7 @@ import {
 
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from '../core/types.ts';
+import { createDotsIcon } from '../ui/theme.ts';
 export { BoxRegistry };
 
 export const boxRegistryUpdateEffect = StateEffect.define<void>();
@@ -120,21 +121,11 @@ export class ApoloSpaceWidget extends WidgetType {
 
         // Subtle top-left 3-dots button for space settings
         const optionsBtn = document.createElement('button');
-        optionsBtn.className = 'apolo-box-options-btn';
+        optionsBtn.className = 'apolo-box-options-btn clickable-icon';
         optionsBtn.type = 'button';
         optionsBtn.dataset.apoloBoxId = this.id;
         optionsBtn.setAttribute('aria-label', 'Opciones del espacio');
-        const dotsSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        dotsSvg.setAttribute('viewBox', '0 0 24 24');
-        dotsSvg.setAttribute('width', '16');
-        dotsSvg.setAttribute('height', '16');
-        dotsSvg.setAttribute('fill', 'none');
-        dotsSvg.setAttribute('stroke', 'currentColor');
-        dotsSvg.setAttribute('stroke-width', '2');
-        dotsSvg.setAttribute('stroke-linecap', 'round');
-        dotsSvg.setAttribute('stroke-linejoin', 'round');
-        dotsSvg.innerHTML = '<circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle><circle cx="5" cy="12" r="1.5"></circle>';
-        optionsBtn.appendChild(dotsSvg);
+        optionsBtn.appendChild(createDotsIcon());
         div.appendChild(optionsBtn);
 
         // 44px touch-target bottom resize handle (strictly for vertical dragging)

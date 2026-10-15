@@ -26,3 +26,17 @@ The engine keeps a spatial hash of stroke bounds for viewport culling, writes si
 ## Runtime notes
 
 Obsidian controls the Android WebView frame scheduler and S-Pen hardware event delivery. The plugin consumes every coalesced sample available to it, but actual latency and drawer behavior should be checked on the Galaxy Tab S10 with the target Obsidian version. Line reanchoring uses the public editor text API and visible CodeMirror line layout; unusual folds and heavily wrapped blocks can make its estimated line-to-pixel shift less exact.
+
+## UI Architecture & Popover System
+
+The UI follows a centralized design system optimized for tablets (Samsung Notes style on Galaxy Tab S10 horizontal):
+- Root container `.apolo-ui` mounted idempotently in `document.body` for the active leaf.
+- Accessible 44px primary touch targets with SVG icons constructed directly via DOM (`createElementNS`), strictly avoiding `innerHTML`.
+- Centralized `PopoverController` managing floating panels (`PopoverShell`, `ToolEstuche`, `BoxMenu`).
+- **Popover Trigger Convention (`data-apolo-popover-trigger="true"`)**:
+  - Any button or control that opens or toggles a popover must include the attribute `data-apolo-popover-trigger="true"`.
+  - When using `IconButton`, set `triggerForPopover: true` in the options.
+  - `PopoverController` checks for this attribute on global `pointerdown` to distinguish intentional trigger toggles from outside clicks, preventing race conditions where tapping an open popover's trigger would cause immediate re-opening or jitter.
+- **Viewport & Physical Screen Anchoring**:
+  - `AnchorPositioning` calculates popover coordinates relative to `window.visualViewport` with automatic vertical and horizontal flip logic and safe margin clamping (accounting for on-screen keyboards and tablet UI bars).
+

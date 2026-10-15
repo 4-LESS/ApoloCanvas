@@ -138,6 +138,10 @@ export class InputManager {
 
     shouldRejectTouch(): boolean { return this.isPalmRejected() || this.hasActivePenStroke; }
 
+    isPointerRejected(pointerId: number): boolean {
+        return this.rejectedPointerIds.has(pointerId);
+    }
+
     destroy(): void {
         if (this.disposed) return;
         this.disposed = true;
@@ -362,7 +366,7 @@ export class InputManager {
         return this.mouseDrawingEnabled && event.pointerType === 'mouse' && event.isPrimary;
     }
 
-    private isPalmRejected(): boolean {
+    isPalmRejected(): boolean {
         return this.isPenHovering || (Date.now() - this.lastPenContactAt < this.cooldownMs);
     }
 

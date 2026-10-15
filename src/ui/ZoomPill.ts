@@ -1,3 +1,5 @@
+import { createSvgIcon } from './kit/index.ts';
+
 export interface ZoomPillCallbacks {
     onZoomIn: () => void;
     onZoomOut: () => void;
@@ -23,8 +25,8 @@ export class ZoomPill {
         const minusBtn = document.createElement('button');
         minusBtn.type = 'button';
         minusBtn.className = 'apolo-zoom-btn';
-        minusBtn.textContent = '−';
         minusBtn.setAttribute('aria-label', 'Alejar zoom');
+        minusBtn.appendChild(createSvgIcon('minus', { size: 16 }));
         minusBtn.addEventListener('click', () => this.callbacks.onZoomOut());
 
         // Zoom percentage label
@@ -36,8 +38,8 @@ export class ZoomPill {
         const plusBtn = document.createElement('button');
         plusBtn.type = 'button';
         plusBtn.className = 'apolo-zoom-btn';
-        plusBtn.textContent = '+';
         plusBtn.setAttribute('aria-label', 'Acercar zoom');
+        plusBtn.appendChild(createSvgIcon('plus', { size: 16 }));
         plusBtn.addEventListener('click', () => this.callbacks.onZoomIn());
 
         // Fit button (visible when zoom > 1)

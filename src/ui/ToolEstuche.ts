@@ -1,5 +1,8 @@
-import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, ToolbarSlot, ToolType } from '../core/types.ts';
-import { HIGHLIGHTER_COLOR_NAMES, HIGHLIGHTER_PALETTE, ICONS, PEN_PROFILES, PRIMARY_COLOR_NAMES, PRIMARY_PALETTE, createStrokeWavePreview, createSvg, isDarkTheme, mapInkColorForDark } from './theme.ts';
+import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, StrokePattern, ToolbarSlot, ToolType } from '../core/types.ts';
+import { ICONS, createSvg } from './theme.ts';
+import type { PopoverController, PopoverInstance } from './kit/index.ts';
+import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
+import { applyPopoverGeometry } from './popover/PopoverGeometry.ts';
 
 export interface ToolEstucheState {
     tool: ToolType;
@@ -9,6 +12,11 @@ export interface ToolEstucheState {
     profileId: PenProfileId;
     smoothing: number; // 0..1
     pressureSensitivity: number; // 0..1
+    opacity?: number;
+    lineStyle?: StrokePattern;
+    pattern?: StrokePattern;
+    straightenLines?: boolean;
+    onlyHighlighter?: boolean;
     favorites: PenFavorite[];
     eraserMode: EraserMode;
     eraserRadius: number;
@@ -24,6 +32,10 @@ export interface ToolEstucheCallbacks {
     onChangeWidth: (width: number) => void;
     onChangeSmoothing: (smoothing: number) => void;
     onChangePressure: (pressure: number) => void;
+    onChangeOpacity?: (opacity: number) => void;
+    onChangeLineStyle?: (pattern: StrokePattern) => void;
+    onToggleStraighten?: (enabled: boolean) => void;
+    onToggleOnlyHighlighter?: (enabled: boolean) => void;
     onUseFavorite: (index: number) => void;
     onSaveFavorite: (index: number) => void;
     onSelectEraserMode: (mode: EraserMode) => void;
@@ -35,419 +47,689 @@ export interface ToolEstucheCallbacks {
     onClose: () => void;
 }
 
-export class ToolEstuche {
+export class ToolEstuche implements PopoverInstance {
     readonly container: HTMLElement;
     private state: ToolEstucheState;
     private callbacks: ToolEstucheCallbacks;
-    private isVisible = false;
-    private openedAt = 0;
+    private popoverController?: PopoverController;
+    private currentAnchorEl: HTMLElement | null = null;
+    private openState = false;
+    private colorPicker: ColorPickerPopover;
 
-    constructor(initialState: ToolEstucheState, callbacks: ToolEstucheCallbacks, parent: HTMLElement = document.body) {
+    // Direct DOM nodes for in-place updates without DOM destruction
+    private headerEl: HTMLElement;
+    private bodyEl: HTMLElement;
+    private widthInput?: HTMLInputElement;
+    private widthBubble?: HTMLElement;
+    private smoothingInput?: HTMLInputElement;
+    private smoothingBubble?: HTMLElement;
+    private opacityInput?: HTMLInputElement;
+    private opacityBubble?: HTMLElement;
+    private eraserRadiusInput?: HTMLInputElement;
+    private eraserRadiusBubble?: HTMLElement;
+    private eraserPreviewDot?: HTMLElement;
+    private snapGridSwitch?: HTMLElement;
+    private scribbleSwitch?: HTMLElement;
+    private toolButtons: Map<string, HTMLElement> = new Map();
+    private eraserModeButtons: Map<string, HTMLElement> = new Map();
+    private lassoModeButtons: Map<string, HTMLElement> = new Map();
+    private shapeButtons: Map<string, HTMLElement> = new Map();
+    private lineStyleChips: Map<string, HTMLElement> = new Map();
+    private straightenSwitch?: HTMLElement;
+    private onlyHighlighterSwitch?: HTMLElement;
+    private swatchRowEl?: HTMLElement;
+    private paginationEl?: HTMLElement;
+    private swatchButtons: Map<string, HTMLElement> = new Map();
+
+    private recentColors: string[] = ['#E53935', '#FFA726', '#FFEE58', '#26A69A', '#42A5F5', '#1E88E5', '#7E57C2', '#EEEEEE'];
+    private maxRecentSlots = 8;
+    private colorPages: string[][] = [];
+    private currentPageIndex = 0;
+
+    constructor(
+        initialState: ToolEstucheState,
+        callbacks: ToolEstucheCallbacks,
+        parent: HTMLElement = document.body,
+        popoverController?: PopoverController,
+    ) {
         this.state = { ...initialState };
         this.callbacks = callbacks;
+        this.popoverController = popoverController;
+
+        this.initColorPages();
 
         this.container = document.createElement('div');
-        this.container.className = 'apolo-popover-panel apolo-tool-estuche';
-        this.container.setAttribute('role', 'dialog');
+        this.container.className = 'apolo-estuche-popover apolo-tool-estuche apolo-popover-shell';
         this.container.hidden = true;
         this.container.style.display = 'none';
+        this.container.setAttribute('role', 'dialog');
+        this.container.setAttribute('aria-label', this.getTitleForTool(this.state.tool));
+        this.container.addEventListener('pointerdown', (e) => e.stopPropagation());
 
-        // Prevent pointer events from falling through to the canvas
-        this.container.addEventListener('pointerdown', e => e.stopPropagation());
-        this.container.addEventListener('touchstart', e => e.stopPropagation());
+        this.headerEl = document.createElement('div');
+        this.headerEl.className = 'popover-header';
 
+        this.bodyEl = document.createElement('div');
+        this.bodyEl.className = 'apolo-popover-body';
+
+        this.container.append(this.headerEl, this.bodyEl);
         parent.appendChild(this.container);
 
-        window.addEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
-        window.addEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
-        window.addEventListener('keydown', this.onKeyDown);
+        this.colorPicker = new ColorPickerPopover(parent);
     }
 
-    private readonly onOutsidePointerDown = (e: PointerEvent): void => {
-        if (this.isOpen() && !this.container.contains(e.target as Node)) {
-            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
-            if (targetEl?.closest?.('.apolo-tool-btn') || targetEl?.closest?.('.apolo-toolbar-btn')) {
-                return;
-            }
-            this.close();
-        }
-    };
-
-    private readonly onOutsideTouchStart = (e: TouchEvent): void => {
-        if (this.isOpen() && e.target && !this.container.contains(e.target as Node)) {
-            if (Date.now() - this.openedAt < 300) {
-                return;
-            }
-            const targetEl = (e.target && typeof (e.target as any).closest === 'function') ? (e.target as any) : null;
-            if (targetEl?.closest?.('.apolo-tool-btn') || targetEl?.closest?.('.apolo-toolbar-btn')) {
-                return;
-            }
-            this.close();
-        }
-    };
-
-    private readonly onKeyDown = (e: KeyboardEvent): void => {
-        if (this.isOpen() && e.key === 'Escape') {
-            this.close();
-        }
-    };
-
-    open(state?: Partial<ToolEstucheState>): void {
-        if (state) {
-            this.state = { ...this.state, ...state };
-        }
-        if (this.state.tool === 'spacer') {
-            this.close();
-            return;
-        }
-        this.openedAt = Date.now();
-        this.isVisible = true;
-        this.container.hidden = false;
-        this.container.style.display = 'block';
-        this.render();
-        this.position();
-    }
-
-    close(): void {
-        this.isVisible = false;
-        this.container.hidden = true;
-        this.container.style.display = 'none';
-        this.callbacks.onClose();
-    }
-
-    isOpen(): boolean {
-        return this.isVisible && !this.container.hidden && this.container.style.display !== 'none';
-    }
-
-    updateState(partial: Partial<ToolEstucheState>): void {
-        this.state = { ...this.state, ...partial };
-        if (this.isOpen()) {
-            this.render();
-            this.position();
-        }
-    }
-
-    position(): void {
-        const slot = this.state.slot;
-        const col = slot === 'tl' || slot === 'ml' || slot === 'bl' ? 0 : (slot === 'tc' || slot === 'bc' ? 1 : 2);
-        const row = slot === 'tl' || slot === 'tc' || slot === 'tr' ? 0 : (slot === 'ml' || slot === 'mr' ? 1 : 2);
-
-        const estWidth = 420;
-        const marginX = 16;
-        const panelTop = row === 0 ? 122 : 56;
-
-        let left = 0;
-        if (col === 2) {
-            // Toolbar is on the right -> place estuche on the left
-            left = marginX + 44;
+    private initColorPages(): void {
+        if (this.state.tool === 'highlighter') {
+            this.recentColors = ['#FDD835', '#43A047', '#00ACC1', '#1E88E5', '#8E24AA', '#E91E63', '#FB8C00', '#B0BEC5'];
+            this.colorPages = [
+                this.recentColors,
+                ['#FFEE58', '#66BB6A', '#26C6DA', '#42A5F5', '#AB47BC', '#EC407A', '#FFA726', '#CFD8DC'],
+                ['#FFF59D', '#A5D6A7', '#80DEEA', '#90CAF9', '#CE93D8', '#F48FB1', '#FFCC80', '#ECEFF1'],
+                ['#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#00BCD4', '#009688'],
+            ];
         } else {
-            // Toolbar is on the left or center -> place estuche on the right
-            left = Math.max(16, window.innerWidth - estWidth - marginX);
+            this.recentColors = ['#E53935', '#FFA726', '#FFEE58', '#26A69A', '#42A5F5', '#1E88E5', '#7E57C2', '#EEEEEE'];
+            this.colorPages = [
+                this.recentColors,
+                ['#D32F2F', '#C2185B', '#7B1FA2', '#512DA8', '#303F9F', '#1976D2', '#0288D1', '#0097A7'],
+                ['#FFCDD2', '#F8BBD0', '#E1BEE7', '#D1C4E9', '#C5CAE9', '#BBDEFB', '#B3E5FC', '#B2EBF2'],
+                ['#212121', '#424242', '#616161', '#757575', '#9E9E9E', '#BDBDBD', '#E0E0E0', '#FFFFFF'],
+            ];
         }
-
-        const maxH = Math.max(300, window.innerHeight - panelTop - 28);
-        this.container.style.position = 'fixed';
-        this.container.style.left = `${left}px`;
-        this.container.style.top = `${panelTop}px`;
-        this.container.style.width = `${estWidth}px`;
-        this.container.style.maxHeight = `${maxH}px`;
     }
 
-    private render(): void {
-        this.container.replaceChildren();
+    private pushRecentColor(hex: string): void {
+        const clean = hex.toUpperCase();
+        this.recentColors = this.recentColors.filter((c) => c.toUpperCase() !== clean);
+        this.recentColors.unshift(clean);
+        if (this.recentColors.length > this.maxRecentSlots) {
+            this.recentColors.pop();
+        }
+        this.colorPages[0] = this.recentColors;
+    }
 
-        const tool = this.state.tool;
+    private getTitleForTool(tool: ToolType): string {
         const titles: Record<ToolType, string> = {
             pen: 'Estuche de plumas',
             highlighter: 'Estuche de marcadores',
-            eraser: 'Estuche del borrador',
-            lasso: 'Estuche del lazo',
-            shape: 'Estuche de formas',
-            spacer: 'Insertar espacio',
+            eraser: 'Borrador',
+            lasso: 'Lazo',
+            shape: 'Formas',
             link: 'Enlazar',
         };
+        return titles[tool] || 'Estuche';
+    }
 
-        const icons: Record<ToolType, string> = {
-            pen: ICONS.pen,
-            highlighter: ICONS.highlighter,
-            eraser: ICONS.eraser,
-            lasso: ICONS.lasso,
-            shape: ICONS.shapes[this.state.shapeType] || ICONS.shapes.rect,
-            spacer: ICONS.spacer,
-            link: ICONS.link,
+    private getOpacityPercent(): number {
+        if (this.state.opacity !== undefined) {
+            return this.state.opacity <= 1 ? Math.round(this.state.opacity * 100) : Math.round(this.state.opacity);
+        }
+        return Math.round((this.state.pressureSensitivity ?? 0.75) * 100);
+    }
+
+    open(state?: Partial<ToolEstucheState>, anchorEl?: HTMLElement | null): void {
+        if (state) {
+            const toolChanged = state.tool && state.tool !== this.state.tool;
+            this.state = { ...this.state, ...state };
+            if (toolChanged) {
+                this.initColorPages();
+            }
+            if (state.color) {
+                this.pushRecentColor(state.color);
+            }
+        }
+
+        if (anchorEl) {
+            this.currentAnchorEl = anchorEl;
+        }
+
+        this.openState = true;
+        this.container.hidden = false;
+        this.container.style.display = 'flex';
+        this.container.setAttribute('aria-label', this.getTitleForTool(this.state.tool));
+
+        this.render();
+        this.position(this.currentAnchorEl);
+        this.triggerAnimation();
+
+        if (this.popoverController) {
+            this.popoverController.open(this, this.currentAnchorEl);
+        }
+    }
+
+    close(): void {
+        if (!this.isOpen()) return;
+        this.openState = false;
+        this.container.hidden = true;
+        this.container.style.display = 'none';
+        this.container.classList.remove('apolo-popover-animated');
+        this.colorPicker?.close();
+        if (this.popoverController) {
+            this.popoverController.close(this);
+        }
+        this.callbacks.onClose();
+    }
+
+    hide(): void {
+        this.close();
+    }
+
+    isOpen(): boolean {
+        return this.openState;
+    }
+
+    private triggerAnimation(): void {
+        this.container.classList.remove('apolo-popover-animated');
+        void this.container.offsetWidth;
+        this.container.classList.add('apolo-popover-animated');
+    }
+
+    position(anchorEl?: HTMLElement | null): void {
+        if (!this.isOpen()) return;
+        const anchor = anchorEl ?? this.currentAnchorEl;
+        if (!anchor) return;
+        const toolbarEl = (anchor?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || anchor?.parentElement || null;
+        const w = this.state.tool === 'eraser' ? 290 : (this.state.tool === 'shape' ? 330 : 320);
+        this.container.style.width = `${w}px`;
+        applyPopoverGeometry(this.container, anchor, toolbarEl, this.state.slot, {
+            fallbackWidth: w,
+            fallbackHeight: 440,
+        });
+    }
+
+    updateState(partial: Partial<ToolEstucheState>): void {
+        const previousTool = this.state.tool;
+        this.state = { ...this.state, ...partial };
+
+        if (!this.isOpen()) return;
+
+        if (partial.tool && partial.tool !== previousTool) {
+            this.initColorPages();
+            this.render();
+            this.position(this.currentAnchorEl);
+            return;
+        }
+
+        // In-place updates: zero DOM destruction to preserve slider drags and focus
+        if (partial.width !== undefined && this.widthInput && this.widthBubble) {
+            this.widthInput.value = String(partial.width);
+            this.widthBubble.textContent = String(partial.width);
+            const min = Number(this.widthInput.min) || 1;
+            const max = Number(this.widthInput.max) || 20;
+            const ratio = Math.max(0, Math.min(1, (partial.width - min) / (max - min)));
+            this.widthBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+        }
+
+        if (partial.smoothing !== undefined && this.smoothingInput && this.smoothingBubble) {
+            const val = Math.round(partial.smoothing * 10);
+            this.smoothingInput.value = String(val);
+            this.smoothingBubble.textContent = String(val);
+            const ratio = Math.max(0, Math.min(1, val / 10));
+            this.smoothingBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+        }
+
+        if (partial.opacity !== undefined && this.opacityInput && this.opacityBubble) {
+            const val = Math.round(partial.opacity);
+            this.opacityInput.value = String(val);
+            this.opacityBubble.textContent = String(val);
+            const ratio = Math.max(0, Math.min(1, val / 100));
+            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.opacityBubble.style.backgroundColor = this.state.color;
+            this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
+        } else if (partial.pressureSensitivity !== undefined && this.opacityInput && this.opacityBubble) {
+            const val = Math.round(partial.pressureSensitivity * 100);
+            this.opacityInput.value = String(val);
+            this.opacityBubble.textContent = String(val);
+            const ratio = Math.max(0, Math.min(1, val / 100));
+            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.opacityBubble.style.backgroundColor = this.state.color;
+            this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
+        }
+
+        if ((partial.lineStyle !== undefined || partial.pattern !== undefined) && this.lineStyleChips.size > 0) {
+            const nextPattern = (partial.pattern ?? partial.lineStyle ?? this.state.pattern ?? this.state.lineStyle ?? 'solid') as StrokePattern;
+            this.state.lineStyle = nextPattern;
+            this.state.pattern = nextPattern;
+            for (const [pattern, btn] of this.lineStyleChips) {
+                btn.classList.toggle('is-active', pattern === nextPattern);
+            }
+        }
+
+        if (partial.straightenLines !== undefined && this.straightenSwitch) {
+            this.straightenSwitch.classList.toggle('is-checked', partial.straightenLines);
+        }
+
+        if (partial.onlyHighlighter !== undefined && this.onlyHighlighterSwitch) {
+            this.onlyHighlighterSwitch.classList.toggle('is-checked', partial.onlyHighlighter);
+        }
+
+        if (partial.profileId !== undefined) {
+            for (const [id, btn] of this.toolButtons) {
+                btn.classList.toggle('is-active', id === partial.profileId);
+            }
+        }
+
+        if (partial.color !== undefined) {
+            const clean = partial.color.toUpperCase();
+            this.pushRecentColor(partial.color);
+            for (const [col, btn] of this.swatchButtons) {
+                btn.classList.toggle('is-active', col.toUpperCase() === clean);
+            }
+            if (this.opacityBubble) {
+                this.opacityBubble.style.backgroundColor = partial.color;
+            }
+        }
+
+        if (partial.eraserRadius !== undefined && this.eraserRadiusInput && this.eraserRadiusBubble) {
+            this.eraserRadiusInput.value = String(partial.eraserRadius);
+            this.eraserRadiusBubble.textContent = String(partial.eraserRadius);
+            const min = Number(this.eraserRadiusInput.min) || 8;
+            const max = Number(this.eraserRadiusInput.max) || 60;
+            const ratio = Math.max(0, Math.min(1, (partial.eraserRadius - min) / (max - min)));
+            this.eraserRadiusBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            if (this.eraserPreviewDot) {
+                const dotSize = Math.max(12, Math.min(36, partial.eraserRadius * 0.7));
+                this.eraserPreviewDot.style.width = `${dotSize}px`;
+                this.eraserPreviewDot.style.height = `${dotSize}px`;
+            }
+        }
+
+        if (partial.eraserMode !== undefined) {
+            for (const [mode, btn] of this.eraserModeButtons) {
+                btn.classList.toggle('is-active', mode === partial.eraserMode);
+            }
+        }
+
+        if (partial.lassoMode !== undefined) {
+            for (const [mode, btn] of this.lassoModeButtons) {
+                btn.classList.toggle('is-active', mode === partial.lassoMode);
+            }
+        }
+
+        if (partial.shapeType !== undefined) {
+            for (const [type, btn] of this.shapeButtons) {
+                btn.classList.toggle('is-active', type === partial.shapeType);
+            }
+        }
+
+        if (partial.snapGrid !== undefined && this.snapGridSwitch) {
+            this.snapGridSwitch.classList.toggle('is-checked', partial.snapGrid);
+        }
+
+        if (partial.scribbleToErase !== undefined && this.scribbleSwitch) {
+            this.scribbleSwitch.classList.toggle('is-checked', partial.scribbleToErase);
+        }
+
+        if (partial.slot !== undefined) {
+            this.position(this.currentAnchorEl);
+        }
+    }
+
+    private render(): void {
+        this.headerEl.replaceChildren();
+        this.bodyEl.replaceChildren();
+
+        this.toolButtons.clear();
+        this.eraserModeButtons.clear();
+        this.lassoModeButtons.clear();
+        this.shapeButtons.clear();
+        this.lineStyleChips.clear();
+        this.swatchButtons.clear();
+
+        const tool = this.state.tool;
+        if (tool === 'pen') {
+            this.renderPenHeader();
+            this.renderPenContent();
+        } else if (tool === 'highlighter') {
+            this.renderPenHeader();
+            this.renderHighlighterContent();
+        } else if (tool === 'eraser') {
+            this.renderSimpleHeader('Borrador');
+            this.renderEraserContent();
+        } else if (tool === 'shape') {
+            this.renderSimpleHeader('Formas');
+            this.renderShapeContent();
+        } else if (tool === 'lasso') {
+            this.renderSimpleHeader('Lazo');
+            this.renderLassoContent();
+        }
+    }
+
+    private renderPenHeader(): void {
+        const favsBtn = document.createElement('button');
+        favsBtn.type = 'button';
+        favsBtn.className = 'popover-hdr-btn';
+        favsBtn.title = 'Lápices favoritos';
+        favsBtn.setAttribute('aria-label', 'Lápices favoritos');
+        favsBtn.appendChild(createSvg(ICONS.bookmark, { size: 18 }));
+        favsBtn.onclick = () => {
+            this.callbacks.onUseFavorite(0);
         };
+        this.headerEl.appendChild(favsBtn);
 
-        // 1. Header (Icon + Title + Close Button)
-        const header = document.createElement('div');
-        header.className = 'apolo-estuche-header';
+        const rightBtns = document.createElement('div');
+        rightBtns.className = 'popover-header-right';
 
-        const titleGroup = document.createElement('div');
-        titleGroup.className = 'apolo-estuche-title-group';
-        titleGroup.appendChild(createSvg(icons[tool] || ICONS.pen, { size: 22, className: 'apolo-estuche-icon' }));
-
-        const titleText = document.createElement('div');
-        titleText.className = 'apolo-estuche-title';
-        titleText.textContent = titles[tool] || 'Estuche';
-        titleGroup.appendChild(titleText);
+        const starBtn = document.createElement('button');
+        starBtn.type = 'button';
+        starBtn.className = 'popover-hdr-btn';
+        starBtn.title = 'Marcar actual como favorito';
+        starBtn.setAttribute('aria-label', 'Marcar actual como favorito');
+        starBtn.appendChild(createSvg(ICONS.star, { size: 18 }));
+        starBtn.onclick = () => {
+            starBtn.classList.toggle('is-fav-saved');
+            this.callbacks.onSaveFavorite(0);
+        };
 
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
-        closeBtn.className = 'apolo-estuche-close-btn';
-        closeBtn.setAttribute('aria-label', 'Cerrar estuche');
+        closeBtn.className = 'popover-hdr-btn popover-close';
         closeBtn.title = 'Cerrar';
-        closeBtn.appendChild(createSvg(ICONS.close, { size: 18 }));
-        const handleClose = (e: Event): void => {
-            e.stopPropagation();
-            e.preventDefault();
-            this.close();
-        };
-        closeBtn.addEventListener('click', handleClose);
-        closeBtn.addEventListener('pointerdown', handleClose);
-        closeBtn.addEventListener('touchend', handleClose);
+        closeBtn.setAttribute('aria-label', 'Cerrar');
+        closeBtn.appendChild(createSvg(ICONS.close, { size: 16 }));
+        closeBtn.onclick = () => this.close();
 
-        header.append(titleGroup, closeBtn);
-        this.container.appendChild(header);
-
-        // 2. Body based on tool
-        if (tool === 'pen') {
-            this.renderPenContent();
-        } else if (tool === 'highlighter') {
-            this.renderHighlighterContent();
-        } else if (tool === 'eraser') {
-            this.renderEraserContent();
-        } else if (tool === 'lasso') {
-            this.renderLassoContent();
-        } else if (tool === 'shape') {
-            this.renderShapeContent();
-        }
+        rightBtns.append(starBtn, closeBtn);
+        this.headerEl.appendChild(rightBtns);
     }
 
+    private renderSimpleHeader(titleText: string): void {
+        const title = document.createElement('h3');
+        title.className = 'popover-title';
+        title.textContent = titleText;
+        this.headerEl.appendChild(title);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'popover-hdr-btn popover-close';
+        closeBtn.title = 'Cerrar';
+        closeBtn.setAttribute('aria-label', 'Cerrar');
+        closeBtn.appendChild(createSvg(ICONS.close, { size: 16 }));
+        closeBtn.onclick = () => this.close();
+
+        this.headerEl.appendChild(closeBtn);
+    }
+
+    // =========================================================================
+    // Pen Content (Image 2 - 1:1 visually with mockup)
+    // =========================================================================
     private renderPenContent(): void {
-        // 4 Profile Cards (2x2)
-        const profilesGrid = document.createElement('div');
-        profilesGrid.className = 'apolo-profiles-grid';
+        // 1. Selector de Herramientas (4 profiles)
+        const toolsRow = document.createElement('div');
+        toolsRow.className = 'popover-tools-selector';
 
-        const profiles: PenProfileId[] = ['fountain', 'calli', 'ball', 'pencil'];
-        for (const pId of profiles) {
-            const profile = PEN_PROFILES[pId];
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = `apolo-profile-card ${this.state.profileId === pId ? 'is-active' : ''}`;
-            card.setAttribute('aria-label', profile.name);
+        const penProfiles: Array<{ id: PenProfileId; label: string; iconD: string }> = [
+            { id: 'fountain', label: 'Estilográfica', iconD: ICONS.pen },
+            { id: 'calli', label: 'Caligráfica', iconD: ICONS.feather },
+            { id: 'hlr', label: 'Rotulador', iconD: ICONS.highlighter },
+            { id: 'pencil', label: 'Lápiz de mina', iconD: ICONS.pencil },
+        ];
 
-            const nameEl = document.createElement('div');
-            nameEl.className = 'apolo-profile-name';
-            nameEl.textContent = profile.name;
+        for (const t of penProfiles) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `popover-tool-opt ${this.state.profileId === t.id ? 'is-active' : ''}`;
+            btn.title = t.label;
+            btn.setAttribute('aria-label', t.label);
 
-            const wave = createStrokeWavePreview(profile, this.state.width, this.state.color);
-            wave.classList.add('apolo-profile-wave');
+            const wrap = document.createElement('div');
+            wrap.className = 'icon-wrap';
+            wrap.appendChild(createSvg(t.iconD, { size: 24 }));
+            btn.appendChild(wrap);
 
-            card.append(nameEl, wave);
-            card.addEventListener('click', () => {
-                this.callbacks.onSelectProfile(pId);
-                this.state.profileId = pId;
-                this.render();
-            });
-            profilesGrid.appendChild(card);
+            btn.onclick = () => {
+                this.state.profileId = t.id;
+                for (const [, b] of this.toolButtons) b.classList.remove('is-active');
+                btn.classList.add('is-active');
+                this.callbacks.onSelectProfile(t.id);
+            };
+
+            this.toolButtons.set(t.id, btn);
+            toolsRow.appendChild(btn);
         }
-        this.container.appendChild(profilesGrid);
+        this.bodyEl.appendChild(toolsRow);
 
-        // Sliders (Grosor, Suavizado, Presión)
-        const slidersList = document.createElement('div');
-        slidersList.className = 'apolo-sliders-list';
-
-        slidersList.appendChild(this.createSliderRow('Grosor', 1, 12, 0.5, this.state.width, val => {
-            this.state.width = val;
-            this.callbacks.onChangeWidth(val);
-        }, ' px'));
-
-        slidersList.appendChild(this.createSliderRow('Suavizado', 0, 100, 1, Math.round(this.state.smoothing * 100), val => {
-            this.state.smoothing = val / 100;
-            this.callbacks.onChangeSmoothing(this.state.smoothing);
-        }, ' %'));
-
-        slidersList.appendChild(this.createSliderRow('Sensibilidad a presión', 0, 100, 1, Math.round(this.state.pressureSensitivity * 100), val => {
-            this.state.pressureSensitivity = val / 100;
-            this.callbacks.onChangePressure(this.state.pressureSensitivity);
-        }, ' %'));
-
-        this.container.appendChild(slidersList);
-
-        // Color Swatches + HEX
-        this.container.appendChild(this.createColorSection());
-
-        // Favoritos de la barra
-        this.container.appendChild(this.createFavoritesSection());
-    }
-
-    private renderHighlighterContent(): void {
-        // 2 Highlighter Profiles (Round and Flat)
-        const profilesGrid = document.createElement('div');
-        profilesGrid.className = 'apolo-profiles-grid apolo-grid-2cols';
-
-        const profiles: PenProfileId[] = ['hlr', 'hlf'];
-        for (const pId of profiles) {
-            const profile = PEN_PROFILES[pId];
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = `apolo-profile-card ${this.state.profileId === pId ? 'is-active' : ''}`;
-            card.setAttribute('aria-label', profile.name);
-
-            const nameEl = document.createElement('div');
-            nameEl.className = 'apolo-profile-name';
-            nameEl.textContent = profile.name;
-
-            const wave = createStrokeWavePreview(profile, this.state.width, this.state.color);
-            wave.classList.add('apolo-profile-wave');
-
-            card.append(nameEl, wave);
-            card.addEventListener('click', () => {
-                this.callbacks.onSelectProfile(pId);
-                this.state.profileId = pId;
-                this.render();
-            });
-            profilesGrid.appendChild(card);
-        }
-        this.container.appendChild(profilesGrid);
-
-        // Slider Grosor
-        const slidersList = document.createElement('div');
-        slidersList.className = 'apolo-sliders-list';
-        slidersList.appendChild(this.createSliderRow('Grosor', 4, 24, 1, this.state.width, val => {
-            this.state.width = val;
-            this.callbacks.onChangeWidth(val);
-        }, ' px'));
-        this.container.appendChild(slidersList);
-
-        // Color Palette
-        this.container.appendChild(this.createColorSection());
-    }
-
-    private renderEraserContent(): void {
-        // Mode cards (Trazo completo vs Retícula)
-        const modes = document.createElement('div');
-        modes.className = 'apolo-eraser-modes';
-
-        const wholeCard = document.createElement('button');
-        wholeCard.type = 'button';
-        wholeCard.className = `apolo-eraser-mode-card ${this.state.eraserMode === 'whole' ? 'is-active' : ''}`;
-        wholeCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Trazo completo</div>
-            <div class="apolo-eraser-mode-desc">Borra el trazo entero al tocarlo</div>
-        `;
-        wholeCard.addEventListener('click', () => {
-            this.callbacks.onSelectEraserMode('whole');
-            this.state.eraserMode = 'whole';
-            this.render();
-        });
-
-        const reticleCard = document.createElement('button');
-        reticleCard.type = 'button';
-        reticleCard.className = `apolo-eraser-mode-card ${this.state.eraserMode === 'reticle' ? 'is-active' : ''}`;
-        reticleCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Retícula</div>
-            <div class="apolo-eraser-mode-desc">Corta el trazo en sub-trazos</div>
-        `;
-        reticleCard.addEventListener('click', () => {
-            this.callbacks.onSelectEraserMode('reticle');
-            this.state.eraserMode = 'reticle';
-            this.render();
-        });
-
-        modes.append(wholeCard, reticleCard);
-        this.container.appendChild(modes);
-
-        // Eraser Size Slider with preview circle
-        const sizeSection = document.createElement('div');
-        sizeSection.className = 'apolo-eraser-size-section';
-
-        const sizeTitle = document.createElement('div');
-        sizeTitle.className = 'apolo-section-label';
-        sizeTitle.textContent = 'Tamaño del borrador';
-
-        const sizeWrap = document.createElement('div');
-        sizeWrap.className = 'apolo-eraser-size-wrap';
-
-        const input = document.createElement('input');
-        input.type = 'range';
-        input.className = 'apolo-slider-input';
-        input.min = '8';
-        input.max = '60';
-        input.step = '2';
-        input.value = String(this.state.eraserRadius);
-        input.style.flex = '1';
-
-        const previewDot = document.createElement('span');
-        previewDot.className = 'apolo-eraser-preview-dot';
-        const updateDot = (r: number) => {
-            const size = Math.max(12, Math.min(36, r * 0.7));
-            previewDot.style.width = `${size}px`;
-            previewDot.style.height = `${size}px`;
-        };
-        updateDot(this.state.eraserRadius);
-
-        input.addEventListener('input', () => {
-            const next = Number(input.value);
-            this.state.eraserRadius = next;
-            updateDot(next);
-            this.callbacks.onChangeEraserRadius(next);
-        });
-
-        sizeWrap.append(input, previewDot);
-        sizeSection.append(sizeTitle, sizeWrap);
-        this.container.appendChild(sizeSection);
-
-        // Scribble to Erase Toggle
-        const toggleRow = this.createToggleRow(
-            'Garabato para borrar',
-            'Zigzag rápido sobre trazos para eliminarlos',
-            this.state.scribbleToErase,
-            enabled => {
-                this.state.scribbleToErase = enabled;
-                this.callbacks.onToggleScribble(enabled);
-            },
+        // 2. Slider Grosor (1 to 20 px)
+        const widthSlider = this.createSlider(
+            'Grosor',
+            this.state.width,
+            1,
+            20,
+            0.5,
+            (val) => {
+                this.state.width = val;
+                this.callbacks.onChangeWidth(val);
+            }
         );
-        this.container.appendChild(toggleRow);
+        this.widthInput = widthSlider.input;
+        this.widthBubble = widthSlider.bubble;
+        this.bodyEl.appendChild(widthSlider.element);
+
+        // 3. Slider Suavizado (0 to 10)
+        const smoothingSlider = this.createSlider(
+            'Suavizado',
+            Math.round(this.state.smoothing * 10),
+            0,
+            10,
+            1,
+            (val) => {
+                this.state.smoothing = val / 10;
+                this.callbacks.onChangeSmoothing(this.state.smoothing);
+            }
+        );
+        this.smoothingInput = smoothingSlider.input;
+        this.smoothingBubble = smoothingSlider.bubble;
+        this.bodyEl.appendChild(smoothingSlider.element);
+
+        // 4. Line styles grid (solid, dashed, dotted)
+        this.bodyEl.appendChild(this.createLineStylesGrid((pattern) => {
+            this.state.lineStyle = pattern;
+            this.state.pattern = pattern;
+            this.callbacks.onChangeLineStyle?.(pattern);
+        }));
+
+        // 5. Toggle Row: "Enderezar líneas"
+        const straightenRow = this.createToggleRow(
+            'Enderezar líneas',
+            !!this.state.straightenLines,
+            (checked) => {
+                this.state.straightenLines = checked;
+                this.callbacks.onToggleStraighten?.(checked);
+            }
+        );
+        this.straightenSwitch = (straightenRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(straightenRow);
+
+        // 6. Paleta de Colores
+        this.bodyEl.appendChild(this.createPaletteSection());
     }
 
-    private renderLassoContent(): void {
-        const modes = document.createElement('div');
-        modes.className = 'apolo-eraser-modes';
+    // =========================================================================
+    // Highlighter Content
+    // =========================================================================
+    private renderHighlighterContent(): void {
+        // 1. Selector de Puntas (Chisel & Round)
+        const toolsRow = document.createElement('div');
+        toolsRow.className = 'popover-tools-selector';
+        const activeTip: PenProfileId =
+            this.state.profileId === 'hlf' || this.state.profileId === 'hlr' ? this.state.profileId : 'hlf';
 
-        const freeCard = document.createElement('button');
-        freeCard.type = 'button';
-        freeCard.className = `apolo-eraser-mode-card ${this.state.lassoMode === 'free' ? 'is-active' : ''}`;
-        freeCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Lazo libre</div>
-            <div class="apolo-eraser-mode-desc">Dibuja el contorno con el lápiz</div>
-        `;
-        freeCard.addEventListener('click', () => {
-            this.callbacks.onSelectLassoMode('free');
-            this.state.lassoMode = 'free';
-            this.render();
-        });
+        const tips: Array<{ id: PenProfileId; label: string; iconD: string }> = [
+            { id: 'hlf', label: 'Marcador Biselado', iconD: ICONS.highlighterChisel },
+            { id: 'hlr', label: 'Marcador Redondo', iconD: ICONS.highlighterRound },
+        ];
 
-        const rectCard = document.createElement('button');
-        rectCard.type = 'button';
-        rectCard.className = `apolo-eraser-mode-card ${this.state.lassoMode === 'rect' ? 'is-active' : ''}`;
-        rectCard.innerHTML = `
-            <div class="apolo-eraser-mode-title">Rectángulo</div>
-            <div class="apolo-eraser-mode-desc">Arrastra de una esquina a la opuesta</div>
-        `;
-        rectCard.addEventListener('click', () => {
-            this.callbacks.onSelectLassoMode('rect');
-            this.state.lassoMode = 'rect';
-            this.render();
-        });
+        for (const t of tips) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `popover-tool-opt ${activeTip === t.id ? 'is-active' : ''}`;
+            btn.title = t.label;
+            btn.setAttribute('aria-label', t.label);
 
-        modes.append(freeCard, rectCard);
-        this.container.appendChild(modes);
+            const wrap = document.createElement('div');
+            wrap.className = 'icon-wrap';
+            wrap.appendChild(createSvg(t.iconD, { size: 24 }));
+            btn.appendChild(wrap);
+
+            btn.onclick = () => {
+                this.state.profileId = t.id;
+                for (const [, b] of this.toolButtons) b.classList.remove('is-active');
+                btn.classList.add('is-active');
+                this.callbacks.onSelectProfile(t.id);
+            };
+
+            this.toolButtons.set(t.id, btn);
+            toolsRow.appendChild(btn);
+        }
+        this.bodyEl.appendChild(toolsRow);
+
+        // 2. Slider Grosor (4 to 60 px)
+        const widthSlider = this.createSlider(
+            'Grosor',
+            this.state.width,
+            4,
+            60,
+            1,
+            (val) => {
+                this.state.width = val;
+                this.callbacks.onChangeWidth(val);
+            }
+        );
+        this.widthInput = widthSlider.input;
+        this.widthBubble = widthSlider.bubble;
+        this.bodyEl.appendChild(widthSlider.element);
+
+        // 3. Slider Opacidad (10% to 100%)
+        const opacitySlider = this.createSlider(
+            'Opacidad',
+            this.getOpacityPercent(),
+            10,
+            100,
+            5,
+            (val) => {
+                this.state.opacity = val;
+                this.state.pressureSensitivity = val / 100;
+                this.callbacks.onChangeOpacity?.(val);
+            },
+            true
+        );
+        this.opacityInput = opacitySlider.input;
+        this.opacityBubble = opacitySlider.bubble;
+        this.bodyEl.appendChild(opacitySlider.element);
+
+        // 4. Toggle Row: "Enderezar líneas"
+        const straightenRow = this.createToggleRow(
+            'Enderezar líneas',
+            !!this.state.straightenLines,
+            (checked) => {
+                this.state.straightenLines = checked;
+                this.callbacks.onToggleStraighten?.(checked);
+            }
+        );
+        this.straightenSwitch = (straightenRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(straightenRow);
+
+        // 5. Paleta de Colores
+        this.bodyEl.appendChild(this.createPaletteSection());
     }
 
+    // =========================================================================
+    // Eraser Content
+    // =========================================================================
+    private renderEraserContent(): void {
+        // 1. Selector de Modos (Whole vs Reticle)
+        const modesList = document.createElement('div');
+        modesList.className = 'eraser-modes-list';
+
+        const modes: Array<{ id: EraserMode; label: string }> = [
+            { id: 'whole', label: 'Borrar trazo completo' },
+            { id: 'reticle', label: 'Borrar por área (retícula)' },
+        ];
+
+        for (const m of modes) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = `eraser-radio-row ${this.state.eraserMode === m.id ? 'is-active' : ''}`;
+
+            const circle = document.createElement('div');
+            circle.className = 'eraser-radio-circle';
+            const dot = document.createElement('div');
+            dot.className = 'eraser-radio-inner-dot';
+            circle.appendChild(dot);
+
+            const span = document.createElement('span');
+            span.textContent = m.label;
+
+            row.append(circle, span);
+            row.onclick = () => {
+                this.state.eraserMode = m.id;
+                for (const [, r] of this.eraserModeButtons) r.classList.remove('is-active');
+                row.classList.add('is-active');
+                this.callbacks.onSelectEraserMode(m.id);
+            };
+
+            this.eraserModeButtons.set(m.id, row);
+            modesList.appendChild(row);
+        }
+        this.bodyEl.appendChild(modesList);
+
+        const divider = document.createElement('div');
+        divider.className = 'eraser-divider';
+        this.bodyEl.appendChild(divider);
+
+        // 2. Slider Tamaño del Borrador (8 to 60 px)
+        const radiusSlider = this.createSlider(
+            'Tamaño del borrador',
+            this.state.eraserRadius,
+            8,
+            60,
+            2,
+            (val) => {
+                this.state.eraserRadius = val;
+                this.callbacks.onChangeEraserRadius(val);
+                if (this.eraserPreviewDot) {
+                    const dotSize = Math.max(12, Math.min(36, val * 0.7));
+                    this.eraserPreviewDot.style.width = `${dotSize}px`;
+                    this.eraserPreviewDot.style.height = `${dotSize}px`;
+                }
+            }
+        );
+        this.eraserRadiusInput = radiusSlider.input;
+        this.eraserRadiusBubble = radiusSlider.bubble;
+        this.bodyEl.appendChild(radiusSlider.element);
+
+        // 3. Toggle Row: "Borrar resaltador solamente"
+        const onlyHighlighterRow = this.createToggleRow(
+            'Borrar resaltador solamente',
+            !!this.state.onlyHighlighter,
+            (checked) => {
+                this.state.onlyHighlighter = checked;
+                this.callbacks.onToggleOnlyHighlighter?.(checked);
+            }
+        );
+        this.onlyHighlighterSwitch = (onlyHighlighterRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(onlyHighlighterRow);
+
+        // 4. Toggle Row: "Garabato para borrar"
+        const scribbleRow = this.createToggleRow(
+            'Garabato para borrar',
+            this.state.scribbleToErase,
+            (checked) => {
+                this.state.scribbleToErase = checked;
+                this.callbacks.onToggleScribble(checked);
+            }
+        );
+        this.scribbleSwitch = (scribbleRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(scribbleRow);
+    }
+
+    // =========================================================================
+    // Shape Content
+    // =========================================================================
     private renderShapeContent(): void {
-        // 5 Shape Icons without text (line, arrow, rect, circle, triangle)
-        const shapesRow = document.createElement('div');
-        shapesRow.className = 'apolo-shapes-row';
+        // 1. Grid de Formas (5 shapes con targets de 44px)
+        const shapesGrid = document.createElement('div');
+        shapesGrid.className = 'shape-grid-selector';
 
         const shapeDefs: Array<{ type: ShapeType; label: string; iconD: string }> = [
             { type: 'line', label: 'Línea', iconD: ICONS.shapes.line },
@@ -460,266 +742,388 @@ export class ToolEstuche {
         for (const def of shapeDefs) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `apolo-shape-icon-btn ${this.state.shapeType === def.type ? 'is-active' : ''}`;
-            btn.setAttribute('aria-label', def.label);
+            btn.className = `shape-grid-btn ${this.state.shapeType === def.type ? 'is-active' : ''}`;
             btn.title = def.label;
-            btn.appendChild(createSvg(def.iconD, { size: 30 }));
-            btn.addEventListener('click', () => {
-                this.callbacks.onSelectShapeType(def.type);
+            btn.setAttribute('aria-label', def.label);
+            btn.appendChild(createSvg(def.iconD, { size: 24 }));
+
+            btn.onclick = () => {
                 this.state.shapeType = def.type;
-                this.render();
-            });
-            shapesRow.appendChild(btn);
+                for (const [, b] of this.shapeButtons) b.classList.remove('is-active');
+                btn.classList.add('is-active');
+                this.callbacks.onSelectShapeType(def.type);
+            };
+
+            this.shapeButtons.set(def.type, btn);
+            shapesGrid.appendChild(btn);
         }
-        this.container.appendChild(shapesRow);
+        this.bodyEl.appendChild(shapesGrid);
 
-        // Snap Grid Toggle
-        const gridRow = this.createToggleRow(
-            'Imán de cuadrícula',
-            'Las formas encajan en una cuadrícula de 12 px',
-            this.state.snapGrid,
-            enabled => {
-                this.state.snapGrid = enabled;
-                this.callbacks.onToggleSnapGrid(enabled);
-            },
+        // 2. Slider Grosor (1 to 12 px)
+        const widthSlider = this.createSlider(
+            'Grosor de trazo',
+            this.state.width,
+            1,
+            12,
+            0.5,
+            (val) => {
+                this.state.width = val;
+                this.callbacks.onChangeWidth(val);
+            }
         );
-        this.container.appendChild(gridRow);
+        this.widthInput = widthSlider.input;
+        this.widthBubble = widthSlider.bubble;
+        this.bodyEl.appendChild(widthSlider.element);
 
-        // Slider Grosor
-        const slidersList = document.createElement('div');
-        slidersList.className = 'apolo-sliders-list';
-        slidersList.appendChild(this.createSliderRow('Grosor', 1, 12, 0.5, this.state.width, val => {
-            this.state.width = val;
-            this.callbacks.onChangeWidth(val);
-        }, ' px'));
-        this.container.appendChild(slidersList);
+        // 3. Line styles grid
+        this.bodyEl.appendChild(this.createLineStylesGrid((pattern) => {
+            this.state.lineStyle = pattern;
+            this.state.pattern = pattern;
+            this.callbacks.onChangeLineStyle?.(pattern);
+        }));
 
-        // Color Palette
-        this.container.appendChild(this.createColorSection());
+        // 4. Toggle Row: "Imán de cuadrícula"
+        const snapRow = this.createToggleRow(
+            'Imán de cuadrícula',
+            this.state.snapGrid,
+            (checked) => {
+                this.state.snapGrid = checked;
+                this.callbacks.onToggleSnapGrid(checked);
+            }
+        );
+        this.snapGridSwitch = (snapRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(snapRow);
+
+        // 5. Paleta de Colores
+        this.bodyEl.appendChild(this.createPaletteSection());
     }
 
-    private createSliderRow(
+    // =========================================================================
+    // Lasso Content
+    // =========================================================================
+    private renderLassoContent(): void {
+        const modesList = document.createElement('div');
+        modesList.className = 'eraser-modes-list';
+
+        const modes: Array<{ id: LassoMode; label: string }> = [
+            { id: 'free', label: 'Lazo libre' },
+            { id: 'rect', label: 'Lazo rectangular' },
+        ];
+
+        for (const m of modes) {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = `eraser-radio-row ${this.state.lassoMode === m.id ? 'is-active' : ''}`;
+
+            const circle = document.createElement('div');
+            circle.className = 'eraser-radio-circle';
+            const dot = document.createElement('div');
+            dot.className = 'eraser-radio-inner-dot';
+            circle.appendChild(dot);
+
+            const span = document.createElement('span');
+            span.textContent = m.label;
+
+            row.append(circle, span);
+            row.onclick = () => {
+                this.state.lassoMode = m.id;
+                for (const [, r] of this.lassoModeButtons) r.classList.remove('is-active');
+                row.classList.add('is-active');
+                this.callbacks.onSelectLassoMode(m.id);
+            };
+
+            this.lassoModeButtons.set(m.id, row);
+            modesList.appendChild(row);
+        }
+        this.bodyEl.appendChild(modesList);
+    }
+
+    // =========================================================================
+    // Common UI Builders (Mockup 1:1)
+    // =========================================================================
+    private createSlider(
         label: string,
+        currentVal: number,
         min: number,
         max: number,
         step: number,
-        value: number,
-        onInput: (val: number) => void,
-        suffix = ' px',
-    ): HTMLElement {
+        onChange: (val: number) => void,
+        isOpacity = false
+    ): { element: HTMLElement; input: HTMLInputElement; bubble: HTMLElement } {
+        const wrap = document.createElement('div');
+        wrap.className = 'popover-slider-section';
+
+        const lbl = document.createElement('span');
+        lbl.className = 'popover-slider-label';
+        lbl.textContent = label;
+        wrap.appendChild(lbl);
+
         const row = document.createElement('div');
-        row.className = 'apolo-slider-item';
+        row.className = 'popover-slider-row';
 
-        const labelEl = document.createElement('div');
-        labelEl.className = 'apolo-slider-label';
-        labelEl.textContent = label;
+        const minusBtn = document.createElement('button');
+        minusBtn.type = 'button';
+        minusBtn.className = 'popover-step-btn';
+        minusBtn.title = 'Disminuir';
+        minusBtn.appendChild(createSvg(ICONS.minus, { size: 14 }));
 
-        const trackWrap = document.createElement('div');
-        trackWrap.className = 'apolo-slider-track-wrap';
+        const track = document.createElement('div');
+        track.className = 'popover-track-wrap';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'popover-bubble-val';
+        bubble.textContent = String(currentVal);
+        if (isOpacity) {
+            bubble.style.backgroundColor = this.state.color;
+            bubble.style.opacity = String(Math.max(0.35, currentVal / 100));
+        }
 
         const input = document.createElement('input');
         input.type = 'range';
-        input.className = 'apolo-slider-input';
+        input.className = `popover-range-native ${isOpacity ? 'popover-track-checkerboard' : ''}`;
         input.min = String(min);
         input.max = String(max);
         input.step = String(step);
-        input.value = String(value);
+        input.value = String(currentVal);
+        input.style.width = '100%';
+        input.style.minWidth = '0';
+        input.style.maxWidth = 'none';
+        input.style.flex = '1 1 100%';
+        track.append(input, bubble);
 
-        const valText = document.createElement('div');
-        valText.className = 'apolo-slider-value';
-        valText.textContent = suffix === ' px' ? `${value.toFixed(1).replace('.', ',')}${suffix}` : `${value}${suffix}`;
+        const plusBtn = document.createElement('button');
+        plusBtn.type = 'button';
+        plusBtn.className = 'popover-step-btn';
+        plusBtn.title = 'Aumentar';
+        plusBtn.appendChild(createSvg(ICONS.plus, { size: 14 }));
 
-        input.addEventListener('input', () => {
-            const next = Number(input.value);
-            valText.textContent = suffix === ' px' ? `${next.toFixed(1).replace('.', ',')}${suffix}` : `${next}${suffix}`;
-            onInput(next);
-        });
+        row.append(minusBtn, track, plusBtn);
+        wrap.appendChild(row);
 
-        trackWrap.appendChild(input);
-        row.append(labelEl, trackWrap, valText);
-        return row;
+        const updateVal = (val: number, notify = true) => {
+            val = Math.max(min, Math.min(max, val));
+            if (step < 1) val = Math.round(val * 10) / 10;
+            input.value = String(val);
+            bubble.textContent = String(val);
+            const ratio = Math.max(0, Math.min(1, (val - min) / (max - min)));
+            bubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            if (isOpacity) {
+                bubble.style.backgroundColor = this.state.color;
+                bubble.style.opacity = String(Math.max(0.35, val / 100));
+            }
+            if (notify) onChange(val);
+        };
+
+        input.oninput = () => updateVal(Number(input.value));
+        minusBtn.onclick = () => {
+            let next = Number(input.value) - step;
+            if (step < 1) next = Math.round(next * 10) / 10;
+            updateVal(next);
+        };
+        plusBtn.onclick = () => {
+            let next = Number(input.value) + step;
+            if (step < 1) next = Math.round(next * 10) / 10;
+            updateVal(next);
+        };
+
+        setTimeout(() => updateVal(currentVal, false), 0);
+
+        return { element: wrap, input, bubble };
     }
 
-    private createColorSection(): HTMLElement {
-        const wrap = document.createElement('div');
-        wrap.className = 'apolo-estuche-color-section';
+    private createLineStylesGrid(onSelect?: (pattern: StrokePattern) => void): HTMLElement {
+        const stylesRow = document.createElement('div');
+        stylesRow.className = 'popover-lines-grid';
 
-        const title = document.createElement('div');
-        title.className = 'apolo-section-label';
-        title.textContent = 'Color';
-        wrap.appendChild(title);
+        const styles: Array<{ id: StrokePattern; cls: string }> = [
+            { id: 'solid', cls: '' },
+            { id: 'dashed', cls: 'is-dashed' },
+            { id: 'dotted', cls: 'is-dotted' },
+        ];
+        const activePattern = this.state.lineStyle ?? this.state.pattern ?? 'solid';
 
-        const swatchesRow = document.createElement('div');
-        swatchesRow.className = 'apolo-colors-row';
+        for (const s of styles) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `popover-line-chip ${s.id === activePattern ? 'is-active' : ''}`;
 
-        const dark = isDarkTheme();
-        const palette = this.state.tool === 'highlighter' ? HIGHLIGHTER_PALETTE : PRIMARY_PALETTE;
-        const colorNames = this.state.tool === 'highlighter' ? HIGHLIGHTER_COLOR_NAMES : PRIMARY_COLOR_NAMES;
+            const bar = document.createElement('div');
+            bar.className = `popover-line-bar ${s.cls}`;
+            btn.appendChild(bar);
 
-        for (const col of palette) {
-            const swatch = document.createElement('button');
-            swatch.type = 'button';
-            const isActive = this.state.color.toLowerCase() === col.toLowerCase();
-            swatch.className = `apolo-palette-swatch ${isActive ? 'is-active' : ''}`;
-            swatch.style.background = mapInkColorForDark(col, dark);
-            swatch.setAttribute('aria-label', colorNames[col] || col);
-            swatch.title = colorNames[col] || col;
+            btn.onclick = () => {
+                for (const [, b] of this.lineStyleChips) b.classList.remove('is-active');
+                btn.classList.add('is-active');
+                this.state.lineStyle = s.id;
+                this.state.pattern = s.id;
+                onSelect?.(s.id);
+            };
 
-            swatch.addEventListener('click', () => {
-                this.state.color = col;
-                this.callbacks.onChangeColor(col);
-                this.render();
-            });
-            swatchesRow.appendChild(swatch);
+            this.lineStyleChips.set(s.id, btn);
+            stylesRow.appendChild(btn);
         }
 
-        // Custom color input button
+        return stylesRow;
+    }
+
+    private createToggleRow(title: string, initialChecked: boolean, onToggle?: (checked: boolean) => void): HTMLElement {
+        const toggleRow = document.createElement('div');
+        toggleRow.className = 'popover-toggle-row';
+
+        const tTitle = document.createElement('span');
+        tTitle.className = 'popover-toggle-title';
+        tTitle.textContent = title;
+
+        const sw = document.createElement('div');
+        sw.className = `popover-switch ${initialChecked ? 'is-checked' : ''}`;
+        const thumb = document.createElement('span');
+        thumb.className = 'popover-switch-thumb';
+        sw.appendChild(thumb);
+
+        sw.onclick = () => {
+            const next = !sw.classList.contains('is-checked');
+            sw.classList.toggle('is-checked', next);
+            onToggle?.(next);
+        };
+
+        (toggleRow as any).__switch = sw;
+        toggleRow.append(tTitle, sw);
+        return toggleRow;
+    }
+
+    private createPaletteSection(): HTMLElement {
+        const colSection = document.createElement('div');
+        colSection.className = 'popover-palette-section';
+
+        this.swatchRowEl = document.createElement('div');
+        this.swatchRowEl.className = 'popover-swatches-row';
+        this.swatchRowEl.onwheel = (e) => {
+            e.preventDefault();
+            this.changeColorPage(e.deltaY > 0 ? 1 : -1);
+        };
+
+        this.paginationEl = document.createElement('div');
+        this.paginationEl.className = 'popover-pagination';
+
+        colSection.append(this.swatchRowEl, this.paginationEl);
+        this.updateColorsUI();
+
+        return colSection;
+    }
+
+    private changeColorPage(delta: number): void {
+        const n = this.currentPageIndex + delta;
+        if (n >= 0 && n < this.colorPages.length) {
+            this.currentPageIndex = n;
+            this.updateColorsUI();
+        }
+    }
+
+    private updateColorsUI(): void {
+        if (!this.swatchRowEl || !this.paginationEl) return;
+        this.swatchRowEl.replaceChildren();
+        this.swatchButtons.clear();
+
+        const colors = this.colorPages[this.currentPageIndex] || this.recentColors;
+        const visibleColors = colors.slice(0, 8);
+
+        for (const col of visibleColors) {
+            const sw = document.createElement('button');
+            sw.type = 'button';
+            sw.className = `popover-swatch-circle ${this.state.color.toUpperCase() === col.toUpperCase() ? 'is-active' : ''}`;
+            sw.title = col;
+            sw.setAttribute('aria-label', `Color ${col}`);
+            sw.style.backgroundColor = col;
+            sw.style.setProperty('--swatch-color', col);
+
+            const inner = document.createElement('span');
+            inner.className = 'popover-swatch-inner';
+            inner.style.backgroundColor = col;
+            sw.appendChild(inner);
+
+            sw.onclick = () => {
+                this.state.color = col;
+                this.pushRecentColor(col);
+                for (const [, s] of this.swatchButtons) s.classList.remove('is-active');
+                sw.classList.add('is-active');
+                if (this.opacityBubble) {
+                    this.opacityBubble.style.backgroundColor = col;
+                }
+                this.callbacks.onChangeColor(col);
+            };
+
+            this.swatchButtons.set(col, sw);
+            this.swatchRowEl.appendChild(sw);
+        }
+
+        // Circular "+" button (opens ColorPickerPopover)
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
-        addBtn.className = 'apolo-add-color-btn';
-        addBtn.title = 'Selector de color del sistema';
-        addBtn.setAttribute('aria-label', 'Selector de color');
-        addBtn.textContent = '+';
+        addBtn.className = 'popover-color-add';
+        addBtn.setAttribute('data-apolo-popover-trigger', 'true');
+        addBtn.title = 'Añadir color';
+        addBtn.appendChild(createSvg(ICONS.plusCircle, { size: 20 }));
 
-        const hiddenInput = document.createElement('input');
-        hiddenInput.type = 'color';
-        hiddenInput.value = this.state.color;
-        hiddenInput.style.display = 'none';
-        hiddenInput.addEventListener('input', () => {
-            this.state.color = hiddenInput.value;
-            this.callbacks.onChangeColor(hiddenInput.value);
-            this.render();
-        });
-        addBtn.appendChild(hiddenInput);
-        addBtn.addEventListener('click', () => hiddenInput.click());
-        swatchesRow.appendChild(addBtn);
+        addBtn.onclick = (e) => {
+            e.stopPropagation();
+            const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
+            this.colorPicker.open(
+                addBtn,
+                this.state.slot,
+                toolbarEl,
+                this.state.color,
+                (newColor, opacity) => {
+                    this.state.color = newColor;
+                    this.state.opacity = opacity;
+                    this.state.pressureSensitivity = Math.max(0, Math.min(1, opacity / 100));
+                    this.pushRecentColor(newColor);
+                    this.currentPageIndex = 0;
 
-        // HEX Input Field
-        const hexGroup = document.createElement('div');
-        hexGroup.className = 'apolo-hex-group';
+                    const nextOpacity = this.getOpacityPercent();
+                    if (this.opacityInput && this.opacityBubble) {
+                        this.opacityInput.value = String(nextOpacity);
+                        this.opacityBubble.textContent = String(nextOpacity);
+                        const ratio = Math.max(0, Math.min(1, nextOpacity / 100));
+                        this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+                        this.opacityBubble.style.backgroundColor = newColor;
+                        this.opacityBubble.style.opacity = String(Math.max(0.35, nextOpacity / 100));
+                    }
 
-        const hexLabel = document.createElement('label');
-        hexLabel.className = 'apolo-hex-label';
-        hexLabel.textContent = 'HEX';
+                    this.updateColorsUI();
+                    this.callbacks.onChangeColor(newColor);
+                    this.callbacks.onChangeOpacity?.(opacity);
+                },
+                null,
+                this.getOpacityPercent()
+            );
+        };
+        this.swatchRowEl.appendChild(addBtn);
 
-        const hexInput = document.createElement('input');
-        hexInput.type = 'text';
-        hexInput.className = 'apolo-hex-input';
-        hexInput.value = this.state.color.toUpperCase();
-        hexInput.addEventListener('change', () => {
-            const val = hexInput.value.trim();
-            if (/^#[\da-f]{3,8}$/i.test(val)) {
-                this.state.color = val;
-                this.callbacks.onChangeColor(val);
-                this.render();
+        // Pagination dots
+        this.paginationEl.replaceChildren();
+        for (let i = 0; i < this.colorPages.length; i++) {
+            const dot = document.createElement('button');
+            dot.type = 'button';
+            dot.className = `popover-pag-dot ${i === this.currentPageIndex ? 'is-active' : ''}`;
+            dot.setAttribute('aria-label', i === 0 ? 'Colores recientes' : `Página ${i + 1}`);
+            if (i === 0) {
+                dot.appendChild(createSvg(ICONS.clock, { size: 12 }));
+            } else {
+                const dotInner = document.createElement('span');
+                dotInner.className = 'popover-dot-inner';
+                dot.appendChild(dotInner);
             }
-        });
-
-        hexGroup.append(hexLabel, hexInput);
-        swatchesRow.appendChild(hexGroup);
-        wrap.appendChild(swatchesRow);
-
-        return wrap;
-    }
-
-    private createFavoritesSection(): HTMLElement {
-        const wrap = document.createElement('div');
-        wrap.className = 'apolo-favorites-section';
-
-        const title = document.createElement('div');
-        title.className = 'apolo-section-label';
-        title.textContent = 'Favoritos de la barra';
-        wrap.appendChild(title);
-
-        const list = document.createElement('div');
-        list.className = 'apolo-favorites-list';
-
-        const dark = isDarkTheme();
-        for (let i = 0; i < this.state.favorites.length; i++) {
-            const fav = this.state.favorites[i];
-            const profile = PEN_PROFILES[fav.profile] || PEN_PROFILES.fountain;
-
-            const row = document.createElement('div');
-            row.className = 'apolo-favorite-row';
-
-            const dot = document.createElement('span');
-            dot.className = 'apolo-fav-card-dot';
-            dot.style.background = mapInkColorForDark(fav.color, dark);
-
-            const label = document.createElement('div');
-            label.className = 'apolo-favorite-row-label';
-            label.textContent = `Favorito ${i + 1} · ${profile.name} · ${fav.width} px`;
-
-            const useBtn = document.createElement('button');
-            useBtn.type = 'button';
-            useBtn.className = 'apolo-fav-action-btn';
-            useBtn.textContent = 'Usar';
-            useBtn.setAttribute('aria-label', `Usar favorito ${i + 1}`);
-            useBtn.addEventListener('click', () => {
-                this.callbacks.onUseFavorite(i);
-            });
-
-            const saveBtn = document.createElement('button');
-            saveBtn.type = 'button';
-            saveBtn.className = 'apolo-fav-action-btn';
-            saveBtn.textContent = 'Guardar aquí';
-            saveBtn.setAttribute('aria-label', `Guardar estilo actual en favorito ${i + 1}`);
-            saveBtn.addEventListener('click', () => {
-                this.callbacks.onSaveFavorite(i);
-                this.render();
-            });
-
-            row.append(dot, label, useBtn, saveBtn);
-            list.appendChild(row);
+            dot.onclick = () => {
+                this.currentPageIndex = i;
+                this.updateColorsUI();
+            };
+            this.paginationEl.appendChild(dot);
         }
-        wrap.appendChild(list);
-
-        return wrap;
-    }
-
-    private createToggleRow(
-        title: string,
-        desc: string,
-        active: boolean,
-        onChange: (enabled: boolean) => void,
-    ): HTMLElement {
-        const row = document.createElement('div');
-        row.className = 'apolo-toggle-row';
-
-        const textWrap = document.createElement('div');
-        textWrap.className = 'apolo-toggle-row-text';
-
-        const titleEl = document.createElement('div');
-        titleEl.className = 'apolo-toggle-title';
-        titleEl.textContent = title;
-
-        const descEl = document.createElement('div');
-        descEl.className = 'apolo-toggle-desc';
-        descEl.textContent = desc;
-
-        textWrap.append(titleEl, descEl);
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = `apolo-switch-btn ${active ? '' : 'is-off'}`;
-        btn.setAttribute('aria-pressed', String(active));
-        btn.innerHTML = '<span class="apolo-switch-track"><span class="apolo-switch-thumb"></span></span>';
-
-        btn.addEventListener('click', () => {
-            const next = !active;
-            btn.classList.toggle('is-off', !next);
-            btn.setAttribute('aria-pressed', String(next));
-            onChange(next);
-        });
-
-        row.append(textWrap, btn);
-        return row;
     }
 
     destroy(): void {
-        window.removeEventListener('pointerdown', this.onOutsidePointerDown, { capture: true });
-        window.removeEventListener('touchstart', this.onOutsideTouchStart, { capture: true });
-        window.removeEventListener('keydown', this.onKeyDown);
+        this.close();
+        this.colorPicker?.destroy();
         this.container.remove();
     }
 }

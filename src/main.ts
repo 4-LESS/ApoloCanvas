@@ -3,7 +3,7 @@ import { EngineEventBus } from './core/events';
 import { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot } from './core/types';
 import { CanvasController } from './engine/CanvasController';
 import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue';
-import { DEFAULT_FAVORITES } from './ui/theme';
+import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme';
 import { openLocalGraph } from './ui/LinkSuggestModal';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension';
 
@@ -18,6 +18,7 @@ export interface ApoloCanvasSettings {
     shapeRecognition: boolean;
     toolbarSlot: ToolbarSlot;
     favorites: PenFavorite[];
+    toolPalettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }>;
     hasSeenHelpNotice: boolean;
     gridDensity: number;
     defaultBoxHeight: number;
@@ -45,6 +46,20 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
         { profile: 'fountain', color: '#6C3FD1', width: 2 },
         { profile: 'pencil', color: '#111827', width: 3 },
     ],
+    toolPalettes: {
+        pen: {
+            colors: ['#E53935', '#1F4FD8', '#10B981', '#111827'],
+            opacities: [100, 100, 100, 100],
+        },
+        highlighter: {
+            colors: ['#1E88E5', '#FDD835', '#43A047', '#00ACC1'],
+            opacities: [75, 75, 75, 75],
+        },
+        shape: {
+            colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
+            opacities: [100, 100, 100, 100],
+        },
+    },
     hasSeenHelpNotice: false,
     gridDensity: 32,
     defaultBoxHeight: 120,
@@ -229,7 +244,9 @@ export default class ApoloCanvasPlugin extends Plugin {
                                 previewSvgWrap.className = 'apolo-box-preview-svg';
                                 s.appendChild(previewSvgWrap);
                             }
-                            previewSvgWrap.innerHTML = renderBoxSvg(id, boxElements, 800, h);
+                            const svgMarkup = renderBoxSvg(id, boxElements, 800, h);
+                            const parsedSvg = createSvgFromMarkup(svgMarkup);
+                            previewSvgWrap.replaceChildren(...Array.from(parsedSvg.children ?? []));
                         } else if (previewSvgWrap) {
                             previewSvgWrap.remove();
                         }
@@ -241,17 +258,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                         optBtn.type = 'button';
                         optBtn.dataset.apoloBoxId = id;
                         optBtn.setAttribute('aria-label', 'Opciones del espacio');
-                        const dotsSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                        dotsSvg.setAttribute('viewBox', '0 0 24 24');
-                        dotsSvg.setAttribute('width', '16');
-                        dotsSvg.setAttribute('height', '16');
-                        dotsSvg.setAttribute('fill', 'none');
-                        dotsSvg.setAttribute('stroke', 'currentColor');
-                        dotsSvg.setAttribute('stroke-width', '2');
-                        dotsSvg.setAttribute('stroke-linecap', 'round');
-                        dotsSvg.setAttribute('stroke-linejoin', 'round');
-                        dotsSvg.innerHTML = '<circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle><circle cx="5" cy="12" r="1.5"></circle>';
-                        optBtn.appendChild(dotsSvg);
+                        optBtn.appendChild(createDotsIcon());
                         s.appendChild(optBtn);
                     }
                     if (!existingHandle) {
@@ -402,6 +409,34 @@ export default class ApoloCanvasPlugin extends Plugin {
             favorites: saved?.favorites && saved.favorites.length === 4
                 ? saved.favorites
                 : [...DEFAULT_FAVORITES],
+            toolPalettes: {
+                pen: {
+                    colors: saved?.toolPalettes?.pen?.colors && saved.toolPalettes.pen.colors.length === 4
+                        ? [...saved.toolPalettes.pen.colors]
+                        : (saved?.favorites && saved.favorites.length === 4
+                            ? saved.favorites.map(f => f.color)
+                            : [...DEFAULT_SETTINGS.toolPalettes.pen.colors]),
+                    opacities: saved?.toolPalettes?.pen?.opacities && saved.toolPalettes.pen.opacities.length === 4
+                        ? [...saved.toolPalettes.pen.opacities]
+                        : [...DEFAULT_SETTINGS.toolPalettes.pen.opacities],
+                },
+                highlighter: {
+                    colors: saved?.toolPalettes?.highlighter?.colors && saved.toolPalettes.highlighter.colors.length === 4
+                        ? [...saved.toolPalettes.highlighter.colors]
+                        : [...DEFAULT_SETTINGS.toolPalettes.highlighter.colors],
+                    opacities: saved?.toolPalettes?.highlighter?.opacities && saved.toolPalettes.highlighter.opacities.length === 4
+                        ? [...saved.toolPalettes.highlighter.opacities]
+                        : [...DEFAULT_SETTINGS.toolPalettes.highlighter.opacities],
+                },
+                shape: {
+                    colors: saved?.toolPalettes?.shape?.colors && saved.toolPalettes.shape.colors.length === 4
+                        ? [...saved.toolPalettes.shape.colors]
+                        : [...DEFAULT_SETTINGS.toolPalettes.shape.colors],
+                    opacities: saved?.toolPalettes?.shape?.opacities && saved.toolPalettes.shape.opacities.length === 4
+                        ? [...saved.toolPalettes.shape.opacities]
+                        : [...DEFAULT_SETTINGS.toolPalettes.shape.opacities],
+                },
+            },
         };
     }
 
@@ -657,6 +692,18 @@ export default class ApoloCanvasPlugin extends Plugin {
                 },
                 onFavoritesChange: (favs: PenFavorite[]) => {
                     this.settings.favorites = favs;
+                    void this.saveSettings();
+                },
+                toolPalettes: this.settings.toolPalettes,
+                onToolPalettesChange: (palettes) => {
+                    this.settings.toolPalettes = palettes;
+                    if (this.settings.favorites) {
+                        palettes.pen.colors.forEach((col, idx) => {
+                            if (this.settings.favorites[idx]) {
+                                this.settings.favorites[idx].color = col;
+                            }
+                        });
+                    }
                     void this.saveSettings();
                 },
             },
