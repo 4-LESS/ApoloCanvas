@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit && node esbuild.config.mjs production",
-    "test": "node --test tests/**/*.test.ts"
+    "test": "node --test tests/**/*.test.ts",
+    "sandbox": "node sandbox/server.mjs"
   },
   "keywords": ["obsidian", "canvas", "digital-ink", "s-pen"],
   "license": "MIT",

@@ -3909,6 +3909,35 @@ export class CanvasController {
                         }
                         renderContinuousSolidStroke(context, points, element.style);
                     }
+                } else if (element.style.profile === 'calli') {
+                    const cached = (element as any)._calliPointsCache;
+                    let points: { x: number; y: number; pressure?: number }[];
+                    if (
+                        cached &&
+                        cached.contentLeft === contentLeft &&
+                        cached.contentWidth === contentWidth &&
+                        cached.blockTop === blockTop &&
+                        cached.dataRef === data
+                    ) {
+                        points = cached.points;
+                    } else {
+                        points = [];
+                        for (let i = 0; i < data.length; i += 4) {
+                            points.push({
+                                x: contentLeft + data[i] * contentWidth,
+                                y: blockTop + data[i + 1] * contentWidth,
+                                pressure: data[i + 2],
+                            });
+                        }
+                        (element as any)._calliPointsCache = {
+                            contentLeft,
+                            contentWidth,
+                            blockTop,
+                            dataRef: data,
+                            points,
+                        };
+                    }
+                    renderContinuousSolidStroke(context, points, element.style);
                 } else {
                     const points: { x: number; y: number; pressure?: number }[] = [];
                     for (let i = 0; i < data.length; i += 4) {
@@ -4187,36 +4216,7 @@ export class CanvasController {
             );
             const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
             for (const run of validRuns) {
-                if (this.penProfileId === 'pencil') {
-                    // Lightweight continuous path preview during live dragging for zero input latency
-                    context.save();
-                    context.strokeStyle = this.style.color;
-                    context.fillStyle = this.style.color;
-                    context.lineWidth = Math.max(1, this.style.width);
-                    context.globalAlpha = this.style.opacity * 0.75;
-                    context.lineCap = 'round';
-                    context.lineJoin = 'round';
-                    if (run.length === 1) {
-                        context.beginPath();
-                        context.arc(run[0].x, run[0].y, Math.max(1, this.style.width / 2), 0, Math.PI * 2);
-                        context.fill();
-                    } else if (run.length > 1) {
-                        context.beginPath();
-                        context.moveTo(run[0].x, run[0].y);
-                        for (let i = 1; i < run.length; i++) {
-                            const prev = run[i - 1];
-                            const curr = run[i];
-                            const mx = (prev.x + curr.x) / 2;
-                            const my = (prev.y + curr.y) / 2;
-                            context.quadraticCurveTo(prev.x, prev.y, mx, my);
-                        }
-                        context.lineTo(run[run.length - 1].x, run[run.length - 1].y);
-                        context.stroke();
-                    }
-                    context.restore();
-                } else {
-                    renderContinuousSolidStroke(context, run, activeStyle);
-                }
+                renderContinuousSolidStroke(context, run, activeStyle);
             }
         }
         context.restore();

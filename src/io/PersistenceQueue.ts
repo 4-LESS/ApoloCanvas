@@ -2,6 +2,7 @@ import type { App, TFile } from 'obsidian';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, ShapeElement } from '../core/types.ts';
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
+import { buildCalligraphicChiselPath } from '../engine/PatternedStrokeRenderer.ts';
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -549,8 +550,20 @@ export function renderBoxSvg(
         gridDef = `<pattern id="apolo-grid-${safeBoxId}" width="100%" height="${step}" patternUnits="userSpaceOnUse"><line x1="0" y1="${step}" x2="100%" y2="${step}" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${safeBoxId})"/>`;
     }
 
+    const hasPencil = elements.some(el => el.type === 'stroke' && el.style.profile === 'pencil');
+    const pencilFilterDef = hasPencil
+        ? `<filter id="apolo-pencil-grain" filterUnits="userSpaceOnUse" x="-50" y="-50" width="10000" height="10000">` +
+          `<feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="3" seed="17" result="noise"/>` +
+          `<feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1.45 -0.22" in="noise" result="grainMask"/>` +
+          `<feComposite operator="in" in="SourceGraphic" in2="grainMask" result="textured"/>` +
+          `<feDisplacementMap in="textured" in2="noise" scale="1.6" xChannelSelector="R" yChannelSelector="G"/>` +
+          `</filter>`
+        : '';
+
     const content = elements.map(el => renderElement(el, scale)).join('\n');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><defs/>${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
+    const defsContent = [pencilFilterDef].filter(Boolean).join('');
+    const defsTag = defsContent ? `<defs>${defsContent}</defs>` : '<defs/>';
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${defsTag}${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
 }
 
 function vaultRelativeLink(notePath: string, assetPath: string): string {
@@ -571,10 +584,19 @@ function renderSvg(document: PageDocument): string {
         }
     }
     const padding = 16;
+    const hasPencil = document.elements.some(el => el.type === 'stroke' && el.style.profile === 'pencil');
+    const pencilFilterDef = hasPencil
+        ? `<defs><filter id="apolo-pencil-grain" filterUnits="userSpaceOnUse" x="-50" y="-50" width="10000" height="10000">` +
+          `<feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="3" seed="17" result="noise"/>` +
+          `<feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1.45 -0.22" in="noise" result="grainMask"/>` +
+          `<feComposite operator="in" in="SourceGraphic" in2="grainMask" result="textured"/>` +
+          `<feDisplacementMap in="textured" in2="noise" scale="1.6" xChannelSelector="R" yChannelSelector="G"/>` +
+          `</filter></defs>`
+        : '';
     const content = document.elements.map(el => renderElement(el, scale)).join('\n');
     const width = Math.max(1, maxX - minX + padding * 2);
     const height = Math.max(1, maxY - minY + padding * 2);
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - padding} ${minY - padding} ${width} ${height}" width="${width}" height="${height}"><g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - padding} ${minY - padding} ${width} ${height}" width="${width}" height="${height}">${pencilFilterDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
 }
 
 function renderElement(element: CanvasElement, scale = 800): string {
@@ -587,12 +609,22 @@ function renderElement(element: CanvasElement, scale = 800): string {
             ? `0.5 ${Math.round(Math.max(4, strokeWidth * 2.2) * 10) / 10}`
             : '';
     const dash = dashArray ? ` stroke-dasharray="${dashArray}"` : '';
-    const style = `stroke="${escapeXml(element.style.color)}" opacity="${element.style.opacity}" stroke-linecap="${lineCap}" stroke-linejoin="round"${dash}`;
+    const isPencil = element.type === 'stroke' && element.style.profile === 'pencil';
+    const filterAttr = isPencil ? ' filter="url(#apolo-pencil-grain)"' : '';
+    const style = `stroke="${escapeXml(element.style.color)}" opacity="${element.style.opacity}" stroke-linecap="${lineCap}" stroke-linejoin="round"${dash}${filterAttr}`;
     if (element.type === 'stroke') {
         const points = element.points;
         if (points.length < 4) return '';
-        if (points.length === 4) return `<circle cx="${points[0] * scale}" cy="${points[1] * scale}" r="${element.style.width * pressureScale(points[2]) / 2}" fill="${escapeXml(element.style.color)}" opacity="${element.style.opacity}"/>`;
-        if (element.style.pattern !== 'solid') {
+        if (points.length === 4) return `<circle cx="${points[0] * scale}" cy="${points[1] * scale}" r="${element.style.width * pressureScale(points[2]) / 2}" fill="${escapeXml(element.style.color)}" opacity="${element.style.opacity}"${filterAttr}/>`;
+        if (element.style.pattern === 'solid' && element.style.profile === 'calli') {
+            const rawPoints: { x: number; y: number }[] = [];
+            for (let i = 0; i < points.length; i += 4) {
+                rawPoints.push({ x: points[i] * scale, y: points[i + 1] * scale });
+            }
+            const chisel = buildCalligraphicChiselPath(rawPoints, element.style.width);
+            return `<path d="${chisel.toSvgPathD()}" fill="${escapeXml(element.style.color)}" fill-rule="nonzero" opacity="${element.style.opacity}" stroke="none"/>`;
+        }
+        if (element.style.pattern !== 'solid' || isPencil) {
             let path = `M ${points[0] * scale} ${points[1] * scale}`;
             for (let i = 4; i < points.length; i += 4) path += ` L ${points[i] * scale} ${points[i + 1] * scale}`;
             return `<path d="${path}" ${style} stroke-width="${element.style.width}"/>`;

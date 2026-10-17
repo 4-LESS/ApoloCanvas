@@ -1,53 +1,366 @@
 import type { StrokePattern, StrokeStyle } from '../core/types';
 
-// Patrón de textura estocástica para lápiz de mina (grafito orgánico)
-let graphitePatternCache: { color: string; pattern: CanvasPattern } | null = null;
+let graphiteTileCache: { color: string; pattern: CanvasPattern } | null = null;
 
 export function resetGraphitePatternCacheForTesting(): void {
-    graphitePatternCache = null;
+    graphiteTileCache = null;
 }
 
-function getGraphitePattern(ctx: CanvasRenderingContext2D, color: string): CanvasPattern | null {
-    if (graphitePatternCache && graphitePatternCache.color === color) {
-        return graphitePatternCache.pattern;
+export function getGraphitePattern(ctx: CanvasRenderingContext2D, color: string): CanvasPattern | null {
+    if (graphiteTileCache && graphiteTileCache.color === color) {
+        return graphiteTileCache.pattern;
     }
     try {
-        const size = 64; // Textura más amplia y de alta resolución
-        const patternCanvas = document.createElement('canvas');
-        patternCanvas.width = size;
-        patternCanvas.height = size;
-        const pCtx = patternCanvas.getContext('2d');
-        if (!pCtx) return null;
+        const size = 96;
+        const tile = document.createElement('canvas');
+        tile.width = size;
+        tile.height = size;
+        const tCtx = tile.getContext('2d');
+        if (!tCtx) return null;
 
-        pCtx.fillStyle = color;
-        
-        // Distribución estocástica (ruido de dispersión por partículas aleatorias)
-        const particleCount = 450; // Cantidad de motas de grafito por celda
-        for (let i = 0; i < particleCount; i++) {
-            // Posición pseudo-aleatoria pero determinista para evitar parpadeos al hacer zoom
-            const rx = (Math.sin(i * 12.9898 + i * 78.233) * 43758.5453) % 1;
-            const ry = (Math.sin(i * 78.233 + i * 15.127) * 12345.6789) % 1;
-            const x = Math.abs(rx) * size;
-            const y = Math.abs(ry) * size;
-            
-            // Tamaño de mota variable para simular el poro del papel
-            const radius = 0.4 + ((i * 9301 + 49297) % 233280) / 233280 * 0.9;
-            
-            pCtx.globalAlpha = 0.15 + 0.45 * (((i * 3 + 7) % 100) / 100);
-            pCtx.beginPath();
-            pCtx.arc(x, y, radius, 0, Math.PI * 2);
-            pCtx.fill();
+        tCtx.fillStyle = color;
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                // High-frequency hash + low-frequency paper grain modulation
+                const h1 = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+                const n1 = h1 - Math.floor(h1);
+                const h2 = Math.sin(x * 0.35 + y * 0.45) * 1973.17;
+                const n2 = h2 - Math.floor(h2);
+                const combined = n1 * 0.75 + n2 * 0.25;
+
+                if (combined > 0.36) {
+                    tCtx.globalAlpha = Math.min(1, (combined - 0.36) * 1.45);
+                    tCtx.fillRect(x, y, 1, 1);
+                }
+            }
         }
-
-        const pattern = ctx.createPattern(patternCanvas, 'repeat');
+        const pattern = ctx.createPattern(tile, 'repeat');
         if (pattern) {
-            graphitePatternCache = { color, pattern };
+            graphiteTileCache = { color, pattern };
             return pattern;
         }
     } catch {
-        // Fallback seguro en entornos headless / testing
+        // Safe fallback for headless test mocks
     }
     return null;
+}
+
+/**
+ * Genera puntos suavizados (subdivisión cuadrática de Chaikin / punto medio)
+ * para que las curvas sean infinitamente suaves al hacer zoom sin facetas poligonales.
+ */
+interface CalliCacheEntry {
+    width: number;
+    nibAngle: number;
+    path2D?: any;
+    svgD: string;
+    strips: number[][];
+}
+
+const calliStrokeCache = new WeakMap<readonly any[], CalliCacheEntry>();
+
+interface LivePrefixCache {
+    pointsRef?: readonly any[];
+    firstPoint?: { x: number; y: number };
+    frozenLength: number;
+    prefixChisel: ReturnType<typeof buildCalligraphicChiselPath>;
+}
+
+let activeLivePrefix: LivePrefixCache | null = null;
+
+export function resetCalliCacheForTesting(): void {
+    activeLivePrefix = null;
+}
+
+/**
+ * Filtra puntos redundantes consecutivos a distancia < 1.8px
+ * preservando siempre el primer y último punto.
+ */
+export function filterRedundantPoints(
+    rawPoints: readonly { x: number; y: number }[]
+): { x: number; y: number }[] {
+    if (!rawPoints || rawPoints.length <= 2) return (rawPoints || []).map(p => ({ x: p.x, y: p.y }));
+    const filtered: { x: number; y: number }[] = [{ x: rawPoints[0].x, y: rawPoints[0].y }];
+    const minDistSq = 1.8 * 1.8;
+    for (let i = 1; i < rawPoints.length - 1; i++) {
+        const last = filtered[filtered.length - 1];
+        const p = rawPoints[i];
+        const dx = p.x - last.x;
+        const dy = p.y - last.y;
+        if (dx * dx + dy * dy >= minDistSq) {
+            filtered.push({ x: p.x, y: p.y });
+        }
+    }
+    const lastRaw = rawPoints[rawPoints.length - 1];
+    filtered.push({ x: lastRaw.x, y: lastRaw.y });
+    return filtered;
+}
+
+/**
+ * Genera puntos suavizados adaptativos (subdivisión cuadrática condicional)
+ * para que las curvas sean suaves con mínimo overhead de vértices.
+ */
+export function smoothCalligraphyPoints(
+    rawPoints: readonly { x: number; y: number }[]
+): { x: number; y: number }[] {
+    if (!rawPoints || rawPoints.length <= 2) return (rawPoints || []).map(p => ({ x: p.x, y: p.y }));
+    const filtered = filterRedundantPoints(rawPoints);
+    if (filtered.length <= 2) return filtered;
+
+    const smoothed: { x: number; y: number }[] = [{ x: filtered[0].x, y: filtered[0].y }];
+    const cos12Deg = Math.cos((12 * Math.PI) / 180);
+
+    for (let i = 1; i < filtered.length - 1; i++) {
+        const p0 = filtered[i - 1];
+        const p1 = filtered[i];
+        const p2 = filtered[i + 1];
+
+        const d01 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+        const d12 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+        let isSharp = false;
+        if (d01 > 0.01 && d12 > 0.01) {
+            const dot = ((p1.x - p0.x) * (p2.x - p1.x) + (p1.y - p0.y) * (p2.y - p1.y)) / (d01 * d12);
+            if (dot < cos12Deg) {
+                isSharp = true;
+            }
+        }
+
+        const needsFullSubdivision = d01 > 6 || d12 > 6 || isSharp;
+
+        const m0x = (p0.x + p1.x) * 0.5;
+        const m0y = (p0.y + p1.y) * 0.5;
+        const m1x = (p1.x + p2.x) * 0.5;
+        const m1y = (p1.y + p2.y) * 0.5;
+
+        if (needsFullSubdivision) {
+            for (let t = 0.25; t <= 1.0; t += 0.25) {
+                const it = 1 - t;
+                smoothed.push({
+                    x: it * it * m0x + 2 * it * t * p1.x + t * t * m1x,
+                    y: it * it * m0y + 2 * it * t * p1.y + t * t * m1y,
+                });
+            }
+        } else {
+            smoothed.push({
+                x: 0.25 * m0x + 0.5 * p1.x + 0.25 * m1x,
+                y: 0.25 * m0y + 0.5 * p1.y + 0.25 * m1y,
+            });
+        }
+    }
+    const last = filtered[filtered.length - 1];
+    smoothed.push({ x: last.x, y: last.y });
+    return smoothed;
+}
+
+/**
+ * Construye el SVG path string (`d`) y/o dibuja en el Canvas2D una pluma biselada
+ * con ángulo fijo de -40°, puntas cortadas en bisel exacto, y giro (winding) 100% positivo
+ * agrupando segmentos contiguos en tiras de cinta monótonas (Monotone Ribbon Strips).
+ */
+export function buildCalligraphicChiselPath(
+    rawPoints: readonly { x: number; y: number }[],
+    baseWidth: number,
+    nibAngleRad = (-40 * Math.PI) / 180
+): { drawToCanvas: (ctx: CanvasRenderingContext2D) => void; toSvgPathD: () => string; path2D?: any } {
+    if (typeof rawPoints === 'object' && rawPoints !== null) {
+        const cached = calliStrokeCache.get(rawPoints);
+        if (cached && cached.width === baseWidth && Math.abs(cached.nibAngle - nibAngleRad) < 1e-4) {
+            return {
+                drawToCanvas(ctx: CanvasRenderingContext2D) {
+                    ctx.beginPath();
+                    if (cached.path2D && typeof (ctx as any).fill === 'function') {
+                        try {
+                            (ctx as any).fill(cached.path2D, 'nonzero');
+                            return;
+                        } catch {
+                            // fallback
+                        }
+                    }
+                    for (const poly of cached.strips) {
+                        for (let j = 0; j < poly.length; j += 2) {
+                            if (j === 0) ctx.moveTo(poly[j], poly[j + 1]);
+                            else ctx.lineTo(poly[j], poly[j + 1]);
+                        }
+                        ctx.closePath();
+                    }
+                    ctx.fill('nonzero');
+                },
+                toSvgPathD() {
+                    return cached.svgD;
+                },
+                path2D: cached.path2D,
+            };
+        }
+    }
+
+    const pts = smoothCalligraphyPoints(rawPoints);
+    const halfSpan = Math.max(1.5, baseWidth * 0.85); // Mitad del ancho del bisel
+    const minNibThickness = Math.max(0.6, baseWidth * 0.08); // Grosor físico mínimo del metal de la plumilla
+
+    // Vector unitario del filo de la plumilla (bisel) y su normal perpendicular
+    const ux = Math.cos(nibAngleRad);
+    const uy = Math.sin(nibAngleRad);
+    const nx = -uy;
+    const ny = ux;
+
+    const edgeA: Array<{ x: number; y: number }> = [];
+    const edgeB: Array<{ x: number; y: number }> = [];
+
+    for (let i = 0; i < pts.length; i++) {
+        let dx = 0;
+        let dy = 0;
+        if (i === 0 && pts.length > 1) {
+            dx = pts[1].x - pts[0].x;
+            dy = pts[1].y - pts[0].y;
+        } else if (i === pts.length - 1 && pts.length > 1) {
+            dx = pts[i].x - pts[i - 1].x;
+            dy = pts[i].y - pts[i - 1].y;
+        } else if (pts.length > 2) {
+            dx = pts[i + 1].x - pts[i - 1].x;
+            dy = pts[i + 1].y - pts[i - 1].y;
+        }
+
+        const padSign = (dx * nx + dy * ny >= 0) ? 1 : -1;
+        const padX = nx * minNibThickness * padSign;
+        const padY = ny * minNibThickness * padSign;
+
+        edgeA.push({
+            x: pts[i].x - ux * halfSpan - padX,
+            y: pts[i].y - uy * halfSpan - padY,
+        });
+        edgeB.push({
+            x: pts[i].x + ux * halfSpan + padX,
+            y: pts[i].y + uy * halfSpan + padY,
+        });
+    }
+
+    const strips: Array<number[]> = [];
+
+    const pushStrip = (startIdx: number, endIdx: number, sign: number) => {
+        if (endIdx <= startIdx) return;
+        const poly: number[] = [];
+        if (sign >= 0) {
+            for (let k = startIdx; k <= endIdx; k++) {
+                poly.push(edgeA[k].x, edgeA[k].y);
+            }
+            for (let k = endIdx; k >= startIdx; k--) {
+                poly.push(edgeB[k].x, edgeB[k].y);
+            }
+        } else {
+            for (let k = startIdx; k <= endIdx; k++) {
+                poly.push(edgeB[k].x, edgeB[k].y);
+            }
+            for (let k = endIdx; k >= startIdx; k--) {
+                poly.push(edgeA[k].x, edgeA[k].y);
+            }
+        }
+        strips.push(poly);
+    };
+
+    if (pts.length >= 2) {
+        let stripStart = 0;
+        let stripSign = 0;
+
+        for (let i = 1; i < pts.length; i++) {
+            const p0 = pts[i - 1];
+            const p1 = pts[i];
+            const dx = p1.x - p0.x;
+            const dy = p1.y - p0.y;
+            if (Math.hypot(dx, dy) < 0.001) continue;
+
+            const cross = ux * dy - uy * dx;
+            const sign = cross >= 0 ? 1 : -1;
+
+            if (stripSign === 0) {
+                stripSign = sign;
+                stripStart = i - 1;
+            } else if (sign !== stripSign) {
+                pushStrip(stripStart, i - 1, stripSign);
+                stripStart = i - 1;
+                stripSign = sign;
+            }
+        }
+
+        if (stripSign !== 0 && stripStart < pts.length - 1) {
+            pushStrip(stripStart, pts.length - 1, stripSign);
+        } else if (strips.length === 0 && pts.length >= 2) {
+            pushStrip(0, pts.length - 1, 1);
+        }
+    }
+
+    if (strips.length === 0 && pts.length > 0) {
+        const p = pts[0];
+        const a0x = p.x - ux * halfSpan - nx * minNibThickness;
+        const a0y = p.y - uy * halfSpan - ny * minNibThickness;
+        const b0x = p.x + ux * halfSpan - nx * minNibThickness;
+        const b0y = p.y + uy * halfSpan - ny * minNibThickness;
+        const b1x = p.x + ux * halfSpan + nx * minNibThickness;
+        const b1y = p.y + uy * halfSpan + ny * minNibThickness;
+        const a1x = p.x - ux * halfSpan + nx * minNibThickness;
+        const a1y = p.y - uy * halfSpan + ny * minNibThickness;
+        strips.push([a0x, a0y, b0x, b0y, b1x, b1y, a1x, a1y]);
+    }
+
+    let svgPathD = '';
+    for (const poly of strips) {
+        if (poly.length < 4) continue;
+        svgPathD += `M${poly[0].toFixed(2)} ${poly[1].toFixed(2)}`;
+        for (let j = 2; j < poly.length; j += 2) {
+            svgPathD += `L${poly[j].toFixed(2)} ${poly[j + 1].toFixed(2)}`;
+        }
+        svgPathD += 'Z';
+    }
+
+    let path2DInstance: any = null;
+    if (typeof Path2D !== 'undefined' && svgPathD) {
+        try {
+            path2DInstance = new Path2D(svgPathD);
+        } catch {
+            path2DInstance = null;
+        }
+    }
+
+    const drawToCanvas = (ctx: CanvasRenderingContext2D) => {
+        ctx.beginPath();
+        if (path2DInstance && typeof (ctx as any).fill === 'function') {
+            try {
+                (ctx as any).fill(path2DInstance, 'nonzero');
+                return;
+            } catch {
+                // Fallback to direct path iteration
+            }
+        }
+        for (const poly of strips) {
+            for (let j = 0; j < poly.length; j += 2) {
+                if (j === 0) ctx.moveTo(poly[j], poly[j + 1]);
+                else ctx.lineTo(poly[j], poly[j + 1]);
+            }
+            ctx.closePath();
+        }
+        ctx.fill('nonzero');
+    };
+
+    const result = {
+        drawToCanvas,
+        toSvgPathD(): string {
+            return svgPathD;
+        },
+        path2D: path2DInstance,
+        strips,
+    };
+
+    if (typeof rawPoints === 'object' && rawPoints !== null) {
+        calliStrokeCache.set(rawPoints, {
+            width: baseWidth,
+            nibAngle: nibAngleRad,
+            path2D: path2DInstance,
+            svgD: svgPathD,
+            strips,
+        });
+    }
+
+    return result;
 }
 
 /**
@@ -73,9 +386,29 @@ export function renderContinuousSolidStroke(
     // Caso 1: Punto único (toque simple)
     if (points.length === 1) {
         const pt = points[0];
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, Math.max(1, baseWidth / 2), 0, Math.PI * 2);
-        ctx.fill();
+        if (profile === 'pencil') {
+            const grainPattern = getGraphitePattern(ctx, color);
+            ctx.fillStyle = grainPattern ?? color;
+            const shiftX = Math.round((pt.x * 37.7) % 96);
+            const shiftY = Math.round((pt.y * 53.3) % 96);
+            if (grainPattern && typeof (grainPattern as any).setTransform === 'function' && typeof DOMMatrix !== 'undefined') {
+                (grainPattern as any).setTransform(new DOMMatrix().translate(shiftX, shiftY));
+            }
+            const avgPressure = pt.pressure !== undefined && pt.pressure > 0 ? pt.pressure : 0.5;
+            const pFactor = 0.55 + 0.45 * avgPressure;
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, Math.max(1, (baseWidth * pFactor) / 2), 0, Math.PI * 2);
+            ctx.fill();
+        } else if (profile === 'calli') {
+            ctx.fillStyle = color;
+            ctx.globalAlpha = opacity;
+            const chisel = buildCalligraphicChiselPath(points, baseWidth);
+            chisel.drawToCanvas(ctx);
+        } else {
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, Math.max(1, baseWidth / 2), 0, Math.PI * 2);
+            ctx.fill();
+        }
         ctx.restore();
         return;
     }
@@ -111,86 +444,86 @@ export function renderContinuousSolidStroke(
         ctx.stroke();
 
     } else if (profile === 'calli') {
-        // Caligráfica: Plumilla plana a -45 grados (Cero espinas, barrido continuo)
-        const angle = -Math.PI / 4;
-        const ux = Math.cos(angle);
-        const uy = Math.sin(angle);
-        const h = Math.max(1, baseWidth * 1.15);
-
-        ctx.beginPath();
-        // Lado A hacia adelante
-        for (let i = 0; i < points.length; i++) {
-            const pt = points[i];
-            const ax = pt.x - h * ux;
-            const ay = pt.y - h * uy;
-            if (i === 0) ctx.moveTo(ax, ay);
-            else ctx.lineTo(ax, ay);
-        }
-        // Lado B hacia atrás (cierre del polígono de la plumilla)
-        for (let i = points.length - 1; i >= 0; i--) {
-            const pt = points[i];
-            const bx = pt.x + h * ux;
-            const by = pt.y + h * uy;
-            ctx.lineTo(bx, by);
-        }
-        ctx.closePath();
-        ctx.fill();
-
-        // Espina central ultrafina para mantener nitidez en trazos paralelos a -45°
-        ctx.lineWidth = Math.max(1, baseWidth * 0.22);
-        ctx.lineCap = 'butt';
-        buildContinuousPath();
-        ctx.stroke();
-
-    } else if (profile === 'pencil') {
-        // Lápiz de mina: Renderizado orgánico por dispersión estocástica gaussiana (sin contornos sólidos)
         ctx.save();
         ctx.fillStyle = color;
+        ctx.globalAlpha = opacity;
+
+        if (points.length > 120 && opacity === 1) {
+            const isSameStroke = activeLivePrefix && (
+                activeLivePrefix.pointsRef === points ||
+                (activeLivePrefix.firstPoint &&
+                 points[0].x === activeLivePrefix.firstPoint.x &&
+                 points[0].y === activeLivePrefix.firstPoint.y)
+            ) && points.length >= activeLivePrefix.frozenLength;
+
+            if (!isSameStroke || (points.length - activeLivePrefix!.frozenLength > 32)) {
+                const frozenLength = points.length - 24;
+                const prefixSlice = points.slice(0, frozenLength);
+                activeLivePrefix = {
+                    pointsRef: points,
+                    firstPoint: { x: points[0].x, y: points[0].y },
+                    frozenLength,
+                    prefixChisel: buildCalligraphicChiselPath(prefixSlice, baseWidth),
+                };
+            }
+
+            // Draw cached prefix
+            activeLivePrefix!.prefixChisel.drawToCanvas(ctx);
+
+            // Draw live tail (with overlap of 2 points to avoid seam gap)
+            const tailSlice = points.slice(Math.max(0, activeLivePrefix!.frozenLength - 2));
+            const tailChisel = buildCalligraphicChiselPath(tailSlice, baseWidth);
+            tailChisel.drawToCanvas(ctx);
+        } else {
+            activeLivePrefix = null;
+            const chisel = buildCalligraphicChiselPath(points, baseWidth);
+            chisel.drawToCanvas(ctx);
+        }
+        ctx.restore();
+
+    } else if (profile === 'pencil') {
+        // 3-Pass Soft-Edge Continuous Stroke (Zero shadowBlur, 120fps in Live pointermove)
+        const grainPattern = getGraphitePattern(ctx, color);
+        ctx.strokeStyle = grainPattern ?? color;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
-        // Determinar paso y densidad de partículas según el grosor
-        const step = Math.max(1.5, baseWidth * 0.25);
-        const radius = Math.max(1, baseWidth * 0.5);
-
-        for (let i = 0; i < points.length - 1; i++) {
-            const p1 = points[i];
-            const p2 = points[i + 1];
-            const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-            const stepsCount = Math.ceil(dist / step);
-
-            for (let s = 0; s <= stepsCount; s++) {
-                const t = stepsCount === 0 ? 0 : s / stepsCount;
-                const cx = p1.x + (p2.x - p1.x) * t;
-                const cy = p1.y + (p2.y - p1.y) * t;
-
-                // Densidad proporcional al área para que grosores altos mantengan textura rica
-                const density = Math.max(4, Math.round(baseWidth * 1.5));
-
-                for (let c = 0; c < density; c++) {
-                    // Distribución gaussiana / radial aproximada (más denso al centro, difuso en el radio)
-                    const u1 = ((c * 93.13 + i * 41.2 + s * 17.3) % 100) / 100;
-                    const u2 = ((c * 47.7 + i * 83.9 + s * 29.1) % 100) / 100;
-                    
-                    const angle = u1 * Math.PI * 2;
-                    // Raíz cuadrada de u2 concentra las partículas hacia el centro (distribución natural de mina)
-                    const r = radius * Math.sqrt(u2);
-
-                    const px = cx + Math.cos(angle) * r;
-                    const py = cy + Math.sin(angle) * r;
-
-                    // Opacidad individual variable para dar el efecto de grano de papel
-                    const particleAlpha = opacity * (0.12 + 0.38 * (((c * 7 + s * 3) % 10) / 10));
-                    ctx.globalAlpha = particleAlpha;
-
-                    // Usar círculos pequeños en lugar de rectángulos para evitar esquinas cuadradas
-                    ctx.beginPath();
-                    ctx.arc(px, py, 0.85 + (c % 2) * 0.4, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            }
+        let totalP = 0;
+        for (let i = 0; i < points.length; i++) {
+            totalP += (points[i].pressure !== undefined && points[i].pressure! > 0) ? points[i].pressure! : 0.5;
         }
-        ctx.restore();
+        const avgPressure = totalP / points.length;
+        const pFactor = 0.55 + 0.45 * avgPressure;
+
+        const shiftX = Math.round((points[0].x * 37.7) % 96);
+        const shiftY = Math.round((points[0].y * 53.3) % 96);
+
+        const applyShift = (passOffsetX: number, passOffsetY: number) => {
+            if (grainPattern && typeof (grainPattern as any).setTransform === 'function' && typeof DOMMatrix !== 'undefined') {
+                (grainPattern as any).setTransform(new DOMMatrix().translate(shiftX + passOffsetX, shiftY + passOffsetY));
+            }
+        };
+
+        // Pass 1 (Outer Soft Halo — replaces shadowBlur)
+        applyShift(0, 0);
+        ctx.lineWidth = Math.max(1.2, baseWidth * 1.18);
+        ctx.globalAlpha = opacity * pFactor * 0.22;
+        buildContinuousPath();
+        ctx.stroke();
+
+        // Pass 2 (Mid Graphite Body)
+        applyShift(31, 19);
+        ctx.lineWidth = Math.max(1, baseWidth * 0.92);
+        ctx.globalAlpha = opacity * pFactor * 0.48;
+        buildContinuousPath();
+        ctx.stroke();
+
+        // Pass 3 (Dense Inner Core)
+        applyShift(67, 43);
+        ctx.lineWidth = Math.max(0.8, baseWidth * 0.62);
+        ctx.globalAlpha = opacity * pFactor * 0.72;
+        buildContinuousPath();
+        ctx.stroke();
     }
 
     ctx.restore();
