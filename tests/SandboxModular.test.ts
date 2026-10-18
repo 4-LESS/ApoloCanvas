@@ -18,7 +18,7 @@ describe('Sandbox Modular Canvas Architecture', () => {
     });
 
     it('pens export renderPen function and execute without error', async () => {
-        const pens = ['ball', 'fountain', 'calli', 'pencil', 'pencil-simple', 'pencil-atlas'];
+        const pens = ['ball', 'fountain', 'calli', 'pencil', 'pencil-simple', 'pencil-atlas', 'pencil-atlasv2'];
         
         // Mock CanvasRenderingContext2D
         const mockCtx: any = {
@@ -263,5 +263,35 @@ describe('Sandbox Modular Canvas Architecture', () => {
         assert.ok(svgOutput.includes('feColorMatrix'), 'Filter must include feColorMatrix');
         assert.ok(svgOutput.includes('feDisplacementMap'), 'Filter must include feDisplacementMap');
         assert.ok(svgOutput.includes('filter="url(#apolo-pencil-grain)"'), 'Pencil stroke must reference apolo-pencil-grain filter');
+    });
+
+    it('pencil-atlasv2 exports compliant dual Canvas and compact RDP SVG without heavy filters', async () => {
+        const v2Mod = await import('../sandbox/pens/pencil-atlasv2.js');
+
+        assert.strictEqual(typeof v2Mod.renderPen, 'function');
+        assert.strictEqual(typeof v2Mod.renderCanvas, 'function');
+        assert.strictEqual(typeof v2Mod.renderSvg, 'function');
+        assert.strictEqual(typeof v2Mod.releasePencilStroke, 'function');
+
+        const testPoints = [
+            { x: 10, y: 10, pressure: 0.2 },
+            { x: 30, y: 40, pressure: 0.5 },
+            { x: 70, y: 80, pressure: 0.8 },
+            { x: 120, y: 110, pressure: 0.6 },
+            { x: 180, y: 150, pressure: 0.4 },
+        ];
+        const style = { width: 4, opacity: 0.85, color: '#2b2b2b' };
+
+        const svg = v2Mod.renderSvg(testPoints, style);
+        assert.ok(svg.body.includes('fill-rule="nonzero"'), 'SVG body must include nonzero fill rule');
+        assert.ok(svg.body.includes('fill-opacity="0.85"'), 'SVG body must include correct opacity');
+        assert.ok(svg.body.includes('l'), 'SVG path d must use compact relative coordinates');
+        assert.ok(!svg.body.includes('feTurbulence'), 'Must not use heavy SVG filter turbulence');
+        assert.ok(!svg.body.includes('feDisplacementMap'), 'Must not use heavy SVG displacement map');
+
+        // Verify releasePencilStroke does not throw
+        assert.doesNotThrow(() => {
+            v2Mod.releasePencilStroke(testPoints);
+        });
     });
 });

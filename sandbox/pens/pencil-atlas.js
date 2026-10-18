@@ -38,6 +38,29 @@ const colorAtlasCache = new Map();
 const strokeStateMap = new WeakMap();
 const strokeStateById = new Map();
 
+export function releasePencilStroke(strokeKey) {
+    if (!strokeKey) return;
+    if (typeof strokeKey === 'object') {
+        const state = strokeStateMap.get(strokeKey);
+        if (state && state.liveCanvas) {
+            state.liveCanvas.width = 0;
+            state.liveCanvas.height = 0;
+            state.liveCanvas = null;
+            state.liveCtx = null;
+        }
+        strokeStateMap.delete(strokeKey);
+    } else {
+        const state = strokeStateById.get(strokeKey);
+        if (state && state.liveCanvas) {
+            state.liveCanvas.width = 0;
+            state.liveCanvas.height = 0;
+            state.liveCanvas = null;
+            state.liveCtx = null;
+        }
+        strokeStateById.delete(strokeKey);
+    }
+}
+
 export function resetPencilAtlasCacheForTesting() {
     paperHeightField = null;
     colorAtlasCache.clear();
@@ -228,7 +251,10 @@ export function getOrCreateGrainAtlas(ctx, color, dpr = 1) {
         tile.width = PAPER_SIZE;
         tile.height = PAPER_SIZE;
         const tCtx = tile.getContext('2d');
-        if (!tCtx) continue;
+        if (!tCtx || typeof tCtx.createImageData !== 'function') {
+            dataUrls[k] = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+            continue;
+        }
 
         const imgData = tCtx.createImageData(PAPER_SIZE, PAPER_SIZE);
         const data = imgData.data;
@@ -996,5 +1022,6 @@ if (typeof globalThis !== 'undefined') {
         getPaperHeightField,
         getOrCreateGrainAtlas,
         conditionStrokeByArcLength,
+        releasePencilStroke,
     };
 }

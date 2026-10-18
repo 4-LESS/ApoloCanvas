@@ -208,6 +208,14 @@ export class SandboxEngine {
 
         const entry = { sprite, bounds };
         this.strokeSpriteCache.set(stroke.id, entry);
+
+        if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlas']?.releasePencilStroke === 'function') {
+            globalThis.ApoloSandbox.pens['pencil-atlas'].releasePencilStroke(stroke.points);
+        }
+        if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlasv2']?.releasePencilStroke === 'function') {
+            globalThis.ApoloSandbox.pens['pencil-atlasv2'].releasePencilStroke(stroke.points);
+        }
+
         return entry;
     }
 
@@ -318,6 +326,13 @@ export class SandboxEngine {
                 stroke.renderPen(this.dryCtx, stroke.points, stroke.style);
             }
             this.dryCtx.restore();
+
+            if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlas']?.releasePencilStroke === 'function') {
+                globalThis.ApoloSandbox.pens['pencil-atlas'].releasePencilStroke(stroke.points);
+            }
+            if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlasv2']?.releasePencilStroke === 'function') {
+                globalThis.ApoloSandbox.pens['pencil-atlasv2'].releasePencilStroke(stroke.points);
+            }
         }
 
         this.activePoints = [];
