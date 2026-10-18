@@ -119,27 +119,31 @@ export class SandboxEngine {
     }
 
     smoothPoint(raw) {
-        const style = this.getStyle();
-        const smoothing = Math.max(0, Math.min(0.95, style.smoothing !== undefined ? style.smoothing : 0.5));
+    const style = this.getStyle();
+    const smoothing = Math.max(0, Math.min(0.85, style.smoothing !== undefined ? style.smoothing : 0.25));
 
-        if (!this.lastSmoothedPoint || smoothing <= 0.02) {
-            this.lastSmoothedPoint = { ...raw };
-            return this.lastSmoothedPoint;
-        }
-
-        const alpha = 1 - smoothing;
-        const sx = this.lastSmoothedPoint.x + (raw.x - this.lastSmoothedPoint.x) * alpha;
-        const sy = this.lastSmoothedPoint.y + (raw.y - this.lastSmoothedPoint.y) * alpha;
-
-        this.lastSmoothedPoint = {
-            x: sx,
-            y: sy,
-            pressure: raw.pressure,
-            time: raw.time,
-        };
-
+    // Respuesta inmediata en el arranque del trazo (cero lag al tocar)
+    if (!this.lastSmoothedPoint || this.activePoints.length < 2 || smoothing <= 0.02) {
+        this.lastSmoothedPoint = { ...raw };
         return this.lastSmoothedPoint;
     }
+
+    // Suavizado adaptativo a la velocidad: a mayor distancia, menor retardo
+    const dist = Math.hypot(raw.x - this.lastSmoothedPoint.x, raw.y - this.lastSmoothedPoint.y);
+    const dynamicAlpha = Math.min(1, (1 - smoothing) + Math.min(dist / 25, 0.45));
+
+    const sx = this.lastSmoothedPoint.x + (raw.x - this.lastSmoothedPoint.x) * dynamicAlpha;
+    const sy = this.lastSmoothedPoint.y + (raw.y - this.lastSmoothedPoint.y) * dynamicAlpha;
+
+    this.lastSmoothedPoint = {
+        x: sx,
+        y: sy,
+        pressure: raw.pressure,
+        time: raw.time,
+    };
+
+    return this.lastSmoothedPoint;
+}
 
     /**
      * Calcula la caja delimitadora (Bounding Box) de un trazo con padding
@@ -168,7 +172,7 @@ export class SandboxEngine {
     }
 
     /**
-     * Genera un sprite fuera de pantalla para un trazo específico (crucial para pencil de miles de partículas)
+     * Genera un sprite fuera de pantalla en coordenadas de mundo reales y resolución DPR nativa
      */
     getOrCreateStrokeSprite(stroke) {
         if (!stroke.id) {
@@ -178,6 +182,7 @@ export class SandboxEngine {
             return this.strokeSpriteCache.get(stroke.id);
         }
 
+        const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
         const pad = Math.max(16, Math.ceil((stroke.style.width || 3) * 2));
         const bounds = this.calculateBounds(stroke.points, pad);
         const w = Math.max(1, bounds.width);
@@ -186,19 +191,18 @@ export class SandboxEngine {
         const isDoc = typeof document !== 'undefined' && typeof document.createElement === 'function';
         const sprite = isDoc ? document.createElement('canvas') : null;
         if (!sprite) return null;
-        sprite.width = w;
-        sprite.height = h;
+
+        // Resolución física exacta para evitar filtrado bilineal y pérdida de grano
+        sprite.width = Math.ceil(w * dpr);
+        sprite.height = Math.ceil(h * dpr);
         const sCtx = sprite.getContext('2d');
 
         if (sCtx && typeof stroke.renderPen === 'function') {
             sCtx.save();
-            // Desplazar puntos al origen local del sprite
-            const localPoints = stroke.points.map(p => ({
-                x: p.x - bounds.minX,
-                y: p.y - bounds.minY,
-                pressure: p.pressure,
-            }));
-            stroke.renderPen(sCtx, localPoints, stroke.style);
+            // Trasladamos el contexto en vez de mutar las coordenadas de los puntos:
+            // así el patrón de papel (0,0) y el seed coinciden 100% con Live Preview y SVG
+            sCtx.setTransform(dpr, 0, 0, dpr, -bounds.minX * dpr, -bounds.minY * dpr);
+            stroke.renderPen(sCtx, stroke.points, stroke.style);
             sCtx.restore();
         }
 
@@ -224,7 +228,13 @@ export class SandboxEngine {
             const stroke = this.strokes[i];
             const cached = this.getOrCreateStrokeSprite(stroke);
             if (cached && cached.sprite) {
-                this.dryCtx.drawImage(cached.sprite, cached.bounds.minX, cached.bounds.minY);
+                this.dryCtx.drawImage(
+                    cached.sprite,
+                    cached.bounds.minX,
+                    cached.bounds.minY,
+                    cached.bounds.width,
+                    cached.bounds.height
+                );
             } else if (typeof stroke.renderPen === 'function') {
                 stroke.renderPen(this.dryCtx, stroke.points, stroke.style);
             }
@@ -297,7 +307,13 @@ export class SandboxEngine {
             this.dryCtx.save();
             this.dryCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
             if (cached && cached.sprite) {
-                this.dryCtx.drawImage(cached.sprite, cached.bounds.minX, cached.bounds.minY);
+                this.dryCtx.drawImage(
+                    cached.sprite,
+                    cached.bounds.minX,
+                    cached.bounds.minY,
+                    cached.bounds.width,
+                    cached.bounds.height
+                );
             } else {
                 stroke.renderPen(this.dryCtx, stroke.points, stroke.style);
             }

@@ -18,7 +18,7 @@ describe('Sandbox Modular Canvas Architecture', () => {
     });
 
     it('pens export renderPen function and execute without error', async () => {
-        const pens = ['ball', 'fountain', 'calli', 'pencil', 'pencil-simple'];
+        const pens = ['ball', 'fountain', 'calli', 'pencil', 'pencil-simple', 'pencil-atlas'];
         
         // Mock CanvasRenderingContext2D
         const mockCtx: any = {

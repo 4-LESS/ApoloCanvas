@@ -1,31 +1,50 @@
 /**
  * sandbox/pens/calli.js
  * 
- * Caligráfica (Calligraphy Chisel Pen)
- * Plumilla biselada plana inclinada a -40° con variación natural de grosor según la dirección
- * del trazo (trazos anchos descendentes, finos ascendentes).
- * 
- * Arquitectura de alto rendimiento (120 FPS en trazos largos > 1500 puntos):
- * 1. Monotone Ribbon Strips: agrupa segmentos continuos con signo de producto cruz constante
- *    en 2 a 6 polígonos cerrados de giro 100% horario (+1). Cero agujeros o inversiones.
- * 2. Filtrado euclidiano (< 1.8px) y subdivisión cuadrática adaptativa (solo en giros > 12° o tramos > 6px).
- * 3. Cache nativo Path2D vía WeakMap para trazos confirmados y ventana incremental prefix en vivo.
- * 
- * Contrato Sandbox:
- * export function renderPen(ctx, points, style)
- * export function renderSvg(points, style)
+ * Caligráfica (Calligraphy Chisel Pen) - O(1) Incremental Chunk Baking
  */
 
 export const id = 'calli';
 export const name = 'Caligráfica';
-export const description = 'Plumilla biselada a -40° (Monotone Ribbon Strips) con corte bisel plano, Path2D cache y cero agujeros';
+export const description = 'Plumilla biselada a -40° (Monotone Ribbon Strips) con horneado incremental O(1) y cero lag';
 
 const calliStrokeCache = new WeakMap();
 
-let activeLivePrefix = null;
+// Estado para el horneado incremental O(1) en vivo
+let liveBakeState = {
+    canvas: null,
+    ctx: null,
+    firstPointX: null,
+    firstPointY: null,
+    bakedRawIndex: 0,
+    width: 0,
+    angle: 0,
+    color: '',
+    dpr: 1,
+};
 
 export function resetCalliCacheForTesting() {
-    activeLivePrefix = null;
+    liveBakeState.bakedRawIndex = 0;
+    liveBakeState.firstPointX = null;
+}
+
+function ensureLiveBakeCanvas(targetCanvas, dpr) {
+    if (!liveBakeState.canvas && typeof document !== 'undefined') {
+        liveBakeState.canvas = document.createElement('canvas');
+        liveBakeState.ctx = liveBakeState.canvas.getContext('2d');
+    }
+    if (!liveBakeState.canvas) return null;
+
+    if (
+        liveBakeState.canvas.width !== targetCanvas.width ||
+        liveBakeState.canvas.height !== targetCanvas.height
+    ) {
+        liveBakeState.canvas.width = targetCanvas.width;
+        liveBakeState.canvas.height = targetCanvas.height;
+        liveBakeState.bakedRawIndex = 0; // Forzar reseteo si cambió el tamaño
+    }
+    liveBakeState.dpr = dpr;
+    return liveBakeState.ctx;
 }
 
 /**
@@ -33,66 +52,69 @@ export function resetCalliCacheForTesting() {
  * preservando siempre el primer y último punto.
  */
 export function filterRedundantPoints(rawPoints) {
-    if (!rawPoints || rawPoints.length <= 2) return (rawPoints || []).map(p => ({ x: p.x, y: p.y }));
-    const filtered = [{ x: rawPoints[0].x, y: rawPoints[0].y }];
+    if (!rawPoints || rawPoints.length <= 2) return rawPoints ? rawPoints.slice() : [];
+    const len = rawPoints.length;
+    const filtered = [rawPoints[0]];
     const minDistSq = 1.8 * 1.8;
-    for (let i = 1; i < rawPoints.length - 1; i++) {
-        const last = filtered[filtered.length - 1];
+    let last = rawPoints[0];
+
+    for (let i = 1; i < len - 1; i++) {
         const p = rawPoints[i];
         const dx = p.x - last.x;
         const dy = p.y - last.y;
         if (dx * dx + dy * dy >= minDistSq) {
-            filtered.push({ x: p.x, y: p.y });
+            filtered.push(p);
+            last = p;
         }
     }
-    const lastRaw = rawPoints[rawPoints.length - 1];
-    filtered.push({ x: lastRaw.x, y: lastRaw.y });
+    filtered.push(rawPoints[len - 1]);
     return filtered;
 }
 
 /**
  * Genera puntos suavizados adaptativos (subdivisión cuadrática condicional)
- * para que las curvas sean suaves con mínimo overhead de vértices.
  */
 export function smoothCalligraphyPoints(rawPoints) {
-    if (!rawPoints || rawPoints.length <= 2) return (rawPoints || []).map(p => ({ x: p.x, y: p.y }));
+    if (!rawPoints || rawPoints.length <= 2) return rawPoints ? rawPoints.slice() : [];
     const filtered = filterRedundantPoints(rawPoints);
-    if (filtered.length <= 2) return filtered;
+    const flen = filtered.length;
+    if (flen <= 2) return filtered;
 
     const smoothed = [{ x: filtered[0].x, y: filtered[0].y }];
-    const cos12Deg = Math.cos((12 * Math.PI) / 180);
+    const cos12Deg = 0.9781476; // Math.cos((12 * Math.PI) / 180)
 
-    for (let i = 1; i < filtered.length - 1; i++) {
+    for (let i = 1; i < flen - 1; i++) {
         const p0 = filtered[i - 1];
         const p1 = filtered[i];
         const p2 = filtered[i + 1];
 
-        const d01 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-        const d12 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        const v0x = p1.x - p0.x;
+        const v0y = p1.y - p0.y;
+        const v1x = p2.x - p1.x;
+        const v1y = p2.y - p1.y;
+
+        const d01 = Math.hypot(v0x, v0y);
+        const d12 = Math.hypot(v1x, v1y);
 
         let isSharp = false;
         if (d01 > 0.01 && d12 > 0.01) {
-            const dot = ((p1.x - p0.x) * (p2.x - p1.x) + (p1.y - p0.y) * (p2.y - p1.y)) / (d01 * d12);
-            if (dot < cos12Deg) {
-                isSharp = true;
-            }
+            const dot = (v0x * v1x + v0y * v1y) / (d01 * d12);
+            if (dot < cos12Deg) isSharp = true;
         }
-
-        const needsFullSubdivision = d01 > 6 || d12 > 6 || isSharp;
 
         const m0x = (p0.x + p1.x) * 0.5;
         const m0y = (p0.y + p1.y) * 0.5;
         const m1x = (p1.x + p2.x) * 0.5;
         const m1y = (p1.y + p2.y) * 0.5;
 
-        if (needsFullSubdivision) {
-            for (let t = 0.25; t <= 1.0; t += 0.25) {
-                const it = 1 - t;
-                smoothed.push({
-                    x: it * it * m0x + 2 * it * t * p1.x + t * t * m1x,
-                    y: it * it * m0y + 2 * it * t * p1.y + t * t * m1y,
-                });
-            }
+        if (d01 > 6 || d12 > 6 || isSharp) {
+            // Desenrollado de bucle (t = 0.25, 0.5, 0.75, 1.0) para evitar overhead en caliente
+            smoothed.push(
+                { x: 0.5625 * m0x + 0.375 * p1.x + 0.0625 * m1x, y: 0.5625 * m0y + 0.375 * p1.y + 0.0625 * m1y },
+                { x: 0.25 * m0x + 0.5 * p1.x + 0.25 * m1x,       y: 0.25 * m0y + 0.5 * p1.y + 0.25 * m1y },
+                { x: 0.0625 * m0x + 0.375 * p1.x + 0.5625 * m1x, y: 0.0625 * m0y + 0.375 * p1.y + 0.5625 * m1y },
+                { x: m1x, y: m1y }
+            );
         } else {
             smoothed.push({
                 x: 0.25 * m0x + 0.5 * p1.x + 0.25 * m1x,
@@ -100,127 +122,114 @@ export function smoothCalligraphyPoints(rawPoints) {
             });
         }
     }
-    const last = filtered[filtered.length - 1];
+    const last = filtered[flen - 1];
     smoothed.push({ x: last.x, y: last.y });
     return smoothed;
 }
 
 /**
- * Construye el SVG path string (`d`) y/o dibuja en el Canvas2D una pluma biselada
- * con ángulo fijo de -40°, puntas cortadas en bisel exacto, y giro (winding) 100% positivo
- * agrupando segmentos contiguos en tiras de cinta monótonas (Monotone Ribbon Strips).
+ * Construye las tiras de polígonos (Monotone Ribbon Strips) sin serializar strings en caliente.
+ * La generación de string SVG y Path2D se hace de forma perezosa (lazy) solo si se solicita.
  */
 export function buildCalligraphicChiselPath(
     rawPoints,
     baseWidth,
-    nibAngleRad = (-40 * Math.PI) / 180
+    nibAngleRad = (-40 * Math.PI) / 180,
+    allowCache = true
 ) {
-    if (typeof rawPoints === 'object' && rawPoints !== null) {
+    if (allowCache && typeof rawPoints === 'object' && rawPoints !== null) {
         const cached = calliStrokeCache.get(rawPoints);
         if (cached && cached.width === baseWidth && Math.abs(cached.nibAngle - nibAngleRad) < 1e-4) {
-            return {
-                drawToCanvas(ctx) {
-                    ctx.beginPath();
-                    if (cached.path2D && typeof ctx.fill === 'function') {
-                        try {
-                            ctx.fill(cached.path2D, 'nonzero');
-                            return;
-                        } catch {
-                            // fallback
-                        }
-                    }
-                    for (const poly of cached.strips) {
-                        for (let j = 0; j < poly.length; j += 2) {
-                            if (j === 0) ctx.moveTo(poly[j], poly[j + 1]);
-                            else ctx.lineTo(poly[j], poly[j + 1]);
-                        }
-                        ctx.closePath();
-                    }
-                    ctx.fill('nonzero');
-                },
-                toSvgPathD() {
-                    return cached.svgD;
-                },
-                path2D: cached.path2D,
-                strips: cached.strips,
-            };
+            return cached.result;
         }
     }
 
     const pts = smoothCalligraphyPoints(rawPoints);
-    const halfSpan = Math.max(1.5, baseWidth * 0.85); // Mitad del ancho del bisel
-    const minNibThickness = Math.max(0.6, baseWidth * 0.08); // Grosor físico mínimo del metal de la plumilla
+    const plen = pts.length;
+    const halfSpan = Math.max(1.5, baseWidth * 0.85);
+    const minNibThickness = Math.max(0.6, baseWidth * 0.08);
 
-    // Vector unitario del filo de la plumilla (bisel) y su normal perpendicular
     const ux = Math.cos(nibAngleRad);
     const uy = Math.sin(nibAngleRad);
     const nx = -uy;
     const ny = ux;
 
-    const edgeA = [];
-    const edgeB = [];
+    // Arrays planos tipados para evitar miles de objetos {x, y} en el Garbage Collector
+    const edgeAx = new Float32Array(plen);
+    const edgeAy = new Float32Array(plen);
+    const edgeBx = new Float32Array(plen);
+    const edgeBy = new Float32Array(plen);
 
-    for (let i = 0; i < pts.length; i++) {
+    const uxSpan = ux * halfSpan;
+    const uySpan = uy * halfSpan;
+    const nxThick = nx * minNibThickness;
+    const nyThick = ny * minNibThickness;
+
+    for (let i = 0; i < plen; i++) {
         let dx = 0;
         let dy = 0;
-        if (i === 0 && pts.length > 1) {
+        if (i === 0 && plen > 1) {
             dx = pts[1].x - pts[0].x;
             dy = pts[1].y - pts[0].y;
-        } else if (i === pts.length - 1 && pts.length > 1) {
+        } else if (i === plen - 1 && plen > 1) {
             dx = pts[i].x - pts[i - 1].x;
             dy = pts[i].y - pts[i - 1].y;
-        } else if (pts.length > 2) {
+        } else if (plen > 2) {
             dx = pts[i + 1].x - pts[i - 1].x;
             dy = pts[i + 1].y - pts[i - 1].y;
         }
 
         const padSign = (dx * nx + dy * ny >= 0) ? 1 : -1;
-        const padX = nx * minNibThickness * padSign;
-        const padY = ny * minNibThickness * padSign;
+        const padX = nxThick * padSign;
+        const padY = nyThick * padSign;
 
-        edgeA.push({
-            x: pts[i].x - ux * halfSpan - padX,
-            y: pts[i].y - uy * halfSpan - padY,
-        });
-        edgeB.push({
-            x: pts[i].x + ux * halfSpan + padX,
-            y: pts[i].y + uy * halfSpan + padY,
-        });
+        const px = pts[i].x;
+        const py = pts[i].y;
+
+        edgeAx[i] = px - uxSpan - padX;
+        edgeAy[i] = py - uySpan - padY;
+        edgeBx[i] = px + uxSpan + padX;
+        edgeBy[i] = py + uySpan + padY;
     }
 
     const strips = [];
 
     const pushStrip = (startIdx, endIdx, sign) => {
         if (endIdx <= startIdx) return;
-        const poly = [];
+        const count = (endIdx - startIdx + 1) * 4;
+        const poly = new Float32Array(count);
+        let ptr = 0;
+
         if (sign >= 0) {
             for (let k = startIdx; k <= endIdx; k++) {
-                poly.push(edgeA[k].x, edgeA[k].y);
+                poly[ptr++] = edgeAx[k];
+                poly[ptr++] = edgeAy[k];
             }
             for (let k = endIdx; k >= startIdx; k--) {
-                poly.push(edgeB[k].x, edgeB[k].y);
+                poly[ptr++] = edgeBx[k];
+                poly[ptr++] = edgeBy[k];
             }
         } else {
             for (let k = startIdx; k <= endIdx; k++) {
-                poly.push(edgeB[k].x, edgeB[k].y);
+                poly[ptr++] = edgeBx[k];
+                poly[ptr++] = edgeBy[k];
             }
             for (let k = endIdx; k >= startIdx; k--) {
-                poly.push(edgeA[k].x, edgeA[k].y);
+                poly[ptr++] = edgeAx[k];
+                poly[ptr++] = edgeAy[k];
             }
         }
         strips.push(poly);
     };
 
-    if (pts.length >= 2) {
+    if (plen >= 2) {
         let stripStart = 0;
         let stripSign = 0;
 
-        for (let i = 1; i < pts.length; i++) {
-            const p0 = pts[i - 1];
-            const p1 = pts[i];
-            const dx = p1.x - p0.x;
-            const dy = p1.y - p0.y;
-            if (Math.hypot(dx, dy) < 0.001) continue;
+        for (let i = 1; i < plen; i++) {
+            const dx = pts[i].x - pts[i - 1].x;
+            const dy = pts[i].y - pts[i - 1].y;
+            if (dx * dx + dy * dy < 1e-6) continue;
 
             const cross = ux * dy - uy * dx;
             const sign = cross >= 0 ? 1 : -1;
@@ -235,81 +244,67 @@ export function buildCalligraphicChiselPath(
             }
         }
 
-        if (stripSign !== 0 && stripStart < pts.length - 1) {
-            pushStrip(stripStart, pts.length - 1, stripSign);
-        } else if (strips.length === 0 && pts.length >= 2) {
-            pushStrip(0, pts.length - 1, 1);
+        if (stripSign !== 0 && stripStart < plen - 1) {
+            pushStrip(stripStart, plen - 1, stripSign);
+        } else if (strips.length === 0 && plen >= 2) {
+            pushStrip(0, plen - 1, 1);
         }
     }
 
-    if (strips.length === 0 && pts.length > 0) {
+    if (strips.length === 0 && plen > 0) {
         const p = pts[0];
-        const a0x = p.x - ux * halfSpan - nx * minNibThickness;
-        const a0y = p.y - uy * halfSpan - ny * minNibThickness;
-        const b0x = p.x + ux * halfSpan - nx * minNibThickness;
-        const b0y = p.y + uy * halfSpan - ny * minNibThickness;
-        const b1x = p.x + ux * halfSpan + nx * minNibThickness;
-        const b1y = p.y + uy * halfSpan + ny * minNibThickness;
-        const a1x = p.x - ux * halfSpan + nx * minNibThickness;
-        const a1y = p.y - uy * halfSpan + ny * minNibThickness;
-        strips.push([a0x, a0y, b0x, b0y, b1x, b1y, a1x, a1y]);
+        strips.push(new Float32Array([
+            p.x - uxSpan - nxThick, p.y - uySpan - nyThick,
+            p.x + uxSpan - nxThick, p.y + uySpan - nyThick,
+            p.x + uxSpan + nxThick, p.y + uySpan + nyThick,
+            p.x - uxSpan + nxThick, p.y - uySpan + nyThick
+        ]));
     }
 
-    let svgPathD = '';
-    for (const poly of strips) {
-        if (poly.length < 4) continue;
-        svgPathD += `M${poly[0].toFixed(2)} ${poly[1].toFixed(2)}`;
-        for (let j = 2; j < poly.length; j += 2) {
-            svgPathD += `L${poly[j].toFixed(2)} ${poly[j + 1].toFixed(2)}`;
-        }
-        svgPathD += 'Z';
-    }
-
-    let path2DInstance = null;
-    if (typeof Path2D !== 'undefined' && svgPathD) {
-        try {
-            path2DInstance = new Path2D(svgPathD);
-        } catch {
-            path2DInstance = null;
-        }
-    }
-
+    // Dibuja directamente desde los Float32Array sin crear strings ni Path2D intermedios
     const drawToCanvas = (ctx) => {
         ctx.beginPath();
-        if (path2DInstance && typeof ctx.fill === 'function') {
-            try {
-                ctx.fill(path2DInstance, 'nonzero');
-                return;
-            } catch {
-                // Fallback to direct path iteration
-            }
-        }
-        for (const poly of strips) {
-            for (let j = 0; j < poly.length; j += 2) {
-                if (j === 0) ctx.moveTo(poly[j], poly[j + 1]);
-                else ctx.lineTo(poly[j], poly[j + 1]);
+        for (let s = 0; s < strips.length; s++) {
+            const poly = strips[s];
+            const len = poly.length;
+            if (len < 4) continue;
+            ctx.moveTo(poly[0], poly[1]);
+            for (let j = 2; j < len; j += 2) {
+                ctx.lineTo(poly[j], poly[j + 1]);
             }
             ctx.closePath();
         }
         ctx.fill('nonzero');
     };
 
+    let lazySvgD = null;
+    const toSvgPathD = () => {
+        if (lazySvgD !== null) return lazySvgD;
+        let d = '';
+        for (let s = 0; s < strips.length; s++) {
+            const poly = strips[s];
+            if (poly.length < 4) continue;
+            d += `M${poly[0].toFixed(2)} ${poly[1].toFixed(2)}`;
+            for (let j = 2; j < poly.length; j += 2) {
+                d += `L${poly[j].toFixed(2)} ${poly[j + 1].toFixed(2)}`;
+            }
+            d += 'Z';
+        }
+        lazySvgD = d;
+        return d;
+    };
+
     const result = {
         drawToCanvas,
-        toSvgPathD() {
-            return svgPathD;
-        },
-        path2D: path2DInstance,
+        toSvgPathD,
         strips,
     };
 
-    if (typeof rawPoints === 'object' && rawPoints !== null) {
+    if (allowCache && typeof rawPoints === 'object' && rawPoints !== null) {
         calliStrokeCache.set(rawPoints, {
             width: baseWidth,
             nibAngle: nibAngleRad,
-            path2D: path2DInstance,
-            svgD: svgPathD,
-            strips,
+            result,
         });
     }
 
@@ -317,10 +312,7 @@ export function buildCalligraphicChiselPath(
 }
 
 /**
- * Renderiza un trazo caligráfico de plumilla plana biselada en Canvas 2D
- * @param {CanvasRenderingContext2D} ctx - Contexto 2D del canvas
- * @param {Array<{x: number, y: number, pressure?: number}>} points - Secuencia de puntos
- * @param {{width: number, opacity: number, color: string, tiltAngle?: number}} style - Parámetros de estilo
+ * Renderiza un trazo caligráfico con complejidad O(1) en trazos largos mediante Chunk Baking
  */
 export function renderPen(ctx, points, style) {
     if (!points || points.length === 0) return;
@@ -334,38 +326,76 @@ export function renderPen(ctx, points, style) {
     ctx.fillStyle = color;
     ctx.globalAlpha = opacity;
 
-    if (points.length > 120 && opacity === 1) {
-        const isSameStroke = activeLivePrefix && (
-            activeLivePrefix.pointsRef === points ||
-            (activeLivePrefix.firstPoint &&
-             points[0].x === activeLivePrefix.firstPoint.x &&
-             points[0].y === activeLivePrefix.firstPoint.y)
-        ) && points.length >= activeLivePrefix.frozenLength;
+    // Si estamos en un trazo largo en vivo (> 48 puntos), horneamos en chunks O(1)
+    const targetCanvas = ctx.canvas;
+    const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
 
-        if (!isSameStroke || (points.length - activeLivePrefix.frozenLength > 32)) {
-            const frozenLength = points.length - 24;
-            const prefixSlice = points.slice(0, frozenLength);
-            activeLivePrefix = {
-                pointsRef: points,
-                firstPoint: { x: points[0].x, y: points[0].y },
-                frozenLength,
-                prefixChisel: buildCalligraphicChiselPath(prefixSlice, baseWidth, angle),
-            };
+    if (points.length > 48 && opacity === 1 && targetCanvas) {
+        const bakeCtx = ensureLiveBakeCanvas(targetCanvas, dpr);
+        if (bakeCtx) {
+            const isContinuation =
+                liveBakeState.firstPointX === points[0].x &&
+                liveBakeState.firstPointY === points[0].y &&
+                liveBakeState.width === baseWidth &&
+                liveBakeState.angle === angle &&
+                liveBakeState.color === color &&
+                points.length >= liveBakeState.bakedRawIndex;
+
+            if (!isContinuation) {
+                // Nuevo trazo largo: limpiar buffer acumulativo
+                liveBakeState.firstPointX = points[0].x;
+                liveBakeState.firstPointY = points[0].y;
+                liveBakeState.bakedRawIndex = 0;
+                liveBakeState.width = baseWidth;
+                liveBakeState.angle = angle;
+                liveBakeState.color = color;
+
+                bakeCtx.save();
+                bakeCtx.setTransform(1, 0, 0, 1, 0, 0);
+                bakeCtx.clearRect(0, 0, liveBakeState.canvas.width, liveBakeState.canvas.height);
+                bakeCtx.restore();
+            }
+
+            // Dejamos siempre solo los últimos 16 puntos como "cola viva"
+            const safeFreezeLimit = points.length - 16;
+
+            // Si acumulamos al menos 16 puntos nuevos sin hornear, horneamos SOLO ese delta O(1)
+            if (safeFreezeLimit - liveBakeState.bakedRawIndex >= 16) {
+                const chunkStart = Math.max(0, liveBakeState.bakedRawIndex - 3); // Solapamiento de 3 pts para costura invisible
+                const chunkPoints = points.slice(chunkStart, safeFreezeLimit + 1);
+
+                bakeCtx.save();
+                bakeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                bakeCtx.fillStyle = color;
+                const chunkChisel = buildCalligraphicChiselPath(chunkPoints, baseWidth, angle, false);
+                chunkChisel.drawToCanvas(bakeCtx);
+                bakeCtx.restore();
+
+                liveBakeState.bakedRawIndex = safeFreezeLimit;
+            }
+
+            // 1. Volcar todo el historial congelado en una sola operación GPU (O(1))
+            if (liveBakeState.bakedRawIndex > 0) {
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.drawImage(liveBakeState.canvas, 0, 0);
+                ctx.restore();
+            }
+
+            // 2. Dibujar únicamente los últimos ~18 puntos vivos (complejidad constante O(1))
+            const tailStart = Math.max(0, liveBakeState.bakedRawIndex - 3);
+            const tailSlice = points.slice(tailStart);
+            const tailChisel = buildCalligraphicChiselPath(tailSlice, baseWidth, angle, false);
+            tailChisel.drawToCanvas(ctx);
+
+            ctx.restore();
+            return;
         }
-
-        // Draw cached prefix
-        activeLivePrefix.prefixChisel.drawToCanvas(ctx);
-
-        // Draw live tail (with overlap of 2 points to avoid seam gap)
-        const tailSlice = points.slice(Math.max(0, activeLivePrefix.frozenLength - 2));
-        const tailChisel = buildCalligraphicChiselPath(tailSlice, baseWidth, angle);
-        tailChisel.drawToCanvas(ctx);
-    } else {
-        activeLivePrefix = null;
-        const chisel = buildCalligraphicChiselPath(points, baseWidth, angle);
-        chisel.drawToCanvas(ctx);
     }
 
+    // Trazos cortos (< 48 puntos) o renderizado final a sprite
+    const chisel = buildCalligraphicChiselPath(points, baseWidth, angle, true);
+    chisel.drawToCanvas(ctx);
     ctx.restore();
 }
 
@@ -378,14 +408,13 @@ export function renderSvg(points, style) {
     const color = style.color || '#1e1e1e';
     const opacity = style.opacity !== undefined ? style.opacity : 1.0;
     const angle = style.tiltAngle !== undefined ? style.tiltAngle : (-40 * Math.PI) / 180;
-    const chisel = buildCalligraphicChiselPath(points, baseWidth, angle);
+    const chisel = buildCalligraphicChiselPath(points, baseWidth, angle, true);
     return {
         defs: '',
         body: `<path d="${chisel.toSvgPathD()}" fill="${color}" fill-rule="nonzero" opacity="${opacity}" stroke="none"/>`
     };
 }
 
-// Fallback de registro global para compatibilidad directa
 if (typeof globalThis !== 'undefined') {
     globalThis.ApoloSandbox = globalThis.ApoloSandbox || { pens: {}, engines: {} };
     globalThis.ApoloSandbox.pens.calli = {
