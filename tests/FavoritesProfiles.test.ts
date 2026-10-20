@@ -1,0 +1,706 @@
+import test, { describe, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert';
+import {
+    FavoritesDrawer,
+    type FavoritesDrawerCallbacks,
+} from '../src/ui/favorites/FavoritesDrawer.ts';
+import {
+    createFavoritePreset,
+    toggleFavoritePreset,
+    getActiveStrokeProfile,
+    getActiveShapeProfile,
+    syncLegacyFavoritesSlice,
+    findMatchingProfile,
+    switchStrokeProfile,
+    switchShapeProfile,
+    createStrokeProfile,
+    createShapeProfile,
+} from '../src/ui/favorites/FavoritesStore.ts';
+import {
+    ToolEstuche,
+    type ToolEstucheState,
+    type ToolEstucheCallbacks,
+} from '../src/ui/ToolEstuche.ts';
+import {
+    DEFAULT_WORKSPACE_TOOL_STATE,
+    DEFAULT_STROKE_FAVORITE_PROFILES,
+    DEFAULT_SHAPE_FAVORITE_PROFILES,
+    cloneWorkspaceToolState,
+    mergeWorkspaceToolState,
+    type PenFavoritePreset,
+    type HighlighterFavoritePreset,
+    type ShapeFavoritePreset,
+    type WorkspaceToolState,
+} from '../src/core/types.ts';
+
+function createMockEnvironment() {
+    const createElement = (tag: string) => {
+        const children: any[] = [];
+        const classes = new Set<string>();
+        const attributes = new Map<string, string>();
+        const elementListeners = new Map<string, Function[]>();
+        const styleObj: any = {
+            display: '',
+            zIndex: '',
+            position: '',
+            top: '',
+            left: '',
+            right: '',
+            bottom: '',
+            transform: '',
+            setProperty: (k: string, v: string) => { styleObj[k] = v; },
+            getPropertyValue: (k: string) => styleObj[k] ?? '',
+        };
+
+        const matchesSelector = (node: any, sel: string): boolean => {
+            if (!node || typeof node !== 'object') return false;
+            const notMatch = sel.match(/^([a-zA-Z0-9_.-]+)?:not\((.+)\)$/);
+            if (notMatch) {
+                const baseSel = notMatch[1];
+                const negatedSel = notMatch[2];
+                if (baseSel && !matchesSelector(node, baseSel)) return false;
+                return !matchesSelector(node, negatedSel);
+            }
+            if (sel.startsWith('.')) {
+                const targetCls = sel.slice(1);
+                return Boolean(node.classList?.contains(targetCls) || node.className?.split(/\s+/).includes(targetCls));
+            }
+            if (sel.startsWith('#')) {
+                return node.id === sel.slice(1);
+            }
+            if (sel.startsWith('[') && sel.endsWith(']')) {
+                const inner = sel.slice(1, -1);
+                const eqIdx = inner.indexOf('=');
+                if (eqIdx !== -1) {
+                    const attr = inner.slice(0, eqIdx);
+                    const val = inner.slice(eqIdx + 1).replace(/^["']|["']$/g, '');
+                    return node.getAttribute(attr) === val || node.dataset?.[attr.replace('data-', '')] === val;
+                }
+                return node.hasAttribute(inner);
+            }
+            if (sel.toLowerCase() === node.tagName?.toLowerCase()) {
+                return true;
+            }
+            return false;
+        };
+
+        const el: any = {
+            tagName: tag.toUpperCase(),
+            style: styleObj,
+            dataset: {},
+            hidden: false,
+            className: '',
+            children,
+            title: '',
+            type: '',
+            value: '',
+            disabled: false,
+            maxLength: 24,
+            placeholder: '',
+            focus: () => {},
+            get textContent(): string {
+                return children.map(c => typeof c === 'string' ? c : (c?.textContent ?? '')).join('');
+            },
+            set textContent(v: string) {
+                children.length = 0;
+                if (v !== '') children.push(String(v));
+            },
+            classList: {
+                add: (...cs: string[]) => {
+                    for (const c of cs) {
+                        for (const item of c.split(/\s+/).filter(Boolean)) classes.add(item);
+                    }
+                    el.className = [...classes].join(' ');
+                },
+                remove: (...cs: string[]) => {
+                    for (const c of cs) {
+                        for (const item of c.split(/\s+/).filter(Boolean)) classes.delete(item);
+                    }
+                    el.className = [...classes].join(' ');
+                },
+                contains: (c: string) => classes.has(c) || el.className.split(/\s+/).filter(Boolean).includes(c),
+                toggle: (c: string, force?: boolean) => {
+                    const next = force !== undefined ? force : !classes.has(c);
+                    if (next) classes.add(c); else classes.delete(c);
+                    el.className = [...classes].join(' ');
+                    return next;
+                },
+            },
+            setAttribute: (k: string, v: string) => {
+                attributes.set(k, String(v));
+                if (k.startsWith('data-')) {
+                    const dataKey = k.slice(5).replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+                    el.dataset[dataKey] = String(v);
+                }
+            },
+            getAttribute: (k: string) => attributes.get(k) ?? null,
+            hasAttribute: (k: string) => attributes.has(k),
+            removeAttribute: (k: string) => {
+                attributes.delete(k);
+                if (k.startsWith('data-')) {
+                    const dataKey = k.slice(5).replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+                    delete el.dataset[dataKey];
+                }
+            },
+            appendChild: (child: any) => {
+                if (child !== null && child !== undefined) {
+                    children.push(child);
+                    if (typeof child === 'object') child.parentElement = el;
+                }
+                return child;
+            },
+            append: (...args: any[]) => {
+                for (const c of args) {
+                    if (c !== null && c !== undefined) {
+                        children.push(c);
+                        if (typeof c === 'object') c.parentElement = el;
+                    }
+                }
+            },
+            replaceChildren: (...args: any[]) => {
+                children.length = 0;
+                for (const c of args) {
+                    if (c !== null && c !== undefined) {
+                        children.push(c);
+                        if (typeof c === 'object') c.parentElement = el;
+                    }
+                }
+            },
+            remove: () => {
+                if (el.parentElement?.children) {
+                    const idx = el.parentElement.children.indexOf(el);
+                    if (idx !== -1) el.parentElement.children.splice(idx, 1);
+                }
+            },
+            contains: (target: any) => target === el || children.some(c => c === target || c?.contains?.(target)),
+            querySelector: (sel: string): any => {
+                const findIn = (node: any): any => {
+                    if (!node || typeof node !== 'object') return null;
+                    if (matchesSelector(node, sel)) return node;
+                    for (const child of node.children || []) {
+                        const res = findIn(child);
+                        if (res) return res;
+                    }
+                    return null;
+                };
+                for (const child of children) {
+                    const res = findIn(child);
+                    if (res) return res;
+                }
+                return null;
+            },
+            querySelectorAll: (sel: string): any[] => {
+                const results: any[] = [];
+                const collect = (node: any) => {
+                    if (!node || typeof node !== 'object') return;
+                    if (matchesSelector(node, sel)) results.push(node);
+                    for (const child of node.children || []) collect(child);
+                };
+                for (const child of children) collect(child);
+                return results;
+            },
+            addEventListener: (type: string, fn: Function) => {
+                if (!elementListeners.has(type)) elementListeners.set(type, []);
+                elementListeners.get(type)!.push(fn);
+            },
+            removeEventListener: (type: string, fn: Function) => {
+                const list = elementListeners.get(type);
+                if (list) {
+                    const idx = list.indexOf(fn);
+                    if (idx !== -1) list.splice(idx, 1);
+                }
+            },
+            dispatchPointerEvent: (type: string, eventInit: { clientX: number; clientY: number }) => {
+                const listeners = elementListeners.get(type) || [];
+                const event = {
+                    ...eventInit,
+                    target: el,
+                    currentTarget: el,
+                    stopPropagation: () => {},
+                    preventDefault: () => {},
+                };
+                for (const listener of listeners) {
+                    listener(event);
+                }
+            },
+            getBoundingClientRect: () => ({
+                top: 100,
+                bottom: 200,
+                left: 100,
+                right: 300,
+                width: 200,
+                height: 100,
+            }),
+            offsetWidth: 280,
+            offsetHeight: 320,
+            onclick: null as any,
+            onkeydown: null as any,
+        };
+        return el;
+    };
+
+    const mockDocument: any = {
+        body: createElement('body'),
+        createElement,
+        createElementNS: (_ns: string, tag: string) => createElement(tag),
+        addEventListener: () => {},
+        removeEventListener: () => {},
+    };
+
+    return mockDocument;
+}
+
+describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
+    let prevDoc: any;
+    let prevWindow: any;
+
+    beforeEach(() => {
+        prevDoc = (globalThis as any).document;
+        prevWindow = (globalThis as any).window;
+        const mockDoc = createMockEnvironment();
+        (globalThis as any).document = mockDoc;
+        (globalThis as any).window = {
+            document: mockDoc,
+            innerWidth: 1024,
+            innerHeight: 768,
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            setTimeout: (fn: Function) => fn(),
+            clearTimeout: () => {},
+        };
+    });
+
+    afterEach(() => {
+        (globalThis as any).document = prevDoc;
+        (globalThis as any).window = prevWindow;
+    });
+
+    // =========================================================================
+    // 1. Decoupled Profile Data Model
+    // =========================================================================
+    describe('1. Decoupled Profile Data Model & Switching Behavior', () => {
+        test('initializes with independent default stroke and shape profiles', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+
+            assert.strictEqual(state.strokeFavoriteProfiles.length, 3);
+            assert.deepStrictEqual(
+                state.strokeFavoriteProfiles.map(p => p.id),
+                ['notes', 'academic', 'engineering'],
+            );
+            assert.strictEqual(state.activeStrokeProfileId, 'notes');
+
+            assert.strictEqual(state.shapeFavoriteProfiles.length, 3);
+            assert.deepStrictEqual(
+                state.shapeFavoriteProfiles.map(p => p.id),
+                ['general', 'diagrams', 'engineering'],
+            );
+            assert.strictEqual(state.activeShapeProfileId, 'general');
+            assert.strictEqual(state.syncFavoriteProfiles, false);
+        });
+
+        test('presets added to a stroke profile do NOT cross into other profiles or shapes', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+
+            const penPreset = createFavoritePreset({
+                tool: 'pen',
+                profileId: 'calli',
+                color: '#ef4444',
+                width: 5,
+            }) as PenFavoritePreset;
+
+            const notesProfile = getActiveStrokeProfile(state);
+            notesProfile.pen.push(penPreset);
+            syncLegacyFavoritesSlice(state);
+
+            assert.strictEqual(state.favorites.pen.length, 1);
+            assert.strictEqual(state.favorites.pen[0].id, penPreset.id);
+
+            // Switch to academic profile
+            switchStrokeProfile(state, 'academic');
+            assert.strictEqual(state.activeStrokeProfileId, 'academic');
+            assert.strictEqual(state.favorites.pen.length, 0, 'Academic profile must be empty');
+
+            // Switch back to notes profile
+            switchStrokeProfile(state, 'notes');
+            assert.strictEqual(state.activeStrokeProfileId, 'notes');
+            assert.strictEqual(state.favorites.pen.length, 1, 'Notes profile retains its presets');
+
+            // Shape profiles remain empty
+            const shapeProfile = getActiveShapeProfile(state);
+            assert.strictEqual(shapeProfile.shape.length, 0);
+            assert.strictEqual(state.favorites.shape.length, 0);
+        });
+
+        test('switching profiles in pen updates activeStrokeProfileId without changing activeShapeProfileId when syncFavoriteProfiles is false (default)', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            assert.strictEqual(state.syncFavoriteProfiles, false);
+            assert.strictEqual(state.activeStrokeProfileId, 'notes');
+            assert.strictEqual(state.activeShapeProfileId, 'general');
+
+            // Switch stroke profile to 'engineering'
+            switchStrokeProfile(state, 'engineering');
+            assert.strictEqual(state.activeStrokeProfileId, 'engineering');
+            assert.strictEqual(state.activeShapeProfileId, 'general', 'activeShapeProfileId must remain untouched');
+
+            // Switch shape profile to 'diagrams'
+            switchShapeProfile(state, 'diagrams');
+            assert.strictEqual(state.activeShapeProfileId, 'diagrams');
+            assert.strictEqual(state.activeStrokeProfileId, 'engineering', 'activeStrokeProfileId must remain untouched');
+        });
+
+        test('enabling syncFavoriteProfiles = true synchronizes profile switching between stroke and shape profiles', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            state.syncFavoriteProfiles = true;
+
+            // 1. Switch stroke profile to 'engineering': matches shape profile 'engineering' by ID
+            switchStrokeProfile(state, 'engineering');
+            assert.strictEqual(state.activeStrokeProfileId, 'engineering');
+            assert.strictEqual(state.activeShapeProfileId, 'engineering', 'Shape profile must synchronize to engineering by ID');
+
+            // 2. Switch stroke profile to 'academic' (index 1): matches shape profile 'diagrams' (index 1 fallback)
+            switchStrokeProfile(state, 'academic');
+            assert.strictEqual(state.activeStrokeProfileId, 'academic');
+            assert.strictEqual(state.activeShapeProfileId, 'diagrams', 'Shape profile must synchronize by index fallback');
+
+            // 3. Switch shape profile to 'general' (index 0): matches stroke profile 'notes' (index 0 fallback)
+            switchShapeProfile(state, 'general');
+            assert.strictEqual(state.activeShapeProfileId, 'general');
+            assert.strictEqual(state.activeStrokeProfileId, 'notes', 'Stroke profile must synchronize to notes');
+        });
+
+        test('creating a profile in stroke domain creates independent profile or syncs when enabled', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+
+            // Sync false: only creates in stroke domain
+            state.syncFavoriteProfiles = false;
+            const newStroke = createStrokeProfile(state, 'Arquitectura');
+            assert.strictEqual(state.strokeFavoriteProfiles.length, 4);
+            assert.strictEqual(state.activeStrokeProfileId, newStroke.id);
+            assert.strictEqual(state.shapeFavoriteProfiles.length, 3, 'Shape profiles should NOT increase');
+            assert.strictEqual(state.activeShapeProfileId, 'general');
+
+            // Sync true: creates in both domains
+            state.syncFavoriteProfiles = true;
+            const syncedProfile = createStrokeProfile(state, 'Química');
+            assert.strictEqual(state.strokeFavoriteProfiles.length, 5);
+            assert.strictEqual(state.shapeFavoriteProfiles.length, 4, 'Shape profiles should also receive new profile');
+            assert.strictEqual(state.activeStrokeProfileId, syncedProfile.id);
+            assert.strictEqual(state.activeShapeProfileId, syncedProfile.id);
+        });
+    });
+
+    // =========================================================================
+    // 2. FavoritesDrawer Header, Navigation & Sync Toggle
+    // =========================================================================
+    describe('2. FavoritesDrawer Header & Navigation', () => {
+        test('renders profile header with active name, dots, and sync toggle', () => {
+            const profiles = [
+                { id: 'notes', name: 'Notas' },
+                { id: 'academic', name: 'Académico' },
+            ];
+
+            let synced = false;
+            let switchedProfileId = '';
+
+            const drawer = new FavoritesDrawer(
+                {
+                    onSelectFavorite: () => {},
+                    onDeleteFavorite: () => {},
+                    onReorderFavorite: () => {},
+                    onSwitchProfile: (id) => { switchedProfileId = id; },
+                    onToggleSyncProfiles: (s) => { synced = s; },
+                },
+                'pen',
+                [],
+                null,
+                undefined,
+                profiles,
+                'notes',
+                false,
+            );
+
+            const header = drawer.el.querySelector('.apolo-profile-header');
+            assert.ok(header, 'Profile header must be rendered');
+
+            const name = header.querySelector('.apolo-profile-name');
+            assert.ok(name);
+            assert.strictEqual(name.textContent, 'Notas');
+
+            const dots = header.querySelectorAll('.apolo-profile-dot:not(.is-add)');
+            assert.strictEqual(dots.length, 2);
+            assert.ok(dots[0].classList.contains('is-active'));
+            assert.ok(!dots[1].classList.contains('is-active'));
+
+            const addDot = header.querySelector('.apolo-profile-add-btn');
+            assert.ok(addDot, 'Add profile dot must exist');
+
+            const syncBtn = header.querySelector('.apolo-profile-sync-btn');
+            assert.ok(syncBtn, 'Sync toggle button must exist');
+            assert.ok(!syncBtn.classList.contains('is-synced'));
+
+            // Click dot 1 to switch
+            dots[1].onclick({ stopPropagation: () => {} });
+            assert.strictEqual(switchedProfileId, 'academic');
+
+            // Click sync button to toggle
+            syncBtn.onclick({ stopPropagation: () => {} });
+            assert.strictEqual(synced, true);
+            assert.ok(syncBtn.classList.contains('is-synced'));
+        });
+
+        test('nav buttons < and > navigate between profiles', () => {
+            const profiles = [
+                { id: 'p1', name: 'Uno' },
+                { id: 'p2', name: 'Dos' },
+                { id: 'p3', name: 'Tres' },
+            ];
+
+            let currentId = 'p2';
+            const drawer = new FavoritesDrawer(
+                {
+                    onSelectFavorite: () => {},
+                    onDeleteFavorite: () => {},
+                    onReorderFavorite: () => {},
+                    onSwitchProfile: (id) => {
+                        currentId = id;
+                        drawer.updateState({ activeProfileId: id });
+                    },
+                },
+                'pen',
+                [],
+                null,
+                undefined,
+                profiles,
+                'p2',
+            );
+
+            const prevBtn = drawer.el.querySelector('.apolo-profile-prev-btn');
+            assert.ok(prevBtn);
+
+            // Click previous from p2 -> p1
+            prevBtn.onclick({ stopPropagation: () => {} });
+            assert.strictEqual(currentId, 'p1');
+
+            // Click next from p1 -> p2 (query freshly rendered button)
+            const nextBtn = drawer.el.querySelector('.apolo-profile-next-btn');
+            assert.ok(nextBtn);
+            nextBtn.onclick({ stopPropagation: () => {} });
+            assert.strictEqual(currentId, 'p2');
+        });
+    });
+
+    // =========================================================================
+    // 3. Horizontal Swipe Gestures & Overswipe Creation
+    // =========================================================================
+    describe('3. Horizontal Swipe Gestures & Overswipe Creation', () => {
+        test('horizontal swipe navigates between profiles (swipe left -> next, swipe right -> previous)', () => {
+            const profiles = [
+                { id: 'p1', name: 'Uno' },
+                { id: 'p2', name: 'Dos' },
+                { id: 'p3', name: 'Tres' },
+            ];
+
+            let activeId = 'p2';
+            const drawer = new FavoritesDrawer(
+                {
+                    onSelectFavorite: () => {},
+                    onDeleteFavorite: () => {},
+                    onReorderFavorite: () => {},
+                    onSwitchProfile: (id) => {
+                        activeId = id;
+                        drawer.updateState({ activeProfileId: id });
+                    },
+                },
+                'pen',
+                [],
+                null,
+                undefined,
+                profiles,
+                'p2',
+            );
+
+            // 1. Swipe Left (dx = -60): Next profile (p2 -> p3)
+            drawer.handleHorizontalSwipe(-60);
+            assert.strictEqual(activeId, 'p3');
+
+            // 2. Swipe Right (dx = +70): Previous profile (p3 -> p2)
+            drawer.handleHorizontalSwipe(70);
+            assert.strictEqual(activeId, 'p2');
+
+            // 3. Swipe Right (dx = +50): Previous profile (p2 -> p1)
+            drawer.handleHorizontalSwipe(50);
+            assert.strictEqual(activeId, 'p1');
+        });
+
+        test('pointer gesture event dispatch triggers horizontal swipe when dx >= 44 and dx > dy * 1.4', () => {
+            const profiles = [
+                { id: 'p1', name: 'Uno' },
+                { id: 'p2', name: 'Dos' },
+            ];
+
+            let activeId = 'p1';
+            const drawer = new FavoritesDrawer(
+                {
+                    onSelectFavorite: () => {},
+                    onDeleteFavorite: () => {},
+                    onReorderFavorite: () => {},
+                    onSwitchProfile: (id) => {
+                        activeId = id;
+                        drawer.updateState({ activeProfileId: id });
+                    },
+                },
+                'pen',
+                [],
+                null,
+                undefined,
+                profiles,
+                'p1',
+            );
+
+            const el = drawer.el as any;
+
+            // Insufficient swipe (dx = -20) -> should NOT trigger
+            el.dispatchPointerEvent('pointerdown', { clientX: 100, clientY: 100 });
+            el.dispatchPointerEvent('pointerup', { clientX: 80, clientY: 100 });
+            assert.strictEqual(activeId, 'p1');
+
+            // Mostly vertical gesture (dx = -50, dy = 60) -> should NOT trigger
+            el.dispatchPointerEvent('pointerdown', { clientX: 100, clientY: 100 });
+            el.dispatchPointerEvent('pointerup', { clientX: 50, clientY: 160 });
+            assert.strictEqual(activeId, 'p1');
+
+            // Valid horizontal swipe left (dx = -55, dy = 5) -> triggers next profile p1 -> p2
+            el.dispatchPointerEvent('pointerdown', { clientX: 100, clientY: 100 });
+            el.dispatchPointerEvent('pointerup', { clientX: 45, clientY: 105 });
+            assert.strictEqual(activeId, 'p2');
+        });
+
+        test('overswipe beyond boundary opens "Nuevo perfil" inline creation form', () => {
+            const profiles = [
+                { id: 'p1', name: 'Uno' },
+                { id: 'p2', name: 'Dos' },
+            ];
+
+            const drawer = new FavoritesDrawer(
+                {
+                    onSelectFavorite: () => {},
+                    onDeleteFavorite: () => {},
+                    onReorderFavorite: () => {},
+                },
+                'pen',
+                [],
+                null,
+                undefined,
+                profiles,
+                'p2', // at last profile
+            );
+
+            // Initially not showing create form
+            assert.strictEqual(drawer.el.querySelector('.apolo-profile-create-form'), null);
+
+            // Overswipe left (dx < 0) on last profile -> opens create form
+            drawer.handleHorizontalSwipe(-50);
+            const form = drawer.el.querySelector('.apolo-profile-create-form');
+            assert.ok(form, 'Create form must open on overswipe beyond edge');
+
+            const input = form.querySelector('.apolo-profile-name-input');
+            assert.ok(input);
+            const createBtn = form.querySelector('.apolo-profile-create-btn');
+            assert.ok(createBtn);
+            const cancelBtn = form.querySelector('.apolo-profile-cancel-btn');
+            assert.ok(cancelBtn);
+
+            // Cancel button closes create form
+            cancelBtn.onclick({ stopPropagation: () => {} });
+            assert.strictEqual(drawer.el.querySelector('.apolo-profile-create-form'), null);
+        });
+
+        test('tapping + dot opens create form and submitting creates new independent profile', () => {
+            let createdName = '';
+            const profiles = [
+                { id: 'p1', name: 'Uno' },
+            ];
+
+            const drawer = new FavoritesDrawer(
+                {
+                    onSelectFavorite: () => {},
+                    onDeleteFavorite: () => {},
+                    onReorderFavorite: () => {},
+                    onCreateProfile: (name) => {
+                        createdName = name;
+                    },
+                },
+                'pen',
+                [],
+                null,
+                undefined,
+                profiles,
+                'p1',
+            );
+
+            const addDot = drawer.el.querySelector('.apolo-profile-add-btn');
+            assert.ok(addDot);
+            addDot.onclick({ stopPropagation: () => {} });
+
+            const form = drawer.el.querySelector('.apolo-profile-create-form');
+            assert.ok(form);
+
+            const input = form.querySelector('.apolo-profile-name-input') as any;
+            assert.ok(input);
+            input.value = 'Matemáticas';
+
+            const createBtn = form.querySelector('.apolo-profile-create-btn');
+            assert.ok(createBtn);
+            createBtn.onclick({ stopPropagation: () => {} });
+
+            assert.strictEqual(createdName, 'Matemáticas');
+            assert.strictEqual(drawer.el.querySelector('.apolo-profile-create-form'), null);
+        });
+    });
+
+    // =========================================================================
+    // 4. Persistence Across Reloads
+    // =========================================================================
+    describe('4. Persistence Across Reloads', () => {
+        test('survives WorkspaceToolState serialization and hydration with independent profiles and sync flag', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+
+            // Customize state
+            state.activeStrokeProfileId = 'academic';
+            state.activeShapeProfileId = 'diagrams';
+            state.syncFavoriteProfiles = true;
+
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'calli', color: '#111', width: 4 }) as PenFavoritePreset;
+            state.strokeFavoriteProfiles[1].pen.push(p1); // into academic
+
+            const s1 = createFavoritePreset({ tool: 'shape', shapeType: 'triangle', color: '#222', width: 2 }) as ShapeFavoritePreset;
+            state.shapeFavoriteProfiles[1].shape.push(s1); // into diagrams
+
+            syncLegacyFavoritesSlice(state);
+
+            // Serialize & deserialize
+            const serialized = JSON.stringify(state);
+            const deserialized = JSON.parse(serialized);
+            const hydrated = mergeWorkspaceToolState(deserialized);
+
+            assert.strictEqual(hydrated.activeStrokeProfileId, 'academic');
+            assert.strictEqual(hydrated.activeShapeProfileId, 'diagrams');
+            assert.strictEqual(hydrated.syncFavoriteProfiles, true);
+
+            assert.strictEqual(hydrated.strokeFavoriteProfiles.length, 3);
+            assert.strictEqual(hydrated.shapeFavoriteProfiles.length, 3);
+
+            assert.strictEqual(hydrated.strokeFavoriteProfiles[1].pen.length, 1);
+            assert.strictEqual(hydrated.strokeFavoriteProfiles[1].pen[0].id, p1.id);
+
+            assert.strictEqual(hydrated.shapeFavoriteProfiles[1].shape.length, 1);
+            assert.strictEqual(hydrated.shapeFavoriteProfiles[1].shape[0].id, s1.id);
+
+            // Legacy slice correctly resolved
+            assert.strictEqual(hydrated.favorites.pen.length, 1);
+            assert.strictEqual(hydrated.favorites.pen[0].id, p1.id);
+            assert.strictEqual(hydrated.favorites.shape.length, 1);
+            assert.strictEqual(hydrated.favorites.shape[0].id, s1.id);
+        });
+    });
+});

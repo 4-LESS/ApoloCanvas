@@ -8,6 +8,12 @@ import {
     toggleFavoritePreset,
     removeFavoriteById,
     reorderFavorites,
+    getActiveStrokeProfile,
+    getActiveShapeProfile,
+    switchStrokeProfile,
+    switchShapeProfile,
+    createStrokeProfile,
+    createShapeProfile,
     type ToolFavoritePreset,
     type PenFavoritePreset,
     type HighlighterFavoritePreset,
@@ -533,14 +539,20 @@ export default class ApoloCanvasPlugin extends Plugin {
         }
         const tool = this.settings.toolState.activeTool;
         if (tool === 'pen') {
-            const result = toggleFavoritePreset(this.settings.toolState.favorites.pen, { tool: 'pen', ...this.settings.toolState.pen });
-            this.settings.toolState.favorites.pen = result.updatedList;
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            const result = toggleFavoritePreset(profile.pen, { tool: 'pen', ...this.settings.toolState.pen });
+            profile.pen = result.updatedList as PenFavoritePreset[];
+            this.settings.toolState.favorites.pen = profile.pen;
         } else if (tool === 'highlighter') {
-            const result = toggleFavoritePreset(this.settings.toolState.favorites.highlighter, { tool: 'highlighter', ...this.settings.toolState.highlighter });
-            this.settings.toolState.favorites.highlighter = result.updatedList;
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            const result = toggleFavoritePreset(profile.highlighter, { tool: 'highlighter', ...this.settings.toolState.highlighter });
+            profile.highlighter = result.updatedList as HighlighterFavoritePreset[];
+            this.settings.toolState.favorites.highlighter = profile.highlighter;
         } else if (tool === 'shape') {
-            const result = toggleFavoritePreset(this.settings.toolState.favorites.shape, { tool: 'shape', ...this.settings.toolState.shape });
-            this.settings.toolState.favorites.shape = result.updatedList;
+            const profile = getActiveShapeProfile(this.settings.toolState);
+            const result = toggleFavoritePreset(profile.shape, { tool: 'shape', ...this.settings.toolState.shape });
+            profile.shape = result.updatedList as ShapeFavoritePreset[];
+            this.settings.toolState.favorites.shape = profile.shape;
         } else {
             return;
         }
@@ -602,13 +614,19 @@ export default class ApoloCanvasPlugin extends Plugin {
         }
         const tool = this.settings.toolState.activeTool;
         if (tool === 'pen') {
-            this.settings.toolState.favorites.pen = removeFavoriteById(this.settings.toolState.favorites.pen, presetId);
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            profile.pen = removeFavoriteById(profile.pen, presetId);
+            this.settings.toolState.favorites.pen = profile.pen;
             this.debouncedSaveSettings();
         } else if (tool === 'highlighter') {
-            this.settings.toolState.favorites.highlighter = removeFavoriteById(this.settings.toolState.favorites.highlighter, presetId);
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            profile.highlighter = removeFavoriteById(profile.highlighter, presetId);
+            this.settings.toolState.favorites.highlighter = profile.highlighter;
             this.debouncedSaveSettings();
         } else if (tool === 'shape') {
-            this.settings.toolState.favorites.shape = removeFavoriteById(this.settings.toolState.favorites.shape, presetId);
+            const profile = getActiveShapeProfile(this.settings.toolState);
+            profile.shape = removeFavoriteById(profile.shape, presetId);
+            this.settings.toolState.favorites.shape = profile.shape;
             this.debouncedSaveSettings();
         }
     }
@@ -620,15 +638,58 @@ export default class ApoloCanvasPlugin extends Plugin {
         }
         const tool = this.settings.toolState.activeTool;
         if (tool === 'pen') {
-            this.settings.toolState.favorites.pen = reorderFavorites(this.settings.toolState.favorites.pen, fromIndex, toIndex);
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            profile.pen = reorderFavorites(profile.pen, fromIndex, toIndex);
+            this.settings.toolState.favorites.pen = profile.pen;
             this.debouncedSaveSettings();
         } else if (tool === 'highlighter') {
-            this.settings.toolState.favorites.highlighter = reorderFavorites(this.settings.toolState.favorites.highlighter, fromIndex, toIndex);
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            profile.highlighter = reorderFavorites(profile.highlighter, fromIndex, toIndex);
+            this.settings.toolState.favorites.highlighter = profile.highlighter;
             this.debouncedSaveSettings();
         } else if (tool === 'shape') {
-            this.settings.toolState.favorites.shape = reorderFavorites(this.settings.toolState.favorites.shape, fromIndex, toIndex);
+            const profile = getActiveShapeProfile(this.settings.toolState);
+            profile.shape = reorderFavorites(profile.shape, fromIndex, toIndex);
+            this.settings.toolState.favorites.shape = profile.shape;
             this.debouncedSaveSettings();
         }
+    }
+
+    switchToolFavoriteProfile(profileId: string): void {
+        if (this.controller) {
+            this.controller.switchFavoriteProfile(profileId);
+            return;
+        }
+        const isShape = this.settings.toolState.activeTool === 'shape';
+        if (isShape) {
+            switchShapeProfile(this.settings.toolState, profileId);
+        } else {
+            switchStrokeProfile(this.settings.toolState, profileId);
+        }
+        this.debouncedSaveSettings();
+    }
+
+    createToolFavoriteProfile(name: string): void {
+        if (this.controller) {
+            this.controller.createFavoriteProfile(name);
+            return;
+        }
+        const isShape = this.settings.toolState.activeTool === 'shape';
+        if (isShape) {
+            createShapeProfile(this.settings.toolState, name);
+        } else {
+            createStrokeProfile(this.settings.toolState, name);
+        }
+        this.debouncedSaveSettings();
+    }
+
+    toggleSyncFavoriteProfiles(sync: boolean): void {
+        if (this.controller) {
+            this.controller.toggleSyncFavoriteProfiles(sync);
+            return;
+        }
+        this.settings.toolState.syncFavoriteProfiles = sync;
+        this.debouncedSaveSettings();
     }
 
     private registerCommands(): void {

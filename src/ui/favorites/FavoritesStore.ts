@@ -8,6 +8,13 @@ import type {
     ShapeType,
     PenProfileId,
     ToolFavoritePreset,
+    StrokeFavoriteProfile,
+    ShapeFavoriteProfile,
+    WorkspaceToolState,
+} from '../../core/types.ts';
+import {
+    DEFAULT_STROKE_FAVORITE_PROFILES,
+    DEFAULT_SHAPE_FAVORITE_PROFILES,
 } from '../../core/types.ts';
 
 export type {
@@ -17,6 +24,8 @@ export type {
     HighlighterFavoritePreset,
     ShapeFavoritePreset,
     ToolFavoritePreset,
+    StrokeFavoriteProfile,
+    ShapeFavoriteProfile,
 };
 
 export const MAX_FAVORITES_PER_TOOL = 24;
@@ -261,4 +270,199 @@ export function reorderFavorites<T extends ToolFavoritePreset = ToolFavoritePres
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
     return next;
+}
+
+/**
+ * Returns the currently active stroke favorite profile (pen + highlighter),
+ * guaranteeing a safe fallback if uninitialized.
+ */
+export function getActiveStrokeProfile(state: WorkspaceToolState): StrokeFavoriteProfile {
+    if (!Array.isArray(state.strokeFavoriteProfiles) || state.strokeFavoriteProfiles.length === 0) {
+        state.strokeFavoriteProfiles = DEFAULT_STROKE_FAVORITE_PROFILES.map(p => ({
+            id: p.id,
+            name: p.name,
+            pen: [],
+            highlighter: [],
+        }));
+    }
+    const found = state.strokeFavoriteProfiles.find(p => p.id === state.activeStrokeProfileId);
+    if (found) return found;
+    state.activeStrokeProfileId = state.strokeFavoriteProfiles[0].id;
+    return state.strokeFavoriteProfiles[0];
+}
+
+/**
+ * Returns the currently active shape favorite profile (shapes),
+ * guaranteeing a safe fallback if uninitialized.
+ */
+export function getActiveShapeProfile(state: WorkspaceToolState): ShapeFavoriteProfile {
+    if (!Array.isArray(state.shapeFavoriteProfiles) || state.shapeFavoriteProfiles.length === 0) {
+        state.shapeFavoriteProfiles = DEFAULT_SHAPE_FAVORITE_PROFILES.map(p => ({
+            id: p.id,
+            name: p.name,
+            shape: [],
+        }));
+    }
+    const found = state.shapeFavoriteProfiles.find(p => p.id === state.activeShapeProfileId);
+    if (found) return found;
+    state.activeShapeProfileId = state.shapeFavoriteProfiles[0].id;
+    return state.shapeFavoriteProfiles[0];
+}
+
+/**
+ * Synchronizes the legacy `state.favorites` slice with the currently active profiles.
+ */
+export function syncLegacyFavoritesSlice(state: WorkspaceToolState): void {
+    const stroke = getActiveStrokeProfile(state);
+    const shape = getActiveShapeProfile(state);
+    state.favorites = {
+        pen: stroke.pen,
+        highlighter: stroke.highlighter,
+        shape: shape.shape,
+    };
+}
+
+/**
+ * Resolves a matching profile across domains by ID, normalized name, or fallback index.
+ */
+export function findMatchingProfile<T extends { id: string; name: string }>(
+    profiles: readonly T[],
+    targetId: string,
+    targetName?: string,
+    fallbackIndex?: number,
+): T | undefined {
+    if (!Array.isArray(profiles) || profiles.length === 0) return undefined;
+    const byId = profiles.find(p => p.id === targetId);
+    if (byId) return byId;
+    if (targetName) {
+        const norm = targetName.trim().toLowerCase();
+        const byName = profiles.find(p => p.name.trim().toLowerCase() === norm);
+        if (byName) return byName;
+    }
+    if (fallbackIndex !== undefined && fallbackIndex >= 0 && fallbackIndex < profiles.length) {
+        return profiles[fallbackIndex];
+    }
+    return undefined;
+}
+
+/**
+ * Switches the active stroke profile (pen + highlighter).
+ * If `syncFavoriteProfiles === true`, also updates `activeShapeProfileId`.
+ */
+export function switchStrokeProfile(state: WorkspaceToolState, profileId: string): void {
+    if (!Array.isArray(state.strokeFavoriteProfiles)) return;
+    const strokeIdx = state.strokeFavoriteProfiles.findIndex(p => p.id === profileId);
+    if (strokeIdx === -1) return;
+    const targetStroke = state.strokeFavoriteProfiles[strokeIdx];
+    state.activeStrokeProfileId = profileId;
+
+    if (state.syncFavoriteProfiles) {
+        const matchingShape = findMatchingProfile(
+            state.shapeFavoriteProfiles,
+            targetStroke.id,
+            targetStroke.name,
+            strokeIdx,
+        );
+        if (matchingShape) {
+            state.activeShapeProfileId = matchingShape.id;
+        }
+    }
+    syncLegacyFavoritesSlice(state);
+}
+
+/**
+ * Switches the active shape profile (shapes).
+ * If `syncFavoriteProfiles === true`, also updates `activeStrokeProfileId`.
+ */
+export function switchShapeProfile(state: WorkspaceToolState, profileId: string): void {
+    if (!Array.isArray(state.shapeFavoriteProfiles)) return;
+    const shapeIdx = state.shapeFavoriteProfiles.findIndex(p => p.id === profileId);
+    if (shapeIdx === -1) return;
+    const targetShape = state.shapeFavoriteProfiles[shapeIdx];
+    state.activeShapeProfileId = profileId;
+
+    if (state.syncFavoriteProfiles) {
+        const matchingStroke = findMatchingProfile(
+            state.strokeFavoriteProfiles,
+            targetShape.id,
+            targetShape.name,
+            shapeIdx,
+        );
+        if (matchingStroke) {
+            state.activeStrokeProfileId = matchingStroke.id;
+        }
+    }
+    syncLegacyFavoritesSlice(state);
+}
+
+/**
+ * Creates a new stroke favorite profile and selects it.
+ * If `syncFavoriteProfiles === true`, also creates and selects a matching shape profile.
+ */
+export function createStrokeProfile(state: WorkspaceToolState, rawName: string): StrokeFavoriteProfile {
+    const name = (rawName || '').trim().slice(0, 24) || 'Nuevo perfil';
+    const id = `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const newProfile: StrokeFavoriteProfile = {
+        id,
+        name,
+        pen: [],
+        highlighter: [],
+    };
+    if (!Array.isArray(state.strokeFavoriteProfiles)) {
+        state.strokeFavoriteProfiles = [];
+    }
+    state.strokeFavoriteProfiles.push(newProfile);
+    state.activeStrokeProfileId = id;
+
+    if (state.syncFavoriteProfiles) {
+        if (!Array.isArray(state.shapeFavoriteProfiles)) {
+            state.shapeFavoriteProfiles = [];
+        }
+        if (!state.shapeFavoriteProfiles.some(p => p.id === id)) {
+            state.shapeFavoriteProfiles.push({
+                id,
+                name,
+                shape: [],
+            });
+            state.activeShapeProfileId = id;
+        }
+    }
+    syncLegacyFavoritesSlice(state);
+    return newProfile;
+}
+
+/**
+ * Creates a new shape favorite profile and selects it.
+ * If `syncFavoriteProfiles === true`, also creates and selects a matching stroke profile.
+ */
+export function createShapeProfile(state: WorkspaceToolState, rawName: string): ShapeFavoriteProfile {
+    const name = (rawName || '').trim().slice(0, 24) || 'Nuevo perfil';
+    const id = `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const newProfile: ShapeFavoriteProfile = {
+        id,
+        name,
+        shape: [],
+    };
+    if (!Array.isArray(state.shapeFavoriteProfiles)) {
+        state.shapeFavoriteProfiles = [];
+    }
+    state.shapeFavoriteProfiles.push(newProfile);
+    state.activeShapeProfileId = id;
+
+    if (state.syncFavoriteProfiles) {
+        if (!Array.isArray(state.strokeFavoriteProfiles)) {
+            state.strokeFavoriteProfiles = [];
+        }
+        if (!state.strokeFavoriteProfiles.some(p => p.id === id)) {
+            state.strokeFavoriteProfiles.push({
+                id,
+                name,
+                pen: [],
+                highlighter: [],
+            });
+            state.activeStrokeProfileId = id;
+        }
+    }
+    syncLegacyFavoritesSlice(state);
+    return newProfile;
 }

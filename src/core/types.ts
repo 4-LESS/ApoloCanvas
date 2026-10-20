@@ -89,6 +89,19 @@ export type ToolFavoritePreset =
     | HighlighterFavoritePreset
     | ShapeFavoritePreset;
 
+export interface StrokeFavoriteProfile {
+    id: string;
+    name: string;
+    pen: PenFavoritePreset[];
+    highlighter: HighlighterFavoritePreset[];
+}
+
+export interface ShapeFavoriteProfile {
+    id: string;
+    name: string;
+    shape: ShapeFavoritePreset[];
+}
+
 export type EraserMode = 'whole' | 'reticle';
 
 export type LassoMode = 'free' | 'rect';
@@ -146,7 +159,24 @@ export interface WorkspaceToolState {
         highlighter: HighlighterFavoritePreset[];
         shape: ShapeFavoritePreset[];
     };
+    strokeFavoriteProfiles: StrokeFavoriteProfile[];
+    activeStrokeProfileId: string;
+    shapeFavoriteProfiles: ShapeFavoriteProfile[];
+    activeShapeProfileId: string;
+    syncFavoriteProfiles: boolean;
 }
+
+export const DEFAULT_STROKE_FAVORITE_PROFILES: StrokeFavoriteProfile[] = [
+    { id: 'notes', name: 'Notas', pen: [], highlighter: [] },
+    { id: 'academic', name: 'Académico', pen: [], highlighter: [] },
+    { id: 'engineering', name: 'Ingeniería', pen: [], highlighter: [] },
+];
+
+export const DEFAULT_SHAPE_FAVORITE_PROFILES: ShapeFavoriteProfile[] = [
+    { id: 'general', name: 'General', shape: [] },
+    { id: 'diagrams', name: 'Diagramas', shape: [] },
+    { id: 'engineering', name: 'Ingeniería', shape: [] },
+];
 
 export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
     penEnabled: true,
@@ -208,9 +238,61 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
         highlighter: [],
         shape: [],
     },
+    strokeFavoriteProfiles: [
+        { id: 'notes', name: 'Notas', pen: [], highlighter: [] },
+        { id: 'academic', name: 'Académico', pen: [], highlighter: [] },
+        { id: 'engineering', name: 'Ingeniería', pen: [], highlighter: [] },
+    ],
+    activeStrokeProfileId: 'notes',
+    shapeFavoriteProfiles: [
+        { id: 'general', name: 'General', shape: [] },
+        { id: 'diagrams', name: 'Diagramas', shape: [] },
+        { id: 'engineering', name: 'Ingeniería', shape: [] },
+    ],
+    activeShapeProfileId: 'general',
+    syncFavoriteProfiles: false,
 };
 
 export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToolState {
+    const strokeProfiles: StrokeFavoriteProfile[] = Array.isArray(state.strokeFavoriteProfiles) && state.strokeFavoriteProfiles.length > 0
+        ? state.strokeFavoriteProfiles.map(sp => ({
+            id: sp.id,
+            name: sp.name,
+            pen: Array.isArray(sp.pen) ? sp.pen.map(p => ({ ...p })) : [],
+            highlighter: Array.isArray(sp.highlighter) ? sp.highlighter.map(h => ({ ...h })) : [],
+        }))
+        : DEFAULT_STROKE_FAVORITE_PROFILES.map(sp => ({ ...sp, pen: [], highlighter: [] }));
+
+    const activeStrokeId = state.activeStrokeProfileId && strokeProfiles.some(p => p.id === state.activeStrokeProfileId)
+        ? state.activeStrokeProfileId
+        : strokeProfiles[0].id;
+
+    const shapeProfiles: ShapeFavoriteProfile[] = Array.isArray(state.shapeFavoriteProfiles) && state.shapeFavoriteProfiles.length > 0
+        ? state.shapeFavoriteProfiles.map(shp => ({
+            id: shp.id,
+            name: shp.name,
+            shape: Array.isArray(shp.shape) ? shp.shape.map(s => ({ ...s })) : [],
+        }))
+        : DEFAULT_SHAPE_FAVORITE_PROFILES.map(shp => ({ ...shp, shape: [] }));
+
+    const activeShapeId = state.activeShapeProfileId && shapeProfiles.some(p => p.id === state.activeShapeProfileId)
+        ? state.activeShapeProfileId
+        : shapeProfiles[0].id;
+
+    const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) || strokeProfiles[0];
+    const activeShape = shapeProfiles.find(p => p.id === activeShapeId) || shapeProfiles[0];
+
+    // Mirror any directly set legacy favorites if active profile was empty
+    if (Array.isArray(state.favorites?.pen) && state.favorites.pen.length > 0 && activeStroke.pen.length === 0) {
+        activeStroke.pen = state.favorites.pen.map(p => ({ ...p }));
+    }
+    if (Array.isArray(state.favorites?.highlighter) && state.favorites.highlighter.length > 0 && activeStroke.highlighter.length === 0) {
+        activeStroke.highlighter = state.favorites.highlighter.map(h => ({ ...h }));
+    }
+    if (Array.isArray(state.favorites?.shape) && state.favorites.shape.length > 0 && activeShape.shape.length === 0) {
+        activeShape.shape = state.favorites.shape.map(s => ({ ...s }));
+    }
+
     return {
         penEnabled: state.penEnabled,
         activeTool: state.activeTool,
@@ -267,10 +349,15 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
             mode: state.lasso.mode,
         },
         favorites: {
-            pen: Array.isArray(state.favorites?.pen) ? state.favorites.pen.map(p => ({ ...p })) : [],
-            highlighter: Array.isArray(state.favorites?.highlighter) ? state.favorites.highlighter.map(h => ({ ...h })) : [],
-            shape: Array.isArray(state.favorites?.shape) ? state.favorites.shape.map(s => ({ ...s })) : [],
+            pen: activeStroke.pen.map(p => ({ ...p })),
+            highlighter: activeStroke.highlighter.map(h => ({ ...h })),
+            shape: activeShape.shape.map(s => ({ ...s })),
         },
+        strokeFavoriteProfiles: strokeProfiles,
+        activeStrokeProfileId: activeStrokeId,
+        shapeFavoriteProfiles: shapeProfiles,
+        activeShapeProfileId: activeShapeId,
+        syncFavoriteProfiles: Boolean(state.syncFavoriteProfiles),
     };
 }
 
@@ -279,6 +366,65 @@ export function mergeWorkspaceToolState(
     fallback: WorkspaceToolState = DEFAULT_WORKSPACE_TOOL_STATE,
 ): WorkspaceToolState {
     if (!saved) return cloneWorkspaceToolState(fallback);
+
+    // Hydrate stroke profiles
+    const strokeProfiles: StrokeFavoriteProfile[] = Array.isArray(saved.strokeFavoriteProfiles) && saved.strokeFavoriteProfiles.length > 0
+        ? saved.strokeFavoriteProfiles.map(sp => ({
+            id: sp.id,
+            name: sp.name,
+            pen: Array.isArray(sp.pen) ? sp.pen.map(p => ({ ...p })) : [],
+            highlighter: Array.isArray(sp.highlighter) ? sp.highlighter.map(h => ({ ...h })) : [],
+        }))
+        : (Array.isArray(fallback.strokeFavoriteProfiles) && fallback.strokeFavoriteProfiles.length > 0
+            ? fallback.strokeFavoriteProfiles.map(sp => ({
+                id: sp.id,
+                name: sp.name,
+                pen: Array.isArray(sp.pen) ? sp.pen.map(p => ({ ...p })) : [],
+                highlighter: Array.isArray(sp.highlighter) ? sp.highlighter.map(h => ({ ...h })) : [],
+            }))
+            : DEFAULT_STROKE_FAVORITE_PROFILES.map(sp => ({ ...sp, pen: [], highlighter: [] })));
+
+    const activeStrokeId = saved.activeStrokeProfileId && strokeProfiles.some(p => p.id === saved.activeStrokeProfileId)
+        ? saved.activeStrokeProfileId
+        : (fallback.activeStrokeProfileId && strokeProfiles.some(p => p.id === fallback.activeStrokeProfileId)
+            ? fallback.activeStrokeProfileId
+            : strokeProfiles[0].id);
+
+    // Hydrate shape profiles
+    const shapeProfiles: ShapeFavoriteProfile[] = Array.isArray(saved.shapeFavoriteProfiles) && saved.shapeFavoriteProfiles.length > 0
+        ? saved.shapeFavoriteProfiles.map(shp => ({
+            id: shp.id,
+            name: shp.name,
+            shape: Array.isArray(shp.shape) ? shp.shape.map(s => ({ ...s })) : [],
+        }))
+        : (Array.isArray(fallback.shapeFavoriteProfiles) && fallback.shapeFavoriteProfiles.length > 0
+            ? fallback.shapeFavoriteProfiles.map(shp => ({
+                id: shp.id,
+                name: shp.name,
+                shape: Array.isArray(shp.shape) ? shp.shape.map(s => ({ ...s })) : [],
+            }))
+            : DEFAULT_SHAPE_FAVORITE_PROFILES.map(shp => ({ ...shp, shape: [] })));
+
+    const activeShapeId = saved.activeShapeProfileId && shapeProfiles.some(p => p.id === saved.activeShapeProfileId)
+        ? saved.activeShapeProfileId
+        : (fallback.activeShapeProfileId && shapeProfiles.some(p => p.id === fallback.activeShapeProfileId)
+            ? fallback.activeShapeProfileId
+            : shapeProfiles[0].id);
+
+    const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) || strokeProfiles[0];
+    const activeShape = shapeProfiles.find(p => p.id === activeShapeId) || shapeProfiles[0];
+
+    // Legacy migration: if saved.favorites has presets but active profile is empty
+    if (Array.isArray(saved.favorites?.pen) && saved.favorites.pen.length > 0 && activeStroke.pen.length === 0) {
+        activeStroke.pen = saved.favorites.pen.map(p => ({ ...p }));
+    }
+    if (Array.isArray(saved.favorites?.highlighter) && saved.favorites.highlighter.length > 0 && activeStroke.highlighter.length === 0) {
+        activeStroke.highlighter = saved.favorites.highlighter.map(h => ({ ...h }));
+    }
+    if (Array.isArray(saved.favorites?.shape) && saved.favorites.shape.length > 0 && activeShape.shape.length === 0) {
+        activeShape.shape = saved.favorites.shape.map(s => ({ ...s }));
+    }
+
     return {
         penEnabled: saved.penEnabled ?? fallback.penEnabled,
         activeTool: saved.activeTool ?? fallback.activeTool,
@@ -347,16 +493,15 @@ export function mergeWorkspaceToolState(
             mode: saved.lasso?.mode ?? fallback.lasso.mode,
         },
         favorites: {
-            pen: Array.isArray(saved.favorites?.pen)
-                ? saved.favorites.pen.map(p => ({ ...p }))
-                : (Array.isArray(fallback.favorites?.pen) ? fallback.favorites.pen.map(p => ({ ...p })) : []),
-            highlighter: Array.isArray(saved.favorites?.highlighter)
-                ? saved.favorites.highlighter.map(h => ({ ...h }))
-                : (Array.isArray(fallback.favorites?.highlighter) ? fallback.favorites.highlighter.map(h => ({ ...h })) : []),
-            shape: Array.isArray(saved.favorites?.shape)
-                ? saved.favorites.shape.map(s => ({ ...s }))
-                : (Array.isArray(fallback.favorites?.shape) ? fallback.favorites.shape.map(s => ({ ...s })) : []),
+            pen: activeStroke.pen.map(p => ({ ...p })),
+            highlighter: activeStroke.highlighter.map(h => ({ ...h })),
+            shape: activeShape.shape.map(s => ({ ...s })),
         },
+        strokeFavoriteProfiles: strokeProfiles,
+        activeStrokeProfileId: activeStrokeId,
+        shapeFavoriteProfiles: shapeProfiles,
+        activeShapeProfileId: activeShapeId,
+        syncFavoriteProfiles: Boolean(saved.syncFavoriteProfiles ?? fallback.syncFavoriteProfiles ?? false),
     };
 }
 

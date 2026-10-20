@@ -5,6 +5,10 @@ import type {
     HighlighterFavoritePreset,
     ShapeFavoritePreset,
 } from '../../core/types.ts';
+import {
+    DEFAULT_STROKE_FAVORITE_PROFILES,
+    DEFAULT_SHAPE_FAVORITE_PROFILES,
+} from '../../core/types.ts';
 import { computeFavoriteFingerprint, inferTool } from './FavoritesStore.ts';
 import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark } from '../theme.ts';
 
@@ -12,6 +16,9 @@ export interface FavoritesDrawerCallbacks {
     onSelectFavorite: (preset: ToolFavoritePreset) => void;
     onDeleteFavorite: (presetId: string) => void;
     onReorderFavorite: (fromIndex: number, toIndex: number) => void;
+    onSwitchProfile?: (profileId: string) => void;
+    onCreateProfile?: (name: string) => void;
+    onToggleSyncProfiles?: (sync: boolean) => void;
 }
 
 /**
@@ -232,6 +239,15 @@ export class FavoritesDrawer {
     private tool: FavoritableTool;
     private favorites: ToolFavoritePreset[] = [];
     private currentSlice: any = null;
+    private profiles: { id: string; name: string }[] = [];
+    private activeProfileId: string = '';
+    private syncFavoriteProfiles: boolean = false;
+    private isCreatingProfile: boolean = false;
+
+    // Gesture tracking state
+    private pointerStartX = 0;
+    private pointerStartY = 0;
+    private isPointerDown = false;
 
     constructor(
         callbacks: FavoritesDrawerCallbacks,
@@ -239,14 +255,32 @@ export class FavoritesDrawer {
         initialFavorites: readonly ToolFavoritePreset[] = [],
         initialSlice?: any,
         parent?: HTMLElement,
+        initialProfiles?: readonly { id: string; name: string }[],
+        initialActiveProfileId?: string,
+        initialSyncProfiles?: boolean,
     ) {
         this.callbacks = callbacks;
         this.tool = initialTool;
         this.favorites = [...initialFavorites];
         this.currentSlice = initialSlice ?? null;
+        this.syncFavoriteProfiles = Boolean(initialSyncProfiles);
+
+        if (initialProfiles && initialProfiles.length > 0) {
+            this.profiles = initialProfiles.map(p => ({ id: p.id, name: p.name }));
+        } else if (initialTool === 'shape') {
+            this.profiles = DEFAULT_SHAPE_FAVORITE_PROFILES.map(p => ({ id: p.id, name: p.name }));
+        } else {
+            this.profiles = DEFAULT_STROKE_FAVORITE_PROFILES.map(p => ({ id: p.id, name: p.name }));
+        }
+
+        this.activeProfileId = initialActiveProfileId && this.profiles.some(p => p.id === initialActiveProfileId)
+            ? initialActiveProfileId
+            : (this.profiles[0]?.id || (initialTool === 'shape' ? 'general' : 'notes'));
 
         this.el = document.createElement('div');
         this.el.className = 'apolo-favorites-drawer';
+
+        this.setupSwipeListeners();
 
         if (parent) {
             parent.appendChild(this.el);
@@ -255,23 +289,124 @@ export class FavoritesDrawer {
         this.render();
     }
 
+    private setupSwipeListeners(): void {
+        this.el.addEventListener('pointerdown', (e: PointerEvent) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest?.('.apolo-profile-name-input, .apolo-profile-create-btn, .apolo-profile-cancel-btn')) {
+                return;
+            }
+            this.pointerStartX = e.clientX;
+            this.pointerStartY = e.clientY;
+            this.isPointerDown = true;
+        });
+
+        const onPointerEnd = (e: PointerEvent) => {
+            if (!this.isPointerDown) return;
+            this.isPointerDown = false;
+            const dx = e.clientX - this.pointerStartX;
+            const dy = e.clientY - this.pointerStartY;
+            if (Math.abs(dx) >= 44 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+                this.handleHorizontalSwipe(dx);
+            }
+        };
+
+        this.el.addEventListener('pointerup', onPointerEnd);
+        this.el.addEventListener('pointercancel', () => {
+            this.isPointerDown = false;
+        });
+    }
+
+    public handleHorizontalSwipe(dx: number): void {
+        if (this.isCreatingProfile) return;
+        const currIdx = this.profiles.findIndex(p => p.id === this.activeProfileId);
+        if (currIdx === -1) {
+            if (this.profiles.length > 0) {
+                this.switchProfile(this.profiles[0].id);
+            }
+            return;
+        }
+
+        if (dx < 0) {
+            // Swipe Left (dx < 0): Switch to next profile in current domain (index + 1)
+            if (currIdx < this.profiles.length - 1) {
+                this.switchProfile(this.profiles[currIdx + 1].id);
+            } else {
+                // Overswipe beyond last profile -> create profile view
+                this.openCreateProfileForm();
+            }
+        } else if (dx > 0) {
+            // Swipe Right (dx > 0): Switch to previous profile in current domain (index - 1)
+            if (currIdx > 0) {
+                this.switchProfile(this.profiles[currIdx - 1].id);
+            } else {
+                // Overswipe beyond first profile -> create profile view
+                this.openCreateProfileForm();
+            }
+        }
+    }
+
+    public switchProfile(profileId: string): void {
+        this.activeProfileId = profileId;
+        this.isCreatingProfile = false;
+        if (this.callbacks.onSwitchProfile) {
+            this.callbacks.onSwitchProfile(profileId);
+        } else {
+            this.render();
+        }
+    }
+
+    public openCreateProfileForm(): void {
+        this.isCreatingProfile = true;
+        this.render();
+    }
+
     /**
      * Updates tool, favorites list, and active configuration slice.
      */
-    update(tool: FavoritableTool, favorites: readonly ToolFavoritePreset[], currentSlice?: any): void {
+    update(
+        tool: FavoritableTool,
+        favorites: readonly ToolFavoritePreset[],
+        currentSlice?: any,
+        profiles?: readonly { id: string; name: string }[],
+        activeProfileId?: string,
+        syncFavoriteProfiles?: boolean,
+    ): void {
         this.tool = tool;
         this.favorites = [...favorites];
         this.currentSlice = currentSlice ?? null;
+        if (profiles !== undefined && profiles.length > 0) {
+            this.profiles = profiles.map(p => ({ id: p.id, name: p.name }));
+        }
+        if (activeProfileId !== undefined) {
+            this.activeProfileId = activeProfileId;
+        }
+        if (syncFavoriteProfiles !== undefined) {
+            this.syncFavoriteProfiles = syncFavoriteProfiles;
+        }
         this.render();
     }
 
     /**
      * Partial state update helper.
      */
-    updateState(partial: Partial<{ tool: FavoritableTool; favorites: readonly ToolFavoritePreset[]; currentSlice: any }>): void {
+    updateState(partial: Partial<{
+        tool: FavoritableTool;
+        favorites: readonly ToolFavoritePreset[];
+        currentSlice: any;
+        profiles: readonly { id: string; name: string }[];
+        activeProfileId: string;
+        syncFavoriteProfiles: boolean;
+        isCreatingProfile: boolean;
+    }>): void {
         if (partial.tool !== undefined) this.tool = partial.tool;
         if (partial.favorites !== undefined) this.favorites = [...partial.favorites];
         if (partial.currentSlice !== undefined) this.currentSlice = partial.currentSlice;
+        if (partial.profiles !== undefined && partial.profiles.length > 0) {
+            this.profiles = partial.profiles.map(p => ({ id: p.id, name: p.name }));
+        }
+        if (partial.activeProfileId !== undefined) this.activeProfileId = partial.activeProfileId;
+        if (partial.syncFavoriteProfiles !== undefined) this.syncFavoriteProfiles = partial.syncFavoriteProfiles;
+        if (partial.isCreatingProfile !== undefined) this.isCreatingProfile = partial.isCreatingProfile;
         this.render();
     }
 
@@ -281,12 +416,200 @@ export class FavoritesDrawer {
     private render(): void {
         this.el.replaceChildren();
 
+        // 1. Profile Carousel Header
+        this.renderProfileHeader();
+
+        // 2. Either Create Profile View or Favorites List / Empty State
+        if (this.isCreatingProfile) {
+            this.renderCreateProfileForm();
+            return;
+        }
+
         if (this.favorites.length === 0) {
             this.renderEmptyState();
             return;
         }
 
         this.renderFavoritesList();
+    }
+
+    /**
+     * Renders the compact profile carousel header:
+     * - Active profile name
+     * - Pagination dots + subtle < / > buttons + add dot (+)
+     * - Sync icon toggle button reflecting syncFavoriteProfiles
+     */
+    private renderProfileHeader(): void {
+        const header = document.createElement('div');
+        header.className = 'apolo-profile-header';
+
+        const navGroup = document.createElement('div');
+        navGroup.className = 'apolo-profile-nav';
+
+        const currIdx = this.profiles.findIndex(p => p.id === this.activeProfileId);
+        const currentProfile = currIdx !== -1 ? this.profiles[currIdx] : this.profiles[0];
+
+        const prevBtn = document.createElement('button');
+        prevBtn.type = 'button';
+        prevBtn.className = 'apolo-profile-nav-btn apolo-profile-prev-btn';
+        prevBtn.setAttribute('aria-label', 'Perfil anterior');
+        prevBtn.title = 'Perfil anterior';
+        prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 14, strokeWidth: 2 }));
+        prevBtn.onclick = (e) => {
+            e.stopPropagation();
+            const idx = this.profiles.findIndex(p => p.id === this.activeProfileId);
+            if (idx > 0) {
+                this.switchProfile(this.profiles[idx - 1].id);
+            } else {
+                this.openCreateProfileForm();
+            }
+        };
+
+        const nameEl = document.createElement('span');
+        nameEl.className = 'apolo-profile-name';
+        nameEl.textContent = currentProfile?.name || 'Perfil';
+
+        const nextBtn = document.createElement('button');
+        nextBtn.type = 'button';
+        nextBtn.className = 'apolo-profile-nav-btn apolo-profile-next-btn';
+        nextBtn.setAttribute('aria-label', 'Perfil siguiente');
+        nextBtn.title = 'Perfil siguiente';
+        nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 14, strokeWidth: 2 }));
+        nextBtn.onclick = (e) => {
+            e.stopPropagation();
+            const idx = this.profiles.findIndex(p => p.id === this.activeProfileId);
+            if (idx !== -1 && idx < this.profiles.length - 1) {
+                this.switchProfile(this.profiles[idx + 1].id);
+            } else {
+                this.openCreateProfileForm();
+            }
+        };
+
+        navGroup.append(prevBtn, nameEl, nextBtn);
+
+        // Pagination dots + plus button
+        const dotsContainer = document.createElement('div');
+        dotsContainer.className = 'apolo-profile-dots';
+
+        this.profiles.forEach((p, idx) => {
+            const dot = document.createElement('button');
+            dot.type = 'button';
+            const isActive = p.id === this.activeProfileId || (currIdx === -1 && idx === 0);
+            dot.className = `apolo-profile-dot${isActive ? ' is-active' : ''}`;
+            dot.setAttribute('aria-label', `Perfil ${p.name}`);
+            dot.title = p.name;
+            dot.onclick = (e) => {
+                e.stopPropagation();
+                this.switchProfile(p.id);
+            };
+            dotsContainer.appendChild(dot);
+        });
+
+        // Add dot (+)
+        const addDot = document.createElement('button');
+        addDot.type = 'button';
+        addDot.className = 'apolo-profile-dot is-add apolo-profile-add-btn';
+        addDot.setAttribute('aria-label', 'Crear nuevo perfil');
+        addDot.title = 'Crear nuevo perfil';
+        addDot.textContent = '+';
+        addDot.onclick = (e) => {
+            e.stopPropagation();
+            this.openCreateProfileForm();
+        };
+        dotsContainer.appendChild(addDot);
+
+        // Sync toggle button
+        const syncBtn = document.createElement('button');
+        syncBtn.type = 'button';
+        const isSynced = Boolean(this.syncFavoriteProfiles);
+        syncBtn.className = `apolo-profile-sync-btn${isSynced ? ' is-synced is-active' : ''}`;
+        syncBtn.setAttribute('aria-label', 'Sincronizar cambio de perfil entre Lápices y Formas');
+        syncBtn.title = 'Sincronizar cambio de perfil entre Lápices y Formas';
+        syncBtn.appendChild(createSvg(ICONS.link, { size: 14, strokeWidth: 2 }));
+        syncBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.syncFavoriteProfiles = !this.syncFavoriteProfiles;
+            syncBtn.classList.toggle('is-synced', this.syncFavoriteProfiles);
+            syncBtn.classList.toggle('is-active', this.syncFavoriteProfiles);
+            this.callbacks.onToggleSyncProfiles?.(this.syncFavoriteProfiles);
+        };
+
+        header.append(navGroup, dotsContainer, syncBtn);
+        this.el.appendChild(header);
+    }
+
+    /**
+     * Renders the inline "Nuevo perfil" creation form.
+     */
+    private renderCreateProfileForm(): void {
+        const form = document.createElement('div');
+        form.className = 'apolo-profile-create-form';
+
+        const title = document.createElement('span');
+        title.className = 'apolo-profile-create-title';
+        title.textContent = 'Nuevo perfil';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'apolo-profile-name-input';
+        input.placeholder = 'Nombre del nuevo perfil...';
+        input.maxLength = 24;
+
+        const actions = document.createElement('div');
+        actions.className = 'apolo-profile-create-actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'apolo-profile-cancel-btn';
+        cancelBtn.textContent = 'Cancelar';
+        cancelBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.isCreatingProfile = false;
+            this.render();
+        };
+
+        const createBtn = document.createElement('button');
+        createBtn.type = 'button';
+        createBtn.className = 'apolo-profile-create-btn';
+        createBtn.textContent = 'Crear';
+
+        const submit = () => {
+            const rawName = input.value.trim();
+            const name = rawName || 'Nuevo perfil';
+            this.isCreatingProfile = false;
+            if (this.callbacks.onCreateProfile) {
+                this.callbacks.onCreateProfile(name);
+                this.render();
+            } else {
+                const id = `profile-${Date.now().toString(36)}`;
+                this.profiles.push({ id, name });
+                this.activeProfileId = id;
+                this.favorites = [];
+                this.render();
+            }
+        };
+
+        createBtn.onclick = (e) => {
+            e.stopPropagation();
+            submit();
+        };
+
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                this.isCreatingProfile = false;
+                this.render();
+            }
+        };
+
+        actions.append(cancelBtn, createBtn);
+        form.append(title, input, actions);
+        this.el.appendChild(form);
+
+        setTimeout(() => input.focus?.(), 0);
     }
 
     /**

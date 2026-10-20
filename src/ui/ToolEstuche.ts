@@ -1,4 +1,21 @@
-import type { EraserMode, FavoritableTool, LassoMode, PenFavorite, PenProfileId, ShapeType, StrokePattern, ToolbarSlot, ToolFavoritePreset, ToolType } from '../core/types.ts';
+import type {
+    EraserMode,
+    FavoritableTool,
+    LassoMode,
+    PenFavorite,
+    PenProfileId,
+    ShapeType,
+    StrokePattern,
+    ToolbarSlot,
+    ToolFavoritePreset,
+    ToolType,
+    StrokeFavoriteProfile,
+    ShapeFavoriteProfile,
+} from '../core/types.ts';
+import {
+    DEFAULT_STROKE_FAVORITE_PROFILES,
+    DEFAULT_SHAPE_FAVORITE_PROFILES,
+} from '../core/types.ts';
 import { ICONS, createSvg } from './theme.ts';
 import type { PopoverController, PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
@@ -27,6 +44,11 @@ export interface ToolEstucheState {
     snapGrid: boolean;
     isCurrentFavorite?: boolean;
     showingFavorites?: boolean;
+    strokeFavoriteProfiles?: StrokeFavoriteProfile[];
+    activeStrokeProfileId?: string;
+    shapeFavoriteProfiles?: ShapeFavoriteProfile[];
+    activeShapeProfileId?: string;
+    syncFavoriteProfiles?: boolean;
 }
 
 export interface ToolEstucheCallbacks {
@@ -45,6 +67,9 @@ export interface ToolEstucheCallbacks {
     onApplyFavorite?: (preset: ToolFavoritePreset) => void;
     onDeleteFavorite?: (presetId: string) => void;
     onReorderFavorites?: (fromIndex: number, toIndex: number) => void;
+    onSwitchProfile?: (profileId: string) => void;
+    onCreateProfile?: (name: string) => void;
+    onToggleSyncProfiles?: (sync: boolean) => void;
     onSelectEraserMode: (mode: EraserMode) => void;
     onChangeEraserRadius: (radius: number) => void;
     onToggleScribble: (enabled: boolean) => void;
@@ -272,11 +297,34 @@ export class ToolEstuche implements PopoverInstance {
             this.updateStarButtonVisual();
         }
 
-        if (partial.favorites !== undefined) {
+        if (
+            partial.favorites !== undefined ||
+            partial.strokeFavoriteProfiles !== undefined ||
+            partial.shapeFavoriteProfiles !== undefined ||
+            partial.activeStrokeProfileId !== undefined ||
+            partial.activeShapeProfileId !== undefined ||
+            partial.syncFavoriteProfiles !== undefined
+        ) {
             this.updateFavsButtonVisual();
             if (this.state.showingFavorites && this.favoritesDrawer) {
                 const tool = this.state.tool as FavoritableTool;
-                this.favoritesDrawer.update(tool, this.getToolFavorites(), this.getCurrentToolSlice());
+                const isShape = tool === 'shape';
+                const profiles = isShape
+                    ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
+                    : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
+                const activeProfileId = isShape
+                    ? (this.state.activeShapeProfileId ?? 'general')
+                    : (this.state.activeStrokeProfileId ?? 'notes');
+                const syncFavoriteProfiles = Boolean(this.state.syncFavoriteProfiles);
+
+                this.favoritesDrawer.update(
+                    tool,
+                    this.getToolFavorites(),
+                    this.getCurrentToolSlice(),
+                    profiles,
+                    activeProfileId,
+                    syncFavoriteProfiles,
+                );
             }
         }
 
@@ -520,6 +568,14 @@ export class ToolEstuche implements PopoverInstance {
         const tool = this.state.tool as FavoritableTool;
         const favorites = this.getToolFavorites();
         const currentSlice = this.getCurrentToolSlice();
+        const isShape = tool === 'shape';
+        const profiles = isShape
+            ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
+            : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
+        const activeProfileId = isShape
+            ? (this.state.activeShapeProfileId ?? 'general')
+            : (this.state.activeStrokeProfileId ?? 'notes');
+        const syncFavoriteProfiles = Boolean(this.state.syncFavoriteProfiles);
 
         this.favoritesDrawer = new FavoritesDrawer(
             {
@@ -532,11 +588,23 @@ export class ToolEstuche implements PopoverInstance {
                 onReorderFavorite: (fromIndex, toIndex) => {
                     this.callbacks.onReorderFavorites?.(fromIndex, toIndex);
                 },
+                onSwitchProfile: (profileId) => {
+                    this.callbacks.onSwitchProfile?.(profileId);
+                },
+                onCreateProfile: (name) => {
+                    this.callbacks.onCreateProfile?.(name);
+                },
+                onToggleSyncProfiles: (sync) => {
+                    this.callbacks.onToggleSyncProfiles?.(sync);
+                },
             },
             tool,
             favorites,
             currentSlice,
             this.bodyEl,
+            profiles,
+            activeProfileId,
+            syncFavoriteProfiles,
         );
     }
 
