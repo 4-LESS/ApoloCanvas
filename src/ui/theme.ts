@@ -154,6 +154,8 @@ export const ICONS = {
     sendToBack: 'M12 3v14m5-5l-5 5-5-5 M4 21h16',
     sliders: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6',
     trash: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
+    chevronUp: 'M6 15l6-6 6 6',
+    chevronDown: 'M6 9l6 6 6-6',
 };
 
 export interface SvgOptions {
@@ -316,7 +318,16 @@ export function createStrokeWavePreview(
         }
     }
 
-    const waveD = 'M4 28 C30 6 50 38 76 20 S120 8 146 24';
+    // La onda se define sobre una base de 150x40 y se escala al tamaño pedido,
+    // así puede ocupar todo el ancho de la tarjeta sin deformar el trazo.
+    const sx = svgW / 150;
+    const sy = svgH / 40;
+    const pt = (x: number, y: number) => `${+(x * sx).toFixed(1)} ${+(y * sy).toFixed(1)}`;
+    const waveD = `M${pt(4, 28)} C${pt(30, 6)} ${pt(50, 38)} ${pt(76, 20)} S${pt(120, 8)} ${pt(146, 24)}`;
+
+    // Grosor efectivo: nunca más del 60% del alto, para que no se recorte.
+    const effWidth = Math.min(svgH * 0.6, Math.max(1.5, baseWidth * profile.wm));
+
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', String(svgW));
     svg.setAttribute('height', String(svgH));
@@ -327,18 +338,16 @@ export function createStrokeWavePreview(
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', waveD);
     path.setAttribute('stroke', mapInkColorForDark(color));
-    path.setAttribute('stroke-width', String(Math.max(1.5, baseWidth * profile.wm)));
+    path.setAttribute('stroke-width', String(effWidth));
     path.setAttribute('stroke-linecap', pattern === 'dashed' ? 'butt' : profile.cap);
     path.setAttribute('stroke-linejoin', 'round');
     path.setAttribute('stroke-opacity', String(opacity));
 
     if (pattern === 'dashed') {
-        const effWidth = Math.max(1.5, baseWidth * profile.wm);
         const dashLen = Math.max(6, Math.round(effWidth * 2.5));
         const gapLen = Math.max(4, Math.round(effWidth * 1.8));
         path.setAttribute('stroke-dasharray', `${dashLen} ${gapLen}`);
     } else if (pattern === 'dotted') {
-        const effWidth = Math.max(1.5, baseWidth * profile.wm);
         const gapLen = Math.max(4, Math.round(effWidth * 2));
         path.setAttribute('stroke-dasharray', `0.1 ${gapLen}`);
         path.setAttribute('stroke-linecap', 'round');

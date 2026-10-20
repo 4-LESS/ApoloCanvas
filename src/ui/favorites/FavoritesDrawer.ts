@@ -50,6 +50,39 @@ export function getPresetLabel(preset: ToolFavoritePreset): string {
 }
 
 /**
+ * Returns the SVG path (from ICONS) that represents the tool/profile/shape of a preset.
+ */
+export function getPresetIcon(preset: ToolFavoritePreset): string {
+    if (preset.tool === 'shape') {
+        const shapes = ICONS.shapes as Record<string, string>;
+        const type = (preset as ShapeFavoritePreset).shapeType;
+        const key = type === 'ellipse' ? 'circle' : type === 'rounded-rect' ? 'rect' : type;
+        return shapes[key] ?? shapes.rect;
+    }
+    const profileId = (preset as PenFavoritePreset | HighlighterFavoritePreset).profileId;
+    switch (profileId) {
+        case 'fountain': return ICONS.feather;
+        case 'calli': return ICONS.pen;
+        case 'ball': return ICONS.ballpoint;
+        case 'pencil': return ICONS.pencil;
+        case 'hlf': return ICONS.highlighterChisel;
+        case 'hlr': return ICONS.highlighterRound;
+        default: return preset.tool === 'highlighter' ? ICONS.highlighter : ICONS.pen;
+    }
+}
+
+/**
+ * Tooltip / aria text: the info that no longer takes space on the card.
+ */
+export function getPresetTooltip(preset: ToolFavoritePreset): string {
+    const parts = [getPresetLabel(preset), `${preset.width}px`];
+    if (preset.pattern === 'dashed') parts.push('rayas');
+    else if (preset.pattern === 'dotted') parts.push('puntos');
+    if (preset.tool === 'shape' && (preset as ShapeFavoritePreset).fillEnabled) parts.push('relleno');
+    return parts.join(' · ');
+}
+
+/**
  * Creates a pure DOM inline SVG preview for a shape favorite preset.
  */
 export function createShapePreview(
@@ -263,12 +296,12 @@ export class FavoritesDrawer {
         const emptyContainer = document.createElement('div');
         emptyContainer.className = 'apolo-favorites-empty';
 
-        const starIcon = createSvg(ICONS.star, { size: 24 });
+        const bookmarkIcon = createSvg(ICONS.bookmark, { size: 24 });
         const text = document.createElement('p');
         text.className = 'apolo-favorites-empty-text';
-        text.textContent = 'No hay favoritos guardados. Toca ☆ arriba para guardar la configuración actual.';
+        text.append('Toca ', createSvg(ICONS.star, { size: 13 }), ' para guardar el trazo actual');
 
-        emptyContainer.append(starIcon, text);
+        emptyContainer.append(bookmarkIcon, text);
         this.el.appendChild(emptyContainer);
     }
 
@@ -283,148 +316,110 @@ export class FavoritesDrawer {
             ? computeFavoriteFingerprint({ ...this.currentSlice, tool: inferTool(this.currentSlice, this.tool) })
             : '';
 
-        for (let i = 0; i < this.favorites.length; i++) {
-            const preset = this.favorites[i];
-            const presetFp = computeFavoriteFingerprint(preset);
-            const isActive = Boolean(activeFp && presetFp === activeFp);
-
-            const card = document.createElement('div');
-            card.className = `apolo-favorite-card ${isActive ? 'is-active' : ''}`;
-            card.dataset.presetId = preset.id;
-            card.setAttribute('role', 'button');
-            card.setAttribute('tabindex', '0');
-            card.setAttribute('aria-label', `Favorito ${getPresetLabel(preset)} ${preset.width}px`);
-
-            // Apply preset on click / Enter
-            card.onclick = () => {
-                this.callbacks.onSelectFavorite(preset);
-            };
-            card.onkeydown = (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    this.callbacks.onSelectFavorite(preset);
-                }
-            };
-
-            // Main content column (preview + metadata)
-            const content = document.createElement('div');
-            content.className = 'apolo-favorite-content';
-
-            // Preview Area
-            const previewEl = document.createElement('div');
-            previewEl.className = 'apolo-favorite-preview';
-
-            if (preset.tool === 'pen') {
-                const pen = preset as PenFavoritePreset;
-                const wave = createStrokeWavePreview(
-                    pen.color,
-                    pen.width,
-                    pen.profileId,
-                    pen.opacity,
-                    pen.pattern,
-                );
-                previewEl.appendChild(wave);
-            } else if (preset.tool === 'highlighter') {
-                const hl = preset as HighlighterFavoritePreset;
-                const wave = createStrokeWavePreview(
-                    hl.color,
-                    hl.width,
-                    hl.profileId,
-                    hl.opacity,
-                    hl.pattern,
-                );
-                previewEl.appendChild(wave);
-            } else if (preset.tool === 'shape') {
-                const shape = preset as ShapeFavoritePreset;
-                const shapeSvg = createShapePreview(shape);
-                previewEl.appendChild(shapeSvg);
-            }
-            content.appendChild(previewEl);
-
-            // Metadata row
-            const metaEl = document.createElement('div');
-            metaEl.className = 'apolo-favorite-meta';
-
-            const labelSpan = document.createElement('span');
-            labelSpan.className = 'apolo-favorite-label';
-            labelSpan.textContent = getPresetLabel(preset);
-
-            const thicknessSpan = document.createElement('span');
-            thicknessSpan.className = 'apolo-favorite-thickness';
-            thicknessSpan.textContent = `${preset.width}px`;
-
-            metaEl.append(labelSpan, thicknessSpan);
-
-            if (preset.pattern && preset.pattern !== 'solid') {
-                const patternBadge = document.createElement('span');
-                patternBadge.className = 'apolo-favorite-pattern-badge';
-                patternBadge.textContent = preset.pattern === 'dashed' ? 'Rayas' : 'Puntos';
-                metaEl.appendChild(patternBadge);
-            }
-
-            if (preset.tool === 'shape' && (preset as ShapeFavoritePreset).fillEnabled) {
-                const fillBadge = document.createElement('span');
-                fillBadge.className = 'apolo-favorite-fill-badge';
-                fillBadge.textContent = 'Relleno';
-                metaEl.appendChild(fillBadge);
-            }
-
-            content.appendChild(metaEl);
-            card.appendChild(content);
-
-            // Actions (Reorder + Delete)
-            const actions = document.createElement('div');
-            actions.className = 'apolo-favorite-actions';
-
-            if (this.favorites.length > 1) {
-                if (i > 0) {
-                    const upBtn = document.createElement('button');
-                    upBtn.type = 'button';
-                    upBtn.className = 'apolo-favorite-reorder-btn apolo-favorite-reorder-up';
-                    upBtn.setAttribute('aria-label', 'Mover arriba');
-                    upBtn.title = 'Mover arriba';
-                    const upSvg = createSvg('M12 5l-7 7h14z', { size: 12 });
-                    upBtn.appendChild(upSvg);
-                    upBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        this.callbacks.onReorderFavorite(i, i - 1);
-                    };
-                    actions.appendChild(upBtn);
-                }
-
-                if (i < this.favorites.length - 1) {
-                    const downBtn = document.createElement('button');
-                    downBtn.type = 'button';
-                    downBtn.className = 'apolo-favorite-reorder-btn apolo-favorite-reorder-down';
-                    downBtn.setAttribute('aria-label', 'Mover abajo');
-                    downBtn.title = 'Mover abajo';
-                    const downSvg = createSvg('M12 19l7-7H5z', { size: 12 });
-                    downBtn.appendChild(downSvg);
-                    downBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        this.callbacks.onReorderFavorite(i, i + 1);
-                    };
-                    actions.appendChild(downBtn);
-                }
-            }
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.type = 'button';
-            deleteBtn.className = 'apolo-favorite-delete-btn';
-            deleteBtn.setAttribute('aria-label', 'Eliminar favorito');
-            deleteBtn.title = 'Eliminar favorito';
-            deleteBtn.appendChild(createSvg(ICONS.close, { size: 14 }));
-            deleteBtn.onclick = (e) => {
-                e.stopPropagation();
-                this.callbacks.onDeleteFavorite(preset.id);
-            };
-            actions.appendChild(deleteBtn);
-
-            card.appendChild(actions);
-            listContainer.appendChild(card);
-        }
+        this.favorites.forEach((preset, index) => {
+            const isActive = Boolean(activeFp && computeFavoriteFingerprint(preset) === activeFp);
+            listContainer.appendChild(this.buildCard(preset, index, isActive));
+        });
 
         this.el.appendChild(listContainer);
+    }
+
+    /**
+     * Card = [tool glyph] [stroke/shape preview] [thickness dot] + floating actions.
+     * Label, thickness number, pattern and fill live in the tooltip / aria-label.
+     */
+    private buildCard(preset: ToolFavoritePreset, index: number, isActive: boolean): HTMLElement {
+        const tooltip = getPresetTooltip(preset);
+
+        const card = document.createElement('div');
+        card.className = `apolo-favorite-card${isActive ? ' is-active' : ''}`;
+        card.dataset.presetId = preset.id;
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('aria-pressed', String(isActive));
+        card.setAttribute('aria-label', tooltip);
+        card.title = tooltip;
+
+        card.onclick = () => this.callbacks.onSelectFavorite(preset);
+        card.onkeydown = (e) => {
+            // Ignore keys coming from the inner buttons (reorder / delete).
+            if (e.target !== card) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                this.callbacks.onSelectFavorite(preset);
+            }
+        };
+
+        // 1) Tool glyph
+        const glyph = document.createElement('span');
+        glyph.className = 'apolo-favorite-glyph';
+        glyph.appendChild(createSvg(getPresetIcon(preset), { size: 18 }));
+
+        // 2) Preview (wave is drawn wide; shapes keep their compact box)
+        const previewEl = document.createElement('div');
+        previewEl.className = 'apolo-favorite-preview';
+        if (preset.tool === 'pen' || preset.tool === 'highlighter') {
+            const stroke = preset as PenFavoritePreset | HighlighterFavoritePreset;
+            previewEl.appendChild(
+                createStrokeWavePreview(stroke.color, stroke.width, stroke.profileId, stroke.opacity, stroke.pattern, 220, 32),
+            );
+        } else if (preset.tool === 'shape') {
+            previewEl.appendChild(createShapePreview(preset as ShapeFavoritePreset));
+        }
+
+        // 3) Thickness as a dot instead of "7px"
+        const size = document.createElement('span');
+        size.className = 'apolo-favorite-size';
+        size.setAttribute('aria-hidden', 'true');
+        const dot = document.createElement('span');
+        dot.className = 'apolo-favorite-size-dot';
+        dot.style.setProperty('--dot', `${Math.max(3, Math.min(14, 2 + preset.width * 0.8))}px`);
+        size.appendChild(dot);
+
+        // 4) Floating actions (visible on hover / focus; always visible on touch)
+        const actions = document.createElement('div');
+        actions.className = 'apolo-favorite-actions';
+
+        if (this.favorites.length > 1) {
+            const reorder = document.createElement('div');
+            reorder.className = 'apolo-favorite-reorder';
+            reorder.append(
+                this.createActionButton('apolo-favorite-reorder-btn apolo-favorite-reorder-up', 'Mover arriba', ICONS.chevronUp, 12, index === 0,
+                    () => this.callbacks.onReorderFavorite(index, index - 1)),
+                this.createActionButton('apolo-favorite-reorder-btn apolo-favorite-reorder-down', 'Mover abajo', ICONS.chevronDown, 12, index === this.favorites.length - 1,
+                    () => this.callbacks.onReorderFavorite(index, index + 1)),
+            );
+            actions.appendChild(reorder);
+        }
+        actions.appendChild(
+            this.createActionButton('apolo-favorite-delete-btn', 'Eliminar favorito', ICONS.trash, 15, false,
+                () => this.callbacks.onDeleteFavorite(preset.id)),
+        );
+
+        card.append(glyph, previewEl, size, actions);
+        return card;
+    }
+
+    private createActionButton(
+        className: string,
+        label: string,
+        icon: string,
+        iconSize: number,
+        disabled: boolean,
+        onClick: () => void,
+    ): HTMLButtonElement {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = className;
+        btn.setAttribute('aria-label', label);
+        btn.title = label;
+        btn.disabled = disabled;
+        btn.appendChild(createSvg(icon, { size: iconSize, strokeWidth: 2 }));
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            onClick();
+        };
+        return btn;
     }
 
     /**

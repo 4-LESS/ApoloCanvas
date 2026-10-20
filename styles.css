@@ -411,7 +411,7 @@
 /* Tool icon wrapper */
 .apolo-tool-icon-wrap {
   position: relative;
-  z-index: 1;
+  z-1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2187,7 +2187,7 @@
 .apolo-space-widget[data-apolo-grid-style="none"],
 .apolo-space-block[data-apolo-grid-style="none"],
 .apolo-space[data-apolo-grid="false"],
-.apolo-space-widget[data-apolo-grid="false"],
+.apolo-space-widget[data-apolo-grid-style="none"],
 .apolo-space-block[data-apolo-grid="false"],
 [data-apolo-space][data-apolo-grid="false"],
 [data-apolo-space-id][data-apolo-grid="false"],
@@ -3645,110 +3645,127 @@ button.apolo-box-menu-swatch,
 
 /* =========================================================================
    6. Cajón de Favoritos (.apolo-favorites-drawer)
+   Tarjeta = [glifo de herramienta] [vista previa] [punto de grosor]
+   Acciones flotantes al pasar el cursor / enfocar; siempre visibles en táctil.
    ========================================================================= */
 
 .apolo-favorites-drawer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   width: 100%;
   box-sizing: border-box;
 }
 
+/* ---- Estado vacío ---- */
 .apolo-favorites-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 24px 16px;
-  gap: 10px;
-  border-radius: 12px;
-  background: var(--apolo-bg-alt, rgba(128, 128, 128, 0.06));
-  border: 1px dashed var(--apolo-border-subtle, rgba(128, 128, 128, 0.2));
-  color: var(--apolo-text-muted, #888);
-}
-
-.apolo-favorites-empty svg {
-  color: var(--apolo-accent, #3b82f6);
-  opacity: 0.65;
+  padding: 20px 16px;
+  gap: 8px;
+  color: var(--apolo-text-faint, #9ca3af);
 }
 
 .apolo-favorites-empty-text {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
   color: var(--apolo-text-muted, #888);
-  max-width: 260px;
 }
 
+.apolo-favorites-empty-text svg {
+  vertical-align: -2px;
+  margin: 0 1px;
+}
+
+/* ---- Lista ---- */
 .apolo-favorites-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 280px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.apolo-favorites-list::-webkit-scrollbar {
-  width: 4px;
-}
-.apolo-favorites-list::-webkit-scrollbar-thumb {
-  background: var(--apolo-border-subtle, rgba(128, 128, 128, 0.2));
-  border-radius: 4px;
-}
-
-.apolo-favorite-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--apolo-bg, #ffffff);
-  border: 1px solid var(--apolo-border-subtle, rgba(128, 128, 128, 0.18));
-  cursor: pointer;
-  transition: all 0.15s ease;
-  user-select: none;
-  box-sizing: border-box;
-}
-
-.theme-dark .apolo-favorite-card {
-  background: var(--apolo-bg, #202022);
-}
-
-.apolo-favorite-card:hover {
-  background: var(--apolo-bg-alt, rgba(128, 128, 128, 0.08));
-  border-color: var(--apolo-accent, #3b82f6);
-  transform: translateY(-1px);
-  box-shadow: var(--apolo-shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.08));
-}
-
-.apolo-favorite-card.is-active {
-  border-color: var(--apolo-accent, #3b82f6);
-  background: var(--apolo-accent-light, rgba(59, 130, 246, 0.12));
-  box-shadow: inset 0 0 0 1px var(--apolo-accent, #3b82f6), 0 0 0 2px rgba(59, 130, 246, 0.15);
-}
-
-.apolo-favorite-content {
+  margin-top: 0; /* anula el margen de la lista antigua del estuche */
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex: 1;
-  min-width: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--apolo-border-subtle, rgba(128, 128, 128, 0.25)) transparent;
 }
 
-.apolo-favorite-preview {
+.apolo-favorites-list::-webkit-scrollbar { width: 4px; }
+.apolo-favorites-list::-webkit-scrollbar-thumb {
+  background: var(--apolo-border-subtle, rgba(128, 128, 128, 0.25));
+  border-radius: 4px;
+}
+
+/* ---- Tarjeta ---- */
+.apolo-favorite-card {
+  position: relative;
   display: flex;
   align-items: center;
-  height: 32px;
-  width: 100%;
-  overflow: hidden;
-  border-radius: 6px;
-  background: var(--apolo-bg-alt, rgba(128, 128, 128, 0.04));
-  padding: 0 4px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px 6px 12px;
+  border-radius: 10px;
+  background: rgba(128, 128, 128, 0.06);
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
   box-sizing: border-box;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.apolo-favorite-card:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.apolo-favorite-card:focus-visible {
+  outline: 2px solid var(--apolo-accent, #3b82f6);
+  outline-offset: -2px;
+}
+
+/* Activo: barra de acento a la izquierda + tinte suave (sin sombras) */
+.apolo-favorite-card.is-active {
+  background: var(--apolo-accent-subtle, rgba(59, 130, 246, 0.08));
+  border-color: var(--apolo-accent-light, rgba(59, 130, 246, 0.2));
+}
+
+.apolo-favorite-card.is-active::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--apolo-accent, #3b82f6);
+}
+
+/* Glifo de la herramienta */
+.apolo-favorite-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--apolo-text-muted, #888);
+}
+
+.apolo-favorite-card.is-active .apolo-favorite-glyph {
+  color: var(--apolo-accent, #3b82f6);
+}
+
+/* Vista previa (sin caja de fondo) */
+.apolo-favorite-preview {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 .apolo-favorite-preview svg {
@@ -3757,41 +3774,52 @@ button.apolo-box-menu-swatch,
   display: block;
 }
 
-.apolo-favorite-meta {
+/* Grosor como punto proporcional (el número queda en el tooltip) */
+.apolo-favorite-size {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--apolo-text-muted, #888);
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
-.apolo-favorite-label {
-  font-weight: 600;
-  color: var(--apolo-text, #222);
-}
-.theme-dark .apolo-favorite-label {
-  color: var(--apolo-text, #ddd);
-}
-
-.apolo-favorite-thickness {
-  color: var(--apolo-text-muted, #888);
+.apolo-favorite-size-dot {
+  display: block;
+  width: var(--dot, 6px);
+  height: var(--dot, 6px);
+  border-radius: 50%;
+  background: var(--apolo-text-faint, #9ca3af);
 }
 
-.apolo-favorite-pattern-badge,
-.apolo-favorite-fill-badge {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--apolo-bg-alt, rgba(128, 128, 128, 0.12));
-  color: var(--apolo-text-muted, #777);
-  font-weight: 500;
-}
-
+/* ---- Acciones flotantes ---- */
 .apolo-favorite-actions {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   gap: 2px;
-  flex-shrink: 0;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--apolo-bg-elevated, var(--apolo-bg, #fff));
+  border: 1px solid var(--apolo-border-subtle, rgba(128, 128, 128, 0.18));
+  box-shadow: var(--apolo-shadow-sm, 0 2px 6px rgba(0, 0, 0, 0.18));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.apolo-favorite-card:hover .apolo-favorite-actions,
+.apolo-favorite-card:focus-within .apolo-favorite-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.apolo-favorite-reorder {
+  display: flex;
+  flex-direction: column;
 }
 
 .apolo-ui .apolo-favorite-reorder-btn,
@@ -3802,17 +3830,23 @@ button.apolo-box-menu-swatch,
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
   border-radius: 6px;
   color: var(--apolo-text-muted, #888);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: color 0.12s ease, background 0.12s ease;
 }
+
+.apolo-favorite-reorder-btn { width: 24px; height: 14px; }
+.apolo-favorite-delete-btn  { width: 26px; height: 26px; }
 
 .apolo-favorite-reorder-btn:hover {
   color: var(--apolo-text, #111);
-  background: var(--apolo-bg-alt, rgba(128, 128, 128, 0.15));
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.apolo-favorite-reorder-btn:disabled {
+  opacity: 0.25;
+  pointer-events: none;
 }
 
 .apolo-favorite-delete-btn:hover {
@@ -3820,6 +3854,23 @@ button.apolo-box-menu-swatch,
   background: rgba(239, 68, 68, 0.12);
 }
 
+/* ---- Táctil (S-Pen / dedos): acciones siempre visibles, en línea y más grandes ---- */
+@media (hover: none) {
+  .apolo-favorite-card { min-height: 48px; }
 
+  .apolo-favorite-actions {
+    position: static;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    flex-shrink: 0;
+  }
 
-
+  .apolo-favorite-reorder-btn { width: 30px; height: 20px; }
+  .apolo-favorite-delete-btn  { width: 32px; height: 32px; }
+  .apolo-favorite-size { display: none; } /* el grosor ya se ve en la onda */
+}
