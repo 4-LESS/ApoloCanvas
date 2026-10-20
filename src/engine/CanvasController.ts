@@ -52,6 +52,7 @@ import { ToolEstuche } from '../ui/ToolEstuche.ts';
 import {
     computeFavoriteFingerprint,
     findMatchingFavorite,
+    getNextFavoritePreset,
     toggleFavoritePreset,
     removeFavoriteById,
     reorderFavorites,
@@ -440,6 +441,8 @@ export class CanvasController {
             this.scroller.addEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true, passive: false });
             this.canvas.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
             this.canvas.addEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true, passive: false });
+            this.scroller.addEventListener('contextmenu', this.onCanvasContextMenu);
+            this.canvas.addEventListener('contextmenu', this.onCanvasContextMenu);
 
             this.input = new InputManager(this.canvas, {
                 palmRejectionCooldownMs: options.palmRejectionCooldownMs,
@@ -591,6 +594,9 @@ export class CanvasController {
             canRedo: this.future.length > 0,
             eraserRadius: this.eraserRadius,
             eraserMode: this.eraserMode,
+            onCycleFavorite: (_tool) => {
+                this.cycleActiveToolFavorite();
+            },
             onSlotChange: (slot) => {
                 this.toolbarSlot = slot;
                 this.estuche?.updateState({ slot });
@@ -1179,8 +1185,31 @@ export class CanvasController {
         }
     }
 
+    private readonly onCanvasContextMenu = (event: MouseEvent): void => {
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
         if (this.handledBoxEvents.has(event)) return;
+
+        // S-Pen barrel button: single-action cycle favorites when not mid-stroke
+        const isBarrel = event.pointerType === 'pen' && (
+            event.button === 2 ||
+            event.buttons === 32 ||
+            (event.buttons & 32) !== 0 ||
+            (event.buttons & 2) !== 0
+        );
+        if (isBarrel && !this.activeStart) {
+            this.handledBoxEvents.add(event);
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            this.cycleActiveToolFavorite();
+            this.options.eventBus?.emit('favorites:cycle');
+            return;
+        }
+
         const elements = (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function')
             ? document.elementsFromPoint(event.clientX, event.clientY)
             : [];
@@ -2012,6 +2041,62 @@ export class CanvasController {
         this.toast?.show(sync ? 'Perfiles sincronizados' : 'Perfiles independientes');
     }
 
+    public cycleActiveToolFavorite(): boolean {
+        const tool = this.tool;
+        if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return false;
+
+        let list: ToolFavoritePreset[] = [];
+        let profileName = '';
+
+        if (tool === 'pen') {
+            const profile = getActiveStrokeProfile(this.toolState);
+            list = profile.pen;
+            profileName = profile.name;
+        } else if (tool === 'highlighter') {
+            const profile = getActiveStrokeProfile(this.toolState);
+            list = profile.highlighter;
+            profileName = profile.name;
+        } else if (tool === 'shape') {
+            const profile = getActiveShapeProfile(this.toolState);
+            list = profile.shape;
+            profileName = profile.name;
+        }
+
+        if (!list || list.length === 0) return false;
+
+        const currentSlice = this.getCurrentToolSlice();
+        const next = getNextFavoritePreset(list, currentSlice);
+        if (!next) return false;
+
+        this.applyToolFavoritePreset(next.preset);
+        this.toast?.show(`${profileName} · Favorito ${next.index + 1}/${list.length}`);
+        return true;
+    }
+
+    public cycleActiveToolProfile(): boolean {
+        const tool = this.tool;
+        const isShape = tool === 'shape';
+        if (isShape) {
+            const profiles = this.toolState.shapeFavoriteProfiles;
+            if (!profiles || profiles.length === 0) return false;
+            const currIdx = profiles.findIndex(p => p.id === this.toolState.activeShapeProfileId);
+            const nextIdx = currIdx !== -1 ? (currIdx + 1) % profiles.length : 0;
+            const nextProfile = profiles[nextIdx];
+            this.switchFavoriteProfile(nextProfile.id);
+            this.toast?.show(`Perfil: ${nextProfile.name}`);
+            return true;
+        } else {
+            const profiles = this.toolState.strokeFavoriteProfiles;
+            if (!profiles || profiles.length === 0) return false;
+            const currIdx = profiles.findIndex(p => p.id === this.toolState.activeStrokeProfileId);
+            const nextIdx = currIdx !== -1 ? (currIdx + 1) % profiles.length : 0;
+            const nextProfile = profiles[nextIdx];
+            this.switchFavoriteProfile(nextProfile.id);
+            this.toast?.show(`Perfil: ${nextProfile.name}`);
+            return true;
+        }
+    }
+
     public getEstuche(): ToolEstuche | null {
         return this.estuche;
     }
@@ -2487,6 +2572,8 @@ export class CanvasController {
         this.scroller.removeEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true });
         this.canvas.removeEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true });
         this.canvas.removeEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true });
+        this.scroller.removeEventListener('contextmenu', this.onCanvasContextMenu);
+        this.canvas.removeEventListener('contextmenu', this.onCanvasContextMenu);
         window.removeEventListener('pointermove', this.onWindowPointerMoveHandleDrag);
         window.removeEventListener('pointerup', this.onWindowPointerUpHandleDrag);
         window.removeEventListener('pointercancel', this.onWindowPointerUpHandleDrag);

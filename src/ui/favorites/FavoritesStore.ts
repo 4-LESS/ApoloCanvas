@@ -198,6 +198,28 @@ export function findMatchingFavorite<T extends ToolFavoritePreset = ToolFavorite
 }
 
 /**
+ * Finds the next favorite preset to cycle to from the given current configuration slice.
+ * If current slice matches a preset at index i, returns preset at (i + 1) % len.
+ * If current slice does not match any preset, returns preset at index 0.
+ * Returns null if the list is empty.
+ */
+export function getNextFavoritePreset<T extends ToolFavoritePreset = ToolFavoritePreset>(
+    list: readonly T[],
+    currentSlice: any,
+): { preset: T; index: number } | null {
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const tool = inferTool(currentSlice, list[0]?.tool);
+    const targetFp = computeFavoriteFingerprint({ ...currentSlice, tool });
+    const currIdx = list.findIndex(preset => computeFavoriteFingerprint(preset) === targetFp);
+
+    const nextIdx = currIdx !== -1 ? (currIdx + 1) % list.length : 0;
+    return {
+        preset: list[nextIdx],
+        index: nextIdx,
+    };
+}
+
+/**
  * Toggles a favorite preset:
  * - If a preset with the same fingerprint exists, removes it and returns `{ updatedList, added: false, removedId }`.
  * - Otherwise appends a new preset (max 24 presets per tool) and returns `{ updatedList, added: true, preset }`.

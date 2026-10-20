@@ -76,7 +76,7 @@ export interface ToolEstucheCallbacks {
     onSelectLassoMode: (mode: LassoMode) => void;
     onSelectShapeType: (shapeType: ShapeType) => void;
     onToggleSnapGrid: (enabled: boolean) => void;
-    onClose: () => void;
+    onClose?: () => void;
 }
 
 export class ToolEstuche implements PopoverInstance {
@@ -243,7 +243,7 @@ export class ToolEstuche implements PopoverInstance {
         if (this.popoverController) {
             this.popoverController.close(this);
         }
-        this.callbacks.onClose();
+        this.callbacks.onClose?.();
     }
 
     hide(): void {
@@ -581,6 +581,7 @@ export class ToolEstuche implements PopoverInstance {
             {
                 onSelectFavorite: (preset) => {
                     this.callbacks.onApplyFavorite?.(preset);
+                    this.close();
                 },
                 onDeleteFavorite: (presetId) => {
                     this.callbacks.onDeleteFavorite?.(presetId);

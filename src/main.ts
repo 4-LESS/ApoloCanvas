@@ -5,6 +5,7 @@ import { DEFAULT_WORKSPACE_TOOL_STATE, cloneWorkspaceToolState, mergeWorkspaceTo
 import {
     computeFavoriteFingerprint,
     findMatchingFavorite,
+    getNextFavoritePreset,
     toggleFavoritePreset,
     removeFavoriteById,
     reorderFavorites,
@@ -692,6 +693,72 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.debouncedSaveSettings();
     }
 
+    cycleActiveToolFavorite(): boolean {
+        if (this.controller) {
+            return this.controller.cycleActiveToolFavorite();
+        }
+        const tool = this.settings.toolState.activeTool;
+        if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return false;
+
+        let list: ToolFavoritePreset[] = [];
+        let profileName = '';
+
+        if (tool === 'pen') {
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            list = profile.pen;
+            profileName = profile.name;
+        } else if (tool === 'highlighter') {
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            list = profile.highlighter;
+            profileName = profile.name;
+        } else if (tool === 'shape') {
+            const profile = getActiveShapeProfile(this.settings.toolState);
+            list = profile.shape;
+            profileName = profile.name;
+        }
+
+        if (!list || list.length === 0) return false;
+
+        const currentSlice = tool === 'pen'
+            ? { tool: 'pen', ...this.settings.toolState.pen }
+            : tool === 'highlighter'
+            ? { tool: 'highlighter', ...this.settings.toolState.highlighter }
+            : { tool: 'shape', ...this.settings.toolState.shape };
+
+        const next = getNextFavoritePreset(list, currentSlice);
+        if (!next) return false;
+
+        this.applyToolFavorite(next.preset);
+        new Notice(`${profileName} · Favorito ${next.index + 1}/${list.length}`);
+        return true;
+    }
+
+    cycleActiveToolProfile(): boolean {
+        if (this.controller) {
+            return this.controller.cycleActiveToolProfile();
+        }
+        const isShape = this.settings.toolState.activeTool === 'shape';
+        if (isShape) {
+            const profiles = this.settings.toolState.shapeFavoriteProfiles;
+            if (!profiles || profiles.length === 0) return false;
+            const currIdx = profiles.findIndex(p => p.id === this.settings.toolState.activeShapeProfileId);
+            const nextIdx = currIdx !== -1 ? (currIdx + 1) % profiles.length : 0;
+            const nextProfile = profiles[nextIdx];
+            this.switchToolFavoriteProfile(nextProfile.id);
+            new Notice(`Perfil: ${nextProfile.name}`);
+            return true;
+        } else {
+            const profiles = this.settings.toolState.strokeFavoriteProfiles;
+            if (!profiles || profiles.length === 0) return false;
+            const currIdx = profiles.findIndex(p => p.id === this.settings.toolState.activeStrokeProfileId);
+            const nextIdx = currIdx !== -1 ? (currIdx + 1) % profiles.length : 0;
+            const nextProfile = profiles[nextIdx];
+            this.switchToolFavoriteProfile(nextProfile.id);
+            new Notice(`Perfil: ${nextProfile.name}`);
+            return true;
+        }
+    }
+
     private registerCommands(): void {
         this.addCommand({
             id: 'apolo-insert-canvas',
@@ -764,6 +831,22 @@ export default class ApoloCanvasPlugin extends Plugin {
             id: 'apolo-tool-highlighter',
             name: 'Apolo Canvas: Seleccionar marcador',
             callback: () => this.controller?.selectTool('highlighter'),
+        });
+
+        this.addCommand({
+            id: 'apolo-cycle-favorite-preset',
+            name: 'Apolo Canvas: Ciclar siguiente favorito de la herramienta activa',
+            callback: () => {
+                this.cycleActiveToolFavorite();
+            },
+        });
+
+        this.addCommand({
+            id: 'apolo-cycle-favorite-profile',
+            name: 'Apolo Canvas: Cambiar al siguiente perfil de favoritos de la herramienta activa',
+            callback: () => {
+                this.cycleActiveToolProfile();
+            },
         });
 
         this.addCommand({
