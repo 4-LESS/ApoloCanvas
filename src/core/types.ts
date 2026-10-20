@@ -51,6 +51,44 @@ export interface PenFavorite {
     width: number;
 }
 
+export type FavoritableTool = 'pen' | 'highlighter' | 'shape';
+
+export interface BaseFavoritePreset {
+    id: string;
+    tool: FavoritableTool;
+    color: string;
+    width: number;
+    opacity: number; // normalized 0..1 or 10..100 matching WorkspaceToolState convention
+    pattern: StrokePattern;
+    createdAt: number;
+}
+
+export interface PenFavoritePreset extends BaseFavoritePreset {
+    tool: 'pen';
+    profileId: PenProfileId;
+    smoothing?: number;
+    straightenLines?: boolean;
+}
+
+export interface HighlighterFavoritePreset extends BaseFavoritePreset {
+    tool: 'highlighter';
+    profileId: 'hlf' | 'hlr';
+    straightenLines?: boolean;
+}
+
+export interface ShapeFavoritePreset extends BaseFavoritePreset {
+    tool: 'shape';
+    shapeType: ShapeType;
+    fillEnabled?: boolean;
+    fillColor?: string;
+    fillOpacity?: number;
+}
+
+export type ToolFavoritePreset =
+    | PenFavoritePreset
+    | HighlighterFavoritePreset
+    | ShapeFavoritePreset;
+
 export type EraserMode = 'whole' | 'reticle';
 
 export type LassoMode = 'free' | 'rect';
@@ -102,6 +140,11 @@ export interface WorkspaceToolState {
     };
     lasso: {
         mode: LassoMode;
+    };
+    favorites: {
+        pen: PenFavoritePreset[];
+        highlighter: HighlighterFavoritePreset[];
+        shape: ShapeFavoritePreset[];
     };
 }
 
@@ -160,6 +203,11 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
     lasso: {
         mode: 'free',
     },
+    favorites: {
+        pen: [],
+        highlighter: [],
+        shape: [],
+    },
 };
 
 export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToolState {
@@ -217,6 +265,11 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
         },
         lasso: {
             mode: state.lasso.mode,
+        },
+        favorites: {
+            pen: Array.isArray(state.favorites?.pen) ? state.favorites.pen.map(p => ({ ...p })) : [],
+            highlighter: Array.isArray(state.favorites?.highlighter) ? state.favorites.highlighter.map(h => ({ ...h })) : [],
+            shape: Array.isArray(state.favorites?.shape) ? state.favorites.shape.map(s => ({ ...s })) : [],
         },
     };
 }
@@ -292,6 +345,17 @@ export function mergeWorkspaceToolState(
         },
         lasso: {
             mode: saved.lasso?.mode ?? fallback.lasso.mode,
+        },
+        favorites: {
+            pen: Array.isArray(saved.favorites?.pen)
+                ? saved.favorites.pen.map(p => ({ ...p }))
+                : (Array.isArray(fallback.favorites?.pen) ? fallback.favorites.pen.map(p => ({ ...p })) : []),
+            highlighter: Array.isArray(saved.favorites?.highlighter)
+                ? saved.favorites.highlighter.map(h => ({ ...h }))
+                : (Array.isArray(fallback.favorites?.highlighter) ? fallback.favorites.highlighter.map(h => ({ ...h })) : []),
+            shape: Array.isArray(saved.favorites?.shape)
+                ? saved.favorites.shape.map(s => ({ ...s }))
+                : (Array.isArray(fallback.favorites?.shape) ? fallback.favorites.shape.map(s => ({ ...s })) : []),
         },
     };
 }
