@@ -1,4 +1,4 @@
-import { BoundingBox, CanvasElement } from '../../core/types';
+import type { BoundingBox, CanvasElement } from '../../core/types.ts';
 
 /** A compact spatial hash that avoids scanning every stroke on each viewport paint. */
 export class SpatialGrid {

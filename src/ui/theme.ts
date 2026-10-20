@@ -1,4 +1,4 @@
-import type { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types';
+import type { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types.ts';
 
 /**
  * Checks whether Obsidian is currently rendering in dark theme.

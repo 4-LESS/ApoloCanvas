@@ -1,4 +1,4 @@
-import { Point } from '../../core/types';
+import type { Point } from '../../core/types.ts';
 
 /** Velocity based tip projection with exponential decay as motion slows. */
 export class Predictor {
@@ -10,7 +10,15 @@ export class Predictor {
     private pressure = 0;
     private initialized = false;
 
-    constructor(private readonly horizonMs = 12, private readonly damping = 0.82, private readonly maxSpeed = 5) {}
+    private readonly horizonMs: number;
+    private readonly damping: number;
+    private readonly maxSpeed: number;
+
+    constructor(horizonMs = 12, damping = 0.82, maxSpeed = 5) {
+        this.horizonMs = horizonMs;
+        this.damping = damping;
+        this.maxSpeed = maxSpeed;
+    }
 
     update(point: Point): Point {
         const time = point.time ?? (typeof performance !== 'undefined' ? performance.now() : Date.now());

@@ -1,11 +1,12 @@
 import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
-import { EngineEventBus } from './core/events';
-import { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot } from './core/types';
-import { CanvasController } from './engine/CanvasController';
-import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue';
-import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme';
-import { openLocalGraph } from './ui/LinkSuggestModal';
-import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension';
+import { EngineEventBus } from './core/events.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
+import { DEFAULT_WORKSPACE_TOOL_STATE, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
+import { CanvasController } from './engine/CanvasController.ts';
+import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue.ts';
+import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
+import { openLocalGraph } from './ui/LinkSuggestModal.ts';
+import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
 
 export interface ApoloCanvasSettings {
     defaultPenColor: string;
@@ -17,6 +18,7 @@ export interface ApoloCanvasSettings {
     enableMouseDrawing: boolean;
     shapeRecognition: boolean;
     straightenLines: boolean;
+    toolState: WorkspaceToolState;
     toolbarSlot: ToolbarSlot;
     favorites: PenFavorite[];
     toolPalettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }>;
@@ -41,6 +43,7 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     enableMouseDrawing: false,
     shapeRecognition: true,
     straightenLines: false,
+    toolState: DEFAULT_WORKSPACE_TOOL_STATE,
     toolbarSlot: 'tc',
     favorites: [
         { profile: 'fountain', color: '#1F4FD8', width: 3 },
@@ -407,39 +410,43 @@ export default class ApoloCanvasPlugin extends Plugin {
 
     async loadSettings(): Promise<void> {
         const saved = await this.loadData() as Partial<ApoloCanvasSettings> | null;
+        const initialToolState = mergeWorkspaceToolState(saved?.toolState, {
+            ...DEFAULT_WORKSPACE_TOOL_STATE,
+            penEnabled: saved?.penInputEnabled ?? DEFAULT_WORKSPACE_TOOL_STATE.penEnabled,
+            pen: {
+                ...DEFAULT_WORKSPACE_TOOL_STATE.pen,
+                color: saved?.defaultPenColor ?? DEFAULT_WORKSPACE_TOOL_STATE.pen.color,
+                width: saved?.defaultPenWidth ?? DEFAULT_WORKSPACE_TOOL_STATE.pen.width,
+                straightenLines: saved?.straightenLines ?? DEFAULT_WORKSPACE_TOOL_STATE.pen.straightenLines,
+                palette: saved?.toolPalettes?.pen?.colors && saved.toolPalettes.pen.colors.length === 4
+                    ? { colors: [...saved.toolPalettes.pen.colors], opacities: [...(saved.toolPalettes.pen.opacities ?? [100, 100, 100, 100])] }
+                    : DEFAULT_WORKSPACE_TOOL_STATE.pen.palette,
+            },
+            highlighter: {
+                ...DEFAULT_WORKSPACE_TOOL_STATE.highlighter,
+                palette: saved?.toolPalettes?.highlighter?.colors && saved.toolPalettes.highlighter.colors.length === 4
+                    ? { colors: [...saved.toolPalettes.highlighter.colors], opacities: [...(saved.toolPalettes.highlighter.opacities ?? [75, 75, 75, 75])] }
+                    : DEFAULT_WORKSPACE_TOOL_STATE.highlighter.palette,
+            },
+            shape: {
+                ...DEFAULT_WORKSPACE_TOOL_STATE.shape,
+                palette: saved?.toolPalettes?.shape?.colors && saved.toolPalettes.shape.colors.length === 4
+                    ? { colors: [...saved.toolPalettes.shape.colors], opacities: [...(saved.toolPalettes.shape.opacities ?? [100, 100, 100, 100])] }
+                    : DEFAULT_WORKSPACE_TOOL_STATE.shape.palette,
+            },
+        });
+
         this.settings = {
             ...DEFAULT_SETTINGS,
             ...(saved ?? {}),
+            toolState: initialToolState,
             favorites: saved?.favorites && saved.favorites.length === 4
                 ? saved.favorites
                 : [...DEFAULT_FAVORITES],
             toolPalettes: {
-                pen: {
-                    colors: saved?.toolPalettes?.pen?.colors && saved.toolPalettes.pen.colors.length === 4
-                        ? [...saved.toolPalettes.pen.colors]
-                        : (saved?.favorites && saved.favorites.length === 4
-                            ? saved.favorites.map(f => f.color)
-                            : [...DEFAULT_SETTINGS.toolPalettes.pen.colors]),
-                    opacities: saved?.toolPalettes?.pen?.opacities && saved.toolPalettes.pen.opacities.length === 4
-                        ? [...saved.toolPalettes.pen.opacities]
-                        : [...DEFAULT_SETTINGS.toolPalettes.pen.opacities],
-                },
-                highlighter: {
-                    colors: saved?.toolPalettes?.highlighter?.colors && saved.toolPalettes.highlighter.colors.length === 4
-                        ? [...saved.toolPalettes.highlighter.colors]
-                        : [...DEFAULT_SETTINGS.toolPalettes.highlighter.colors],
-                    opacities: saved?.toolPalettes?.highlighter?.opacities && saved.toolPalettes.highlighter.opacities.length === 4
-                        ? [...saved.toolPalettes.highlighter.opacities]
-                        : [...DEFAULT_SETTINGS.toolPalettes.highlighter.opacities],
-                },
-                shape: {
-                    colors: saved?.toolPalettes?.shape?.colors && saved.toolPalettes.shape.colors.length === 4
-                        ? [...saved.toolPalettes.shape.colors]
-                        : [...DEFAULT_SETTINGS.toolPalettes.shape.colors],
-                    opacities: saved?.toolPalettes?.shape?.opacities && saved.toolPalettes.shape.opacities.length === 4
-                        ? [...saved.toolPalettes.shape.opacities]
-                        : [...DEFAULT_SETTINGS.toolPalettes.shape.opacities],
-                },
+                pen: { ...initialToolState.pen.palette },
+                highlighter: { ...initialToolState.highlighter.palette },
+                shape: { ...initialToolState.shape.palette },
             },
         };
     }
@@ -448,17 +455,56 @@ export default class ApoloCanvasPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
+    private toolStateSaveTimer: number | null = null;
+
+    handleToolStateChange(state: WorkspaceToolState): void {
+        this.settings.toolState = cloneWorkspaceToolState(state);
+        this.settings.penInputEnabled = state.penEnabled;
+        this.settings.defaultPenColor = state.pen.color;
+        this.settings.defaultPenWidth = state.pen.width;
+        this.settings.straightenLines = state.pen.straightenLines;
+        this.settings.toolPalettes = {
+            pen: { colors: [...state.pen.palette.colors], opacities: [...state.pen.palette.opacities] },
+            highlighter: { colors: [...state.highlighter.palette.colors], opacities: [...state.highlighter.palette.opacities] },
+            shape: { colors: [...state.shape.palette.colors], opacities: [...state.shape.palette.opacities] },
+        };
+        this.debouncedSaveSettings();
+    }
+
+    private debouncedSaveSettings(): void {
+        if (this.toolStateSaveTimer !== null) {
+            window.clearTimeout(this.toolStateSaveTimer);
+        }
+        this.toolStateSaveTimer = window.setTimeout(() => {
+            this.toolStateSaveTimer = null;
+            void this.saveSettings();
+        }, 300);
+    }
+
+    applyWorkspaceToolStateToController(controller: CanvasController): void {
+        if (this.settings.toolState) {
+            controller.applyWorkspaceToolState(this.settings.toolState, true);
+        }
+    }
+
     setAutoSaveDelay(value: number): void { this.persistence?.setDebounceMs(value); }
     setCompanionExport(value: boolean): void { this.persistence?.setCompanionSvgEnabled(value); }
     setShapeRecognition(value: boolean): void { this.controller?.setShapeRecognition(value); }
     setStraightenLines(value: boolean): void {
         this.settings.straightenLines = value;
+        if (this.settings.toolState) {
+            this.settings.toolState.pen.straightenLines = value;
+            this.settings.toolState.highlighter.straightenLines = value;
+        }
         this.controller?.setStraightenLines(value);
         void this.saveSettings();
     }
 
     setPenInput(value: boolean): void {
         this.settings.penInputEnabled = value;
+        if (this.settings.toolState) {
+            this.settings.toolState.penEnabled = value;
+        }
         this.controller?.setPenEnabled(value);
         void this.saveSettings();
     }
@@ -709,6 +755,10 @@ export default class ApoloCanvasPlugin extends Plugin {
                     this.settings.favorites = favs;
                     void this.saveSettings();
                 },
+                toolState: this.settings.toolState,
+                onToolStateChange: (state: WorkspaceToolState) => {
+                    this.handleToolStateChange(state);
+                },
                 toolPalettes: this.settings.toolPalettes,
                 onToolPalettesChange: (palettes) => {
                     this.settings.toolPalettes = palettes;
@@ -727,6 +777,10 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.mountedScroller = scroller;
         this.mountedFilePath = file.path;
         this.mountedMode = mode;
+
+        if (mode === 'source') {
+            this.applyWorkspaceToolStateToController(this.controller);
+        }
 
         if (mode === 'preview') {
             this.controller.syncPreviewSpacing();
@@ -865,7 +919,12 @@ export default class ApoloCanvasPlugin extends Plugin {
 }
 
 class ApoloCanvasSettingsTab extends PluginSettingTab {
-    constructor(app: App, private readonly plugin: ApoloCanvasPlugin) { super(app, plugin); }
+    private readonly plugin: ApoloCanvasPlugin;
+
+    constructor(app: App, plugin: ApoloCanvasPlugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
 
     display(): void {
         const { containerEl } = this;
@@ -896,6 +955,9 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.defaultPenColor)
                 .onChange(async value => {
                     this.plugin.settings.defaultPenColor = value;
+                    if (this.plugin.settings.toolState) {
+                        this.plugin.settings.toolState.pen.color = value;
+                    }
                     await this.plugin.saveSettings();
                 }));
 
@@ -907,6 +969,9 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setDynamicTooltip()
                 .onChange(async value => {
                     this.plugin.settings.defaultPenWidth = value;
+                    if (this.plugin.settings.toolState) {
+                        this.plugin.settings.toolState.pen.width = value;
+                    }
                     await this.plugin.saveSettings();
                 }));
 

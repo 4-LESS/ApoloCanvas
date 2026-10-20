@@ -1,7 +1,7 @@
-import { App, Editor, Notice, TFile } from 'obsidian';
-import { EditorView } from '@codemirror/view';
+import type { App, Editor, Notice, TFile } from 'obsidian';
+import type { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
-import {
+import type {
     BoundingBox,
     BoxAccentColor,
     BoxBgTheme,
@@ -23,61 +23,65 @@ import {
     ThicknessPreset,
     ToolbarSlot,
     ToolType,
-} from '../core/types';
-import { InputManager } from './input/InputManager';
-import { PointBuffer } from './input/PointBuffer';
+    WorkspaceToolState,
+} from '../core/types.ts';
+import {
+    DEFAULT_WORKSPACE_TOOL_STATE,
+    cloneWorkspaceToolState,
+} from '../core/types.ts';
+import { InputManager } from './input/InputManager.ts';
+import { PointBuffer } from './input/PointBuffer.ts';
 import {
     applyStrokePattern,
     bakeLiveStrokeSegment,
     computeStraightLinePoints,
     drawPatternedStrokePath,
     getOrCreateStrokeSprite,
-    LiveBakeState,
+    type LiveBakeState,
     renderContinuousSolidStroke,
     snapLineAngle,
-} from './PatternedStrokeRenderer';
-import { getPenPlugin } from './pens/index';
-import { SpatialGrid } from './spatial/SpatialGrid';
-import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue';
-import { ShapeRecognizer } from '../tools/ShapeRecognizer';
-import { Predictor } from './input/Predictor';
-import { EngineEventBus } from '../core/events';
-import { Toolbar } from '../ui/Toolbar';
-import { ToolEstuche } from '../ui/ToolEstuche';
-import { LassoMenu } from '../ui/LassoMenu';
-import { BoxMenu, BoxMenuState } from '../ui/BoxMenu';
-import { ZoomPill } from '../ui/ZoomPill';
-import { Toast } from '../ui/Toast';
-import { PopoverController } from '../ui/kit';
-import { LinkSuggestModal, openLocalGraph } from '../ui/LinkSuggestModal';
-import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
-import { smoothPressure } from './input/PressureCurve';
-import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser';
+} from './PatternedStrokeRenderer.ts';
+import { getPenPlugin } from './pens/index.ts';
+import { SpatialGrid } from './spatial/SpatialGrid.ts';
+import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
+import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
+import { Predictor } from './input/Predictor.ts';
+import { EngineEventBus } from '../core/events.ts';
+import { Toolbar } from '../ui/Toolbar.ts';
+import { ToolEstuche } from '../ui/ToolEstuche.ts';
+import { LassoMenu } from '../ui/LassoMenu.ts';
+import { BoxMenu, type BoxMenuState } from '../ui/BoxMenu.ts';
+import { ZoomPill } from '../ui/ZoomPill.ts';
+import { Toast } from '../ui/Toast.ts';
+import { PopoverController } from '../ui/kit/index.ts';
+import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
+import { smoothPressure } from './input/PressureCurve.ts';
+import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser.ts';
 import {
     cleanAnchorText,
     findBestMatchingLine,
     findBestMatchingPreviewBlock,
-    PreviewBlockInfo,
-} from './anchoring/SmartAnchor';
+    type PreviewBlockInfo,
+} from './anchoring/SmartAnchor.ts';
 import {
     applySpaceMutationToMarkdown,
     BoxRegistry,
     escapeRegExp,
     htmlEscapeAttribute,
     normalizeBoxId,
-    SpaceMutation,
-} from '../editor/ApoloSpaceExtension';
-import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion';
+    type SpaceMutation,
+} from '../editor/ApoloSpaceExtension.ts';
+import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion.ts';
 import {
-    DocumentContentBounds,
+    type DocumentContentBounds,
     isInkAllowedAt,
     isScreenPointForbidden,
     sanitizeNormalizedPoint,
     snapNormalizedPoint,
-    SpaceBlockRegion,
+    type SpaceBlockRegion,
     DEFAULT_INK_LIMITS,
     splitStrokeIntoValidRuns,
-} from './anchoring/InkBoundary';
+} from './anchoring/InkBoundary.ts';
 
 export interface CanvasControllerOptions {
     palmRejectionCooldownMs: number;
@@ -107,6 +111,8 @@ export interface CanvasControllerOptions {
         highlighter?: { colors: string[]; opacities: number[] };
         shape?: { colors: string[]; opacities: number[] };
     };
+    toolState?: WorkspaceToolState;
+    onToolStateChange?: (state: WorkspaceToolState) => void;
     onPenEnabledChange?: (enabled: boolean) => void;
     onToggleStraighten?: (enabled: boolean) => void;
     onToolbarSlotChange?: (slot: ToolbarSlot) => void;
@@ -206,6 +212,7 @@ export class CanvasController {
 
     // Document & Tool State
     private document: PageDocument;
+    private toolState: WorkspaceToolState;
     private tool: ToolType = 'pen';
     private style: StrokeStyle;
     private shapeType: ShapeType = 'rect';
@@ -272,16 +279,30 @@ export class CanvasController {
     private readonly handledBoxEvents = new WeakSet<Event>();
     private destroyed = false;
 
+    private readonly scroller: HTMLElement;
+    private readonly editor: Editor | undefined;
+    private readonly file: TFile;
+    private readonly persistence: PersistenceQueue;
+    private readonly options: CanvasControllerOptions;
+
     constructor(
-        private readonly scroller: HTMLElement,
-        private readonly editor: Editor | undefined,
+        scroller: HTMLElement,
+        editor: Editor | undefined,
         documentModel: PageDocument,
-        private readonly file: TFile,
+        file: TFile,
         pageId: string,
-        private readonly persistence: PersistenceQueue,
-        private readonly options: CanvasControllerOptions,
+        persistence: PersistenceQueue,
+        options: CanvasControllerOptions,
     ) {
+        this.scroller = scroller;
+        this.editor = editor;
+        this.file = file;
+        this.persistence = persistence;
+        this.options = options;
         this.document = documentModel;
+        if (!this.document.elements) {
+            this.document.elements = [];
+        }
         if (this.document.boxes) {
             for (const [id, meta] of Object.entries(this.document.boxes)) {
                 BoxRegistry.setHeight(id, meta.height);
@@ -296,52 +317,64 @@ export class CanvasController {
             }
         }
         this.pageId = pageId;
-        this.penEnabled = options.enabled;
         this.shapeRecognition = options.shapeRecognition;
-        this.straightenLines = options.straightenLines ?? false;
         this.gridDensity = options.gridDensity ?? 32;
         this.toolbarSlot = options.toolbarSlot ?? 'tc';
         this.favorites = options.favorites && options.favorites.length === 4
             ? [...options.favorites]
             : [...DEFAULT_FAVORITES];
 
+        if (options.toolState) {
+            this.toolState = cloneWorkspaceToolState(options.toolState);
+        } else {
+            this.toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            if (options.defaultPenColor) this.toolState.pen.color = options.defaultPenColor;
+            if (options.defaultPenWidth) this.toolState.pen.width = options.defaultPenWidth;
+            if (options.straightenLines !== undefined) this.toolState.pen.straightenLines = options.straightenLines;
+            if (options.enabled !== undefined) this.toolState.penEnabled = options.enabled;
+            if (options.favorites && options.favorites.length === 4) {
+                this.toolState.pen.palette.colors = options.favorites.map(f => f.color);
+            }
+            if (options.toolPalettes) {
+                if (options.toolPalettes.pen) {
+                    this.toolState.pen.palette = {
+                        colors: [...options.toolPalettes.pen.colors],
+                        opacities: [...options.toolPalettes.pen.opacities],
+                    };
+                }
+                if (options.toolPalettes.highlighter) {
+                    this.toolState.highlighter.palette = {
+                        colors: [...options.toolPalettes.highlighter.colors],
+                        opacities: [...options.toolPalettes.highlighter.opacities],
+                    };
+                }
+                if (options.toolPalettes.shape) {
+                    this.toolState.shape.palette = {
+                        colors: [...options.toolPalettes.shape.colors],
+                        opacities: [...options.toolPalettes.shape.opacities],
+                    };
+                }
+            }
+        }
+
+        this.penEnabled = this.toolState.penEnabled;
+        this.straightenLines = this.toolState.pen.straightenLines;
         this.toolPalettes = {
-            pen: {
-                colors: options.toolPalettes?.pen?.colors && options.toolPalettes.pen.colors.length === 4
-                    ? [...options.toolPalettes.pen.colors]
-                    : (options.favorites && options.favorites.length === 4
-                        ? options.favorites.map(f => f.color)
-                        : [...DEFAULT_TOOL_PALETTES.pen.colors]),
-                opacities: options.toolPalettes?.pen?.opacities && options.toolPalettes.pen.opacities.length === 4
-                    ? [...options.toolPalettes.pen.opacities]
-                    : [...DEFAULT_TOOL_PALETTES.pen.opacities],
-            },
-            highlighter: {
-                colors: options.toolPalettes?.highlighter?.colors && options.toolPalettes.highlighter.colors.length === 4
-                    ? [...options.toolPalettes.highlighter.colors]
-                    : [...DEFAULT_TOOL_PALETTES.highlighter.colors],
-                opacities: options.toolPalettes?.highlighter?.opacities && options.toolPalettes.highlighter.opacities.length === 4
-                    ? [...options.toolPalettes.highlighter.opacities]
-                    : [...DEFAULT_TOOL_PALETTES.highlighter.opacities],
-            },
-            shape: {
-                colors: options.toolPalettes?.shape?.colors && options.toolPalettes.shape.colors.length === 4
-                    ? [...options.toolPalettes.shape.colors]
-                    : [...DEFAULT_TOOL_PALETTES.shape.colors],
-                opacities: options.toolPalettes?.shape?.opacities && options.toolPalettes.shape.opacities.length === 4
-                    ? [...options.toolPalettes.shape.opacities]
-                    : [...DEFAULT_TOOL_PALETTES.shape.opacities],
-            },
+            pen: { colors: [...this.toolState.pen.palette.colors], opacities: [...this.toolState.pen.palette.opacities] },
+            highlighter: { colors: [...this.toolState.highlighter.palette.colors], opacities: [...this.toolState.highlighter.palette.opacities] },
+            shape: { colors: [...this.toolState.shape.palette.colors], opacities: [...this.toolState.shape.palette.opacities] },
         };
 
         this.style = {
-            color: options.defaultPenColor,
-            width: options.defaultPenWidth,
-            opacity: 1,
-            pattern: 'solid',
+            color: this.toolState.pen.color,
+            width: this.toolState.pen.width,
+            opacity: this.toolState.pen.opacity,
+            pattern: this.toolState.pen.pattern,
             lineCap: 'round',
         };
-        this.previousPenColor = options.defaultPenColor;
+        this.previousPenColor = this.toolState.pen.color;
+
+        this.applyWorkspaceToolState(this.toolState, false);
 
         const context = this.canvas.getContext('2d', { alpha: true, desynchronized: true });
         if (!context) throw new Error('Canvas 2D is unavailable in this Obsidian WebView.');
@@ -573,6 +606,7 @@ export class CanvasController {
                         shapeType: this.shapeType,
                         snapGrid: this.snapGrid,
                         straightenLines: this.straightenLines,
+                        onlyHighlighter: this.toolState.eraser.onlyHighlighter,
                     }, toolBtn);
                 }
             },
@@ -619,12 +653,17 @@ export class CanvasController {
                 shapeType: this.shapeType,
                 snapGrid: this.snapGrid,
                 straightenLines: this.straightenLines,
+                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
             },
             {
                 onSelectProfile: (profileId) => this.applyPenProfile(profileId),
                 onChangeColor: (color) => this.setInkColor(color),
                 onChangeWidth: (width) => this.setWidth(width),
-                onChangeSmoothing: (smoothing) => { this.smoothing = smoothing; },
+                onChangeSmoothing: (smoothing) => {
+                    this.smoothing = smoothing;
+                    this.toolState.pen.smoothing = smoothing;
+                    this.notifyToolStateChange();
+                },
                 onChangePressure: (pressure) => {
                     this.pressureSensitivity = pressure;
                     this.renderDirty = true;
@@ -632,9 +671,17 @@ export class CanvasController {
                 },
                 onChangeLineStyle: (pattern) => {
                     this.style.pattern = pattern;
+                    if (this.tool === 'pen') {
+                        this.toolState.pen.pattern = pattern;
+                    } else if (this.tool === 'highlighter') {
+                        this.toolState.highlighter.pattern = pattern;
+                    } else if (this.tool === 'shape') {
+                        this.toolState.shape.pattern = pattern;
+                    }
                     this.estuche?.updateState({ lineStyle: pattern, pattern });
                     this.options.eventBus?.emit('style:changed', { pattern });
                     this.schedulePaint();
+                    this.notifyToolStateChange();
                 },
                 onUseFavorite: (index) => this.applyFavorite(index),
                 onSaveFavorite: (index) => this.saveFavoriteAt(index),
@@ -643,20 +690,38 @@ export class CanvasController {
                 },
                 onChangeEraserRadius: (radius) => {
                     this.eraserRadius = radius;
+                    this.toolState.eraser.radius = radius;
                     this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
+                    this.notifyToolStateChange();
                 },
-                onToggleScribble: (enabled) => { this.scribbleToErase = enabled; },
-                onSelectLassoMode: (mode) => { this.lassoMode = mode; },
+                onToggleScribble: (enabled) => {
+                    this.scribbleToErase = enabled;
+                    this.toolState.eraser.scribbleToErase = enabled;
+                    this.notifyToolStateChange();
+                },
+                onToggleOnlyHighlighter: (enabled) => {
+                    this.toolState.eraser.onlyHighlighter = enabled;
+                    this.notifyToolStateChange();
+                },
+                onSelectLassoMode: (mode) => {
+                    this.lassoMode = mode;
+                    this.toolState.lasso.mode = mode;
+                    this.notifyToolStateChange();
+                },
                 onSelectShapeType: (shapeType) => {
                     this.shapeType = shapeType;
+                    this.toolState.shape.shapeType = shapeType;
                     this.toolbar?.setShape(shapeType);
                     this.toolbar?.setTool('shape', shapeType);
+                    this.notifyToolStateChange();
                 },
                 onToggleSnapGrid: (enabled) => {
                     this.snapGrid = enabled;
+                    this.toolState.snapGrid = enabled;
                     this.toolbar?.setSnapGrid(enabled);
                     this.renderDirty = true;
                     this.schedulePaint();
+                    this.notifyToolStateChange();
                 },
                 onToggleStraighten: (enabled) => {
                     this.setStraightenLines(enabled);
@@ -677,9 +742,11 @@ export class CanvasController {
             },
             onPaste: () => this.duplicateSelection(),
             onLink: () => {
-                new LinkSuggestModal(this.options.app, (target) => {
-                    this.linkSelection(target);
-                }).open();
+                void import('../ui/LinkSuggestModal.ts').then(({ LinkSuggestModal }) => {
+                    new LinkSuggestModal(this.options.app, (target) => {
+                        this.linkSelection(target);
+                    }).open();
+                });
             },
             onBringToFront: () => this.changeSelectionOrder(true),
             onSendToBack: () => this.changeSelectionOrder(false),
@@ -1537,7 +1604,21 @@ export class CanvasController {
         const paletteKey = this.tool === 'highlighter' ? 'highlighter' : (this.tool === 'shape' ? 'shape' : 'pen');
         this.activeColorSlots[paletteKey] = index;
         this.activeFavoriteIndex = index;
+        this.toolState[paletteKey].activeSlotIndex = index;
         const color = this.toolPalettes[paletteKey]?.colors[index] ?? this.favorites[index]?.color ?? '#1F4FD8';
+        if (paletteKey === 'highlighter') {
+            const op = (this.toolPalettes.highlighter.opacities[index] ?? 75) / 100;
+            this.style.opacity = op;
+            this.toolState.highlighter.opacity = op;
+        } else if (paletteKey === 'pen') {
+            const op = (this.toolPalettes.pen.opacities[index] ?? 100) / 100;
+            this.style.opacity = op;
+            this.toolState.pen.opacity = op;
+        } else if (paletteKey === 'shape') {
+            const op = (this.toolPalettes.shape.opacities[index] ?? 100) / 100;
+            this.style.opacity = op;
+            this.toolState.shape.opacity = op;
+        }
         this.setInkColor(color);
         // Note: strictly only changes ink color; does NOT alter current tool, profile, or width
     }
@@ -1553,6 +1634,12 @@ export class CanvasController {
         this.toolPalettes[toolKey].opacities[slotIdx] = opacity;
         this.activeColorSlots[toolKey] = slotIdx;
         this.activeFavoriteIndex = slotIdx;
+
+        this.toolState[toolKey].palette.colors[slotIdx] = newColor;
+        this.toolState[toolKey].palette.opacities[slotIdx] = opacity;
+        this.toolState[toolKey].activeSlotIndex = slotIdx;
+        this.toolState[toolKey].color = newColor;
+        this.toolState[toolKey].opacity = opacity / 100;
 
         // Keep favorites in sync if pen palette changed
         if (toolKey === 'pen' && this.favorites[slotIdx]) {
@@ -1592,6 +1679,7 @@ export class CanvasController {
         if (this.tool === 'eraser') {
             const radii = { fine: 10, medium: 20, thick: 40 };
             this.eraserRadius = radii[preset];
+            this.toolState.eraser.radius = this.eraserRadius;
             this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
             this.estuche?.updateState({ eraserRadius: this.eraserRadius });
             const labels = {
@@ -1600,6 +1688,7 @@ export class CanvasController {
                 thick: 'Borrador grande (40 px)',
             };
             this.toast?.show(labels[preset]);
+            this.notifyToolStateChange();
         } else if (this.tool === 'highlighter') {
             const widths = { fine: 12, medium: 20, thick: 32 };
             this.setWidth(widths[preset]);
@@ -1631,11 +1720,23 @@ export class CanvasController {
 
         if (profileId === 'hlr' || profileId === 'hlf') {
             this.tool = 'highlighter';
+            this.toolState.activeTool = 'highlighter';
+            this.toolState.highlighter.profileId = profileId;
+            this.toolState.highlighter.opacity = profile.op;
+            this.toolState.highlighter.pattern = this.style.pattern;
+            this.style.isHighlighter = true;
+            this.canvas.classList.add('is-highlighter-mode');
         } else {
             this.tool = 'pen';
+            this.toolState.activeTool = 'pen';
+            this.toolState.pen.profileId = profileId;
+            this.toolState.pen.opacity = profile.op;
+            this.toolState.pen.pattern = this.style.pattern;
+            this.style.isHighlighter = false;
+            this.canvas.classList.remove('is-highlighter-mode');
         }
 
-        this.toolbar?.setTool(this.tool);
+        this.toolbar?.setTool(this.tool, this.shapeType);
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
         this.estuche?.updateState({
             tool: this.tool,
@@ -1643,39 +1744,126 @@ export class CanvasController {
             width: this.style.width,
             lineStyle: this.style.pattern,
             pattern: this.style.pattern,
+            straightenLines: this.straightenLines,
         });
-        this.options.eventBus?.emit('tool:changed', this.tool);
+        this.options.eventBus?.emit('tool:changed', this.tool, this.shapeType);
         this.options.eventBus?.emit('style:changed', this.style, this.penProfileId);
         this.schedulePaint();
+        this.notifyToolStateChange();
     }
 
     setInkColor(color: string): void {
         this.style.color = color;
         if (this.tool === 'pen') {
             this.previousPenColor = color;
+            this.toolState.pen.color = color;
+        } else if (this.tool === 'highlighter') {
+            this.toolState.highlighter.color = color;
+        } else if (this.tool === 'shape') {
+            this.toolState.shape.color = color;
         }
         this.toolbar?.setStyle(color, this.style.width, this.penProfileId);
         this.estuche?.updateState({ color });
         this.options.eventBus?.emit('style:changed', { color });
         this.schedulePaint();
+        this.notifyToolStateChange();
     }
 
     setWidth(width: number): void {
         this.style.width = width;
+        if (this.tool === 'pen') {
+            this.toolState.pen.width = width;
+        } else if (this.tool === 'highlighter') {
+            this.toolState.highlighter.width = width;
+        } else if (this.tool === 'shape') {
+            this.toolState.shape.width = width;
+        }
         this.toolbar?.setStyle(this.style.color, width, this.penProfileId);
         this.estuche?.updateState({ width });
         this.options.eventBus?.emit('style:changed', { width });
         this.schedulePaint();
+        this.notifyToolStateChange();
     }
 
     setStraightenLines(enabled: boolean): void {
         this.straightenLines = enabled;
+        if (this.tool === 'pen') {
+            this.toolState.pen.straightenLines = enabled;
+        } else if (this.tool === 'highlighter') {
+            this.toolState.highlighter.straightenLines = enabled;
+        }
         this.estuche?.updateState({ straightenLines: enabled });
         this.options.eventBus?.emit('straighten:changed', enabled);
+        this.notifyToolStateChange();
     }
 
     getStraightenLines(): boolean {
         return this.straightenLines;
+    }
+
+    getToolState(): WorkspaceToolState {
+        return cloneWorkspaceToolState(this.toolState);
+    }
+
+    applyWorkspaceToolState(state: WorkspaceToolState, updateUi = true): void {
+        this.toolState = cloneWorkspaceToolState(state);
+        this.penEnabled = state.penEnabled;
+        this.snapGrid = state.snapGrid;
+        this.toolPalettes = {
+            pen: { colors: [...state.pen.palette.colors], opacities: [...state.pen.palette.opacities] },
+            highlighter: { colors: [...state.highlighter.palette.colors], opacities: [...state.highlighter.palette.opacities] },
+            shape: { colors: [...state.shape.palette.colors], opacities: [...state.shape.palette.opacities] },
+        };
+        this.activeColorSlots = {
+            pen: state.pen.activeSlotIndex,
+            highlighter: state.highlighter.activeSlotIndex,
+            shape: state.shape.activeSlotIndex,
+        };
+
+        this.eraserMode = state.eraser.mode;
+        this.eraserRadius = state.eraser.radius;
+        this.scribbleToErase = state.eraser.scribbleToErase;
+        this.lassoMode = state.lasso.mode;
+        this.shapeType = state.shape.shapeType;
+
+        this.setTool(state.activeTool, false);
+
+        if (updateUi) {
+            this.toolbar?.setToolPalettes(this.toolPalettes);
+            this.toolbar?.setPenEnabled(this.penEnabled);
+            this.toolbar?.setSnapGrid(this.snapGrid);
+            this.toolbar?.setEraserMode(this.eraserMode);
+            this.toolbar?.setShape(this.shapeType);
+            this.toolbar?.setTool(this.tool, this.shapeType);
+            this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
+            this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
+            this.estuche?.updateState({
+                tool: this.tool,
+                slot: this.toolbarSlot,
+                color: this.style.color,
+                width: this.style.width,
+                profileId: this.penProfileId,
+                smoothing: this.smoothing,
+                pressureSensitivity: this.pressureSensitivity,
+                lineStyle: this.style.pattern,
+                pattern: this.style.pattern,
+                straightenLines: this.straightenLines,
+                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
+                eraserMode: this.eraserMode,
+                eraserRadius: this.eraserRadius,
+                scribbleToErase: this.scribbleToErase,
+                lassoMode: this.lassoMode,
+                shapeType: this.shapeType,
+                snapGrid: this.snapGrid,
+            });
+            this.updateLayerPointerEvents();
+        }
+        this.renderDirty = true;
+        this.schedulePaint();
+    }
+
+    private notifyToolStateChange(): void {
+        this.options.onToolStateChange?.(this.getToolState());
     }
 
     private readonly onCanvasDblClick = (event: MouseEvent): void => {
@@ -1737,6 +1925,7 @@ export class CanvasController {
     setPenEnabled(enabled: boolean): void {
         if (this.options.readonly) return;
         this.penEnabled = enabled;
+        this.toolState.penEnabled = enabled;
         if (!enabled) {
             this.resetCursor();
         } else {
@@ -1746,6 +1935,7 @@ export class CanvasController {
         this.toolbar?.setPenEnabled(enabled);
         this.options.onPenEnabledChange?.(enabled);
         this.options.eventBus?.emit('pen:changed', enabled);
+        this.notifyToolStateChange();
 
         if (!enabled && this.editor) {
             this.toast?.show('Modo teclado activo: toca el texto para editar');
@@ -1763,71 +1953,113 @@ export class CanvasController {
         if (!this.options.readonly) this.setTool(tool);
     }
 
-    setTool(tool: ToolType): void {
+    setTool(tool: ToolType, notify = true): void {
         const previousTool = this.tool;
         this.tool = tool;
+        this.toolState.activeTool = tool;
 
-        // Auto color and mode switch when moving between pen, highlighter, and shape
-        if (tool === 'highlighter' && previousTool !== 'highlighter') {
-            this.previousPenColor = this.style.color;
-            const hlSlot = this.activeColorSlots.highlighter ?? 0;
-            const hlColor = this.toolPalettes?.highlighter?.colors[hlSlot] || '#FDD835';
-            this.style.color = hlColor;
-            this.style.opacity = (this.toolPalettes?.highlighter?.opacities[hlSlot] ?? 75) / 100;
-            this.style.isHighlighter = true;
-            if (this.style.width < 8) {
-                this.style.width = 20;
-            }
-            this.canvas.classList.add('is-highlighter-mode');
-        } else if (previousTool === 'highlighter' && tool === 'pen') {
-            const penSlot = this.activeColorSlots.pen ?? 0;
-            this.style.color = this.toolPalettes?.pen?.colors[penSlot] || this.previousPenColor || '#1F4FD8';
-            this.style.opacity = (this.toolPalettes?.pen?.opacities[penSlot] ?? 100) / 100;
+        if (tool === 'pen') {
+            const slice = this.toolState.pen;
+            this.penProfileId = slice.profileId;
+            const profile = PEN_PROFILES[slice.profileId] || PEN_PROFILES.fountain;
+            this.style.color = slice.color;
+            this.style.width = slice.width;
+            this.style.opacity = slice.opacity;
+            this.style.pattern = slice.pattern;
+            this.style.lineCap = profile.cap;
             this.style.isHighlighter = false;
-            if (this.style.width > 10) {
-                this.style.width = 3.2;
-            }
+            this.smoothing = slice.smoothing;
+            this.straightenLines = slice.straightenLines;
             this.canvas.classList.remove('is-highlighter-mode');
-        } else if (tool === 'shape' && previousTool !== 'shape') {
-            const shapeSlot = this.activeColorSlots.shape ?? 0;
-            this.style.color = this.toolPalettes?.shape?.colors[shapeSlot] || '#2F6BFF';
-            this.style.opacity = (this.toolPalettes?.shape?.opacities[shapeSlot] ?? 100) / 100;
-            this.canvas.classList.remove('is-highlighter-mode');
-        } else if (previousTool === 'shape' && tool === 'pen') {
-            const penSlot = this.activeColorSlots.pen ?? 0;
-            this.style.color = this.toolPalettes?.pen?.colors[penSlot] || this.previousPenColor || '#1F4FD8';
-            this.style.opacity = (this.toolPalettes?.pen?.opacities[penSlot] ?? 100) / 100;
+        } else if (tool === 'highlighter') {
+            const slice = this.toolState.highlighter;
+            this.penProfileId = slice.profileId;
+            const profile = PEN_PROFILES[slice.profileId] || PEN_PROFILES.hlr;
+            this.style.color = slice.color;
+            this.style.width = slice.width;
+            this.style.opacity = slice.opacity;
+            this.style.pattern = slice.pattern;
+            this.style.lineCap = profile.cap;
+            this.style.isHighlighter = true;
+            this.straightenLines = slice.straightenLines;
+            this.canvas.classList.add('is-highlighter-mode');
+        } else if (tool === 'shape') {
+            const slice = this.toolState.shape;
+            this.shapeType = slice.shapeType;
+            this.style.color = slice.color;
+            this.style.width = slice.width;
+            this.style.opacity = slice.opacity;
+            this.style.pattern = slice.pattern;
+            this.style.lineCap = 'round';
+            this.style.isHighlighter = false;
             this.canvas.classList.remove('is-highlighter-mode');
         } else if (tool === 'eraser') {
+            const slice = this.toolState.eraser;
+            this.eraserMode = slice.mode;
+            this.eraserRadius = slice.radius;
+            this.scribbleToErase = slice.scribbleToErase;
             this.selection = [];
             this.lassoMenu?.hide();
+            this.canvas.classList.remove('is-highlighter-mode');
+        } else if (tool === 'lasso') {
+            const slice = this.toolState.lasso;
+            this.lassoMode = slice.mode;
             this.canvas.classList.remove('is-highlighter-mode');
         } else {
             this.canvas.classList.remove('is-highlighter-mode');
         }
 
-        this.toolbar?.setTool(tool);
+        this.toolbar?.setTool(tool, this.shapeType);
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
-        this.estuche?.updateState({ tool, color: this.style.color, width: this.style.width, straightenLines: this.straightenLines });
-        this.options.eventBus?.emit('tool:changed', tool);
+        this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
+        if (tool === 'eraser') {
+            this.toolbar?.setEraserMode(this.eraserMode);
+        }
+
+        this.estuche?.updateState({
+            tool,
+            color: this.style.color,
+            width: this.style.width,
+            profileId: this.penProfileId,
+            lineStyle: this.style.pattern,
+            pattern: this.style.pattern,
+            straightenLines: this.straightenLines,
+            smoothing: this.smoothing,
+            eraserMode: this.eraserMode,
+            eraserRadius: this.eraserRadius,
+            scribbleToErase: this.scribbleToErase,
+            shapeType: this.shapeType,
+            snapGrid: this.snapGrid,
+        });
+
+        this.options.eventBus?.emit('tool:changed', tool, this.shapeType);
+        this.options.eventBus?.emit('style:changed', this.style, this.penProfileId);
         this.schedulePaint();
+
+        if (notify) {
+            this.notifyToolStateChange();
+        }
     }
 
     toggleEraserMode(): EraserMode {
         this.eraserMode = this.eraserMode === 'whole' ? 'reticle' : 'whole';
+        this.toolState.eraser.mode = this.eraserMode;
         this.toolbar?.setEraserMode(this.eraserMode);
         this.estuche?.updateState({ eraserMode: this.eraserMode });
         const label = this.eraserMode === 'whole'
             ? 'Borrador: Trazo completo (borra líneas enteras)'
             : 'Borrador: Retícula (corte de trazo)';
         this.toast?.show(label);
+        this.notifyToolStateChange();
         return this.eraserMode;
     }
 
     setEraserMode(mode: EraserMode): void {
         this.eraserMode = mode;
+        this.toolState.eraser.mode = mode;
         this.toolbar?.setEraserMode(mode);
         this.estuche?.updateState({ eraserMode: mode });
+        this.notifyToolStateChange();
     }
 
     undo(): void { if (!this.options.readonly) this.performUndo(); }
@@ -3560,7 +3792,7 @@ export class CanvasController {
 
     private rebuildIndex(): void {
         this.index.clear();
-        for (const element of this.document.elements) {
+        for (const element of (this.document?.elements || [])) {
             this.index.add(element, this.getElementDocBounds(element));
         }
         this.renderDirty = true;

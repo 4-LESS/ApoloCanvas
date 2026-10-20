@@ -1,4 +1,4 @@
-import { ToolType, StrokeStyle, CanvasElement, BoundingBox, ShapeType, PenProfileId } from './types';
+import type { ToolType, StrokeStyle, CanvasElement, BoundingBox, ShapeType, PenProfileId } from './types.ts';
 
 export interface EngineEvents {
     'tool:changed': (tool: ToolType, shapeType?: ShapeType) => void;
