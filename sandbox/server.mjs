@@ -30,13 +30,14 @@ const MIME_TYPES = {
     '.svg': 'image/svg+xml',
 };
 
-// Orden preferido para las plumas base e iteraciones numeradas del lápiz; cualquier nuevo .js aparece automáticamente después
+// Orden preferido: las 4 herramientas seleccionadas finales primero, seguidas de las iteraciones experimentales
 const PREFERRED_ORDER = [
     'ball',
-    'fountain',
     'fountain-v2',
-    'calli',
     'calli-v2',
+    'pencil-sketch',
+    'fountain',
+    'calli',
     'pencil-simple',
     'pencil-multistrand',
     'pencil-ribbon-jitter',
@@ -48,7 +49,6 @@ const PREFERRED_ORDER = [
     'pencil-atlasv2',
     'pencil-atlasv4',
     'pencil-atlasClaude',
-    'pencil-sketch',
 ];
 
 function listPenFiles() {

@@ -846,13 +846,14 @@
 
     <!-- Script de Integración Modular y Hot-swapping -->
     <script type="module">
-        // Estado de la aplicación sandbox (orden base e iteraciones 1..8 del lápiz mina)
+        // Estado de la aplicación sandbox (los 4 seleccionados finales primero, seguidos de las iteraciones previas)
         const FALLBACK_PEN_IDS = [
             'ball',
-            'fountain',
             'fountain-v2',
-            'calli',
             'calli-v2',
+            'pencil-sketch',
+            'fountain',
+            'calli',
             'pencil-simple',
             'pencil-multistrand',
             'pencil-ribbon-jitter',
@@ -864,7 +865,6 @@
             'pencil-atlasv2',
             'pencil-atlasv4',
             'pencil-atlasClaude',
-            'pencil-sketch',
         ];
 
         const state = {
