@@ -11,6 +11,7 @@ import {
     resetGraphitePatternCacheForTesting,
     smoothCalligraphyPoints,
 } from '../src/engine/PatternedStrokeRenderer.ts';
+import { getPenPlugin, PEN_REGISTRY } from '../src/engine/pens/index.ts';
 
 function createRecordingContext(pattern: CanvasPattern | null = null) {
     const strokes: Array<{ lineWidth: number; globalAlpha: number; lineCap: string; strokeStyle: unknown; dash: number[] }> = [];
@@ -68,8 +69,17 @@ function createRecordingContext(pattern: CanvasPattern | null = null) {
 
 const solidPoints = [0.1, 0.5, 0.9, 0, 0.4, 0.5, 0.6, 100, 0.8, 0.25, 0.5, 200];
 
-test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and dual-layer soft graphite with scatter', () => {
+test('solid profiles delegate to modular pen engines (ball, fountain, calli, pencil)', () => {
     const baseStyle = { color: '#222222', width: 4, opacity: 0.8, pattern: 'solid' as const };
+
+    assert.ok('ball' in PEN_REGISTRY);
+    assert.ok('fountain' in PEN_REGISTRY);
+    assert.ok('calli' in PEN_REGISTRY);
+    assert.ok('pencil' in PEN_REGISTRY);
+    assert.equal(getPenPlugin('ball').id, 'ball');
+    assert.equal(getPenPlugin('fountain').id, 'fountain');
+    assert.equal(getPenPlugin('calli').id, 'calli');
+    assert.equal(getPenPlugin('pencil').id, 'pencil');
 
     const ball = createRecordingContext();
     drawSolidProfileStrokePath(ball.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'ball' });
@@ -82,11 +92,10 @@ test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and du
 
     const fountain = createRecordingContext();
     drawSolidProfileStrokePath(fountain.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'fountain' });
-    assert.equal(fountain.strokes.length, 1, 'fountain uses one continuous stroke');
-    assert.equal(fountain.fills.length, 0);
-    assert.equal(fountain.strokes[0].lineWidth, 4);
-    assert.equal(fountain.strokes[0].lineCap, 'round');
-    assert.ok(fountain.commands.includes('quadraticCurveTo'), 'fountain path is smoothed');
+    assert.ok(fountain.fills.length >= 1, 'fountain v2 uses tangential capsule fills');
+    assert.ok(fountain.fills.every(f => f.rule === 'nonzero'), 'fountain v2 enforces nonzero winding');
+    assert.equal(fountain.strokes.length, 0, 'fountain v2 uses filled capsule geometry');
+    assert.ok(fountain.commands.includes('closePath'), 'fountain v2 closes capsule trapezoids');
 
     const calli = createRecordingContext();
     drawSolidProfileStrokePath(calli.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'calli' });
@@ -97,17 +106,10 @@ test('solid profiles use continuous paths, ribbon fills, fixed-nib quads, and du
 
     const pencil = createRecordingContext();
     drawSolidProfileStrokePath(pencil.context, solidPoints, 0, 100, 0, { ...baseStyle, profile: 'pencil' });
-    assert.equal(pencil.strokes.length, 3, 'pencil renders 3 continuous stroke passes (halo, body, core)');
-    assert.equal(pencil.fills.length, 0, 'continuous pencil stroke uses stroke passes without per-point particle fills');
-    assert.equal(pencil.arcs.length, 0, 'pencil uses continuous path rather than per-point arc loops');
-    assert.equal(pencil.strokes[0].lineCap, 'round');
-    assert.equal(pencil.strokes[1].lineCap, 'round');
-    assert.equal(pencil.strokes[2].lineCap, 'round');
-    // Verify decreasing width and increasing alpha across the 3 passes
-    assert.ok(pencil.strokes[0].lineWidth > pencil.strokes[1].lineWidth, 'Pass 1 is wider than Pass 2');
-    assert.ok(pencil.strokes[1].lineWidth > pencil.strokes[2].lineWidth, 'Pass 2 is wider than Pass 3');
-    assert.ok(pencil.strokes[0].globalAlpha < pencil.strokes[1].globalAlpha, 'Pass 1 alpha is softer than Pass 2');
-    assert.ok(pencil.strokes[1].globalAlpha < pencil.strokes[2].globalAlpha, 'Pass 2 alpha is softer than Pass 3');
+    assert.equal(pencil.fills.length, 2, 'pencil vector sketch renders 2 nonzero ribbon fills (outer porous + inner core)');
+    assert.ok(pencil.fills.every(f => f.rule === 'nonzero'), 'pencil fills enforce nonzero winding');
+    assert.equal(pencil.strokes.length, 1, 'pencil vector sketch renders 1 batched dry edge filament stroke');
+    assert.deepEqual(pencil.dashCalls[pencil.dashCalls.length - 1], [], 'pencil always resets setLineDash([])');
 });
 
 test('renderContinuousSolidStroke handles single point touches with arc and fill', () => {
@@ -191,7 +193,6 @@ test('buildCalligraphicChiselPath groups segments into Monotone Ribbon Strips an
     }
 
     const chisel1 = buildCalligraphicChiselPath(rawPoints, 5);
-    // With Monotone Ribbon Strips, strips should be grouped into few continuous polygons (< 15) instead of 100+ individual quads
     assert.ok((chisel1 as any).strips.length < 15, `Monotone ribbon strips must be < 15, got ${(chisel1 as any).strips.length}`);
 
     // WeakMap cache hit check
@@ -199,7 +200,7 @@ test('buildCalligraphicChiselPath groups segments into Monotone Ribbon Strips an
     assert.equal(chisel1.toSvgPathD(), chisel2.toSvgPathD(), 'cached SVG path matches identical input');
 });
 
-test('renderContinuousSolidStroke manages live prefix window for long calli strokes (>120 points)', () => {
+test('renderContinuousSolidStroke batches long calli strokes (>120 points) with nonzero winding', () => {
     resetCalliCacheForTesting();
     const recording = createRecordingContext();
     const longPoints: { x: number; y: number }[] = [];
@@ -215,8 +216,8 @@ test('renderContinuousSolidStroke manages live prefix window for long calli stro
         profile: 'calli',
     });
 
-    // Should have filled both the cached prefix and live tail with nonzero rule
-    assert.ok(recording.fills.length >= 2, 'long live stroke splits into prefix and tail fills');
+    // Should have filled batches of 48 convex hulls with nonzero rule
+    assert.ok(recording.fills.length >= 2, 'long calli stroke batches hulls into bounded fill calls');
     assert.ok(recording.fills.every(f => f.rule === 'nonzero'), 'all calli fills must enforce nonzero winding');
 
     resetCalliCacheForTesting();

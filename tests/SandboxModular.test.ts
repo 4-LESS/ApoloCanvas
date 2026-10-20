@@ -185,7 +185,7 @@ describe('Sandbox Modular Canvas Architecture', () => {
         assert.ok(optStatsReceived, 'Optimized engine should report benchmark stats');
     });
 
-    it('pencil renders 3 continuous passes on canvas without per-point arc loops', async () => {
+    it('pencil delegates to Vector Sketch O(1) engine (2 fills + 1 filament stroke)', async () => {
         const { renderContinuousSolidStroke, resetGraphitePatternCacheForTesting } = await import('../src/engine/PatternedStrokeRenderer.ts');
         resetGraphitePatternCacheForTesting();
 
@@ -200,8 +200,10 @@ describe('Sandbox Modular Canvas Architecture', () => {
             moveTo: () => {},
             lineTo: () => {},
             quadraticCurveTo: () => {},
+            closePath: () => {},
+            setLineDash: () => {},
             arc: (...args: any[]) => recordedArcs.push(args),
-            fill: () => recordedFills.push(true),
+            fill: (rule?: string) => recordedFills.push(rule),
             stroke: () => {
                 recordedStrokes.push({
                     lineWidth: mockContext.lineWidth,
@@ -232,16 +234,8 @@ describe('Sandbox Modular Canvas Architecture', () => {
             profile: 'pencil',
         });
 
-        // Must execute exactly 3 continuous passes
-        assert.strictEqual(recordedStrokes.length, 3, 'pencil must render 3 continuous stroke passes');
-        assert.strictEqual(recordedArcs.length, 0, 'pencil must not use per-point arc() particle loops');
-        assert.strictEqual(recordedFills.length, 0, 'pencil must not use fill() on continuous paths');
-
-        // Verify decreasing width and increasing alpha (Pass 1 halo, Pass 2 body, Pass 3 core)
-        assert.ok(recordedStrokes[0].lineWidth > recordedStrokes[1].lineWidth, 'Pass 1 is wider than Pass 2');
-        assert.ok(recordedStrokes[1].lineWidth > recordedStrokes[2].lineWidth, 'Pass 2 is wider than Pass 3');
-        assert.ok(recordedStrokes[0].globalAlpha < recordedStrokes[1].globalAlpha, 'Pass 1 is softer than Pass 2');
-        assert.ok(recordedStrokes[1].globalAlpha < recordedStrokes[2].globalAlpha, 'Pass 2 is softer than Pass 3');
+        assert.strictEqual(recordedFills.length, 2, 'pencil must execute 2 nonzero ribbon fills (coarse + core)');
+        assert.strictEqual(recordedStrokes.length, 1, 'pencil must execute 1 dry edge filament stroke');
     });
 
     it('SVG companion export includes userSpaceOnUse apolo-pencil-grain filter when pencil stroke is present', async () => {

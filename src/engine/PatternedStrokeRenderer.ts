@@ -1,9 +1,11 @@
-import type { StrokePattern, StrokeStyle } from '../core/types';
+import type { PenProfileId, StrokePattern, StrokeStyle } from '../core/types.ts';
+import { calliPenPlugin, getPenPlugin, pencilPenPlugin } from './pens/index.ts';
 
 let graphiteTileCache: { color: string; pattern: CanvasPattern } | null = null;
 
 export function resetGraphitePatternCacheForTesting(): void {
     graphiteTileCache = null;
+    pencilPenPlugin.resetCache?.();
 }
 
 export function getGraphitePattern(ctx: CanvasRenderingContext2D, color: string): CanvasPattern | null {
@@ -70,6 +72,7 @@ let activeLivePrefix: LivePrefixCache | null = null;
 
 export function resetCalliCacheForTesting(): void {
     activeLivePrefix = null;
+    calliPenPlugin.resetCache?.();
 }
 
 /**
@@ -364,169 +367,16 @@ export function buildCalligraphicChiselPath(
 }
 
 /**
- * Renderizador unificado de trazos sólidos con perfiles continuos
+ * Renderizador unificado de trazos sólidos con perfiles continuos.
+ * Delega directamente en el registro modular `src/engine/pens/`.
  */
 export function renderContinuousSolidStroke(
     ctx: CanvasRenderingContext2D,
-    points: readonly { x: number; y: number; pressure?: number }[],
-    style: { color: string; width: number; opacity: number; profile?: string }
+    points: readonly { x: number; y: number; pressure?: number; time?: number }[],
+    style: { color: string; width: number; opacity: number; profile?: PenProfileId | string; tiltAngle?: number; simulatePressure?: boolean }
 ): void {
     if (!points || points.length === 0) return;
-
-    const profile = style.profile ?? 'fountain';
-    const baseWidth = style.width;
-    const opacity = style.opacity;
-    const color = style.color;
-
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.globalAlpha = opacity;
-
-    // Caso 1: Punto único (toque simple)
-    if (points.length === 1) {
-        const pt = points[0];
-        if (profile === 'pencil') {
-            const grainPattern = getGraphitePattern(ctx, color);
-            ctx.fillStyle = grainPattern ?? color;
-            const shiftX = Math.round((pt.x * 37.7) % 96);
-            const shiftY = Math.round((pt.y * 53.3) % 96);
-            if (grainPattern && typeof (grainPattern as any).setTransform === 'function' && typeof DOMMatrix !== 'undefined') {
-                (grainPattern as any).setTransform(new DOMMatrix().translate(shiftX, shiftY));
-            }
-            const avgPressure = pt.pressure !== undefined && pt.pressure > 0 ? pt.pressure : 0.5;
-            const pFactor = 0.55 + 0.45 * avgPressure;
-            ctx.beginPath();
-            ctx.arc(pt.x, pt.y, Math.max(1, (baseWidth * pFactor) / 2), 0, Math.PI * 2);
-            ctx.fill();
-        } else if (profile === 'calli') {
-            ctx.fillStyle = color;
-            ctx.globalAlpha = opacity;
-            const chisel = buildCalligraphicChiselPath(points, baseWidth);
-            chisel.drawToCanvas(ctx);
-        } else {
-            ctx.beginPath();
-            ctx.arc(pt.x, pt.y, Math.max(1, baseWidth / 2), 0, Math.PI * 2);
-            ctx.fill();
-        }
-        ctx.restore();
-        return;
-    }
-
-    // Helper para construir un camino suave continuo de principio a fin
-    const buildContinuousPath = () => {
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-            const prev = points[i - 1];
-            const curr = points[i];
-            const mx = (prev.x + curr.x) / 2;
-            const my = (prev.y + curr.y) / 2;
-            ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
-        }
-        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-    };
-
-    if (profile === 'ball') {
-        // Bolígrafo: Monolinea 100% constante
-        ctx.lineWidth = Math.max(1, baseWidth * 0.9);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        buildContinuousPath();
-        ctx.stroke();
-
-    } else if (profile === 'fountain') {
-        // Estilográfica: Cinta continua variable basada en presión con suavizado EMA
-        ctx.lineWidth = Math.max(1, baseWidth);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        buildContinuousPath();
-        ctx.stroke();
-
-    } else if (profile === 'calli') {
-        ctx.save();
-        ctx.fillStyle = color;
-        ctx.globalAlpha = opacity;
-
-        if (points.length > 120 && opacity === 1) {
-            const isSameStroke = activeLivePrefix && (
-                activeLivePrefix.pointsRef === points ||
-                (activeLivePrefix.firstPoint &&
-                 points[0].x === activeLivePrefix.firstPoint.x &&
-                 points[0].y === activeLivePrefix.firstPoint.y)
-            ) && points.length >= activeLivePrefix.frozenLength;
-
-            if (!isSameStroke || (points.length - activeLivePrefix!.frozenLength > 32)) {
-                const frozenLength = points.length - 24;
-                const prefixSlice = points.slice(0, frozenLength);
-                activeLivePrefix = {
-                    pointsRef: points,
-                    firstPoint: { x: points[0].x, y: points[0].y },
-                    frozenLength,
-                    prefixChisel: buildCalligraphicChiselPath(prefixSlice, baseWidth),
-                };
-            }
-
-            // Draw cached prefix
-            activeLivePrefix!.prefixChisel.drawToCanvas(ctx);
-
-            // Draw live tail (with overlap of 2 points to avoid seam gap)
-            const tailSlice = points.slice(Math.max(0, activeLivePrefix!.frozenLength - 2));
-            const tailChisel = buildCalligraphicChiselPath(tailSlice, baseWidth);
-            tailChisel.drawToCanvas(ctx);
-        } else {
-            activeLivePrefix = null;
-            const chisel = buildCalligraphicChiselPath(points, baseWidth);
-            chisel.drawToCanvas(ctx);
-        }
-        ctx.restore();
-
-    } else if (profile === 'pencil') {
-        // 3-Pass Soft-Edge Continuous Stroke (Zero shadowBlur, 120fps in Live pointermove)
-        const grainPattern = getGraphitePattern(ctx, color);
-        ctx.strokeStyle = grainPattern ?? color;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        let totalP = 0;
-        for (let i = 0; i < points.length; i++) {
-            totalP += (points[i].pressure !== undefined && points[i].pressure! > 0) ? points[i].pressure! : 0.5;
-        }
-        const avgPressure = totalP / points.length;
-        const pFactor = 0.55 + 0.45 * avgPressure;
-
-        const shiftX = Math.round((points[0].x * 37.7) % 96);
-        const shiftY = Math.round((points[0].y * 53.3) % 96);
-
-        const applyShift = (passOffsetX: number, passOffsetY: number) => {
-            if (grainPattern && typeof (grainPattern as any).setTransform === 'function' && typeof DOMMatrix !== 'undefined') {
-                (grainPattern as any).setTransform(new DOMMatrix().translate(shiftX + passOffsetX, shiftY + passOffsetY));
-            }
-        };
-
-        // Pass 1 (Outer Soft Halo — replaces shadowBlur)
-        applyShift(0, 0);
-        ctx.lineWidth = Math.max(1.2, baseWidth * 1.18);
-        ctx.globalAlpha = opacity * pFactor * 0.22;
-        buildContinuousPath();
-        ctx.stroke();
-
-        // Pass 2 (Mid Graphite Body)
-        applyShift(31, 19);
-        ctx.lineWidth = Math.max(1, baseWidth * 0.92);
-        ctx.globalAlpha = opacity * pFactor * 0.48;
-        buildContinuousPath();
-        ctx.stroke();
-
-        // Pass 3 (Dense Inner Core)
-        applyShift(67, 43);
-        ctx.lineWidth = Math.max(0.8, baseWidth * 0.62);
-        ctx.globalAlpha = opacity * pFactor * 0.72;
-        buildContinuousPath();
-        ctx.stroke();
-    }
-
-    ctx.restore();
+    getPenPlugin(style.profile).renderCanvas(ctx, points, style);
 }
 
 export function drawSolidProfileStrokePath(
