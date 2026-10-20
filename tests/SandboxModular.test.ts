@@ -321,6 +321,27 @@ describe('Sandbox Modular Canvas Architecture', () => {
         assert.ok(!svgOut.body.includes('feTurbulence'), 'SVG output must not rely on slow feTurbulence filters');
     });
 
+    it('calli-v2 renders stable 2D chisel hull parallel to nib angle and updates SVG when points array grows in-place', async () => {
+        const calliV2Mod = await import('../sandbox/pens/calli-v2.js');
+        assert.strictEqual(calliV2Mod.id, 'calli-v2');
+        assert.strictEqual(calliV2Mod.incrementalBake, true);
+
+        const style = { width: 12, color: '#1e1e1e', opacity: 1.0, tiltAngle: Math.PI / 2 }; // 90 deg vertical nib
+        const activePoints = [{ x: 100, y: 50, pressure: 0.5 }];
+
+        // 1. Simulate pointerdown (1 point)
+        const svg1 = calliV2Mod.renderSvg(activePoints, style);
+        const len1 = svg1.body.length;
+
+        // 2. Simulate pointermove mutating the same array in-place along the 90 deg nib direction (vertical line)
+        for (let i = 1; i <= 25; i++) {
+            activePoints.push({ x: 100 + (i % 2 === 0 ? 0.05 : -0.05), y: 50 + i * 8, pressure: 0.5 });
+        }
+
+        const svg2 = calliV2Mod.renderSvg(activePoints, style);
+        assert.ok(svg2.body.length > len1 * 5, 'SVG must include the full grown vector path, not just the initial point');
+    });
+
     it('benchmarks average FPS of all pens reaching 50,000 points in a single stroke', async () => {
         const pensDir = path.join(sandboxDir, 'pens');
         const jsFiles = fs.readdirSync(pensDir).filter(f => f.endsWith('.js'));
@@ -508,6 +529,8 @@ describe('Sandbox Modular Canvas Architecture', () => {
             assert.ok(sketchRes && sketchRes.avgFps >= 60, 'pencil-sketch must sustain >= 60 FPS average up to 50,000 points');
             const fountainV2Res = results.find(r => r.id === 'fountain-v2');
             assert.ok(fountainV2Res && fountainV2Res.avgFps >= 60, 'fountain-v2 must sustain >= 60 FPS average up to 50,000 points');
+            const calliV2Res = results.find(r => r.id === 'calli-v2');
+            assert.ok(calliV2Res && calliV2Res.avgFps >= 60, 'calli-v2 must sustain >= 60 FPS average up to 50,000 points');
         } finally {
             globalThis.document = prevDoc;
             (globalThis as any).Path2D = prevPath2D;

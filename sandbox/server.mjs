@@ -36,6 +36,7 @@ const PREFERRED_ORDER = [
     'fountain',
     'fountain-v2',
     'calli',
+    'calli-v2',
     'pencil-simple',
     'pencil-multistrand',
     'pencil-ribbon-jitter',

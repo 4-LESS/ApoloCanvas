@@ -852,6 +852,7 @@
             'fountain',
             'fountain-v2',
             'calli',
+            'calli-v2',
             'pencil-simple',
             'pencil-multistrand',
             'pencil-ribbon-jitter',
@@ -959,11 +960,12 @@
             let body = '';
 
             for (const s of committedStrokes) {
-                if (!s._cachedSvgOut) {
+                if (!s._cachedSvgOut || s._cachedSvgPointCount !== s.points.length) {
                     const mod = state.penModules[s.style?.penId];
                     s._cachedSvgOut = (mod && typeof mod.renderSvg === 'function')
                         ? mod.renderSvg(s.points, s.style)
                         : fallbackSvg(s.points, s.style);
+                    s._cachedSvgPointCount = s.points.length;
                 }
                 Object.assign(defs, s._cachedSvgOut.defs || {});
                 body += s._cachedSvgOut.body || '';
