@@ -1,10 +1,11 @@
-import { ToolType, StrokeStyle, CanvasElement, BoundingBox, ShapeType, PenProfileId } from './types';
+import type { ToolType, StrokeStyle, CanvasElement, BoundingBox, ShapeType, PenProfileId } from './types.ts';
 
 export interface EngineEvents {
     'tool:changed': (tool: ToolType, shapeType?: ShapeType) => void;
     'style:changed': (style: Partial<StrokeStyle>, profileId?: PenProfileId) => void;
     'selection:changed': (selected: CanvasElement[], bounds: BoundingBox | null) => void;
     'pen:changed': (penEnabled: boolean) => void;
+    'straighten:changed': (enabled: boolean) => void;
     'snap:detected': (shapeType: ShapeType, x: number, y: number) => void;
     'canvas:dirty': (pageId: string) => void;
     'zoom:changed': (zoom: number) => void;

@@ -1,7 +1,7 @@
-import { App, Editor, Notice, TFile } from 'obsidian';
-import { EditorView } from '@codemirror/view';
+import type { App, Editor, Notice, TFile } from 'obsidian';
+import type { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
-import {
+import type {
     BoundingBox,
     BoxAccentColor,
     BoxBgTheme,
@@ -16,56 +16,72 @@ import {
     Point,
     ShapeElement,
     ShapeType,
+    StrokeCache,
     StrokeElement,
     StrokePattern,
     StrokeStyle,
     ThicknessPreset,
     ToolbarSlot,
     ToolType,
-} from '../core/types';
-import { InputManager } from './input/InputManager';
-import { PointBuffer } from './input/PointBuffer';
-import { SpatialGrid } from './spatial/SpatialGrid';
-import { PersistenceQueue } from '../io/PersistenceQueue';
-import { ShapeRecognizer } from '../tools/ShapeRecognizer';
-import { Predictor } from './input/Predictor';
-import { EngineEventBus } from '../core/events';
-import { Toolbar } from '../ui/Toolbar';
-import { ToolEstuche } from '../ui/ToolEstuche';
-import { LassoMenu } from '../ui/LassoMenu';
-import { BoxMenu, BoxMenuState } from '../ui/BoxMenu';
-import { ZoomPill } from '../ui/ZoomPill';
-import { Toast } from '../ui/Toast';
-import { PopoverController } from '../ui/kit';
-import { LinkSuggestModal, openLocalGraph } from '../ui/LinkSuggestModal';
-import { createDotsIcon, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
-import { calculateNaturalPressureScale, smoothPressure } from './input/PressureCurve';
-import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser';
+    WorkspaceToolState,
+} from '../core/types.ts';
+import {
+    DEFAULT_WORKSPACE_TOOL_STATE,
+    cloneWorkspaceToolState,
+} from '../core/types.ts';
+import { InputManager } from './input/InputManager.ts';
+import { PointBuffer } from './input/PointBuffer.ts';
+import {
+    applyStrokePattern,
+    bakeLiveStrokeSegment,
+    computeStraightLinePoints,
+    drawPatternedStrokePath,
+    getOrCreateStrokeSprite,
+    type LiveBakeState,
+    renderContinuousSolidStroke,
+    snapLineAngle,
+} from './PatternedStrokeRenderer.ts';
+import { getPenPlugin } from './pens/index.ts';
+import { SpatialGrid } from './spatial/SpatialGrid.ts';
+import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
+import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
+import { Predictor } from './input/Predictor.ts';
+import { EngineEventBus } from '../core/events.ts';
+import { Toolbar } from '../ui/Toolbar.ts';
+import { ToolEstuche } from '../ui/ToolEstuche.ts';
+import { LassoMenu } from '../ui/LassoMenu.ts';
+import { BoxMenu, type BoxMenuState } from '../ui/BoxMenu.ts';
+import { ZoomPill } from '../ui/ZoomPill.ts';
+import { Toast } from '../ui/Toast.ts';
+import { PopoverController } from '../ui/kit/index.ts';
+import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
+import { smoothPressure } from './input/PressureCurve.ts';
+import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser.ts';
 import {
     cleanAnchorText,
     findBestMatchingLine,
     findBestMatchingPreviewBlock,
-    PreviewBlockInfo,
-} from './anchoring/SmartAnchor';
+    type PreviewBlockInfo,
+} from './anchoring/SmartAnchor.ts';
 import {
     applySpaceMutationToMarkdown,
     BoxRegistry,
     escapeRegExp,
     htmlEscapeAttribute,
     normalizeBoxId,
-    SpaceMutation,
-} from '../editor/ApoloSpaceExtension';
-import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion';
+    type SpaceMutation,
+} from '../editor/ApoloSpaceExtension.ts';
+import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion.ts';
 import {
-    DocumentContentBounds,
+    type DocumentContentBounds,
     isInkAllowedAt,
     isScreenPointForbidden,
     sanitizeNormalizedPoint,
     snapNormalizedPoint,
-    SpaceBlockRegion,
+    type SpaceBlockRegion,
     DEFAULT_INK_LIMITS,
     splitStrokeIntoValidRuns,
-} from './anchoring/InkBoundary';
+} from './anchoring/InkBoundary.ts';
 
 export interface CanvasControllerOptions {
     palmRejectionCooldownMs: number;
@@ -75,6 +91,7 @@ export interface CanvasControllerOptions {
     enabled: boolean;
     enableMouseDrawing: boolean;
     shapeRecognition: boolean;
+    straightenLines?: boolean;
     gridDensity?: number;
     defaultBoxHeight?: number;
     defaultBoxGridStyle?: BoxGridStyle;
@@ -94,7 +111,10 @@ export interface CanvasControllerOptions {
         highlighter?: { colors: string[]; opacities: number[] };
         shape?: { colors: string[]; opacities: number[] };
     };
+    toolState?: WorkspaceToolState;
+    onToolStateChange?: (state: WorkspaceToolState) => void;
     onPenEnabledChange?: (enabled: boolean) => void;
+    onToggleStraighten?: (enabled: boolean) => void;
     onToolbarSlotChange?: (slot: ToolbarSlot) => void;
     onFavoritesChange?: (favorites: PenFavorite[]) => void;
     onToolPalettesChange?: (palettes: {
@@ -166,6 +186,7 @@ export class CanvasController {
     private readonly history: HistorySnapshot[] = [];
     private readonly future: HistorySnapshot[] = [];
     private readonly touches = new Map<number, TouchPoint>();
+    private readonly strokeCache: StrokeCache = new Map<string, HTMLCanvasElement>();
     private singleTouchStartCoords: { x: number; y: number; time: number } | null = null;
     private lastSingleTouch: { x: number; y: number } | null = null;
     private singleTouchPanned = false;
@@ -191,6 +212,7 @@ export class CanvasController {
 
     // Document & Tool State
     private document: PageDocument;
+    private toolState: WorkspaceToolState;
     private tool: ToolType = 'pen';
     private style: StrokeStyle;
     private shapeType: ShapeType = 'rect';
@@ -230,6 +252,17 @@ export class CanvasController {
     private readonly predictedPoint: Point = { x: 0, y: 0, pressure: 0, time: 0 };
     private hasPrediction = false;
 
+    // Live O(1) Incremental Baking Buffer
+    private liveBakeCanvas: HTMLCanvasElement | null = null;
+    private liveBakeCtx: CanvasRenderingContext2D | null = null;
+    private liveBakedIndex = 0;
+    private liveBakeSegState: Record<string, unknown> = {};
+    private liveBakeZoom = -1;
+    private liveBakeScrollLeft = -1;
+    private liveBakeScrollTop = -1;
+    private liveBakeStyleKey = '';
+    private straightenLines = false;
+
     // Zoom & Viewport State (Single Source of Truth: {zoom, scrollLeft, scrollTop})
     private zoom = 1.0;
     private lastAppliedZoom = -1;
@@ -246,16 +279,30 @@ export class CanvasController {
     private readonly handledBoxEvents = new WeakSet<Event>();
     private destroyed = false;
 
+    private readonly scroller: HTMLElement;
+    private readonly editor: Editor | undefined;
+    private readonly file: TFile;
+    private readonly persistence: PersistenceQueue;
+    private readonly options: CanvasControllerOptions;
+
     constructor(
-        private readonly scroller: HTMLElement,
-        private readonly editor: Editor | undefined,
+        scroller: HTMLElement,
+        editor: Editor | undefined,
         documentModel: PageDocument,
-        private readonly file: TFile,
+        file: TFile,
         pageId: string,
-        private readonly persistence: PersistenceQueue,
-        private readonly options: CanvasControllerOptions,
+        persistence: PersistenceQueue,
+        options: CanvasControllerOptions,
     ) {
+        this.scroller = scroller;
+        this.editor = editor;
+        this.file = file;
+        this.persistence = persistence;
+        this.options = options;
         this.document = documentModel;
+        if (!this.document.elements) {
+            this.document.elements = [];
+        }
         if (this.document.boxes) {
             for (const [id, meta] of Object.entries(this.document.boxes)) {
                 BoxRegistry.setHeight(id, meta.height);
@@ -270,7 +317,6 @@ export class CanvasController {
             }
         }
         this.pageId = pageId;
-        this.penEnabled = options.enabled;
         this.shapeRecognition = options.shapeRecognition;
         this.gridDensity = options.gridDensity ?? 32;
         this.toolbarSlot = options.toolbarSlot ?? 'tc';
@@ -278,43 +324,57 @@ export class CanvasController {
             ? [...options.favorites]
             : [...DEFAULT_FAVORITES];
 
+        if (options.toolState) {
+            this.toolState = cloneWorkspaceToolState(options.toolState);
+        } else {
+            this.toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            if (options.defaultPenColor) this.toolState.pen.color = options.defaultPenColor;
+            if (options.defaultPenWidth) this.toolState.pen.width = options.defaultPenWidth;
+            if (options.straightenLines !== undefined) this.toolState.pen.straightenLines = options.straightenLines;
+            if (options.enabled !== undefined) this.toolState.penEnabled = options.enabled;
+            if (options.favorites && options.favorites.length === 4) {
+                this.toolState.pen.palette.colors = options.favorites.map(f => f.color);
+            }
+            if (options.toolPalettes) {
+                if (options.toolPalettes.pen) {
+                    this.toolState.pen.palette = {
+                        colors: [...options.toolPalettes.pen.colors],
+                        opacities: [...options.toolPalettes.pen.opacities],
+                    };
+                }
+                if (options.toolPalettes.highlighter) {
+                    this.toolState.highlighter.palette = {
+                        colors: [...options.toolPalettes.highlighter.colors],
+                        opacities: [...options.toolPalettes.highlighter.opacities],
+                    };
+                }
+                if (options.toolPalettes.shape) {
+                    this.toolState.shape.palette = {
+                        colors: [...options.toolPalettes.shape.colors],
+                        opacities: [...options.toolPalettes.shape.opacities],
+                    };
+                }
+            }
+        }
+
+        this.penEnabled = this.toolState.penEnabled;
+        this.straightenLines = this.toolState.pen.straightenLines;
         this.toolPalettes = {
-            pen: {
-                colors: options.toolPalettes?.pen?.colors && options.toolPalettes.pen.colors.length === 4
-                    ? [...options.toolPalettes.pen.colors]
-                    : (options.favorites && options.favorites.length === 4
-                        ? options.favorites.map(f => f.color)
-                        : [...DEFAULT_TOOL_PALETTES.pen.colors]),
-                opacities: options.toolPalettes?.pen?.opacities && options.toolPalettes.pen.opacities.length === 4
-                    ? [...options.toolPalettes.pen.opacities]
-                    : [...DEFAULT_TOOL_PALETTES.pen.opacities],
-            },
-            highlighter: {
-                colors: options.toolPalettes?.highlighter?.colors && options.toolPalettes.highlighter.colors.length === 4
-                    ? [...options.toolPalettes.highlighter.colors]
-                    : [...DEFAULT_TOOL_PALETTES.highlighter.colors],
-                opacities: options.toolPalettes?.highlighter?.opacities && options.toolPalettes.highlighter.opacities.length === 4
-                    ? [...options.toolPalettes.highlighter.opacities]
-                    : [...DEFAULT_TOOL_PALETTES.highlighter.opacities],
-            },
-            shape: {
-                colors: options.toolPalettes?.shape?.colors && options.toolPalettes.shape.colors.length === 4
-                    ? [...options.toolPalettes.shape.colors]
-                    : [...DEFAULT_TOOL_PALETTES.shape.colors],
-                opacities: options.toolPalettes?.shape?.opacities && options.toolPalettes.shape.opacities.length === 4
-                    ? [...options.toolPalettes.shape.opacities]
-                    : [...DEFAULT_TOOL_PALETTES.shape.opacities],
-            },
+            pen: { colors: [...this.toolState.pen.palette.colors], opacities: [...this.toolState.pen.palette.opacities] },
+            highlighter: { colors: [...this.toolState.highlighter.palette.colors], opacities: [...this.toolState.highlighter.palette.opacities] },
+            shape: { colors: [...this.toolState.shape.palette.colors], opacities: [...this.toolState.shape.palette.opacities] },
         };
 
         this.style = {
-            color: options.defaultPenColor,
-            width: options.defaultPenWidth,
-            opacity: 1,
-            pattern: 'solid',
+            color: this.toolState.pen.color,
+            width: this.toolState.pen.width,
+            opacity: this.toolState.pen.opacity,
+            pattern: this.toolState.pen.pattern,
             lineCap: 'round',
         };
-        this.previousPenColor = options.defaultPenColor;
+        this.previousPenColor = this.toolState.pen.color;
+
+        this.applyWorkspaceToolState(this.toolState, false);
 
         const context = this.canvas.getContext('2d', { alpha: true, desynchronized: true });
         if (!context) throw new Error('Canvas 2D is unavailable in this Obsidian WebView.');
@@ -413,6 +473,7 @@ export class CanvasController {
         window.addEventListener('scroll', this.scrollHandler, { capture: true, passive: true });
 
         this.resizeObserver = new ResizeObserver(() => {
+            this.strokeCache.clear();
             this.positionLayer();
             this.resize();
             if (this.options.readonly) {
@@ -535,6 +596,8 @@ export class CanvasController {
                         profileId: this.penProfileId,
                         smoothing: this.smoothing,
                         pressureSensitivity: this.pressureSensitivity,
+                        lineStyle: this.style.pattern,
+                        pattern: this.style.pattern,
                         favorites: this.favorites,
                         eraserMode: this.eraserMode,
                         eraserRadius: this.eraserRadius,
@@ -542,6 +605,8 @@ export class CanvasController {
                         lassoMode: this.lassoMode,
                         shapeType: this.shapeType,
                         snapGrid: this.snapGrid,
+                        straightenLines: this.straightenLines,
+                        onlyHighlighter: this.toolState.eraser.onlyHighlighter,
                     }, toolBtn);
                 }
             },
@@ -578,6 +643,8 @@ export class CanvasController {
                 profileId: this.penProfileId,
                 smoothing: this.smoothing,
                 pressureSensitivity: this.pressureSensitivity,
+                lineStyle: this.style.pattern,
+                pattern: this.style.pattern,
                 favorites: this.favorites,
                 eraserMode: this.eraserMode,
                 eraserRadius: this.eraserRadius,
@@ -585,16 +652,36 @@ export class CanvasController {
                 lassoMode: this.lassoMode,
                 shapeType: this.shapeType,
                 snapGrid: this.snapGrid,
+                straightenLines: this.straightenLines,
+                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
             },
             {
                 onSelectProfile: (profileId) => this.applyPenProfile(profileId),
                 onChangeColor: (color) => this.setInkColor(color),
                 onChangeWidth: (width) => this.setWidth(width),
-                onChangeSmoothing: (smoothing) => { this.smoothing = smoothing; },
+                onChangeSmoothing: (smoothing) => {
+                    this.smoothing = smoothing;
+                    this.toolState.pen.smoothing = smoothing;
+                    this.notifyToolStateChange();
+                },
                 onChangePressure: (pressure) => {
                     this.pressureSensitivity = pressure;
                     this.renderDirty = true;
                     this.schedulePaint();
+                },
+                onChangeLineStyle: (pattern) => {
+                    this.style.pattern = pattern;
+                    if (this.tool === 'pen') {
+                        this.toolState.pen.pattern = pattern;
+                    } else if (this.tool === 'highlighter') {
+                        this.toolState.highlighter.pattern = pattern;
+                    } else if (this.tool === 'shape') {
+                        this.toolState.shape.pattern = pattern;
+                    }
+                    this.estuche?.updateState({ lineStyle: pattern, pattern });
+                    this.options.eventBus?.emit('style:changed', { pattern });
+                    this.schedulePaint();
+                    this.notifyToolStateChange();
                 },
                 onUseFavorite: (index) => this.applyFavorite(index),
                 onSaveFavorite: (index) => this.saveFavoriteAt(index),
@@ -603,20 +690,42 @@ export class CanvasController {
                 },
                 onChangeEraserRadius: (radius) => {
                     this.eraserRadius = radius;
+                    this.toolState.eraser.radius = radius;
                     this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
+                    this.notifyToolStateChange();
                 },
-                onToggleScribble: (enabled) => { this.scribbleToErase = enabled; },
-                onSelectLassoMode: (mode) => { this.lassoMode = mode; },
+                onToggleScribble: (enabled) => {
+                    this.scribbleToErase = enabled;
+                    this.toolState.eraser.scribbleToErase = enabled;
+                    this.notifyToolStateChange();
+                },
+                onToggleOnlyHighlighter: (enabled) => {
+                    this.toolState.eraser.onlyHighlighter = enabled;
+                    this.notifyToolStateChange();
+                },
+                onSelectLassoMode: (mode) => {
+                    this.lassoMode = mode;
+                    this.toolState.lasso.mode = mode;
+                    this.notifyToolStateChange();
+                },
                 onSelectShapeType: (shapeType) => {
                     this.shapeType = shapeType;
+                    this.toolState.shape.shapeType = shapeType;
                     this.toolbar?.setShape(shapeType);
                     this.toolbar?.setTool('shape', shapeType);
+                    this.notifyToolStateChange();
                 },
                 onToggleSnapGrid: (enabled) => {
                     this.snapGrid = enabled;
+                    this.toolState.snapGrid = enabled;
                     this.toolbar?.setSnapGrid(enabled);
                     this.renderDirty = true;
                     this.schedulePaint();
+                    this.notifyToolStateChange();
+                },
+                onToggleStraighten: (enabled) => {
+                    this.setStraightenLines(enabled);
+                    this.options.onToggleStraighten?.(enabled);
                 },
                 onClose: () => undefined,
             },
@@ -633,9 +742,11 @@ export class CanvasController {
             },
             onPaste: () => this.duplicateSelection(),
             onLink: () => {
-                new LinkSuggestModal(this.options.app, (target) => {
-                    this.linkSelection(target);
-                }).open();
+                void import('../ui/LinkSuggestModal.ts').then(({ LinkSuggestModal }) => {
+                    new LinkSuggestModal(this.options.app, (target) => {
+                        this.linkSelection(target);
+                    }).open();
+                });
             },
             onBringToFront: () => this.changeSelectionOrder(true),
             onSendToBack: () => this.changeSelectionOrder(false),
@@ -1309,7 +1420,30 @@ export class CanvasController {
             if (isPreview) {
                 if (existingHandle) existingHandle.remove();
                 if (existingOptions) existingOptions.remove();
+
+                const boxElements = this.document.elements.filter(e => e.blockId === `space:${id}`);
+                let previewSvgWrap = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
+                if (boxElements.length > 0) {
+                    if (!previewSvgWrap) {
+                        previewSvgWrap = document.createElement('div');
+                        previewSvgWrap.className = 'apolo-box-preview-svg';
+                        el.appendChild(previewSvgWrap);
+                    }
+                    const targetW = Math.round(boxWidth || 800);
+                    const svgHash = `${boxElements.length}:${targetW}:${h}`;
+                    if (previewSvgWrap.dataset.apoloSvgHash !== svgHash || previewSvgWrap.children.length === 0) {
+                        const svgMarkup = renderBoxSvg(id, boxElements, targetW, h);
+                        const parsedSvg = createSvgFromMarkup(svgMarkup);
+                        previewSvgWrap.replaceChildren(parsedSvg);
+                        previewSvgWrap.dataset.apoloSvgHash = svgHash;
+                    }
+                } else if (previewSvgWrap) {
+                    previewSvgWrap.remove();
+                }
             } else {
+                const existingPreviewSvg = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
+                if (existingPreviewSvg) existingPreviewSvg.remove();
+
                 // 1. Subtle top-left 3-dots button
                 if (!existingOptions) {
                     const optBtn = document.createElement('button');
@@ -1470,7 +1604,21 @@ export class CanvasController {
         const paletteKey = this.tool === 'highlighter' ? 'highlighter' : (this.tool === 'shape' ? 'shape' : 'pen');
         this.activeColorSlots[paletteKey] = index;
         this.activeFavoriteIndex = index;
+        this.toolState[paletteKey].activeSlotIndex = index;
         const color = this.toolPalettes[paletteKey]?.colors[index] ?? this.favorites[index]?.color ?? '#1F4FD8';
+        if (paletteKey === 'highlighter') {
+            const op = (this.toolPalettes.highlighter.opacities[index] ?? 75) / 100;
+            this.style.opacity = op;
+            this.toolState.highlighter.opacity = op;
+        } else if (paletteKey === 'pen') {
+            const op = (this.toolPalettes.pen.opacities[index] ?? 100) / 100;
+            this.style.opacity = op;
+            this.toolState.pen.opacity = op;
+        } else if (paletteKey === 'shape') {
+            const op = (this.toolPalettes.shape.opacities[index] ?? 100) / 100;
+            this.style.opacity = op;
+            this.toolState.shape.opacity = op;
+        }
         this.setInkColor(color);
         // Note: strictly only changes ink color; does NOT alter current tool, profile, or width
     }
@@ -1486,6 +1634,12 @@ export class CanvasController {
         this.toolPalettes[toolKey].opacities[slotIdx] = opacity;
         this.activeColorSlots[toolKey] = slotIdx;
         this.activeFavoriteIndex = slotIdx;
+
+        this.toolState[toolKey].palette.colors[slotIdx] = newColor;
+        this.toolState[toolKey].palette.opacities[slotIdx] = opacity;
+        this.toolState[toolKey].activeSlotIndex = slotIdx;
+        this.toolState[toolKey].color = newColor;
+        this.toolState[toolKey].opacity = opacity / 100;
 
         // Keep favorites in sync if pen palette changed
         if (toolKey === 'pen' && this.favorites[slotIdx]) {
@@ -1525,6 +1679,7 @@ export class CanvasController {
         if (this.tool === 'eraser') {
             const radii = { fine: 10, medium: 20, thick: 40 };
             this.eraserRadius = radii[preset];
+            this.toolState.eraser.radius = this.eraserRadius;
             this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
             this.estuche?.updateState({ eraserRadius: this.eraserRadius });
             const labels = {
@@ -1533,6 +1688,7 @@ export class CanvasController {
                 thick: 'Borrador grande (40 px)',
             };
             this.toast?.show(labels[preset]);
+            this.notifyToolStateChange();
         } else if (this.tool === 'highlighter') {
             const widths = { fine: 12, medium: 20, thick: 32 };
             this.setWidth(widths[preset]);
@@ -1564,39 +1720,150 @@ export class CanvasController {
 
         if (profileId === 'hlr' || profileId === 'hlf') {
             this.tool = 'highlighter';
+            this.toolState.activeTool = 'highlighter';
+            this.toolState.highlighter.profileId = profileId;
+            this.toolState.highlighter.opacity = profile.op;
+            this.toolState.highlighter.pattern = this.style.pattern;
+            this.style.isHighlighter = true;
+            this.canvas.classList.add('is-highlighter-mode');
         } else {
             this.tool = 'pen';
+            this.toolState.activeTool = 'pen';
+            this.toolState.pen.profileId = profileId;
+            this.toolState.pen.opacity = profile.op;
+            this.toolState.pen.pattern = this.style.pattern;
+            this.style.isHighlighter = false;
+            this.canvas.classList.remove('is-highlighter-mode');
         }
 
-        this.toolbar?.setTool(this.tool);
+        this.toolbar?.setTool(this.tool, this.shapeType);
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
         this.estuche?.updateState({
             tool: this.tool,
             profileId: this.penProfileId,
             width: this.style.width,
+            lineStyle: this.style.pattern,
+            pattern: this.style.pattern,
+            straightenLines: this.straightenLines,
         });
-        this.options.eventBus?.emit('tool:changed', this.tool);
+        this.options.eventBus?.emit('tool:changed', this.tool, this.shapeType);
         this.options.eventBus?.emit('style:changed', this.style, this.penProfileId);
         this.schedulePaint();
+        this.notifyToolStateChange();
     }
 
     setInkColor(color: string): void {
         this.style.color = color;
         if (this.tool === 'pen') {
             this.previousPenColor = color;
+            this.toolState.pen.color = color;
+        } else if (this.tool === 'highlighter') {
+            this.toolState.highlighter.color = color;
+        } else if (this.tool === 'shape') {
+            this.toolState.shape.color = color;
         }
         this.toolbar?.setStyle(color, this.style.width, this.penProfileId);
         this.estuche?.updateState({ color });
         this.options.eventBus?.emit('style:changed', { color });
         this.schedulePaint();
+        this.notifyToolStateChange();
     }
 
     setWidth(width: number): void {
         this.style.width = width;
+        if (this.tool === 'pen') {
+            this.toolState.pen.width = width;
+        } else if (this.tool === 'highlighter') {
+            this.toolState.highlighter.width = width;
+        } else if (this.tool === 'shape') {
+            this.toolState.shape.width = width;
+        }
         this.toolbar?.setStyle(this.style.color, width, this.penProfileId);
         this.estuche?.updateState({ width });
         this.options.eventBus?.emit('style:changed', { width });
         this.schedulePaint();
+        this.notifyToolStateChange();
+    }
+
+    setStraightenLines(enabled: boolean): void {
+        this.straightenLines = enabled;
+        if (this.tool === 'pen') {
+            this.toolState.pen.straightenLines = enabled;
+        } else if (this.tool === 'highlighter') {
+            this.toolState.highlighter.straightenLines = enabled;
+        }
+        this.estuche?.updateState({ straightenLines: enabled });
+        this.options.eventBus?.emit('straighten:changed', enabled);
+        this.notifyToolStateChange();
+    }
+
+    getStraightenLines(): boolean {
+        return this.straightenLines;
+    }
+
+    getToolState(): WorkspaceToolState {
+        return cloneWorkspaceToolState(this.toolState);
+    }
+
+    applyWorkspaceToolState(state: WorkspaceToolState, updateUi = true): void {
+        this.toolState = cloneWorkspaceToolState(state);
+        this.penEnabled = state.penEnabled;
+        this.snapGrid = state.snapGrid;
+        this.toolPalettes = {
+            pen: { colors: [...state.pen.palette.colors], opacities: [...state.pen.palette.opacities] },
+            highlighter: { colors: [...state.highlighter.palette.colors], opacities: [...state.highlighter.palette.opacities] },
+            shape: { colors: [...state.shape.palette.colors], opacities: [...state.shape.palette.opacities] },
+        };
+        this.activeColorSlots = {
+            pen: state.pen.activeSlotIndex,
+            highlighter: state.highlighter.activeSlotIndex,
+            shape: state.shape.activeSlotIndex,
+        };
+
+        this.eraserMode = state.eraser.mode;
+        this.eraserRadius = state.eraser.radius;
+        this.scribbleToErase = state.eraser.scribbleToErase;
+        this.lassoMode = state.lasso.mode;
+        this.shapeType = state.shape.shapeType;
+
+        this.setTool(state.activeTool, false);
+
+        if (updateUi) {
+            this.toolbar?.setToolPalettes(this.toolPalettes);
+            this.toolbar?.setPenEnabled(this.penEnabled);
+            this.toolbar?.setSnapGrid(this.snapGrid);
+            this.toolbar?.setEraserMode(this.eraserMode);
+            this.toolbar?.setShape(this.shapeType);
+            this.toolbar?.setTool(this.tool, this.shapeType);
+            this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
+            this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
+            this.estuche?.updateState({
+                tool: this.tool,
+                slot: this.toolbarSlot,
+                color: this.style.color,
+                width: this.style.width,
+                profileId: this.penProfileId,
+                smoothing: this.smoothing,
+                pressureSensitivity: this.pressureSensitivity,
+                lineStyle: this.style.pattern,
+                pattern: this.style.pattern,
+                straightenLines: this.straightenLines,
+                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
+                eraserMode: this.eraserMode,
+                eraserRadius: this.eraserRadius,
+                scribbleToErase: this.scribbleToErase,
+                lassoMode: this.lassoMode,
+                shapeType: this.shapeType,
+                snapGrid: this.snapGrid,
+            });
+            this.updateLayerPointerEvents();
+        }
+        this.renderDirty = true;
+        this.schedulePaint();
+    }
+
+    private notifyToolStateChange(): void {
+        this.options.onToolStateChange?.(this.getToolState());
     }
 
     private readonly onCanvasDblClick = (event: MouseEvent): void => {
@@ -1658,6 +1925,7 @@ export class CanvasController {
     setPenEnabled(enabled: boolean): void {
         if (this.options.readonly) return;
         this.penEnabled = enabled;
+        this.toolState.penEnabled = enabled;
         if (!enabled) {
             this.resetCursor();
         } else {
@@ -1667,6 +1935,7 @@ export class CanvasController {
         this.toolbar?.setPenEnabled(enabled);
         this.options.onPenEnabledChange?.(enabled);
         this.options.eventBus?.emit('pen:changed', enabled);
+        this.notifyToolStateChange();
 
         if (!enabled && this.editor) {
             this.toast?.show('Modo teclado activo: toca el texto para editar');
@@ -1684,71 +1953,113 @@ export class CanvasController {
         if (!this.options.readonly) this.setTool(tool);
     }
 
-    setTool(tool: ToolType): void {
+    setTool(tool: ToolType, notify = true): void {
         const previousTool = this.tool;
         this.tool = tool;
+        this.toolState.activeTool = tool;
 
-        // Auto color and mode switch when moving between pen, highlighter, and shape
-        if (tool === 'highlighter' && previousTool !== 'highlighter') {
-            this.previousPenColor = this.style.color;
-            const hlSlot = this.activeColorSlots.highlighter ?? 0;
-            const hlColor = this.toolPalettes?.highlighter?.colors[hlSlot] || '#FDD835';
-            this.style.color = hlColor;
-            this.style.opacity = (this.toolPalettes?.highlighter?.opacities[hlSlot] ?? 75) / 100;
-            this.style.isHighlighter = true;
-            if (this.style.width < 8) {
-                this.style.width = 20;
-            }
-            this.canvas.classList.add('is-highlighter-mode');
-        } else if (previousTool === 'highlighter' && tool === 'pen') {
-            const penSlot = this.activeColorSlots.pen ?? 0;
-            this.style.color = this.toolPalettes?.pen?.colors[penSlot] || this.previousPenColor || '#1F4FD8';
-            this.style.opacity = (this.toolPalettes?.pen?.opacities[penSlot] ?? 100) / 100;
+        if (tool === 'pen') {
+            const slice = this.toolState.pen;
+            this.penProfileId = slice.profileId;
+            const profile = PEN_PROFILES[slice.profileId] || PEN_PROFILES.fountain;
+            this.style.color = slice.color;
+            this.style.width = slice.width;
+            this.style.opacity = slice.opacity;
+            this.style.pattern = slice.pattern;
+            this.style.lineCap = profile.cap;
             this.style.isHighlighter = false;
-            if (this.style.width > 10) {
-                this.style.width = 3.2;
-            }
+            this.smoothing = slice.smoothing;
+            this.straightenLines = slice.straightenLines;
             this.canvas.classList.remove('is-highlighter-mode');
-        } else if (tool === 'shape' && previousTool !== 'shape') {
-            const shapeSlot = this.activeColorSlots.shape ?? 0;
-            this.style.color = this.toolPalettes?.shape?.colors[shapeSlot] || '#2F6BFF';
-            this.style.opacity = (this.toolPalettes?.shape?.opacities[shapeSlot] ?? 100) / 100;
-            this.canvas.classList.remove('is-highlighter-mode');
-        } else if (previousTool === 'shape' && tool === 'pen') {
-            const penSlot = this.activeColorSlots.pen ?? 0;
-            this.style.color = this.toolPalettes?.pen?.colors[penSlot] || this.previousPenColor || '#1F4FD8';
-            this.style.opacity = (this.toolPalettes?.pen?.opacities[penSlot] ?? 100) / 100;
+        } else if (tool === 'highlighter') {
+            const slice = this.toolState.highlighter;
+            this.penProfileId = slice.profileId;
+            const profile = PEN_PROFILES[slice.profileId] || PEN_PROFILES.hlr;
+            this.style.color = slice.color;
+            this.style.width = slice.width;
+            this.style.opacity = slice.opacity;
+            this.style.pattern = slice.pattern;
+            this.style.lineCap = profile.cap;
+            this.style.isHighlighter = true;
+            this.straightenLines = slice.straightenLines;
+            this.canvas.classList.add('is-highlighter-mode');
+        } else if (tool === 'shape') {
+            const slice = this.toolState.shape;
+            this.shapeType = slice.shapeType;
+            this.style.color = slice.color;
+            this.style.width = slice.width;
+            this.style.opacity = slice.opacity;
+            this.style.pattern = slice.pattern;
+            this.style.lineCap = 'round';
+            this.style.isHighlighter = false;
             this.canvas.classList.remove('is-highlighter-mode');
         } else if (tool === 'eraser') {
+            const slice = this.toolState.eraser;
+            this.eraserMode = slice.mode;
+            this.eraserRadius = slice.radius;
+            this.scribbleToErase = slice.scribbleToErase;
             this.selection = [];
             this.lassoMenu?.hide();
+            this.canvas.classList.remove('is-highlighter-mode');
+        } else if (tool === 'lasso') {
+            const slice = this.toolState.lasso;
+            this.lassoMode = slice.mode;
             this.canvas.classList.remove('is-highlighter-mode');
         } else {
             this.canvas.classList.remove('is-highlighter-mode');
         }
 
-        this.toolbar?.setTool(tool);
+        this.toolbar?.setTool(tool, this.shapeType);
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
-        this.estuche?.updateState({ tool, color: this.style.color, width: this.style.width });
-        this.options.eventBus?.emit('tool:changed', tool);
+        this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
+        if (tool === 'eraser') {
+            this.toolbar?.setEraserMode(this.eraserMode);
+        }
+
+        this.estuche?.updateState({
+            tool,
+            color: this.style.color,
+            width: this.style.width,
+            profileId: this.penProfileId,
+            lineStyle: this.style.pattern,
+            pattern: this.style.pattern,
+            straightenLines: this.straightenLines,
+            smoothing: this.smoothing,
+            eraserMode: this.eraserMode,
+            eraserRadius: this.eraserRadius,
+            scribbleToErase: this.scribbleToErase,
+            shapeType: this.shapeType,
+            snapGrid: this.snapGrid,
+        });
+
+        this.options.eventBus?.emit('tool:changed', tool, this.shapeType);
+        this.options.eventBus?.emit('style:changed', this.style, this.penProfileId);
         this.schedulePaint();
+
+        if (notify) {
+            this.notifyToolStateChange();
+        }
     }
 
     toggleEraserMode(): EraserMode {
         this.eraserMode = this.eraserMode === 'whole' ? 'reticle' : 'whole';
+        this.toolState.eraser.mode = this.eraserMode;
         this.toolbar?.setEraserMode(this.eraserMode);
         this.estuche?.updateState({ eraserMode: this.eraserMode });
         const label = this.eraserMode === 'whole'
             ? 'Borrador: Trazo completo (borra líneas enteras)'
             : 'Borrador: Retícula (corte de trazo)';
         this.toast?.show(label);
+        this.notifyToolStateChange();
         return this.eraserMode;
     }
 
     setEraserMode(mode: EraserMode): void {
         this.eraserMode = mode;
+        this.toolState.eraser.mode = mode;
         this.toolbar?.setEraserMode(mode);
         this.estuche?.updateState({ eraserMode: mode });
+        this.notifyToolStateChange();
     }
 
     undo(): void { if (!this.options.readonly) this.performUndo(); }
@@ -1804,6 +2115,7 @@ export class CanvasController {
         if (this.destroyed) return;
         this.destroyed = true;
 
+        this.strokeCache.clear();
         this.input?.destroy();
         if (this.scrollHandler) {
             this.scroller.removeEventListener('scroll', this.scrollHandler);
@@ -2104,6 +2416,7 @@ export class CanvasController {
 
         this.points.clear();
         this.predictor.reset();
+        this.resetLiveBake();
 
         const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
         this.activeContentLeft = contentLeft;
@@ -2137,7 +2450,24 @@ export class CanvasController {
     private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
         this.barrelActive = barrel;
-        for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
+        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+            const lastRaw = rawPoints[rawPoints.length - 1];
+            const currentDocPt: Point = {
+                x: (lastRaw.x + this.currentScrollLeft) / this.zoom,
+                y: (lastRaw.y + this.currentScrollTop) / this.zoom,
+                pressure: lastRaw.pressure,
+                time: lastRaw.time,
+            };
+            const { points } = computeStraightLinePoints(this.activeStart, currentDocPt, this.zoom);
+            this.points.clear();
+            for (let i = 0; i < points.length; i++) {
+                const pt = points[i];
+                this.points.push(pt.x, pt.y, pt.pressure ?? 0.5, pt.time ?? 0);
+            }
+            this.hasPrediction = false;
+        } else {
+            for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
+        }
 
         if (this.tool === 'eraser' || barrel) {
             const worldPoints = rawPoints.map(p => ({
@@ -2173,7 +2503,23 @@ export class CanvasController {
     private end(rawPoint: Point, barrel: boolean, releasedAt: number): void {
         if (!this.activeStart) return;
         const lastMotionAt = this.points.size > 0 ? this.points.getTime(this.points.size - 1) : releasedAt;
-        this.pushWorldPoint(rawPoint);
+        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+            const currentDocPt: Point = {
+                x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
+                y: (rawPoint.y + this.currentScrollTop) / this.zoom,
+                pressure: rawPoint.pressure,
+                time: rawPoint.time,
+            };
+            const { points } = computeStraightLinePoints(this.activeStart, currentDocPt, this.zoom);
+            this.points.clear();
+            for (let i = 0; i < points.length; i++) {
+                const pt = points[i];
+                this.points.push(pt.x, pt.y, pt.pressure ?? 0.5, pt.time ?? 0);
+            }
+            this.hasPrediction = false;
+        } else {
+            this.pushWorldPoint(rawPoint);
+        }
         const raw = this.readActivePoints();
 
         if (this.movingSelection && this.tool === 'lasso') {
@@ -2201,7 +2547,7 @@ export class CanvasController {
             if (this.tool === 'shape') {
                 this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
             } else {
-                const recognized = this.shapeRecognition ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
+                const recognized = (this.shapeRecognition && !this.straightenLines) ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
                 if (recognized) {
                     this.addShape(recognized.start, recognized.end, recognized.type);
                     this.toast?.show(`Forma reconocida: ${recognized.type}`);
@@ -2222,10 +2568,12 @@ export class CanvasController {
 
         this.points.clear();
         this.predictor.reset();
+        this.resetLiveBake();
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
         this.barrelActive = false;
+        this.renderDirty = true;
         this.rebuildIndex();
         this.schedulePaint();
         this.persistSoon();
@@ -2235,12 +2583,21 @@ export class CanvasController {
     private cancel(): void {
         this.points.clear();
         this.predictor.reset();
+        this.resetLiveBake();
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
         this.movingSelection = false;
         this.barrelActive = false;
         this.schedulePaint();
+    }
+
+    private resetLiveBake(): void {
+        this.liveBakedIndex = 0;
+        this.liveBakeSegState = {};
+        if (this.liveBakeCtx && this.liveBakeCanvas) {
+            this.liveBakeCtx.clearRect(0, 0, this.liveBakeCanvas.width, this.liveBakeCanvas.height);
+        }
     }
 
     private pushWorldPoint(point: Point): void {
@@ -2339,6 +2696,10 @@ export class CanvasController {
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
         this.document.elements.push(element);
+        if (element.style.pattern === 'solid' && !isHl) {
+            this.getOrCreateStrokeCache(element);
+        }
+        this.renderDirty = true;
     }
 
     private isScribble(points: Point[]): boolean {
@@ -2757,6 +3118,12 @@ export class CanvasController {
         }
 
         if (modified) {
+            const keptIds = new Set(kept.map(el => el.id));
+            for (const el of this.document.elements) {
+                if (!keptIds.has(el.id)) {
+                    this.strokeCache.delete(el.id);
+                }
+            }
             this.document.elements = kept;
             this.selection = [];
             this.lassoMenu?.hide();
@@ -2917,6 +3284,9 @@ export class CanvasController {
         if (this.selection.length === 0) return;
         this.recordHistory();
         const ids = new Set(this.selection.map(element => element.id));
+        for (const id of ids) {
+            this.strokeCache.delete(id);
+        }
         this.document.elements = this.document.elements.filter(element => !ids.has(element.id));
         this.selection = [];
         this.lassoMenu?.hide();
@@ -2933,6 +3303,7 @@ export class CanvasController {
             if (patch.color) element.style.color = patch.color;
             if (patch.width !== undefined) element.style.width = patch.width;
             if (patch.pattern) element.style.pattern = patch.pattern;
+            this.strokeCache.delete(element.id);
         }
         this.rebuildIndex();
         this.emitSelection();
@@ -2962,6 +3333,7 @@ export class CanvasController {
         const dv = dy / contentWidth;
         for (const element of this.selection) {
             this.shiftElementNormalized(element, du, dv);
+            this.strokeCache.delete(element.id);
         }
         this.rebuildIndex();
         this.emitSelection();
@@ -3369,6 +3741,7 @@ export class CanvasController {
         }
         this.selection = [];
         this.lassoMenu?.hide();
+        this.strokeCache.clear();
         this.rebuildIndex();
         this.renderDirty = true;
         this.paint();
@@ -3392,6 +3765,7 @@ export class CanvasController {
         }
         this.selection = [];
         this.lassoMenu?.hide();
+        this.strokeCache.clear();
         this.rebuildIndex();
         this.renderDirty = true;
         this.paint();
@@ -3418,7 +3792,7 @@ export class CanvasController {
 
     private rebuildIndex(): void {
         this.index.clear();
-        for (const element of this.document.elements) {
+        for (const element of (this.document?.elements || [])) {
             this.index.add(element, this.getElementDocBounds(element));
         }
         this.renderDirty = true;
@@ -3770,7 +4144,15 @@ export class CanvasController {
             this.index.query(viewport, this.visible);
             this.visible.sort((a, b) => a.zIndex - b.zIndex);
             const isDark = isDarkTheme();
+            const isPreview = !!this.options.readonly || !!this.scroller.closest('.markdown-preview-view');
             for (const element of this.visible) {
+                if (isPreview && element.blockId?.startsWith('space:')) {
+                    const spaceId = element.blockId.slice(6);
+                    const spaceEl = this.findSpaceElementById(spaceId);
+                    if (spaceEl?.querySelector('.apolo-box-preview-svg')) {
+                        continue;
+                    }
+                }
                 if (this.isHighlighter(element)) {
                     this.paintHighlighterStroke(element as StrokeElement, this.highlighterDryContext, isDark);
                 } else {
@@ -3846,43 +4228,39 @@ export class CanvasController {
         context.globalAlpha = element.style.opacity;
         context.lineCap = element.style.lineCap ?? 'round';
         context.lineJoin = 'round';
-        context.setLineDash(element.style.pattern === 'dashed' ? [8, 6] : element.style.pattern === 'dotted' ? [1, 5] : []);
+        if (element.type !== 'stroke' || element.style.pattern === 'solid') {
+            applyStrokePattern(context, element.style.pattern, element.style.width, element.style.lineCap ?? 'round');
+        }
 
         if (element.type === 'stroke') {
             const data = element.points;
             if (data.length >= 4) {
                 if (element.style.pattern !== 'solid') {
-                    context.lineWidth = element.style.width;
-                    context.beginPath();
-                    context.moveTo(contentLeft + data[0] * contentWidth, blockTop + data[1] * contentWidth);
-                    for (let i = 4; i < data.length; i += 4) {
-                        context.lineTo(contentLeft + data[i] * contentWidth, blockTop + data[i + 1] * contentWidth);
-                    }
-                    context.stroke();
-                } else if (data.length === 4) {
-                    const profileId = element.style.profile || 'fountain';
-                    const scale = calculateNaturalPressureScale(data[2], profileId, this.pressureSensitivity);
-                    context.lineWidth = element.style.width * scale;
-                    context.beginPath();
-                    context.arc(
-                        contentLeft + data[0] * contentWidth,
-                        blockTop + data[1] * contentWidth,
-                        context.lineWidth / 2,
-                        0,
-                        Math.PI * 2,
-                    );
-                    context.fillStyle = element.style.color;
-                    context.fill();
+                    drawPatternedStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
                 } else {
-                    const profileId = element.style.profile || 'fountain';
-                    for (let i = 4; i < data.length; i += 4) {
-                        const avgP = (data[i - 2] + data[i + 2]) / 2;
-                        const scale = calculateNaturalPressureScale(avgP, profileId, this.pressureSensitivity);
-                        context.lineWidth = element.style.width * scale;
-                        context.beginPath();
-                        context.moveTo(contentLeft + data[i - 4] * contentWidth, blockTop + data[i - 3] * contentWidth);
-                        context.lineTo(contentLeft + data[i] * contentWidth, blockTop + data[i + 1] * contentWidth);
-                        context.stroke();
+                    const cacheCanvas = this.getOrCreateStrokeCache(element);
+                    if (cacheCanvas && typeof context.drawImage === 'function') {
+                        const meta = (cacheCanvas as any)._cacheMeta;
+                        const pad = meta?.pad ?? (Math.ceil(element.style.width * 2) + 8);
+                        const cssW = meta?.cssW ?? cacheCanvas.width;
+                        const cssH = meta?.cssH ?? cacheCanvas.height;
+                        const docMinX = contentLeft + element.bounds.minX * contentWidth;
+                        const docMinY = blockTop + element.bounds.minY * contentWidth;
+                        context.save();
+                        context.globalAlpha = 1;
+                        context.drawImage(cacheCanvas, docMinX - pad, docMinY - pad, cssW, cssH);
+                        context.restore();
+                    } else {
+                        const points: { x: number; y: number; pressure?: number; time?: number }[] = [];
+                        for (let i = 0; i < data.length; i += 4) {
+                            points.push({
+                                x: contentLeft + data[i] * contentWidth,
+                                y: blockTop + data[i + 1] * contentWidth,
+                                pressure: data[i + 2],
+                                time: data[i + 3],
+                            });
+                        }
+                        renderContinuousSolidStroke(context, points, element.style);
                     }
                 }
             }
@@ -3890,7 +4268,18 @@ export class CanvasController {
             this.paintShape(element, context, contentLeft, contentWidth, blockTop);
         }
 
+        context.setLineDash([]);
         context.restore();
+    }
+
+    private getOrCreateStrokeCache(el: StrokeElement): HTMLCanvasElement | null {
+        const geom = this.getElementAnchorGeometry(el.blockId, el.anchorText);
+        const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
+        return getOrCreateStrokeSprite(el, this.strokeCache, geom, this.zoom, ratio);
+    }
+
+    private getOrCreatePencilCache(el: StrokeElement): HTMLCanvasElement | null {
+        return this.getOrCreateStrokeCache(el);
     }
 
     private isHighlighter(element: CanvasElement): boolean {
@@ -4080,7 +4469,7 @@ export class CanvasController {
                 context.stroke();
             }
 
-            if (this.hasPrediction && this.points.size > 0) {
+            if (!this.straightenLines && this.hasPrediction && this.points.size > 0) {
                 const isPredForbidden = bounds.contentTop > 0 && this.predictedPoint.y < forbiddenY;
                 if (!isPredForbidden) {
                     context.beginPath();
@@ -4094,79 +4483,56 @@ export class CanvasController {
             return;
         }
 
-        // Regular Pen / Stylus stroke rendering with natural pressure dynamics
-        context.strokeStyle = this.style.color;
-        context.lineWidth = this.style.width;
-        context.globalAlpha = this.style.opacity;
-        context.lineCap = this.style.lineCap ?? 'round';
-        context.lineJoin = 'round';
+        if (this.style.pattern !== 'solid') {
+            this.paintActivePatternedStroke(context);
+            context.setLineDash([]);
+            context.restore();
+            return;
+        }
 
-        if (this.points.size === 1) {
-            const isForbidden = bounds.contentTop > 0 && this.points.getY(0) < forbiddenY;
-            if (isForbidden) {
-                context.strokeStyle = 'rgba(140, 149, 159, 0.45)';
-                context.globalAlpha = 1;
-                context.setLineDash([4, 6]);
-                context.lineWidth = Math.max(1.5, this.style.width);
-                context.beginPath();
-                context.arc(this.points.getX(0), this.points.getY(0), Math.max(1, this.style.width / 2), 0, Math.PI * 2);
-                context.stroke();
-            } else {
-                const scale = calculateNaturalPressureScale(
-                    this.points.getPressure(0),
+        if (this.activeAnchor) {
+            const rawPoints = this.readActivePoints();
+            const validRuns = splitStrokeIntoValidRuns(
+                rawPoints,
+                bounds.contentTop,
+                DEFAULT_INK_LIMITS.topMarginPx,
+            );
+            const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
+            const penPlugin = getPenPlugin(this.penProfileId);
+
+            if (!this.straightenLines && validRuns.length === 1 && validRuns[0].length === rawPoints.length) {
+                const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
+                const boxClip = this.activeAnchor.blockId.startsWith('space:')
+                    ? this.getElementAnchorGeometry(this.activeAnchor.blockId)
+                    : null;
+                const baked = bakeLiveStrokeSegment(
+                    this as unknown as LiveBakeState,
+                    context,
+                    validRuns[0],
+                    activeStyle,
                     this.penProfileId,
-                    this.pressureSensitivity,
+                    this.canvas.width,
+                    this.canvas.height,
+                    this.zoom,
+                    this.currentScrollLeft,
+                    this.currentScrollTop,
+                    ratio,
+                    boxClip,
                 );
-                context.lineWidth = this.style.width * scale;
-                context.beginPath();
-                context.arc(this.points.getX(0), this.points.getY(0), context.lineWidth / 2, 0, Math.PI * 2);
-                context.fillStyle = this.style.color;
-                context.fill();
-            }
-        } else {
-            for (let i = 1; i < this.points.size; i++) {
-                const y0 = this.points.getY(i - 1);
-                const y1 = this.points.getY(i);
-                const isForbidden = bounds.contentTop > 0 && (y0 < forbiddenY || y1 < forbiddenY);
-
-                context.save();
-                if (isForbidden) {
-                    // Fixed semi-transparent gray with wider dash spacing (6px dash, 10px gap)
-                    context.strokeStyle = 'rgba(140, 149, 159, 0.45)';
-                    context.globalAlpha = 1;
-                    context.setLineDash([6, 10]);
-                    context.lineWidth = Math.max(1.5, Math.min(3, this.style.width));
-                } else {
-                    context.strokeStyle = this.style.color;
-                    context.globalAlpha = this.style.opacity;
-                    if (this.style.pattern === 'dashed') {
-                        context.setLineDash([8, 6]);
-                        context.lineWidth = this.style.width;
-                    } else if (this.style.pattern === 'dotted') {
-                        context.setLineDash([1, 5]);
-                        context.lineWidth = this.style.width;
-                    } else {
-                        context.setLineDash([]);
-                        const avgP = (this.points.getPressure(i - 1) + this.points.getPressure(i)) / 2;
-                        const scale = calculateNaturalPressureScale(
-                            avgP,
-                            this.penProfileId,
-                            this.pressureSensitivity,
-                        );
-                        context.lineWidth = this.style.width * scale;
+                if (!baked) {
+                    for (const run of validRuns) {
+                        renderContinuousSolidStroke(context, run, activeStyle);
                     }
                 }
-
-                context.beginPath();
-                context.moveTo(this.points.getX(i - 1), this.points.getY(i - 1));
-                context.lineTo(this.points.getX(i), this.points.getY(i));
-                context.stroke();
-                context.restore();
+            } else {
+                for (const run of validRuns) {
+                    renderContinuousSolidStroke(context, run, activeStyle);
+                }
             }
         }
         context.restore();
 
-        if (this.hasPrediction && this.points.size > 0) {
+        if (!this.straightenLines && this.hasPrediction && this.points.size > 0) {
             context.save();
             const isPredForbidden = bounds.contentTop > 0 && this.predictedPoint.y < forbiddenY;
             if (isPredForbidden) {
@@ -4185,6 +4551,31 @@ export class CanvasController {
             context.stroke();
             context.restore();
         }
+    }
+
+    private paintActivePatternedStroke(context: CanvasRenderingContext2D): void {
+        if (!this.activeAnchor || this.points.size === 0) return;
+
+        const anchor = this.activeAnchor;
+        const geometry = this.getElementAnchorGeometry(anchor.blockId, anchor.text);
+        const points = this.points.toArray();
+
+        for (let i = 0; i < points.length; i += 4) {
+            const x = (points[i] - geometry.originX) / geometry.scaleWidth;
+            const y = (points[i + 1] - geometry.originY) / geometry.scaleWidth;
+            points[i] = x;
+            points[i + 1] = y;
+        }
+
+        const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
+        drawPatternedStrokePath(
+            context,
+            points,
+            geometry.originX,
+            geometry.scaleWidth,
+            geometry.originY,
+            activeStyle,
+        );
     }
 
     private paintLasso(): void {

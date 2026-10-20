@@ -1,4 +1,4 @@
-import { Point, ShapeType } from '../core/types';
+import type { Point, ShapeType } from '../core/types.ts';
 
 export interface RecognizedShape {
     type: ShapeType;
@@ -8,7 +8,13 @@ export interface RecognizedShape {
 
 /** Recognizes deliberate straight and closed geometry after a stationary hold. */
 export class ShapeRecognizer {
-    constructor(private readonly dwellMs = 300, private readonly tolerance = 0.16) {}
+    private readonly dwellMs: number;
+    private readonly tolerance: number;
+
+    constructor(dwellMs = 300, tolerance = 0.16) {
+        this.dwellMs = dwellMs;
+        this.tolerance = tolerance;
+    }
 
     recognize(points: readonly Point[], releasedAt: number, lastMotionAt = points[points.length - 1]?.time ?? releasedAt): RecognizedShape | null {
         if (points.length < 3) return null;

@@ -1,4 +1,4 @@
-import type { PenProfileId } from '../../core/types';
+import type { PenProfileId } from '../../core/types.ts';
 
 export interface PressureProfileConfig {
     minScale: number;

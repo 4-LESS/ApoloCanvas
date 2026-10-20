@@ -57,6 +57,245 @@ export type LassoMode = 'free' | 'rect';
 
 export type ThicknessPreset = 'fine' | 'medium' | 'thick';
 
+export interface WorkspaceToolState {
+    penEnabled: boolean;
+    activeTool: ToolType;
+    snapGrid: boolean;
+    pen: {
+        profileId: PenProfileId; // 'fountain' | 'calli' | 'ball' | 'pencil'
+        color: string;
+        width: number;
+        opacity: number;
+        smoothing: number;
+        pattern: StrokePattern;
+        straightenLines: boolean;
+        activeSlotIndex: number;
+        palette: { colors: string[]; opacities: number[] };
+    };
+    highlighter: {
+        profileId: 'hlf' | 'hlr';
+        color: string;
+        width: number;
+        opacity: number;
+        pattern: StrokePattern;
+        straightenLines: boolean;
+        activeSlotIndex: number;
+        palette: { colors: string[]; opacities: number[] };
+    };
+    shape: {
+        shapeType: ShapeType;
+        color: string;
+        width: number;
+        opacity: number;
+        pattern: StrokePattern;
+        fillEnabled?: boolean;
+        fillColor?: string;
+        fillOpacity?: number;
+        activeSlotIndex: number;
+        palette: { colors: string[]; opacities: number[] };
+    };
+    eraser: {
+        mode: EraserMode;
+        radius: number;
+        onlyHighlighter: boolean;
+        scribbleToErase: boolean;
+    };
+    lasso: {
+        mode: LassoMode;
+    };
+}
+
+export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
+    penEnabled: true,
+    activeTool: 'pen',
+    snapGrid: false,
+    pen: {
+        profileId: 'fountain',
+        color: '#1F4FD8',
+        width: 3,
+        opacity: 1,
+        smoothing: 0.6,
+        pattern: 'solid',
+        straightenLines: false,
+        activeSlotIndex: 0,
+        palette: {
+            colors: ['#E53935', '#1F4FD8', '#10B981', '#111827'],
+            opacities: [100, 100, 100, 100],
+        },
+    },
+    highlighter: {
+        profileId: 'hlr',
+        color: '#FDD835',
+        width: 20,
+        opacity: 0.75,
+        pattern: 'solid',
+        straightenLines: false,
+        activeSlotIndex: 1,
+        palette: {
+            colors: ['#1E88E5', '#FDD835', '#43A047', '#00ACC1'],
+            opacities: [75, 75, 75, 75],
+        },
+    },
+    shape: {
+        shapeType: 'rect',
+        color: '#2F6BFF',
+        width: 3,
+        opacity: 1,
+        pattern: 'solid',
+        fillEnabled: false,
+        fillColor: '',
+        fillOpacity: 1,
+        activeSlotIndex: 0,
+        palette: {
+            colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
+            opacities: [100, 100, 100, 100],
+        },
+    },
+    eraser: {
+        mode: 'whole',
+        radius: 18,
+        onlyHighlighter: false,
+        scribbleToErase: true,
+    },
+    lasso: {
+        mode: 'free',
+    },
+};
+
+export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToolState {
+    return {
+        penEnabled: state.penEnabled,
+        activeTool: state.activeTool,
+        snapGrid: state.snapGrid,
+        pen: {
+            profileId: state.pen.profileId,
+            color: state.pen.color,
+            width: state.pen.width,
+            opacity: state.pen.opacity,
+            smoothing: state.pen.smoothing,
+            pattern: state.pen.pattern,
+            straightenLines: state.pen.straightenLines,
+            activeSlotIndex: state.pen.activeSlotIndex,
+            palette: {
+                colors: [...state.pen.palette.colors],
+                opacities: [...state.pen.palette.opacities],
+            },
+        },
+        highlighter: {
+            profileId: state.highlighter.profileId,
+            color: state.highlighter.color,
+            width: state.highlighter.width,
+            opacity: state.highlighter.opacity,
+            pattern: state.highlighter.pattern,
+            straightenLines: state.highlighter.straightenLines,
+            activeSlotIndex: state.highlighter.activeSlotIndex,
+            palette: {
+                colors: [...state.highlighter.palette.colors],
+                opacities: [...state.highlighter.palette.opacities],
+            },
+        },
+        shape: {
+            shapeType: state.shape.shapeType,
+            color: state.shape.color,
+            width: state.shape.width,
+            opacity: state.shape.opacity,
+            pattern: state.shape.pattern,
+            fillEnabled: state.shape.fillEnabled,
+            fillColor: state.shape.fillColor,
+            fillOpacity: state.shape.fillOpacity,
+            activeSlotIndex: state.shape.activeSlotIndex,
+            palette: {
+                colors: [...state.shape.palette.colors],
+                opacities: [...state.shape.palette.opacities],
+            },
+        },
+        eraser: {
+            mode: state.eraser.mode,
+            radius: state.eraser.radius,
+            onlyHighlighter: state.eraser.onlyHighlighter,
+            scribbleToErase: state.eraser.scribbleToErase,
+        },
+        lasso: {
+            mode: state.lasso.mode,
+        },
+    };
+}
+
+export function mergeWorkspaceToolState(
+    saved?: Partial<WorkspaceToolState> | null,
+    fallback: WorkspaceToolState = DEFAULT_WORKSPACE_TOOL_STATE,
+): WorkspaceToolState {
+    if (!saved) return cloneWorkspaceToolState(fallback);
+    return {
+        penEnabled: saved.penEnabled ?? fallback.penEnabled,
+        activeTool: saved.activeTool ?? fallback.activeTool,
+        snapGrid: saved.snapGrid ?? fallback.snapGrid,
+        pen: {
+            profileId: saved.pen?.profileId ?? fallback.pen.profileId,
+            color: saved.pen?.color ?? fallback.pen.color,
+            width: saved.pen?.width ?? fallback.pen.width,
+            opacity: saved.pen?.opacity ?? fallback.pen.opacity,
+            smoothing: saved.pen?.smoothing ?? fallback.pen.smoothing,
+            pattern: saved.pen?.pattern ?? fallback.pen.pattern,
+            straightenLines: saved.pen?.straightenLines ?? fallback.pen.straightenLines,
+            activeSlotIndex: saved.pen?.activeSlotIndex ?? fallback.pen.activeSlotIndex,
+            palette: {
+                colors: saved.pen?.palette?.colors?.length === 4
+                    ? [...saved.pen.palette.colors]
+                    : [...fallback.pen.palette.colors],
+                opacities: saved.pen?.palette?.opacities?.length === 4
+                    ? [...saved.pen.palette.opacities]
+                    : [...fallback.pen.palette.opacities],
+            },
+        },
+        highlighter: {
+            profileId: (saved.highlighter?.profileId === 'hlf' ? 'hlf' : 'hlr') as 'hlf' | 'hlr',
+            color: saved.highlighter?.color ?? fallback.highlighter.color,
+            width: saved.highlighter?.width ?? fallback.highlighter.width,
+            opacity: saved.highlighter?.opacity ?? fallback.highlighter.opacity,
+            pattern: saved.highlighter?.pattern ?? fallback.highlighter.pattern,
+            straightenLines: saved.highlighter?.straightenLines ?? fallback.highlighter.straightenLines,
+            activeSlotIndex: saved.highlighter?.activeSlotIndex ?? fallback.highlighter.activeSlotIndex,
+            palette: {
+                colors: saved.highlighter?.palette?.colors?.length === 4
+                    ? [...saved.highlighter.palette.colors]
+                    : [...fallback.highlighter.palette.colors],
+                opacities: saved.highlighter?.palette?.opacities?.length === 4
+                    ? [...saved.highlighter.palette.opacities]
+                    : [...fallback.highlighter.palette.opacities],
+            },
+        },
+        shape: {
+            shapeType: saved.shape?.shapeType ?? fallback.shape.shapeType,
+            color: saved.shape?.color ?? fallback.shape.color,
+            width: saved.shape?.width ?? fallback.shape.width,
+            opacity: saved.shape?.opacity ?? fallback.shape.opacity,
+            pattern: saved.shape?.pattern ?? fallback.shape.pattern,
+            fillEnabled: saved.shape?.fillEnabled ?? fallback.shape.fillEnabled,
+            fillColor: saved.shape?.fillColor ?? fallback.shape.fillColor,
+            fillOpacity: saved.shape?.fillOpacity ?? fallback.shape.fillOpacity,
+            activeSlotIndex: saved.shape?.activeSlotIndex ?? fallback.shape.activeSlotIndex,
+            palette: {
+                colors: saved.shape?.palette?.colors?.length === 4
+                    ? [...saved.shape.palette.colors]
+                    : [...fallback.shape.palette.colors],
+                opacities: saved.shape?.palette?.opacities?.length === 4
+                    ? [...saved.shape.palette.opacities]
+                    : [...fallback.shape.palette.opacities],
+            },
+        },
+        eraser: {
+            mode: saved.eraser?.mode ?? fallback.eraser.mode,
+            radius: saved.eraser?.radius ?? fallback.eraser.radius,
+            onlyHighlighter: saved.eraser?.onlyHighlighter ?? fallback.eraser.onlyHighlighter,
+            scribbleToErase: saved.eraser?.scribbleToErase ?? fallback.eraser.scribbleToErase,
+        },
+        lasso: {
+            mode: saved.lasso?.mode ?? fallback.lasso.mode,
+        },
+    };
+}
+
 export interface InkElementBase {
     id: string;
     timestamp: number;
@@ -66,11 +305,14 @@ export interface InkElementBase {
     zIndex: number;
 }
 
+export type StrokeCache = Map<string, HTMLCanvasElement>;
+
 export interface StrokeElement extends InkElementBase {
     type: 'stroke';
     points: number[];       // Interleaved: [u0, v0, p0, t0, u1, v1, p1, t1, ...] normalized by column width
     style: StrokeStyle;
     bounds: BoundingBox;    // Normalized bounds: minU, minV, maxU, maxV
+    cacheCanvas?: HTMLCanvasElement;
 }
 
 export interface ShapeElement extends InkElementBase {

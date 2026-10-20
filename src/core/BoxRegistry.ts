@@ -1,4 +1,4 @@
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from './types';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from './types.ts';
 
 export class BoxRegistry {
     private static heights = new Map<string, number>();

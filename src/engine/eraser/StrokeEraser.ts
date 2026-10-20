@@ -1,4 +1,4 @@
-import type { BoundingBox, CanvasElement, Point, ShapeElement, StrokeElement } from '../../core/types';
+import type { BoundingBox, CanvasElement, Point, ShapeElement, StrokeElement } from '../../core/types.ts';
 
 /**
  * Calculates squared distance from a point to a 2D line segment.

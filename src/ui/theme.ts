@@ -1,4 +1,4 @@
-import type { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types';
+import type { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types.ts';
 
 /**
  * Checks whether Obsidian is currently rendering in dark theme.
@@ -82,7 +82,7 @@ export const PEN_PROFILES: Record<PenProfileId, PenProfile> = {
     fountain: { id: 'fountain', name: 'Pluma estilográfica', wm: 1.0, op: 1.0, cap: 'round', dash: '' },
     calli: { id: 'calli', name: 'Pincel caligráfico', wm: 2.2, op: 1.0, cap: 'butt', dash: '' },
     ball: { id: 'ball', name: 'Bolígrafo', wm: 0.85, op: 0.98, cap: 'round', dash: '' },
-    pencil: { id: 'pencil', name: 'Lápiz texturado', wm: 1.2, op: 0.75, cap: 'round', dash: '1.5 2' },
+    pencil: { id: 'pencil', name: 'Lápiz texturado', wm: 1.2, op: 0.75, cap: 'round', dash: '' },
     hlr: { id: 'hlr', name: 'Marcador redondo', wm: 4.5, op: 0.45, cap: 'round', dash: '' },
     hlf: { id: 'hlf', name: 'Marcador plano', wm: 4.5, op: 0.45, cap: 'square', dash: '' },
 };
@@ -114,6 +114,7 @@ export const DEFAULT_TOOL_PALETTES: Record<'pen' | 'highlighter' | 'shape', { co
  */
 export const ICONS = {
     pen: 'M4 20l1-4L16 5l3 3L8 19z M14 7l3 3',
+    ballpoint: 'M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z M15 5l4 4',
     highlighter: 'M14 4l6 6-7 7-6-6z M9 16l-4 4h5l2-2',
     eraser: 'M5 14l8-8 6 6-6 6H9z M7 20h12',
     lasso: 'M4 10a8 5 0 1016 0a8 5 0 10-16 0 M12 15c0 3-2 4-3 5',
@@ -203,15 +204,21 @@ function applySvgAttributes(node: Element, attributeString: string): void {
 }
 
 function appendSvgMarkup(parent: Element, markup: string): void {
-    const tagRegex = /<([A-Za-z0-9:-]+)([^>]*)>([\s\S]*?)<\/\1>|<([A-Za-z0-9:-]+)([^>]*)\s*\/?>/g;
+    const tagRegex = /<([A-Za-z0-9:-]+)([^>]*?)\/>|<([A-Za-z0-9:-]+)([^>]*)>([\s\S]*?)<\/\3>|<([A-Za-z0-9:-]+)([^>]*)\s*\/?>/g;
     let tagMatch: RegExpExecArray | null;
     while ((tagMatch = tagRegex.exec(markup)) !== null) {
-        const tagName = tagMatch[1] ?? tagMatch[4];
-        const attributeString = tagMatch[2] ?? tagMatch[5] ?? '';
-        const innerMarkup = tagMatch[3] ?? '';
+        const tagName = tagMatch[1] ?? tagMatch[3] ?? tagMatch[6];
+        const attributeString = (tagMatch[2] ?? tagMatch[4] ?? tagMatch[7] ?? '').replace(/\/\s*$/, '');
+        const innerMarkup = tagMatch[5] ?? '';
         const node = document.createElementNS('http://www.w3.org/2000/svg', tagName);
         applySvgAttributes(node, attributeString);
-        if (innerMarkup) appendSvgMarkup(node, innerMarkup);
+        if (innerMarkup) {
+            if (/<[A-Za-z0-9:-]+/.test(innerMarkup)) {
+                appendSvgMarkup(node, innerMarkup);
+            } else {
+                node.textContent = innerMarkup;
+            }
+        }
         parent.appendChild(node);
     }
 }

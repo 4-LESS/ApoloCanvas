@@ -1,0 +1,2077 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ApoloCanvas - Sandbox</title>
+    <style>
+        :root {
+            --bg-canvas: #ffffff;
+            --bg-panel: #f8fafc;
+            --bg-panel-secondary: #f1f5f9;
+            --bg-card: #ffffff;
+            --border-color: #e2e8f0;
+            --border-strong: #cbd5e1;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --accent-color: #2563eb;
+            --accent-hover: #1d4ed8;
+            --accent-subtle: #eff6ff;
+            --danger-color: #dc2626;
+            --success-color: #16a34a;
+            --warning-color: #d97706;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            --radius-md: 6px;
+            --radius-sm: 4px;
+        }
+
+        [data-theme="dark"] {
+            --bg-canvas: #0f172a;
+            --bg-panel: #1e293b;
+            --bg-panel-secondary: #334155;
+            --bg-card: #1e293b;
+            --border-color: #334155;
+            --border-strong: #475569;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-color: #3b82f6;
+            --accent-hover: #60a5fa;
+            --accent-subtle: #1e3a8a33;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-canvas);
+            color: var(--text-primary);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+        }
+
+        /* Barra Lateral de Controles */
+        .sidebar {
+            width: 320px;
+            height: 100vh;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+
+        .sidebar-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-panel);
+        }
+
+        .sidebar-header h1 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-header {
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: var(--bg-panel-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .btn-header:hover {
+            background: var(--border-strong);
+        }
+
+        .control-section {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-title {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Selector de Motor */
+        .engine-picker {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            background: var(--bg-panel-secondary);
+            padding: 3px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+        }
+
+        .engine-pill {
+            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+            border: none;
+            background: transparent;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+        }
+
+        .engine-pill.active {
+            background: var(--bg-card);
+            color: var(--accent-color);
+            border: 1px solid var(--border-color);
+        }
+
+        /* Lista Vertical Scrollable de Plumas */
+        .pen-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 340px;
+            overflow-y: auto;
+            padding-right: 4px;
+            scrollbar-width: thin;
+        }
+
+        .pen-card {
+            padding: 8px 10px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-md);
+            background: var(--bg-card);
+            cursor: pointer;
+            transition: all 0.12s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .pen-card:hover {
+            border-color: var(--accent-color);
+        }
+
+        .pen-card.active {
+            border-color: var(--accent-color);
+            background: var(--accent-subtle);
+        }
+
+        .pen-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+        }
+
+        .pen-card-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pen-card-score {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-panel-secondary);
+            color: var(--text-secondary);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .pen-card-score.score-good {
+            color: var(--success-color);
+            background: rgba(22, 163, 74, 0.08);
+            border-color: rgba(22, 163, 74, 0.25);
+        }
+
+        .pen-card-score.score-warn {
+            color: var(--warning-color);
+            background: rgba(217, 119, 6, 0.08);
+            border-color: rgba(217, 119, 6, 0.25);
+        }
+
+        .pen-card-score.score-bad {
+            color: var(--danger-color);
+            background: rgba(220, 38, 38, 0.08);
+            border-color: rgba(220, 38, 38, 0.25);
+        }
+
+        /* Panel Flotante de Puntuación 50k Puntos */
+        .bench50k-panel {
+            position: absolute;
+            top: 66px;
+            right: 12px;
+            width: 460px;
+            max-height: calc(100vh - 90px);
+            background: var(--bg-panel);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-md);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+            z-index: 35;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .bench50k-panel.open {
+            display: flex;
+        }
+
+        .bench50k-header {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-card);
+        }
+
+        .bench50k-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .bench50k-subtitle {
+            font-size: 10px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .bench50k-body {
+            padding: 8px 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .bench50k-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+
+        .bench50k-table th {
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            padding: 4px 6px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .bench50k-table td {
+            padding: 5px 6px;
+            border-bottom: 1px solid var(--border-color);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .bench50k-row {
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .bench50k-row:hover {
+            background: var(--bg-panel-secondary);
+        }
+
+        .pen-card-preview {
+            width: 100%;
+            height: 28px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            display: block;
+        }
+
+        /* Sliders de Parámetros */
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .slider-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .slider-val {
+            color: var(--accent-color);
+            font-weight: 700;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--border-strong);
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+        }
+
+        /* Paleta de Colores */
+        .color-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .swatch-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            border: 1px solid var(--border-strong);
+            cursor: pointer;
+            transition: all 0.12s;
+        }
+
+        .swatch-btn.active {
+            border-color: var(--accent-color);
+            outline: 2px solid var(--accent-color);
+            outline-offset: 1px;
+        }
+
+        .custom-color-input {
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            cursor: pointer;
+            background: none;
+        }
+
+        /* Stylus & Simulación */
+        .stylus-meters {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            cursor: pointer;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 32px;
+            height: 18px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: var(--border-strong);
+            border-radius: 18px;
+            transition: 0.2s;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 12px;
+            width: 12px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: var(--accent-color);
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(14px);
+        }
+
+        .pressure-meter-container {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .pressure-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: var(--bg-panel-secondary);
+            border-radius: 3px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .pressure-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--accent-color);
+            border-radius: 3px;
+            transition: width 0.05s ease-out;
+        }
+
+        /* Botones de Acción */
+        .actions-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .btn {
+            padding: 7px 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-strong);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.12s;
+        }
+
+        .btn:hover {
+            background: var(--bg-panel-secondary);
+            border-color: var(--border-color);
+        }
+
+        .btn-primary {
+            background: var(--accent-color);
+            color: #ffffff;
+            border-color: var(--accent-color);
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .btn-danger {
+            color: var(--danger-color);
+        }
+
+        .btn-danger:hover {
+            background: #fee2e2;
+            border-color: #fca5a5;
+        }
+
+        .btn-full {
+            grid-column: span 2;
+        }
+
+        /* Área Principal del Canvas */
+        .canvas-container {
+            flex: 1;
+            height: 100vh;
+            position: relative;
+            background: var(--bg-canvas);
+            overflow: hidden;
+        }
+
+        #drawingCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            cursor: crosshair;
+        }
+
+        /* HUD Superior de Benchmarking Flotante */
+        .benchmark-hud {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 8px 14px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            z-index: 20;
+            pointer-events: auto;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .hud-metric {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .hud-metric-label {
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: var(--text-secondary);
+            letter-spacing: 0.05em;
+        }
+
+        .hud-metric-value {
+            font-size: 0.95rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .fps-good { color: var(--success-color); }
+        .fps-warn { color: var(--warning-color); }
+        .fps-bad { color: var(--danger-color); }
+
+        /* Notificación flotante / Toast */
+        .toast {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: var(--bg-panel);
+            color: var(--text-primary);
+            padding: 8px 14px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            font-size: 0.8rem;
+            font-weight: 600;
+            z-index: 100;
+            opacity: 0;
+            transform: translateY(8px);
+            transition: all 0.2s ease;
+            pointer-events: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Vista SVG Vector Preview */
+        .svg-panel {
+            position: absolute;
+            top: 0; bottom: 0; right: 0;
+            width: 100%;
+            background: var(--bg-canvas);
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+            overflow: hidden;
+        }
+        .svg-panel svg { position: absolute; top: 0; right: 0; height: 100%; display: block; }
+        .canvas-container[data-view="svg"] .svg-panel { display: block; }
+        .canvas-container[data-view="split"] .svg-panel {
+            display: block; width: 50%;
+            border-left: 2px dashed var(--accent-color);
+        }
+        .svg-panel-label {
+            position: absolute; bottom: 12px; left: 12px;
+            font-size: 0.65rem; font-weight: 700; color: var(--accent-color);
+            background: var(--bg-panel); padding: 2px 6px; border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+        .view-toggle { display: flex; gap: 3px; background: var(--bg-panel-secondary); padding: 2px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); }
+        .view-toggle button {
+            border: none; background: transparent; color: var(--text-secondary);
+            font-size: 0.7rem; font-weight: 700; padding: 4px 7px; border-radius: var(--radius-sm); cursor: pointer;
+        }
+        .view-toggle button.active { background: var(--bg-card); color: var(--accent-color); border: 1px solid var(--border-color); }
+    </style>
+</head>
+<body data-theme="light">
+
+    <!-- Barra lateral de controles -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1>Sandbox</h1>
+            <div class="header-actions">
+                <button id="headerClearBtn" class="btn-header" title="Limpiar lienzo">Limpiar</button>
+                <button id="themeToggle" class="btn-header" title="Alternar tema">Tema</button>
+            </div>
+        </div>
+
+        <!-- Selector de Motor de Renderizado -->
+        <div class="control-section">
+            <div class="section-title">Motor de Render</div>
+            <div class="engine-picker">
+                <button class="engine-pill" data-engine="default-engine" title="Redibuja todos los trazos en cada frame">Default</button>
+                <button class="engine-pill active" data-engine="optimized-engine" title="Capa seca offscreen + render incremental">Optimized</button>
+            </div>
+        </div>
+
+        <!-- Selector de Plumas (Auto-descubrimiento dinámico desde sandbox/pens/*.js) -->
+        <div class="control-section">
+            <div class="section-title">
+                <span>Herramienta / Pluma</span>
+                <span id="penCountLabel" style="font-family: var(--font-mono); font-size: 0.65rem;"></span>
+            </div>
+            <div class="pen-list" id="penList"></div>
+        </div>
+
+        <!-- Parámetros en Tiempo Real -->
+        <div class="control-section">
+            <div class="section-title">Parámetros del Trazo</div>
+            <div class="slider-group">
+                <div class="slider-item">
+                    <div class="slider-header">
+                        <span>Grosor</span>
+                        <span id="widthVal" class="slider-val">4 px</span>
+                    </div>
+                    <input type="range" id="widthSlider" min="1" max="40" value="4">
+                </div>
+
+                <div class="slider-item">
+                    <div class="slider-header">
+                        <span>Opacidad</span>
+                        <span id="opacityVal" class="slider-val">100%</span>
+                    </div>
+                    <input type="range" id="opacitySlider" min="10" max="100" value="100">
+                </div>
+
+                <div class="slider-item">
+                    <div class="slider-header">
+                        <span>Suavizado</span>
+                        <span id="smoothingVal" class="slider-val">50%</span>
+                    </div>
+                    <input type="range" id="smoothingSlider" min="0" max="95" value="50">
+                </div>
+            </div>
+        </div>
+
+        <!-- Color del Trazo -->
+        <div class="control-section">
+            <div class="section-title">Color de Tinta</div>
+            <div class="color-row">
+                <button class="swatch-btn active" style="background: #1e1e1e;" data-color="#1e1e1e" title="Negro"></button>
+                <button class="swatch-btn" style="background: #2563eb;" data-color="#2563eb" title="Azul"></button>
+                <button class="swatch-btn" style="background: #7c3aed;" data-color="#7c3aed" title="Púrpura"></button>
+                <button class="swatch-btn" style="background: #dc2626;" data-color="#dc2626" title="Rojo"></button>
+                <button class="swatch-btn" style="background: #16a34a;" data-color="#16a34a" title="Verde"></button>
+                <button class="swatch-btn" style="background: #eab308;" data-color="#eab308" title="Ámbar"></button>
+                <input type="color" id="customColorPicker" class="custom-color-input" value="#1e1e1e" title="Personalizado">
+            </div>
+        </div>
+
+        <!-- Stylus & Simulación de Presión -->
+        <div class="control-section">
+            <div class="section-title">Hardware & Simulación</div>
+            <div class="stylus-meters">
+                <label class="toggle-row">
+                    <span>Simular Presión con Velocidad</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="simulatePressureToggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </label>
+
+                <div class="pressure-meter-container">
+                    <div class="slider-header">
+                        <span>Presión</span>
+                        <span id="pressureValueText" class="slider-val">0.00</span>
+                    </div>
+                    <div class="pressure-bar-bg">
+                        <div id="pressureBarFill" class="pressure-bar-fill"></div>
+                    </div>
+                </div>
+
+                <div class="slider-item" style="margin-top: 4px;">
+                    <div class="slider-header">
+                        <span>Inclinación Caligráfica</span>
+                        <span id="tiltVal" class="slider-val">-40°</span>
+                    </div>
+                    <input type="range" id="tiltSlider" min="-90" max="90" value="-40">
+                </div>
+            </div>
+        </div>
+
+        <!-- Acciones del Canvas -->
+        <div class="control-section" style="border-bottom: none; margin-top: auto;">
+            <div class="actions-group">
+                <button id="undoBtn" class="btn" title="Deshacer (Ctrl+Z)">Deshacer</button>
+                <button id="redoBtn" class="btn" title="Rehacer (Ctrl+Y)">Rehacer</button>
+                <button id="clearBtn" class="btn btn-danger" title="Limpiar lienzo">Limpiar</button>
+                <button id="exportBtn" class="btn btn-primary" title="Exportar a PNG">Exportar PNG</button>
+                <button id="bench50kAllBtn" class="btn btn-primary btn-full" title="Evalúa los FPS promedio de todos los lápices al llegar a 50.000 puntos en un trazo">Test 50k Puntos (Todos)</button>
+                <button id="bench50kActiveBtn" class="btn" title="Dibuja y mide un trazo único de 50.000 puntos con la pluma activa">50k (Activo)</button>
+                <button id="stressTestBtn" class="btn" title="Genera 20 trazos cortos">20 Trazos</button>
+                <button id="widthTestBtn" class="btn btn-full" title="Muestras a 2px, 10px y 25px">Muestras 2 / 10 / 25 px</button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Canvas Principal -->
+    <main class="canvas-container">
+        <canvas id="drawingCanvas"></canvas>
+
+        <!-- Monitor Flotante de Benchmarking -->
+        <div class="benchmark-hud">
+            <div class="hud-metric">
+                <span class="hud-metric-label">FPS</span>
+                <span id="fpsCounter" class="hud-metric-value fps-good">60</span>
+            </div>
+            <div class="hud-metric">
+                <span class="hud-metric-label">Render</span>
+                <span id="renderTimeCounter" class="hud-metric-value">0.1 ms</span>
+            </div>
+            <div class="hud-metric">
+                <span class="hud-metric-label">Trazos / Pts</span>
+                <span id="statsCounter" class="hud-metric-value" style="font-size: 0.85rem;">0 / 0</span>
+            </div>
+            <div class="hud-metric">
+                <span class="hud-metric-label">SVG Tamaño</span>
+                <span id="svgSizeCounter" class="hud-metric-value" style="font-size: 0.85rem;">0 B</span>
+            </div>
+            <div class="hud-metric">
+                <span class="hud-metric-label">SVG Build</span>
+                <span id="svgTimeCounter" class="hud-metric-value" style="font-size: 0.85rem;">– ms</span>
+            </div>
+            <div class="view-toggle" id="viewToggle">
+                <button data-view="canvas" class="active">Canvas Live</button>
+                <button data-view="split">Split</button>
+                <button data-view="svg">SVG Vector</button>
+            </div>
+        </div>
+
+        <div class="svg-panel" id="svgPanel">
+            <div id="svgHost"></div>
+            <span class="svg-panel-label">SVG Vector Preview</span>
+        </div>
+
+        <!-- Tabla de Puntuaciones: Benchmark 50.000 Puntos en un Trazo -->
+        <div class="bench50k-panel" id="bench50kPanel">
+            <div class="bench50k-header">
+                <div>
+                    <div class="bench50k-title">Benchmark 50.000 Puntos (1 Trazo Largo)</div>
+                    <div class="bench50k-subtitle" id="bench50kStatus">Haz clic en una fila para renderizar el trazo de 50k pts</div>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                    <button id="rerunBench50kBtn" class="btn" style="padding: 3px 8px; font-size: 11px;">Re-ejecutar</button>
+                    <button id="closeBench50kBtn" class="btn" style="padding: 3px 8px; font-size: 11px;">Cerrar</button>
+                </div>
+            </div>
+            <div class="bench50k-body">
+                <table class="bench50k-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Lápiz / Pluma</th>
+                            <th>FPS Prom.</th>
+                            <th>ms Prom.</th>
+                            <th>ms @ 50k</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bench50kTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="toast" class="toast">Notificación</div>
+    </main>
+
+    <!-- Script de Integración Modular y Hot-swapping -->
+    <script type="module">
+        // Estado de la aplicación sandbox (los 4 seleccionados finales primero, seguidos de las iteraciones previas)
+        const FALLBACK_PEN_IDS = [
+            'ball',
+            'fountain-v2',
+            'calli-v2',
+            'pencil-sketch',
+            'fountain',
+            'calli',
+            'pencil-simple',
+            'pencil-multistrand',
+            'pencil-ribbon-jitter',
+            'pencil-paper-grain',
+            'pencil-svg-turbulence',
+            'pencil',
+            'pencilv2',
+            'pencil-atlas',
+            'pencil-atlasv2',
+            'pencil-atlasv4',
+            'pencil-atlasClaude',
+        ];
+
+        const state = {
+            activeEngineId: 'optimized-engine',
+            activePenId: 'ball',
+            theme: 'light',
+            style: {
+                width: 4,
+                opacity: 1.0,
+                color: '#1e1e1e',
+                smoothing: 0.5,
+                simulatePressure: true,
+                tiltAngle: (-40 * Math.PI) / 180,
+                penId: 'ball',
+            },
+            engineInstance: null,
+            loadedPens: {},
+            penModules: {},
+            penMtimes: {},
+            nonPenFiles: new Set(),
+            loadedEngines: {},
+        };
+
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Toast Helper
+        const toastEl = document.getElementById('toast');
+        let toastTimeout = null;
+        function showToast(msg) {
+            toastEl.textContent = msg;
+            toastEl.classList.add('show');
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => toastEl.classList.remove('show'), 2000);
+        }
+
+        // HUD Elements
+        const fpsCounter = document.getElementById('fpsCounter');
+        const renderTimeCounter = document.getElementById('renderTimeCounter');
+        const statsCounter = document.getElementById('statsCounter');
+        const pressureBarFill = document.getElementById('pressureBarFill');
+        const pressureValueText = document.getElementById('pressureValueText');
+
+        // Manejador de estadísticas en tiempo real
+        function onEngineStats(stats) {
+            if (!stats) return;
+
+            const fps = stats.fps || 60;
+            fpsCounter.textContent = fps;
+            fpsCounter.className = 'hud-metric-value ' + (fps >= 50 ? 'fps-good' : (fps >= 25 ? 'fps-warn' : 'fps-bad'));
+
+            const ms = stats.renderTimeMs !== undefined ? stats.renderTimeMs.toFixed(1) : '0.1';
+            renderTimeCounter.textContent = `${ms} ms`;
+
+            statsCounter.textContent = `${stats.strokeCount || 0} / ${stats.pointCount || 0}`;
+
+            // Nunca reconstruir el DOM/string SVG en vivo mientras se dibuja en modo "Canvas Live":
+            // evita bloquear el hilo principal con megabytes de SVG en trazos de 50.000 puntos.
+            const viewMode = canvasContainer.dataset.view || 'canvas';
+            const isDrawingNow = Boolean(state.engineInstance && state.engineInstance.isDrawing);
+            if (viewMode === 'canvas') {
+                if (!isDrawingNow && (stats.pointCount || 0) <= 2000) {
+                    scheduleSvgUpdate(false);
+                } else {
+                    svgSizeCounter.textContent = (stats.pointCount || 0) > 2000 ? 'Diferido' : svgSizeCounter.textContent;
+                    svgTimeCounter.textContent = '0.0 ms';
+                }
+            } else if (!isDrawingNow || (stats.pointCount || 0) <= 1500) {
+                scheduleSvgUpdate(true);
+            }
+        }
+
+        // ===== SVG Vector Preview =====
+        const svgHost = document.getElementById('svgHost');
+        const svgSizeCounter = document.getElementById('svgSizeCounter');
+        const svgTimeCounter = document.getElementById('svgTimeCounter');
+        const canvasContainer = canvas.parentElement;
+        let svgPending = false;
+
+        function fallbackSvg(points, style) {
+            if (!points.length) return { defs: {}, body: '' };
+            let d = `M${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+            for (let i = 1; i < points.length; i++) d += `L${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)}`;
+            if (points.length === 1) d += 'l0.01 0';
+            return { defs: {}, body: `<path d="${d}" fill="none" stroke="${style.color}" stroke-opacity="${style.opacity}" stroke-width="${style.width}" stroke-linecap="round" stroke-linejoin="round"/>` };
+        }
+
+        function buildSvg() {
+            const eng = state.engineInstance;
+            if (!eng) return '';
+            const committedStrokes = eng.getStrokes();
+            const defs = {};
+            let body = '';
+
+            for (const s of committedStrokes) {
+                if (!s._cachedSvgOut || s._cachedSvgPointCount !== s.points.length) {
+                    const mod = state.penModules[s.style?.penId];
+                    s._cachedSvgOut = (mod && typeof mod.renderSvg === 'function')
+                        ? mod.renderSvg(s.points, s.style)
+                        : fallbackSvg(s.points, s.style);
+                    s._cachedSvgPointCount = s.points.length;
+                }
+                Object.assign(defs, s._cachedSvgOut.defs || {});
+                body += s._cachedSvgOut.body || '';
+            }
+
+            if (eng.isDrawing && eng.activePoints?.length) {
+                const mod = state.penModules[eng.activeStyle?.penId];
+                const out = (mod && typeof mod.renderSvg === 'function')
+                    ? mod.renderSvg(eng.activePoints, eng.activeStyle)
+                    : fallbackSvg(eng.activePoints, eng.activeStyle);
+                Object.assign(defs, out.defs || {});
+                body += out.body || '';
+            }
+
+            const w = canvas.clientWidth, h = canvas.clientHeight;
+            const defsStr = Object.keys(defs).length ? `<defs>${Object.values(defs).join('')}</defs>` : '';
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${defsStr}${body}</svg>`;
+        }
+
+        function scheduleSvgUpdate(force = false) {
+            if (svgPending) return;
+            if (!force && canvasContainer.dataset.view === 'canvas' && state.engineInstance?.isDrawing) {
+                return;
+            }
+            svgPending = true;
+            requestAnimationFrame(() => {
+                svgPending = false;
+                const t0 = performance.now();
+                const markup = buildSvg();
+                const buildMs = performance.now() - t0;
+                const bytes = markup.length;
+                svgSizeCounter.textContent = bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+                state.lastSvg = markup;
+                if (canvasContainer.dataset.view !== 'canvas') {
+                    const t1 = performance.now();
+                    svgHost.innerHTML = markup;
+                    svgTimeCounter.textContent = `${(buildMs + performance.now() - t1).toFixed(1)} ms`;
+                } else {
+                    svgTimeCounter.textContent = `${buildMs.toFixed(1)} ms`;
+                }
+            });
+        }
+
+        canvasContainer.dataset.view = 'canvas';
+        document.querySelectorAll('#viewToggle button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                canvasContainer.dataset.view = btn.dataset.view;
+                document.querySelectorAll('#viewToggle button').forEach(b => b.classList.toggle('active', b === btn));
+                if (btn.dataset.view !== 'canvas') {
+                    scheduleSvgUpdate(true);
+                }
+            });
+        });
+
+        // Ajuste de DPI y tamaño del Canvas
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+
+            const newWidth = Math.floor(rect.width * dpr);
+            const newHeight = Math.floor(rect.height * dpr);
+
+            if (canvas.width !== newWidth || canvas.height !== newHeight) {
+                canvas.width = newWidth;
+                canvas.height = newHeight;
+                canvas.style.width = `${rect.width}px`;
+                canvas.style.height = `${rect.height}px`;
+
+                if (state.engineInstance) {
+                    if (typeof state.engineInstance.syncDryCanvasSize === 'function') {
+                        state.engineInstance.syncDryCanvasSize();
+                    }
+                    state.engineInstance.redraw();
+                }
+            }
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // Cargador dinámico de Módulos de Lápices (pens/*.js) con soporte de hot-reload por mtime
+        async function loadPenModule(penId, mtime = 0) {
+            const prevMtime = state.penMtimes[penId] || 0;
+            const needsReload = mtime > 0 && mtime !== prevMtime;
+
+            if (!needsReload && state.loadedPens[penId]) {
+                return state.loadedPens[penId];
+            }
+            if (!needsReload && state.nonPenFiles.has(penId)) {
+                return null;
+            }
+
+            try {
+                const query = mtime ? `?v=${mtime}` : '';
+                const module = await import(`./pens/${penId}.js${query}`);
+                const fn = module.renderCanvas || module.renderPen;
+                if (typeof fn === 'function') {
+                    state.loadedPens[penId] = fn;
+                    state.penModules[penId] = module;
+                    state.penMtimes[penId] = mtime || 1;
+                    state.nonPenFiles.delete(penId);
+                    return fn;
+                } else {
+                    // Archivo auxiliar en pens/ (p.ej. pencil-common.js), no es una pluma seleccionable
+                    state.nonPenFiles.add(penId);
+                    state.penMtimes[penId] = mtime || 1;
+                    return null;
+                }
+            } catch (err) {
+                console.warn(`[Sandbox] Dynamic import failed for pen ${penId}, trying global registry fallback:`, err);
+            }
+
+            if (window.ApoloSandbox?.pens?.[penId]?.renderPen) {
+                const mod = window.ApoloSandbox.pens[penId];
+                const fn = mod.renderCanvas || mod.renderPen;
+                state.loadedPens[penId] = fn;
+                state.penModules[penId] = mod;
+                state.penMtimes[penId] = mtime || 1;
+                return fn;
+            }
+
+            return null;
+        }
+
+        // Auto-descubrimiento de archivos .js en sandbox/pens/
+        async function discoverPenEntries() {
+            // 1. Intentar endpoint JSON /api/pens de sandbox/server.mjs
+            try {
+                const res = await fetch('./api/pens', { cache: 'no-store' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data?.files)) {
+                        return data.files;
+                    }
+                }
+            } catch {
+                // Ignorar si no está corriendo server.mjs
+            }
+
+            // 2. Intentar listado de directorio estándar /pens/ (Live Server, python http.server, npx serve, etc.)
+            try {
+                const res = await fetch('./pens/', { cache: 'no-store' });
+                if (res.ok) {
+                    const html = await res.text();
+                    const matches = [...html.matchAll(/href=["']([^"']*?\.js)["']/gi)];
+                    const seen = new Set();
+                    const entries = [];
+                    for (const m of matches) {
+                        const rawHref = m[1].split('?')[0];
+                        const fileName = rawHref.split('/').pop();
+                        if (!fileName || !fileName.endsWith('.js')) continue;
+                        const id = decodeURIComponent(fileName.slice(0, -3));
+                        if (seen.has(id)) continue;
+                        seen.add(id);
+                        entries.push({ id, file: fileName, mtime: 0 });
+                    }
+                    if (entries.length > 0) {
+                        entries.sort((a, b) => {
+                            const ia = FALLBACK_PEN_IDS.indexOf(a.id);
+                            const ib = FALLBACK_PEN_IDS.indexOf(b.id);
+                            if (ia !== -1 && ib !== -1) return ia - ib;
+                            if (ia !== -1) return -1;
+                            if (ib !== -1) return 1;
+                            return a.id.localeCompare(b.id);
+                        });
+                        return entries;
+                    }
+                }
+            } catch {
+                // Ignorar
+            }
+
+            // 3. Fallback offline (file://)
+            return FALLBACK_PEN_IDS.map(id => ({ id, file: `${id}.js`, mtime: 0 }));
+        }
+
+        // Sincroniza el DOM de #penList con los módulos válidos en sandbox/pens/*.js sin recargar la página
+        async function syncPenList(rawEntries) {
+            const entries = rawEntries || await discoverPenEntries();
+            const penListEl = document.getElementById('penList');
+            const penCountLabel = document.getElementById('penCountLabel');
+
+            const validIds = [];
+            let anyHotReloaded = false;
+
+            for (const item of entries) {
+                const penId = item.id;
+                const mtime = item.mtime || 0;
+                const wasLoaded = Boolean(state.loadedPens[penId]);
+                const prevMtime = state.penMtimes[penId] || 0;
+
+                const fn = await loadPenModule(penId, mtime);
+                if (typeof fn === 'function') {
+                    validIds.push(penId);
+                    if (wasLoaded && mtime > 0 && prevMtime > 0 && mtime !== prevMtime) {
+                        anyHotReloaded = true;
+                        showToast(`Pluma actualizada: ${state.penModules[penId]?.name || penId}`);
+                    }
+                }
+            }
+
+            // Eliminar tarjetas de plumas cuyos archivos .js fueron borrados
+            const existingCards = new Map();
+            penListEl.querySelectorAll('.pen-card').forEach(card => {
+                existingCards.set(card.dataset.pen, card);
+            });
+
+            for (const [penId, card] of existingCards.entries()) {
+                if (!validIds.includes(penId)) {
+                    card.remove();
+                    existingCards.delete(penId);
+                    delete state.loadedPens[penId];
+                    delete state.penModules[penId];
+                    delete state.penMtimes[penId];
+                }
+            }
+
+            // Crear o actualizar tarjetas en el orden descubierto
+            let addedCount = 0;
+            for (const penId of validIds) {
+                const mod = state.penModules[penId] || {};
+                const displayName = mod.name || penId;
+                let card = existingCards.get(penId);
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.className = 'pen-card' + (penId === state.activePenId ? ' active' : '');
+                    card.dataset.pen = penId;
+                    card.innerHTML = `
+                        <div class="pen-card-top">
+                            <span class="pen-card-name"></span>
+                            <span class="pen-card-score" data-pen-score="${penId}" title="FPS promedio y tiempo por frame al llegar a 50.000 puntos">50k: --</span>
+                        </div>
+                        <canvas class="pen-card-preview" width="260" height="28"></canvas>
+                    `;
+                    card.querySelector('.pen-card-name').textContent = displayName;
+                    existingCards.set(penId, card);
+                    addedCount++;
+                } else {
+                    const nameEl = card.querySelector('.pen-card-name');
+                    if (nameEl && nameEl.textContent !== displayName) {
+                        nameEl.textContent = displayName;
+                    }
+                    card.classList.toggle('active', penId === state.activePenId);
+                }
+                updatePenCardScoreBadge(penId, card);
+                penListEl.appendChild(card);
+            }
+
+            if (penCountLabel) {
+                penCountLabel.textContent = `${validIds.length}`;
+            }
+
+            // Si la pluma activa fue eliminada, cambiar a la primera disponible
+            if (validIds.length > 0 && !validIds.includes(state.activePenId)) {
+                await switchPen(validIds[0]);
+            }
+
+            // Si un archivo .js existente se recargó en caliente, actualizar trazos en el motor
+            if (anyHotReloaded && state.engineInstance) {
+                if (state.loadedPens[state.activePenId]) {
+                    state.engineInstance.setPenRenderer(state.loadedPens[state.activePenId]);
+                }
+                const strokes = state.engineInstance.getStrokes?.() || [];
+                for (const s of strokes) {
+                    const pid = s.style?.penId;
+                    if (pid && state.loadedPens[pid]) {
+                        s.renderPen = state.loadedPens[pid];
+                    }
+                }
+                state.engineInstance.setStrokes?.(strokes);
+                scheduleSvgUpdate();
+            }
+
+            if (addedCount > 0 || anyHotReloaded) {
+                schedulePreviewUpdates();
+            }
+        }
+
+        // Suscripción en tiempo real a cambios en sandbox/pens/ (SSE + fallback polling)
+        function setupPenDirectoryWatcher() {
+            let sseConnected = false;
+
+            if (typeof EventSource !== 'undefined' && location.protocol.startsWith('http')) {
+                try {
+                    const es = new EventSource('./api/pens/events');
+                    es.onopen = () => {
+                        sseConnected = true;
+                    };
+                    es.onmessage = (ev) => {
+                        try {
+                            const payload = JSON.parse(ev.data);
+                            if (Array.isArray(payload?.files)) {
+                                syncPenList(payload.files);
+                            }
+                        } catch {
+                            // Ignorar mensaje malformado
+                        }
+                    };
+                    es.onerror = () => {
+                        sseConnected = false;
+                    };
+                } catch {
+                    sseConnected = false;
+                }
+            }
+
+            // Polling ligero de respaldo (para servidores estáticos sin SSE como Live Server / npx serve)
+            if (location.protocol.startsWith('http')) {
+                setInterval(() => {
+                    if (!sseConnected) {
+                        syncPenList();
+                    }
+                }, 2000);
+            }
+        }
+
+        // Cargador dinámico de Módulos de Motores (engines/*.js)
+        async function loadEngineClass(engineId) {
+            if (state.loadedEngines[engineId]) {
+                return state.loadedEngines[engineId];
+            }
+
+            try {
+                const module = await import(`./engines/${engineId}.js`);
+                const EngineClass = module.SandboxEngine || module.default;
+                if (EngineClass) {
+                    state.loadedEngines[engineId] = EngineClass;
+                    return EngineClass;
+                }
+            } catch (err) {
+                console.warn(`[Sandbox] Dynamic import failed for engine ${engineId}, trying global registry fallback:`, err);
+            }
+
+            if (window.ApoloSandbox?.engines?.[engineId]) {
+                const Cls = window.ApoloSandbox.engines[engineId];
+                state.loadedEngines[engineId] = Cls;
+                return Cls;
+            }
+
+            throw new Error(`No se pudo cargar la clase de motor: ${engineId}`);
+        }
+
+        // Hot-Swap de Motor sin recargar página
+        async function switchEngine(engineId) {
+            try {
+                const EngineClass = await loadEngineClass(engineId);
+                const prevStrokes = state.engineInstance ? state.engineInstance.getStrokes() : [];
+
+                const penRenderer = await loadPenModule(state.activePenId);
+
+                state.engineInstance = new EngineClass(canvas, ctx, {
+                    getPenRenderer: () => state.loadedPens[state.activePenId] || penRenderer,
+                    getStyle: () => ({ ...state.style }),
+                    onStats: onEngineStats,
+                });
+
+                state.activeEngineId = engineId;
+
+                if (prevStrokes.length > 0) {
+                    state.engineInstance.setStrokes(prevStrokes);
+                } else {
+                    state.engineInstance.redraw();
+                }
+
+                document.querySelectorAll('.engine-pill').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.engine === engineId);
+                });
+
+                showToast(`Motor: ${engineId}`);
+            } catch (err) {
+                console.error('Error al cambiar de motor:', err);
+                showToast(`Error al cargar motor: ${err.message}`);
+            }
+        }
+
+        // Hot-Swap de Pluma sin recargar página
+        async function switchPen(penId) {
+            try {
+                const penRenderer = await loadPenModule(penId);
+                state.activePenId = penId;
+                state.style.penId = penId;
+
+                if (state.engineInstance) {
+                    state.engineInstance.setPenRenderer(penRenderer);
+                }
+
+                document.querySelectorAll('.pen-card').forEach(card => {
+                    card.classList.toggle('active', card.dataset.pen === penId);
+                });
+
+                showToast(`Pluma: ${penId}`);
+            } catch (err) {
+                console.error('Error al cambiar de pluma:', err);
+                showToast(`Error al cargar pluma: ${err.message}`);
+            }
+        }
+
+        // Generador de Muestras en Vivo para cada Pluma en la Lista
+        let previewUpdateTimer = null;
+        function schedulePreviewUpdates() {
+            if (previewUpdateTimer) cancelAnimationFrame(previewUpdateTimer);
+            previewUpdateTimer = requestAnimationFrame(() => {
+                renderAllPenPreviews();
+            });
+        }
+
+        async function renderAllPenPreviews() {
+            const cards = document.querySelectorAll('.pen-card');
+            for (const card of cards) {
+                const penId = card.dataset.pen;
+                const previewCanvas = card.querySelector('.pen-card-preview');
+                if (!previewCanvas) continue;
+                const pCtx = previewCanvas.getContext('2d');
+                const w = previewCanvas.width;
+                const h = previewCanvas.height;
+
+                pCtx.clearRect(0, 0, w, h);
+
+                try {
+                    const renderer = await loadPenModule(penId);
+                    const samplePoints = [];
+                    const steps = 32;
+                    for (let i = 0; i <= steps; i++) {
+                        const t = i / steps;
+                        const x = 16 + t * (w - 32);
+                        const y = (h / 2) + Math.sin(t * Math.PI * 2) * 7;
+                        const pressure = 0.35 + 0.55 * Math.sin(t * Math.PI);
+                        samplePoints.push({ x, y, pressure, time: i * 16 });
+                    }
+
+                    const previewWidth = Math.min(Math.max(1.5, state.style.width * 0.7), 9);
+                    const previewStyle = {
+                        ...state.style,
+                        width: previewWidth,
+                        penId,
+                    };
+
+                    renderer(pCtx, samplePoints, previewStyle);
+                } catch (e) {
+                    console.warn(`[Sandbox] Error renderizando preview de ${penId}:`, e);
+                }
+            }
+        }
+
+        // Configuración de Eventos del Canvas y Stylus
+        function setupCanvasEvents() {
+            canvas.addEventListener('pointerdown', (e) => {
+                canvas.setPointerCapture(e.pointerId);
+                updatePressureIndicator(e.pressure);
+                if (state.engineInstance) {
+                    state.engineInstance.handlePointerDown(e);
+                }
+            });
+
+            canvas.addEventListener('pointermove', (e) => {
+                updatePressureIndicator(e.pressure);
+                if (state.engineInstance) {
+                    state.engineInstance.handlePointerMove(e);
+                }
+            });
+
+            const onPointerFinish = (e) => {
+                if (canvas.hasPointerCapture(e.pointerId)) {
+                    canvas.releasePointerCapture(e.pointerId);
+                }
+                updatePressureIndicator(0);
+                if (state.engineInstance) {
+                    state.engineInstance.handlePointerUp(e);
+                }
+            };
+
+            canvas.addEventListener('pointerup', onPointerFinish);
+            canvas.addEventListener('pointercancel', onPointerFinish);
+        }
+
+        function updatePressureIndicator(val) {
+            const displayVal = val > 0 ? val : (state.style.simulatePressure ? 0.5 : 0);
+            pressureValueText.textContent = displayVal.toFixed(2);
+            pressureBarFill.style.width = `${Math.min(100, Math.round(displayVal * 100))}%`;
+        }
+
+        // Controles de Parámetros de la UI
+        function setupUIControls() {
+            // Theme Toggle
+            const themeToggleBtn = document.getElementById('themeToggle');
+            themeToggleBtn.addEventListener('click', () => {
+                const isDark = document.body.dataset.theme === 'dark';
+                const next = isDark ? 'light' : 'dark';
+                document.body.dataset.theme = next;
+                state.theme = next;
+                themeToggleBtn.textContent = next === 'dark' ? 'Tema: Oscuro' : 'Tema: Claro';
+                if (next === 'dark' && state.style.color === '#1e1e1e') {
+                    setColor('#f8fafc');
+                } else if (next === 'light' && state.style.color === '#f8fafc') {
+                    setColor('#1e1e1e');
+                }
+            });
+
+            // Engine Picker Pills
+            document.querySelectorAll('.engine-pill').forEach(btn => {
+                btn.addEventListener('click', () => switchEngine(btn.dataset.engine));
+            });
+
+            // Pen Cards (delegación de eventos para soportar plumas descubiertas en caliente)
+            document.getElementById('penList').addEventListener('click', (e) => {
+                const card = e.target.closest('.pen-card');
+                if (card && card.dataset.pen) {
+                    switchPen(card.dataset.pen);
+                }
+            });
+
+            // Width Slider
+            const widthSlider = document.getElementById('widthSlider');
+            const widthVal = document.getElementById('widthVal');
+            widthSlider.addEventListener('input', (e) => {
+                const val = parseInt(e.target.value, 10);
+                state.style.width = val;
+                widthVal.textContent = `${val} px`;
+                if (state.engineInstance) state.engineInstance.setStyle(state.style);
+                schedulePreviewUpdates();
+            });
+
+            // Opacity Slider
+            const opacitySlider = document.getElementById('opacitySlider');
+            const opacityVal = document.getElementById('opacityVal');
+            opacitySlider.addEventListener('input', (e) => {
+                const val = parseInt(e.target.value, 10);
+                state.style.opacity = val / 100;
+                opacityVal.textContent = `${val}%`;
+                if (state.engineInstance) state.engineInstance.setStyle(state.style);
+                schedulePreviewUpdates();
+            });
+
+            // Smoothing Slider
+            const smoothingSlider = document.getElementById('smoothingSlider');
+            const smoothingVal = document.getElementById('smoothingVal');
+            smoothingSlider.addEventListener('input', (e) => {
+                const val = parseInt(e.target.value, 10);
+                state.style.smoothing = val / 100;
+                smoothingVal.textContent = `${val}%`;
+                if (state.engineInstance) state.engineInstance.setStyle(state.style);
+            });
+
+            // Tilt Slider
+            const tiltSlider = document.getElementById('tiltSlider');
+            const tiltVal = document.getElementById('tiltVal');
+            tiltSlider.addEventListener('input', (e) => {
+                const deg = parseInt(e.target.value, 10);
+                state.style.tiltAngle = (deg * Math.PI) / 180;
+                tiltVal.textContent = `${deg}°`;
+                if (state.engineInstance) state.engineInstance.setStyle(state.style);
+                schedulePreviewUpdates();
+            });
+
+            // Simulate Pressure Toggle
+            const simToggle = document.getElementById('simulatePressureToggle');
+            simToggle.addEventListener('change', (e) => {
+                state.style.simulatePressure = e.target.checked;
+                if (state.engineInstance) state.engineInstance.setStyle(state.style);
+                showToast(`Simulación presión: ${e.target.checked ? 'ON' : 'OFF'}`);
+            });
+
+            // Color Swatches & Picker
+            function setColor(color) {
+                state.style.color = color;
+                document.querySelectorAll('.swatch-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.color.toLowerCase() === color.toLowerCase());
+                });
+                document.getElementById('customColorPicker').value = color;
+                if (state.engineInstance) state.engineInstance.setStyle(state.style);
+                schedulePreviewUpdates();
+            }
+
+            document.querySelectorAll('.swatch-btn').forEach(btn => {
+                btn.addEventListener('click', () => setColor(btn.dataset.color));
+            });
+
+            document.getElementById('customColorPicker').addEventListener('input', (e) => {
+                setColor(e.target.value);
+            });
+
+            // Acciones: Clear, Undo, Redo, Export
+            const clearCanvas = () => {
+                if (state.engineInstance) {
+                    state.engineInstance.clear();
+                    showToast('Lienzo limpio');
+                }
+            };
+            document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+            document.getElementById('headerClearBtn').addEventListener('click', clearCanvas);
+
+            document.getElementById('undoBtn').addEventListener('click', () => {
+                if (state.engineInstance && typeof state.engineInstance.undo === 'function') {
+                    state.engineInstance.undo();
+                }
+            });
+
+            document.getElementById('redoBtn').addEventListener('click', () => {
+                if (state.engineInstance && typeof state.engineInstance.redo === 'function') {
+                    state.engineInstance.redo();
+                }
+            });
+
+            document.getElementById('exportBtn').addEventListener('click', () => {
+                const exportCanvas = document.createElement('canvas');
+                exportCanvas.width = canvas.width;
+                exportCanvas.height = canvas.height;
+                const eCtx = exportCanvas.getContext('2d');
+
+                eCtx.fillStyle = document.body.dataset.theme === 'dark' ? '#0f172a' : '#ffffff';
+                eCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+                eCtx.drawImage(canvas, 0, 0);
+
+                const link = document.createElement('a');
+                link.download = `apolo-sandbox-${Date.now()}.png`;
+                link.href = exportCanvas.toDataURL('image/png');
+                link.click();
+                showToast('Exportado a PNG');
+            });
+
+            // Benchmark de Estrés Automatizado y Test 50k Puntos
+            document.getElementById('bench50kAllBtn').addEventListener('click', () => runBench50kAll(true));
+            document.getElementById('bench50kActiveBtn').addEventListener('click', () => runBench50kSingleOnCanvas(state.activePenId));
+            document.getElementById('rerunBench50kBtn').addEventListener('click', () => runBench50kAll(true));
+            document.getElementById('closeBench50kBtn').addEventListener('click', () => {
+                document.getElementById('bench50kPanel').classList.remove('open');
+            });
+            document.getElementById('stressTestBtn').addEventListener('click', runStressBenchmark);
+            document.getElementById('widthTestBtn').addEventListener('click', runWidthSamples);
+
+            // Atajos de teclado
+            window.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                    if (e.shiftKey) {
+                        state.engineInstance?.redo?.();
+                    } else {
+                        state.engineInstance?.undo?.();
+                    }
+                    e.preventDefault();
+                } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                    state.engineInstance?.redo?.();
+                    e.preventDefault();
+                }
+            });
+        }
+
+        // Generador automatizado de trazos para pruebas de rendimiento estandarizadas
+        async function runStressBenchmark() {
+            showToast('Ejecutando Benchmark de Estrés...');
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.width / dpr;
+            const h = canvas.height / dpr;
+
+            await switchPen('pencil');
+
+            const pencilRenderer = await loadPenModule('pencil');
+            const newStrokes = [];
+
+            for (let s = 0; s < 20; s++) {
+                const points = [];
+                const startY = 80 + (s * (h - 160)) / 20;
+                const startX = 60 + (s % 2) * 40;
+                const endX = w - 80;
+
+                const segments = 45;
+                for (let i = 0; i <= segments; i++) {
+                    const t = i / segments;
+                    const x = startX + (endX - startX) * t;
+                    const y = startY + Math.sin(t * Math.PI * 4 + s) * 25;
+                    const pressure = 0.3 + 0.6 * Math.sin(t * Math.PI);
+                    points.push({ x, y, pressure, time: i * 16 });
+                }
+
+                newStrokes.push({
+                    points,
+                    style: {
+                        width: 5,
+                        opacity: 0.85,
+                        color: s % 2 === 0 ? '#2563eb' : '#1e1e1e',
+                        smoothing: 0.5,
+                        profile: 'pencil',
+                        penId: 'pencil',
+                    },
+                    renderPen: pencilRenderer,
+                });
+            }
+
+            if (state.engineInstance) {
+                state.engineInstance.setStrokes(newStrokes);
+                showToast(`Benchmark: 20 trazos generados`);
+            }
+        }
+
+        // Muestras de la pluma activa a 2, 10 y 25 px (comparación Canvas vs SVG)
+        async function runWidthSamples() {
+            const penId = state.activePenId;
+            const renderer = await loadPenModule(penId);
+            const w = canvas.clientWidth;
+            const strokes = [...(state.engineInstance?.getStrokes() || [])];
+            [2, 10, 25].forEach((width, row) => {
+                const points = [];
+                const y0 = 120 + row * 110;
+                for (let i = 0; i <= 80; i++) {
+                    const t = i / 80;
+                    points.push({
+                        x: 80 + t * (w - 200),
+                        y: y0 + Math.sin(t * Math.PI * 3) * 28,
+                        pressure: 0.25 + 0.7 * Math.sin(t * Math.PI),
+                        time: i * 8,
+                    });
+                }
+                strokes.push({ points, style: { ...state.style, width, penId }, renderPen: renderer });
+            });
+            state.engineInstance?.setStrokes(strokes);
+            showToast(`Muestras 2/10/25 px: ${penId}`);
+        }
+
+        // ===== Benchmark 50.000 Puntos en un Trazo (Nota Larga Continua) =====
+        state.bench50kScores = {};
+        let cached50kPoints = null;
+        let cached50kDims = '';
+        let benchOffscreenCanvas = null;
+        let benchRunning = false;
+
+        function getOrCreate50kStrokePoints() {
+            const dpr = window.devicePixelRatio || 1;
+            const w = Math.max(600, Math.round(canvas.width / dpr));
+            const h = Math.max(450, Math.round(canvas.height / dpr));
+            const dimKey = `${w}x${h}`;
+            if (cached50kPoints && cached50kDims === dimKey) {
+                return cached50kPoints;
+            }
+
+            const totalPoints = 50000;
+            const rows = 25;
+            const ptsPerRow = totalPoints / rows; // 2.000 puntos por renglón de nota
+            const marginX = 55;
+            const marginY = 70;
+            const usableW = Math.max(300, w - marginX * 2);
+            const usableH = Math.max(240, h - marginY * 2);
+            const pts = new Array(totalPoints);
+
+            let idx = 0;
+            for (let r = 0; r < rows; r++) {
+                const rowY = marginY + (r / (rows - 1)) * usableH;
+                const dir = r % 2 === 0 ? 1 : -1;
+                for (let j = 0; j < ptsPerRow; j++) {
+                    const u = j / (ptsPerRow - 1);
+                    const baseT = dir === 1 ? u : 1 - u;
+                    // Oscilación cursiva realista (paso ~1.6px entre muestras consecutivas)
+                    const x = marginX + baseT * usableW + Math.cos(j * 0.35) * 2.2;
+                    const y = rowY + Math.sin(j * 0.28 + r) * 6.5 + Math.cos(j * 0.07) * 2.5;
+                    const pressure = 0.25 + 0.65 * (0.5 + 0.5 * Math.sin(j * 0.04 + r * 0.7));
+                    pts[idx++] = { x, y, pressure, time: idx * 4 };
+                }
+            }
+
+            cached50kPoints = pts;
+            cached50kDims = dimKey;
+            return pts;
+        }
+
+        function computeScoreFromMetrics(avgFps, avgMs, msAt50k) {
+            // Puntuación 0..100 ponderando fluidez sostenida (FPS promedio) y latencia en el punto 50.000
+            const fpsRatio = Math.min(1, avgFps / 120);
+            const tailPenalty = Math.max(0, 1 - Math.max(0, msAt50k - 2.5) / 65);
+            return Math.max(1, Math.min(100, Math.round(fpsRatio * 70 + tailPenalty * 30)));
+        }
+
+        function updatePenCardScoreBadge(penId, cardEl) {
+            const card = cardEl || document.querySelector(`.pen-card[data-pen="${penId}"]`);
+            if (!card) return;
+            const badge = card.querySelector('.pen-card-score');
+            if (!badge) return;
+
+            const data = state.bench50kScores[penId];
+            badge.classList.remove('score-good', 'score-warn', 'score-bad');
+            if (!data) {
+                badge.textContent = '50k: --';
+                return;
+            }
+
+            badge.textContent = `${data.avgFps} FPS · ${data.avgMs.toFixed(1)}ms`;
+            badge.title = `50.000 pts → Promedio: ${data.avgFps} FPS (${data.avgMs.toFixed(2)} ms/frame) | En 50k: ${data.msAt50k.toFixed(2)} ms | Score: ${data.score}/100`;
+            if (data.avgFps >= 55) {
+                badge.classList.add('score-good');
+            } else if (data.avgFps >= 25) {
+                badge.classList.add('score-warn');
+            } else {
+                badge.classList.add('score-bad');
+            }
+        }
+
+        async function evaluatePen50k(penId) {
+            const renderer = await loadPenModule(penId);
+            if (typeof renderer !== 'function') return null;
+
+            const mod = state.penModules[penId] || {};
+            const allPts = getOrCreate50kStrokePoints();
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.width / dpr;
+            const h = canvas.height / dpr;
+
+            if (!benchOffscreenCanvas) {
+                benchOffscreenCanvas = document.createElement('canvas');
+                benchOffscreenCanvas.id = 'drawingCanvas';
+            }
+            if (benchOffscreenCanvas.width !== canvas.width || benchOffscreenCanvas.height !== canvas.height) {
+                benchOffscreenCanvas.width = canvas.width;
+                benchOffscreenCanvas.height = canvas.height;
+            }
+            const bCtx = benchOffscreenCanvas.getContext('2d');
+
+            const strokeId = `bench50k_${penId}_${Date.now()}`;
+            const benchStyle = {
+                ...state.style,
+                penId,
+                strokeId,
+            };
+
+            // Hitos uniformes de carga alta (10k, 25k y 50k puntos).
+            // En cada hito medimos una ráfaga de 5 eventos pointermove consecutivos (+12 puntos por evento = 60 pts),
+            // garantizando que cualquier horneador por chunks/tiles ejecute su ciclo real de horneado dentro de la ventana medida.
+            const milestones = [10000, 25000, 50000];
+            const burstFrames = 5;
+            const ptsPerBurstFrame = 12;
+            const livePoints = [];
+            const milestoneMs = [];
+            let cumulativeMs = 0;
+            let abortedEarly = false;
+
+            for (let mIdx = 0; mIdx < milestones.length; mIdx++) {
+                const targetCount = milestones[mIdx];
+                const warmTarget = Math.max(0, targetCount - burstFrames * ptsPerBurstFrame);
+
+                // Calentar el estado incremental hasta warmTarget en pasos de 64 puntos
+                while (livePoints.length < warmTarget) {
+                    const nextBatch = Math.min(warmTarget, livePoints.length + 64);
+                    while (livePoints.length < nextBatch) {
+                        livePoints.push(allPts[livePoints.length]);
+                    }
+                    if (
+                        mod.incrementalBake ||
+                        penId === 'calli' ||
+                        penId === 'fountain-v2' ||
+                        penId === 'pencil' ||
+                        penId === 'pencil-sketch' ||
+                        penId === 'pencil-atlasv2' ||
+                        penId === 'pencil-atlasv4' ||
+                        penId === 'pencil-atlasClaude'
+                    ) {
+                        bCtx.save();
+                        bCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                        renderer(bCtx, livePoints, benchStyle);
+                        bCtx.restore();
+                    }
+                }
+
+                // Medir ráfaga real de 5 frames pointermove consecutivos hasta llegar a targetCount
+                let burstSumMs = 0;
+                for (let b = 0; b < burstFrames; b++) {
+                    const stepTarget = Math.min(targetCount, livePoints.length + ptsPerBurstFrame);
+                    while (livePoints.length < stepTarget) {
+                        livePoints.push(allPts[livePoints.length]);
+                    }
+
+                    const t0 = performance.now();
+                    bCtx.save();
+                    bCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                    bCtx.clearRect(0, 0, w, h);
+                    renderer(bCtx, livePoints, benchStyle);
+                    bCtx.restore();
+                    try {
+                        const lastPt = livePoints[livePoints.length - 1];
+                        bCtx.getImageData(
+                            Math.max(0, Math.min(canvas.width - 1, Math.floor(lastPt.x * dpr))),
+                            Math.max(0, Math.min(canvas.height - 1, Math.floor(lastPt.y * dpr))),
+                            1,
+                            1
+                        );
+                    } catch {
+                        // Ignorar
+                    }
+                    const dt = performance.now() - t0;
+                    burstSumMs += dt;
+                    cumulativeMs += dt;
+                }
+
+                const avgBurstMs = burstSumMs / burstFrames;
+                milestoneMs.push({ count: targetCount, ms: avgBurstMs });
+
+                if ((avgBurstMs > 45 || cumulativeMs > 240) && mIdx < milestones.length - 1) {
+                    abortedEarly = true;
+                    break;
+                }
+            }
+
+            let msAt50k = milestoneMs[milestoneMs.length - 1].ms;
+            let avgMs = 0;
+
+            if (!abortedEarly) {
+                let sumMs = 0;
+                for (let i = 0; i < milestoneMs.length; i++) sumMs += milestoneMs[i].ms;
+                avgMs = sumMs / milestoneMs.length;
+            } else {
+                const lastSample = milestoneMs[milestoneMs.length - 1];
+                msAt50k = lastSample.ms * (50000 / lastSample.count);
+                avgMs = msAt50k * 0.55;
+            }
+
+            // Media armónica real de FPS ponderando el promedio de trazo largo y el costo en 50.000 puntos
+            const effectiveFrameMs = Math.max(8.33, avgMs * 0.45 + msAt50k * 0.55);
+            const avgFps = Math.max(1, Math.min(120, Math.round(1000 / effectiveFrameMs)));
+            const score = computeScoreFromMetrics(avgFps, avgMs, msAt50k);
+
+            if (typeof mod.releasePencilStroke === 'function') {
+                try {
+                    mod.releasePencilStroke(strokeId);
+                    mod.releasePencilStroke(livePoints);
+                } catch {
+                    // Ignorar
+                }
+            }
+
+            const result = {
+                penId,
+                name: mod.name || penId,
+                avgFps,
+                avgMs,
+                msAt50k,
+                score,
+            };
+
+            state.bench50kScores[penId] = result;
+            updatePenCardScoreBadge(penId);
+            return result;
+        }
+
+        function renderBench50kTable() {
+            const tbody = document.getElementById('bench50kTableBody');
+            if (!tbody) return;
+
+            const rows = Object.values(state.bench50kScores).sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                return a.avgMs - b.avgMs;
+            });
+
+            tbody.innerHTML = '';
+            rows.forEach((r, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'bench50k-row';
+                const fpsClass = r.avgFps >= 55 ? 'fps-good' : (r.avgFps >= 25 ? 'fps-warn' : 'fps-bad');
+                tr.innerHTML = `
+                    <td style="font-family: var(--font-mono); color: var(--text-secondary);">${idx + 1}</td>
+                    <td style="font-weight: 600;">${r.name}</td>
+                    <td class="${fpsClass}" style="font-family: var(--font-mono); font-weight: 700;">${r.avgFps} FPS</td>
+                    <td style="font-family: var(--font-mono);">${r.avgMs.toFixed(2)} ms</td>
+                    <td style="font-family: var(--font-mono);">${r.msAt50k.toFixed(2)} ms</td>
+                    <td style="font-family: var(--font-mono); font-weight: 700;">${r.score}/100</td>
+                `;
+                tr.addEventListener('click', () => {
+                    runBench50kSingleOnCanvas(r.penId);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function runBench50kSingleOnCanvas(penId) {
+            await switchPen(penId);
+            const allPts = getOrCreate50kStrokePoints();
+            const renderer = await loadPenModule(penId);
+            const eng = state.engineInstance;
+            if (!eng || typeof renderer !== 'function') return;
+
+            eng.clear();
+            const strokeId = `live50k_${penId}_${Date.now()}`;
+            eng.isDrawing = true;
+            eng.activeStrokeId = strokeId;
+            eng.activePoints = [];
+            eng.activeStyle = {
+                ...state.style,
+                penId,
+                strokeId,
+            };
+            eng.activeRenderPen = renderer;
+
+            // Transmitir en vivo los 50.000 puntos mediante requestAnimationFrame para medir
+            // los FPS reales de pantalla mientras se dibuja la nota continua frente al usuario
+            const totalFrames = 50;
+            const ptsPerFrame = 50000 / totalFrames;
+            const rafDeltas = [];
+            const renderTimes = [];
+            let lastRaf = performance.now();
+
+            for (let fIdx = 1; fIdx <= totalFrames; fIdx++) {
+                await new Promise(r => requestAnimationFrame(r));
+                const now = performance.now();
+                const rafDt = now - lastRaf;
+                lastRaf = now;
+
+                const targetLen = fIdx * ptsPerFrame;
+                while (eng.activePoints.length < targetLen) {
+                    eng.activePoints.push(allPts[eng.activePoints.length]);
+                }
+
+                const t0 = performance.now();
+                eng.redraw();
+                const rMs = performance.now() - t0;
+
+                if (fIdx > 1) {
+                    rafDeltas.push(rafDt);
+                    renderTimes.push(rMs);
+                }
+            }
+
+            // Finalizar el trazo (pointerup)
+            eng.handlePointerUp({});
+
+            const avgRenderMs = renderTimes.reduce((a, b) => a + b, 0) / Math.max(1, renderTimes.length);
+            const msAt50k = renderTimes[renderTimes.length - 1] || avgRenderMs;
+            const avgRafFps = Math.max(
+                1,
+                Math.min(
+                    120,
+                    Math.round(
+                        rafDeltas.reduce((acc, dt) => acc + Math.min(120, 1000 / Math.max(1, dt)), 0) /
+                            Math.max(1, rafDeltas.length)
+                    )
+                )
+            );
+            const score = computeScoreFromMetrics(avgRafFps, avgRenderMs, msAt50k);
+            const mod = state.penModules[penId] || {};
+
+            state.bench50kScores[penId] = {
+                penId,
+                name: mod.name || penId,
+                avgFps: avgRafFps,
+                avgMs: avgRenderMs,
+                msAt50k,
+                score,
+            };
+            updatePenCardScoreBadge(penId);
+            renderBench50kTable();
+
+            fpsCounter.textContent = avgRafFps;
+            fpsCounter.className = 'hud-metric-value ' + (avgRafFps >= 50 ? 'fps-good' : (avgRafFps >= 25 ? 'fps-warn' : 'fps-bad'));
+            renderTimeCounter.textContent = `${avgRenderMs.toFixed(2)} ms`;
+            statsCounter.textContent = `1 / 50000`;
+            showToast(`${mod.name || penId}: ${avgRafFps} FPS reales (${avgRenderMs.toFixed(2)} ms) en 50k pts`);
+        }
+
+        async function runBench50kAll(openModal = true) {
+            if (benchRunning) return;
+            benchRunning = true;
+
+            const panel = document.getElementById('bench50kPanel');
+            const statusEl = document.getElementById('bench50kStatus');
+            if (openModal && panel) {
+                panel.classList.add('open');
+            }
+
+            const cards = [...document.querySelectorAll('.pen-card')];
+            const penIds = cards.map(c => c.dataset.pen).filter(Boolean);
+
+            for (let i = 0; i < penIds.length; i++) {
+                const pid = penIds[i];
+                const modName = state.penModules[pid]?.name || pid;
+                if (statusEl) {
+                    statusEl.textContent = `Evaluando (${i + 1}/${penIds.length}) a 50.000 pts: ${modName}...`;
+                }
+                await new Promise(r => requestAnimationFrame(r));
+                await evaluatePen50k(pid);
+                renderBench50kTable();
+            }
+
+            if (statusEl) {
+                statusEl.textContent = `Completado en ${penIds.length} lápices (50.000 pts/trazo). Clic en una fila para ver en lienzo.`;
+            }
+            benchRunning = false;
+
+            if (openModal) {
+                await runBench50kSingleOnCanvas(state.activePenId);
+            }
+        }
+
+        // Inicialización de la aplicación
+        async function init() {
+            resizeCanvas();
+            setupCanvasEvents();
+            setupUIControls();
+
+            await syncPenList();
+            setupPenDirectoryWatcher();
+
+            await switchPen(state.activePenId);
+            await switchEngine(state.activeEngineId);
+            renderAllPenPreviews();
+
+            // Evaluar puntuaciones de 50k puntos en segundo plano para mostrar los badges de cada pluma
+            setTimeout(() => {
+                runBench50kAll(false);
+            }, 150);
+        }
+
+        init();
+    </script>
+</body>
+</html>

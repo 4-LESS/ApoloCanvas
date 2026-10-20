@@ -1,4 +1,4 @@
-import { BoundingBox, Point } from '../../core/types';
+import type { BoundingBox, Point } from '../../core/types.ts';
 
 /** Interleaved point storage: x, y, pressure, timestamp (milliseconds). */
 export class PointBuffer {

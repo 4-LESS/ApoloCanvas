@@ -56,7 +56,7 @@ export class PenEstuchePopover {
     private readonly tools: Array<{ id: PenProfileId; label: string; iconD: string }> = [
         { id: 'fountain', label: 'Estilográfica', iconD: ICONS.pen },
         { id: 'calli', label: 'Caligráfica', iconD: ICONS.feather },
-        { id: 'hlr', label: 'Rotulador', iconD: ICONS.highlighter },
+        { id: 'ball', label: 'Bolígrafo', iconD: ICONS.ballpoint },
         { id: 'pencil', label: 'Lápiz de mina', iconD: ICONS.pencil },
     ];
 
@@ -226,9 +226,13 @@ export class PenEstuchePopover {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = `popover-line-chip ${this.state.lineStyle === s.id ? 'is-active' : ''}`;
+            const pill = document.createElement('span');
+            pill.className = 'popover-line-chip-pill';
+            pill.setAttribute('aria-hidden', 'true');
             const bar = document.createElement('div');
             bar.className = `popover-line-bar ${s.cls}`;
-            btn.appendChild(bar);
+            pill.appendChild(bar);
+            btn.appendChild(pill);
             btn.onclick = () => {
                 this.state.lineStyle = s.id;
                 stylesRow.querySelectorAll('.popover-line-chip').forEach((b) => b.classList.remove('is-active'));
