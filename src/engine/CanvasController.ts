@@ -1709,9 +1709,10 @@ export class CanvasController {
     }
 
     public getActiveToolFavorites(): ToolFavoritePreset[] {
-        if (this.tool === 'pen') return this.toolState.favorites.pen;
-        if (this.tool === 'highlighter') return this.toolState.favorites.highlighter;
-        if (this.tool === 'shape') return this.toolState.favorites.shape;
+        if (!this.toolState?.favorites) return [];
+        if (this.tool === 'pen') return this.toolState.favorites.pen ?? [];
+        if (this.tool === 'highlighter') return this.toolState.favorites.highlighter ?? [];
+        if (this.tool === 'shape') return this.toolState.favorites.shape ?? [];
         return [];
     }
 

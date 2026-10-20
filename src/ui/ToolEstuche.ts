@@ -525,9 +525,6 @@ export class ToolEstuche implements PopoverInstance {
             {
                 onSelectFavorite: (preset) => {
                     this.callbacks.onApplyFavorite?.(preset);
-                    if (!this.callbacks.onApplyFavorite && this.callbacks.onUseFavorite) {
-                        this.callbacks.onUseFavorite(0);
-                    }
                 },
                 onDeleteFavorite: (presetId) => {
                     this.callbacks.onDeleteFavorite?.(presetId);
@@ -560,11 +557,7 @@ export class ToolEstuche implements PopoverInstance {
         }
 
         favsBtn.onclick = () => {
-            if (this.callbacks.onToggleFavorite || this.callbacks.onApplyFavorite || this.state.favorites !== undefined) {
-                this.setShowingFavorites(!this.state.showingFavorites);
-            } else if (this.callbacks.onUseFavorite) {
-                this.callbacks.onUseFavorite(0);
-            }
+            this.setShowingFavorites(!this.state.showingFavorites);
         };
         this.favsBtn = favsBtn;
         this.headerEl.appendChild(favsBtn);
