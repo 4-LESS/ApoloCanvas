@@ -2,6 +2,17 @@ import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettin
 import { EngineEventBus } from './core/events.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
 import { DEFAULT_WORKSPACE_TOOL_STATE, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
+import {
+    computeFavoriteFingerprint,
+    findMatchingFavorite,
+    toggleFavoritePreset,
+    removeFavoriteById,
+    reorderFavorites,
+    type ToolFavoritePreset,
+    type PenFavoritePreset,
+    type HighlighterFavoritePreset,
+    type ShapeFavoritePreset,
+} from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
 import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue.ts';
 import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
@@ -515,6 +526,111 @@ export default class ApoloCanvasPlugin extends Plugin {
         void this.remountActiveEditor();
     }
 
+    toggleActiveToolFavorite(): void {
+        if (this.controller) {
+            this.controller.toggleFavorite();
+            return;
+        }
+        const tool = this.settings.toolState.activeTool;
+        if (tool === 'pen') {
+            const result = toggleFavoritePreset(this.settings.toolState.favorites.pen, { tool: 'pen', ...this.settings.toolState.pen });
+            this.settings.toolState.favorites.pen = result.updatedList;
+        } else if (tool === 'highlighter') {
+            const result = toggleFavoritePreset(this.settings.toolState.favorites.highlighter, { tool: 'highlighter', ...this.settings.toolState.highlighter });
+            this.settings.toolState.favorites.highlighter = result.updatedList;
+        } else if (tool === 'shape') {
+            const result = toggleFavoritePreset(this.settings.toolState.favorites.shape, { tool: 'shape', ...this.settings.toolState.shape });
+            this.settings.toolState.favorites.shape = result.updatedList;
+        } else {
+            return;
+        }
+        this.debouncedSaveSettings();
+    }
+
+    applyToolFavorite(preset: ToolFavoritePreset): void {
+        if (this.controller) {
+            this.controller.applyToolFavoritePreset(preset);
+            return;
+        }
+        if (preset.tool === 'pen') {
+            this.settings.toolState.activeTool = 'pen';
+            this.settings.toolState.pen.profileId = preset.profileId;
+            this.settings.toolState.pen.color = preset.color;
+            this.settings.toolState.pen.width = preset.width;
+            this.settings.toolState.pen.opacity = preset.opacity;
+            this.settings.toolState.pen.pattern = preset.pattern;
+            if (preset.straightenLines !== undefined) {
+                this.settings.toolState.pen.straightenLines = preset.straightenLines;
+            }
+            if (preset.smoothing !== undefined) {
+                this.settings.toolState.pen.smoothing = preset.smoothing;
+            }
+        } else if (preset.tool === 'highlighter') {
+            this.settings.toolState.activeTool = 'highlighter';
+            this.settings.toolState.highlighter.profileId = preset.profileId;
+            this.settings.toolState.highlighter.color = preset.color;
+            this.settings.toolState.highlighter.width = preset.width;
+            this.settings.toolState.highlighter.opacity = preset.opacity;
+            this.settings.toolState.highlighter.pattern = preset.pattern;
+            if (preset.straightenLines !== undefined) {
+                this.settings.toolState.highlighter.straightenLines = preset.straightenLines;
+            }
+        } else if (preset.tool === 'shape') {
+            this.settings.toolState.activeTool = 'shape';
+            this.settings.toolState.shape.shapeType = preset.shapeType;
+            this.settings.toolState.shape.color = preset.color;
+            this.settings.toolState.shape.width = preset.width;
+            this.settings.toolState.shape.opacity = preset.opacity;
+            this.settings.toolState.shape.pattern = preset.pattern;
+            if (preset.fillEnabled !== undefined) {
+                this.settings.toolState.shape.fillEnabled = preset.fillEnabled;
+            }
+            if (preset.fillColor !== undefined) {
+                this.settings.toolState.shape.fillColor = preset.fillColor;
+            }
+            if (preset.fillOpacity !== undefined) {
+                this.settings.toolState.shape.fillOpacity = preset.fillOpacity;
+            }
+        }
+        this.debouncedSaveSettings();
+    }
+
+    deleteToolFavorite(presetId: string): void {
+        if (this.controller) {
+            this.controller.deleteToolFavoritePreset(presetId);
+            return;
+        }
+        const tool = this.settings.toolState.activeTool;
+        if (tool === 'pen') {
+            this.settings.toolState.favorites.pen = removeFavoriteById(this.settings.toolState.favorites.pen, presetId);
+            this.debouncedSaveSettings();
+        } else if (tool === 'highlighter') {
+            this.settings.toolState.favorites.highlighter = removeFavoriteById(this.settings.toolState.favorites.highlighter, presetId);
+            this.debouncedSaveSettings();
+        } else if (tool === 'shape') {
+            this.settings.toolState.favorites.shape = removeFavoriteById(this.settings.toolState.favorites.shape, presetId);
+            this.debouncedSaveSettings();
+        }
+    }
+
+    reorderToolFavorites(fromIndex: number, toIndex: number): void {
+        if (this.controller) {
+            this.controller.reorderToolFavorites(fromIndex, toIndex);
+            return;
+        }
+        const tool = this.settings.toolState.activeTool;
+        if (tool === 'pen') {
+            this.settings.toolState.favorites.pen = reorderFavorites(this.settings.toolState.favorites.pen, fromIndex, toIndex);
+            this.debouncedSaveSettings();
+        } else if (tool === 'highlighter') {
+            this.settings.toolState.favorites.highlighter = reorderFavorites(this.settings.toolState.favorites.highlighter, fromIndex, toIndex);
+            this.debouncedSaveSettings();
+        } else if (tool === 'shape') {
+            this.settings.toolState.favorites.shape = reorderFavorites(this.settings.toolState.favorites.shape, fromIndex, toIndex);
+            this.debouncedSaveSettings();
+        }
+    }
+
     private registerCommands(): void {
         this.addCommand({
             id: 'apolo-insert-canvas',
@@ -754,6 +870,18 @@ export default class ApoloCanvasPlugin extends Plugin {
                 onFavoritesChange: (favs: PenFavorite[]) => {
                     this.settings.favorites = favs;
                     void this.saveSettings();
+                },
+                onToggleFavorite: () => {
+                    this.debouncedSaveSettings();
+                },
+                onApplyFavorite: (preset: ToolFavoritePreset) => {
+                    this.debouncedSaveSettings();
+                },
+                onDeleteFavorite: (presetId: string) => {
+                    this.debouncedSaveSettings();
+                },
+                onReorderFavorites: (fromIndex: number, toIndex: number) => {
+                    this.debouncedSaveSettings();
                 },
                 toolState: this.settings.toolState,
                 onToolStateChange: (state: WorkspaceToolState) => {

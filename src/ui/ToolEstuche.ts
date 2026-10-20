@@ -1,8 +1,9 @@
-import type { EraserMode, LassoMode, PenFavorite, PenProfileId, ShapeType, StrokePattern, ToolbarSlot, ToolType } from '../core/types.ts';
+import type { EraserMode, FavoritableTool, LassoMode, PenFavorite, PenProfileId, ShapeType, StrokePattern, ToolbarSlot, ToolFavoritePreset, ToolType } from '../core/types.ts';
 import { ICONS, createSvg } from './theme.ts';
 import type { PopoverController, PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { applyPopoverGeometry } from './popover/PopoverGeometry.ts';
+import { FavoritesDrawer } from './favorites/FavoritesDrawer.ts';
 
 export interface ToolEstucheState {
     tool: ToolType;
@@ -17,13 +18,15 @@ export interface ToolEstucheState {
     pattern?: StrokePattern;
     straightenLines?: boolean;
     onlyHighlighter?: boolean;
-    favorites: PenFavorite[];
+    favorites: PenFavorite[] | ToolFavoritePreset[];
     eraserMode: EraserMode;
     eraserRadius: number;
     scribbleToErase: boolean;
     lassoMode: LassoMode;
     shapeType: ShapeType;
     snapGrid: boolean;
+    isCurrentFavorite?: boolean;
+    showingFavorites?: boolean;
 }
 
 export interface ToolEstucheCallbacks {
@@ -38,6 +41,10 @@ export interface ToolEstucheCallbacks {
     onToggleOnlyHighlighter?: (enabled: boolean) => void;
     onUseFavorite: (index: number) => void;
     onSaveFavorite: (index: number) => void;
+    onToggleFavorite?: () => void;
+    onApplyFavorite?: (preset: ToolFavoritePreset) => void;
+    onDeleteFavorite?: (presetId: string) => void;
+    onReorderFavorites?: (fromIndex: number, toIndex: number) => void;
     onSelectEraserMode: (mode: EraserMode) => void;
     onChangeEraserRadius: (radius: number) => void;
     onToggleScribble: (enabled: boolean) => void;
@@ -80,6 +87,9 @@ export class ToolEstuche implements PopoverInstance {
     private swatchRowEl?: HTMLElement;
     private paginationEl?: HTMLElement;
     private swatchButtons: Map<string, HTMLElement> = new Map();
+    private starBtn?: HTMLElement;
+    private favsBtn?: HTMLElement;
+    private favoritesDrawer?: FavoritesDrawer;
 
     private recentColors: string[] = ['#E53935', '#FFA726', '#FFEE58', '#26A69A', '#42A5F5', '#1E88E5', '#7E57C2', '#EEEEEE'];
     private maxRecentSlots = 8;
@@ -170,10 +180,11 @@ export class ToolEstuche implements PopoverInstance {
     open(state?: Partial<ToolEstucheState>, anchorEl?: HTMLElement | null): void {
         if (state) {
             const toolChanged = state.tool && state.tool !== this.state.tool;
-            this.state = { ...this.state, ...state };
             if (toolChanged) {
+                this.state.showingFavorites = false;
                 this.initColorPages();
             }
+            this.state = { ...this.state, ...state };
             if (state.color) {
                 this.pushRecentColor(state.color);
             }
@@ -239,15 +250,34 @@ export class ToolEstuche implements PopoverInstance {
 
     updateState(partial: Partial<ToolEstucheState>): void {
         const previousTool = this.state.tool;
+        const previousShowingFavs = this.state.showingFavorites;
         this.state = { ...this.state, ...partial };
 
         if (!this.isOpen()) return;
 
         if (partial.tool && partial.tool !== previousTool) {
+            this.state.showingFavorites = false;
             this.initColorPages();
             this.render();
             this.position(this.currentAnchorEl);
             return;
+        }
+
+        if (partial.showingFavorites !== undefined && partial.showingFavorites !== previousShowingFavs) {
+            this.setShowingFavorites(partial.showingFavorites);
+            return;
+        }
+
+        if (partial.isCurrentFavorite !== undefined) {
+            this.updateStarButtonVisual();
+        }
+
+        if (partial.favorites !== undefined) {
+            this.updateFavsButtonVisual();
+            if (this.state.showingFavorites && this.favoritesDrawer) {
+                const tool = this.state.tool as FavoritableTool;
+                this.favoritesDrawer.update(tool, this.getToolFavorites(), this.getCurrentToolSlice());
+            }
         }
 
         // In-place updates: zero DOM destruction to preserve slider drags and focus
@@ -367,6 +397,93 @@ export class ToolEstuche implements PopoverInstance {
         }
     }
 
+    public setShowingFavorites(showing: boolean): void {
+        this.state.showingFavorites = showing;
+        this.render();
+        this.position(this.currentAnchorEl);
+    }
+
+    public isShowingFavorites(): boolean {
+        return Boolean(this.state.showingFavorites);
+    }
+
+    private updateStarButtonVisual(): void {
+        if (!this.starBtn) return;
+        const isFav = Boolean(this.state.isCurrentFavorite);
+        this.starBtn.classList.toggle('is-active', isFav);
+        this.starBtn.classList.toggle('is-fav-saved', isFav);
+        this.starBtn.setAttribute('aria-pressed', String(isFav));
+        this.starBtn.title = isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito';
+        this.starBtn.setAttribute('aria-label', this.starBtn.title);
+    }
+
+    private updateFavsButtonVisual(): void {
+        if (!this.favsBtn) return;
+        const isShowing = Boolean(this.state.showingFavorites);
+        this.favsBtn.classList.toggle('is-active', isShowing);
+        this.favsBtn.title = isShowing ? 'Ver herramientas' : 'Ver favoritos guardados';
+        this.favsBtn.setAttribute('aria-label', this.favsBtn.title);
+
+        const count = this.getToolFavorites().length;
+        let badge = this.favsBtn.querySelector('.popover-favs-badge') as HTMLElement | null;
+        if (count > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'popover-favs-badge';
+                this.favsBtn.appendChild(badge);
+            }
+            badge.textContent = String(count);
+        } else if (badge) {
+            badge.remove();
+        }
+    }
+
+    private getToolFavorites(): ToolFavoritePreset[] {
+        if (Array.isArray(this.state.favorites)) {
+            return this.state.favorites.filter((f): f is ToolFavoritePreset => Boolean(f && typeof f === 'object' && 'id' in f));
+        }
+        return [];
+    }
+
+    private getCurrentToolSlice(): any {
+        const tool = this.state.tool;
+        if (tool === 'pen') {
+            return {
+                tool: 'pen',
+                profileId: this.state.profileId,
+                color: this.state.color,
+                width: this.state.width,
+                opacity: this.state.opacity ?? 1,
+                pattern: this.state.pattern ?? this.state.lineStyle ?? 'solid',
+                straightenLines: Boolean(this.state.straightenLines),
+                smoothing: this.state.smoothing,
+            };
+        }
+        if (tool === 'highlighter') {
+            return {
+                tool: 'highlighter',
+                profileId: this.state.profileId === 'hlf' ? 'hlf' : 'hlr',
+                color: this.state.color,
+                width: this.state.width,
+                opacity: this.state.opacity ?? 0.75,
+                pattern: this.state.pattern ?? this.state.lineStyle ?? 'solid',
+                straightenLines: Boolean(this.state.straightenLines),
+            };
+        }
+        if (tool === 'shape') {
+            return {
+                tool: 'shape',
+                shapeType: this.state.shapeType ?? 'rect',
+                color: this.state.color,
+                width: this.state.width,
+                opacity: this.state.opacity ?? 1,
+                pattern: this.state.pattern ?? this.state.lineStyle ?? 'solid',
+                fillEnabled: false,
+            };
+        }
+        return null;
+    }
+
     private render(): void {
         this.headerEl.replaceChildren();
         this.bodyEl.replaceChildren();
@@ -379,49 +496,108 @@ export class ToolEstuche implements PopoverInstance {
         this.swatchButtons.clear();
 
         const tool = this.state.tool;
-        if (tool === 'pen') {
-            this.renderPenHeader();
-            this.renderPenContent();
-        } else if (tool === 'highlighter') {
-            this.renderPenHeader();
-            this.renderHighlighterContent();
+        if (tool === 'pen' || tool === 'highlighter' || tool === 'shape') {
+            this.renderFavoritesAwareHeader(this.getTitleForTool(tool));
+            if (this.state.showingFavorites) {
+                this.renderFavoritesDrawerContent();
+            } else if (tool === 'pen') {
+                this.renderPenContent();
+            } else if (tool === 'highlighter') {
+                this.renderHighlighterContent();
+            } else if (tool === 'shape') {
+                this.renderShapeContent();
+            }
         } else if (tool === 'eraser') {
             this.renderSimpleHeader('Borrador');
             this.renderEraserContent();
-        } else if (tool === 'shape') {
-            this.renderSimpleHeader('Formas');
-            this.renderShapeContent();
         } else if (tool === 'lasso') {
             this.renderSimpleHeader('Lazo');
             this.renderLassoContent();
         }
     }
 
-    private renderPenHeader(): void {
+    private renderFavoritesDrawerContent(): void {
+        const tool = this.state.tool as FavoritableTool;
+        const favorites = this.getToolFavorites();
+        const currentSlice = this.getCurrentToolSlice();
+
+        this.favoritesDrawer = new FavoritesDrawer(
+            {
+                onSelectFavorite: (preset) => {
+                    this.callbacks.onApplyFavorite?.(preset);
+                    if (!this.callbacks.onApplyFavorite && this.callbacks.onUseFavorite) {
+                        this.callbacks.onUseFavorite(0);
+                    }
+                },
+                onDeleteFavorite: (presetId) => {
+                    this.callbacks.onDeleteFavorite?.(presetId);
+                },
+                onReorderFavorite: (fromIndex, toIndex) => {
+                    this.callbacks.onReorderFavorites?.(fromIndex, toIndex);
+                },
+            },
+            tool,
+            favorites,
+            currentSlice,
+            this.bodyEl,
+        );
+    }
+
+    private renderFavoritesAwareHeader(titleText: string): void {
         const favsBtn = document.createElement('button');
         favsBtn.type = 'button';
-        favsBtn.className = 'popover-hdr-btn';
-        favsBtn.title = 'Lápices favoritos';
-        favsBtn.setAttribute('aria-label', 'Lápices favoritos');
+        favsBtn.className = `popover-hdr-btn popover-favs-btn ${this.state.showingFavorites ? 'is-active' : ''}`;
+        favsBtn.title = this.state.showingFavorites ? 'Ver herramientas' : 'Ver favoritos guardados';
+        favsBtn.setAttribute('aria-label', favsBtn.title);
         favsBtn.appendChild(createSvg(ICONS.bookmark, { size: 18 }));
+
+        const count = this.getToolFavorites().length;
+        if (count > 0) {
+            const badge = document.createElement('span');
+            badge.className = 'popover-favs-badge';
+            badge.textContent = String(count);
+            favsBtn.appendChild(badge);
+        }
+
         favsBtn.onclick = () => {
-            this.callbacks.onUseFavorite(0);
+            if (this.callbacks.onToggleFavorite || this.callbacks.onApplyFavorite || this.state.favorites !== undefined) {
+                this.setShowingFavorites(!this.state.showingFavorites);
+            } else if (this.callbacks.onUseFavorite) {
+                this.callbacks.onUseFavorite(0);
+            }
         };
+        this.favsBtn = favsBtn;
         this.headerEl.appendChild(favsBtn);
+
+        const title = document.createElement('h3');
+        title.className = 'popover-title';
+        title.textContent = this.state.showingFavorites ? 'Favoritos' : titleText;
+        this.headerEl.appendChild(title);
 
         const rightBtns = document.createElement('div');
         rightBtns.className = 'popover-header-right';
 
         const starBtn = document.createElement('button');
         starBtn.type = 'button';
-        starBtn.className = 'popover-hdr-btn';
-        starBtn.title = 'Marcar actual como favorito';
-        starBtn.setAttribute('aria-label', 'Marcar actual como favorito');
+        const isFav = Boolean(this.state.isCurrentFavorite);
+        starBtn.className = `popover-hdr-btn popover-star-btn ${isFav ? 'is-active is-fav-saved' : ''}`;
+        starBtn.title = isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito';
+        starBtn.setAttribute('aria-label', starBtn.title);
+        starBtn.setAttribute('aria-pressed', String(isFav));
         starBtn.appendChild(createSvg(ICONS.star, { size: 18 }));
+
         starBtn.onclick = () => {
-            starBtn.classList.toggle('is-fav-saved');
-            this.callbacks.onSaveFavorite(0);
+            if (this.callbacks.onToggleFavorite) {
+                this.callbacks.onToggleFavorite();
+            } else if (this.callbacks.onSaveFavorite) {
+                this.callbacks.onSaveFavorite(0);
+            }
+            if (this.state.showingFavorites && this.favoritesDrawer) {
+                const tool = this.state.tool as FavoritableTool;
+                this.favoritesDrawer.update(tool, this.getToolFavorites(), this.getCurrentToolSlice());
+            }
         };
+        this.starBtn = starBtn;
 
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
@@ -433,6 +609,10 @@ export class ToolEstuche implements PopoverInstance {
 
         rightBtns.append(starBtn, closeBtn);
         this.headerEl.appendChild(rightBtns);
+    }
+
+    private renderPenHeader(): void {
+        this.renderFavoritesAwareHeader(this.getTitleForTool(this.state.tool));
     }
 
     private renderSimpleHeader(titleText: string): void {
