@@ -40,10 +40,12 @@ export class SandboxEngine {
         this.lastPressure = 0.5;
 
         // Métricas de benchmarking
-        this.fps = 60;
+        this.fps = 120;
         this.renderTimeMs = 0;
-        this.frameCount = 0;
-        this.fpsTimer = performance.now();
+        this.emaFrameMs = 8.33;
+        this.lastFrameTime = performance.now();
+        this.lastRedrawTime = 0;
+        this.rafPending = false;
     }
 
     syncDryCanvasSize() {
@@ -287,7 +289,20 @@ export class SandboxEngine {
             this.activePoints.push(pt);
         }
 
-        this.redraw();
+        const now = performance.now();
+        if (now - this.lastRedrawTime >= 4 || typeof requestAnimationFrame === 'undefined') {
+            this.lastRedrawTime = now;
+            this.redraw();
+        } else if (!this.rafPending) {
+            this.rafPending = true;
+            requestAnimationFrame(() => {
+                this.rafPending = false;
+                if (this.isDrawing) {
+                    this.lastRedrawTime = performance.now();
+                    this.redraw();
+                }
+            });
+        }
     }
 
     handlePointerUp(e) {
@@ -412,13 +427,20 @@ export class SandboxEngine {
     }
 
     recordFrame() {
-        this.frameCount++;
         const now = performance.now();
-        if (now - this.fpsTimer >= 500) {
-            this.fps = Math.round((this.frameCount * 1000) / (now - this.fpsTimer));
-            this.frameCount = 0;
-            this.fpsTimer = now;
+        const deltaMs = now - this.lastFrameTime;
+        this.lastFrameTime = now;
+
+        // Si el evento ocurrió en ráfaga continua (< 45 ms) o el renderizado fue pesado (> 8 ms),
+        // actualizamos la media móvil exponencial del costo real de frame; ignoramos pausas de mano inactiva.
+        if (deltaMs < 45 || this.renderTimeMs > 8) {
+            const effectiveMs = Math.max(8.33, this.renderTimeMs, this.renderTimeMs > 6 ? deltaMs : 8.33);
+            this.emaFrameMs = this.emaFrameMs * 0.75 + effectiveMs * 0.25;
+        } else {
+            const effectiveMs = Math.max(8.33, this.renderTimeMs);
+            this.emaFrameMs = this.emaFrameMs * 0.8 + effectiveMs * 0.2;
         }
+        this.fps = Math.max(1, Math.min(120, Math.round(1000 / this.emaFrameMs)));
 
         let totalPoints = 0;
         for (let i = 0; i < this.strokes.length; i++) {

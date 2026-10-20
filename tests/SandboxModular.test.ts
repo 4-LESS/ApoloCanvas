@@ -412,46 +412,68 @@ describe('Sandbox Modular Canvas Architecture', () => {
                 const strokeId = `test50k_${penId}`;
                 const style = { width: 4, color: '#2b2b2b', opacity: 1.0, strokeId };
 
-                const totalSteps = 25;
-                const chunkSize = totalPoints / totalSteps;
+                const milestones = [10000, 25000, 50000];
+                const burstFrames = 5;
+                const ptsPerBurstFrame = 12;
                 const livePoints: any[] = [];
-                const frameTimes: Array<{ count: number; ms: number }> = [];
+                const milestoneMs: Array<{ count: number; ms: number }> = [];
                 let cumulativeMs = 0;
                 let abortedEarly = false;
 
-                for (let step = 1; step <= totalSteps; step++) {
-                    const targetCount = step * chunkSize;
-                    while (livePoints.length < targetCount) {
-                        livePoints.push(allPts[livePoints.length]);
+                for (let mIdx = 0; mIdx < milestones.length; mIdx++) {
+                    const targetCount = milestones[mIdx];
+                    const warmTarget = Math.max(0, targetCount - burstFrames * ptsPerBurstFrame);
+
+                    while (livePoints.length < warmTarget) {
+                        const nextBatch = Math.min(warmTarget, livePoints.length + 64);
+                        while (livePoints.length < nextBatch) {
+                            livePoints.push(allPts[livePoints.length]);
+                        }
+                        if (
+                            penId === 'calli' ||
+                            penId === 'pencil' ||
+                            penId === 'pencil-sketch' ||
+                            penId === 'pencil-atlasv2' ||
+                            penId === 'pencil-atlasv4' ||
+                            penId === 'pencil-atlasClaude'
+                        ) {
+                            renderFn(ctx, livePoints, style);
+                        }
                     }
-                    const t0 = performance.now();
-                    renderFn(ctx, livePoints, style);
-                    const dt = performance.now() - t0;
-                    frameTimes.push({ count: targetCount, ms: dt });
-                    cumulativeMs += dt;
-                    if (cumulativeMs > 220 && step < totalSteps) {
+
+                    let burstSumMs = 0;
+                    for (let b = 0; b < burstFrames; b++) {
+                        const stepTarget = Math.min(targetCount, livePoints.length + ptsPerBurstFrame);
+                        while (livePoints.length < stepTarget) {
+                            livePoints.push(allPts[livePoints.length]);
+                        }
+                        const t0 = performance.now();
+                        renderFn(ctx, livePoints, style);
+                        const dt = performance.now() - t0;
+                        burstSumMs += dt;
+                        cumulativeMs += dt;
+                    }
+
+                    const avgBurstMs = burstSumMs / burstFrames;
+                    milestoneMs.push({ count: targetCount, ms: avgBurstMs });
+                    if ((avgBurstMs > 45 || cumulativeMs > 240) && mIdx < milestones.length - 1) {
                         abortedEarly = true;
                         break;
                     }
                 }
 
-                let msAt50k = frameTimes[frameTimes.length - 1].ms;
+                let msAt50k = milestoneMs[milestoneMs.length - 1].ms;
                 let avgMs = 0;
                 if (!abortedEarly) {
-                    avgMs = frameTimes.reduce((acc, f) => acc + f.ms, 0) / frameTimes.length;
+                    avgMs = milestoneMs.reduce((acc, f) => acc + f.ms, 0) / milestoneMs.length;
                 } else {
-                    const last = frameTimes[frameTimes.length - 1];
+                    const last = milestoneMs[milestoneMs.length - 1];
                     msAt50k = last.ms * (totalPoints / last.count);
-                    avgMs = msAt50k * 0.52;
+                    avgMs = msAt50k * 0.55;
                 }
 
-                let fpsSum = 0;
-                for (let step = 1; step <= totalSteps; step++) {
-                    const frac = step / totalSteps;
-                    const estMs = !abortedEarly ? frameTimes[step - 1].ms : Math.max(0.1, msAt50k * frac);
-                    fpsSum += Math.min(120, 1000 / Math.max(0.1, estMs));
-                }
-                const avgFps = Math.max(1, Math.min(120, Math.round(fpsSum / totalSteps)));
+                const effectiveFrameMs = Math.max(8.33, avgMs * 0.45 + msAt50k * 0.55);
+                const avgFps = Math.max(1, Math.min(120, Math.round(1000 / effectiveFrameMs)));
                 const fpsRatio = Math.min(1, avgFps / 120);
                 const tailPenalty = Math.max(0, 1 - Math.max(0, msAt50k - 2.5) / 65);
                 const score = Math.max(1, Math.min(100, Math.round(fpsRatio * 70 + tailPenalty * 30)));

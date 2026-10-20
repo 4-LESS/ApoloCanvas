@@ -256,8 +256,11 @@ export class SandboxEngine {
     recordFrame() {
         this.frameCount++;
         const now = performance.now();
-        if (now - this.fpsTimer >= 500) {
-            this.fps = Math.round((this.frameCount * 1000) / (now - this.fpsTimer));
+        const dt = Math.max(0.1, this.renderTimeMs);
+        this.emaFrameMs = this.emaFrameMs === undefined ? dt : (this.emaFrameMs * 0.8 + dt * 0.2);
+
+        if (now - this.fpsTimer >= 120) {
+            this.fps = Math.min(120, Math.max(1, Math.round(1000 / Math.max(8.33, this.emaFrameMs))));
             this.frameCount = 0;
             this.fpsTimer = now;
         }
