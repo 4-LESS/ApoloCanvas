@@ -399,6 +399,91 @@ export function drawSolidProfileStrokePath(
     renderContinuousSolidStroke(context, points, style);
 }
 
+/**
+ * Snap angle in degrees to cardinal axes (0, 90, 180, 270 within 6°)
+ * or intermediate angles (30, 45, 60, 120, 135, 150, 210, 225, 240, 300, 315, 330 within 3.5°).
+ */
+export function snapLineAngle(deg: number): number {
+    const norm = ((deg % 360) + 360) % 360;
+    const diff = (a: number, b: number) => {
+        const d = Math.abs(a - b);
+        return Math.min(d, 360 - d);
+    };
+
+    const cardinals = [0, 90, 180, 270];
+    for (const target of cardinals) {
+        if (diff(norm, target) <= 6.0) {
+            return target;
+        }
+    }
+
+    const intermediates = [30, 45, 60, 120, 135, 150, 210, 225, 240, 300, 315, 330];
+    for (const target of intermediates) {
+        if (diff(norm, target) <= 3.5) {
+            return target;
+        }
+    }
+
+    return norm;
+}
+
+/**
+ * Computes snapped endpoint and collinear sequence of points along the elastic straight line.
+ */
+export function computeStraightLinePoints(
+    start: Point,
+    current: Point,
+    zoom = 1,
+): { end: Point; points: Point[]; angleDeg: number; snappedDeg: number } {
+    const x0 = start.x;
+    const y0 = start.y;
+    const p0 = start.pressure ?? 0.5;
+    const t0 = start.time ?? 0;
+
+    const dx = current.x - x0;
+    const dy = current.y - y0;
+    const rDoc = Math.hypot(dx, dy);
+    const rScreen = rDoc * zoom;
+
+    let xEnd = current.x;
+    let yEnd = current.y;
+    let angleDeg = 0;
+    let snappedDeg = 0;
+
+    if (rDoc >= 1e-4) {
+        angleDeg = (Math.atan2(dy, dx) * 180 / Math.PI) % 360;
+        if (angleDeg < 0) angleDeg += 360;
+
+        snappedDeg = snapLineAngle(angleDeg);
+        const snappedRad = snappedDeg * Math.PI / 180;
+
+        xEnd = x0 + rDoc * Math.cos(snappedRad);
+        yEnd = y0 + rDoc * Math.sin(snappedRad);
+    }
+
+    const pCurr = current.pressure ?? 0.5;
+    const tCurr = current.time ?? 0;
+    const count = Math.max(2, Math.min(24, Math.ceil(rScreen / 8)));
+    const points: Point[] = new Array(count);
+
+    for (let k = 0; k < count; k++) {
+        const u = k / (count - 1);
+        points[k] = {
+            x: x0 + u * (xEnd - x0),
+            y: y0 + u * (yEnd - y0),
+            pressure: p0 + u * (pCurr - p0),
+            time: t0 + u * (tCurr - t0),
+        };
+    }
+
+    return {
+        end: { x: xEnd, y: yEnd, pressure: pCurr, time: tCurr },
+        points,
+        angleDeg,
+        snappedDeg,
+    };
+}
+
 export interface LiveBakeState {
     liveBakeCanvas: HTMLCanvasElement | null;
     liveBakeCtx: CanvasRenderingContext2D | null;

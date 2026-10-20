@@ -16,6 +16,7 @@ export interface ApoloCanvasSettings {
     penInputEnabled: boolean;
     enableMouseDrawing: boolean;
     shapeRecognition: boolean;
+    straightenLines: boolean;
     toolbarSlot: ToolbarSlot;
     favorites: PenFavorite[];
     toolPalettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }>;
@@ -39,6 +40,7 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     penInputEnabled: true,
     enableMouseDrawing: false,
     shapeRecognition: true,
+    straightenLines: false,
     toolbarSlot: 'tc',
     favorites: [
         { profile: 'fountain', color: '#1F4FD8', width: 3 },
@@ -449,6 +451,11 @@ export default class ApoloCanvasPlugin extends Plugin {
     setAutoSaveDelay(value: number): void { this.persistence?.setDebounceMs(value); }
     setCompanionExport(value: boolean): void { this.persistence?.setCompanionSvgEnabled(value); }
     setShapeRecognition(value: boolean): void { this.controller?.setShapeRecognition(value); }
+    setStraightenLines(value: boolean): void {
+        this.settings.straightenLines = value;
+        this.controller?.setStraightenLines(value);
+        void this.saveSettings();
+    }
 
     setPenInput(value: boolean): void {
         this.settings.penInputEnabled = value;
@@ -670,6 +677,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                 enabled: this.settings.penInputEnabled,
                 enableMouseDrawing: this.settings.enableMouseDrawing,
                 shapeRecognition: this.settings.shapeRecognition,
+                straightenLines: this.settings.straightenLines,
                 toolbarSlot: this.settings.toolbarSlot,
                 favorites: this.settings.favorites,
                 gridDensity: this.settings.gridDensity,
@@ -687,6 +695,11 @@ export default class ApoloCanvasPlugin extends Plugin {
                 onPenEnabledChange: (enabled: boolean) => {
                     this.settings.penInputEnabled = enabled;
                     void this.saveSettings();
+                },
+                onToggleStraighten: (enabled: boolean) => {
+                    this.settings.straightenLines = enabled;
+                    void this.saveSettings();
+                    this.controller?.setStraightenLines(enabled);
                 },
                 onToolbarSlotChange: (slot: ToolbarSlot) => {
                     this.settings.toolbarSlot = slot;

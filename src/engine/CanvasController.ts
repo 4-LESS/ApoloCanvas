@@ -29,10 +29,12 @@ import { PointBuffer } from './input/PointBuffer';
 import {
     applyStrokePattern,
     bakeLiveStrokeSegment,
+    computeStraightLinePoints,
     drawPatternedStrokePath,
     getOrCreateStrokeSprite,
     LiveBakeState,
     renderContinuousSolidStroke,
+    snapLineAngle,
 } from './PatternedStrokeRenderer';
 import { getPenPlugin } from './pens/index';
 import { SpatialGrid } from './spatial/SpatialGrid';
@@ -85,6 +87,7 @@ export interface CanvasControllerOptions {
     enabled: boolean;
     enableMouseDrawing: boolean;
     shapeRecognition: boolean;
+    straightenLines?: boolean;
     gridDensity?: number;
     defaultBoxHeight?: number;
     defaultBoxGridStyle?: BoxGridStyle;
@@ -105,6 +108,7 @@ export interface CanvasControllerOptions {
         shape?: { colors: string[]; opacities: number[] };
     };
     onPenEnabledChange?: (enabled: boolean) => void;
+    onToggleStraighten?: (enabled: boolean) => void;
     onToolbarSlotChange?: (slot: ToolbarSlot) => void;
     onFavoritesChange?: (favorites: PenFavorite[]) => void;
     onToolPalettesChange?: (palettes: {
@@ -294,6 +298,7 @@ export class CanvasController {
         this.pageId = pageId;
         this.penEnabled = options.enabled;
         this.shapeRecognition = options.shapeRecognition;
+        this.straightenLines = options.straightenLines ?? false;
         this.gridDensity = options.gridDensity ?? 32;
         this.toolbarSlot = options.toolbarSlot ?? 'tc';
         this.favorites = options.favorites && options.favorites.length === 4
@@ -567,6 +572,7 @@ export class CanvasController {
                         lassoMode: this.lassoMode,
                         shapeType: this.shapeType,
                         snapGrid: this.snapGrid,
+                        straightenLines: this.straightenLines,
                     }, toolBtn);
                 }
             },
@@ -612,6 +618,7 @@ export class CanvasController {
                 lassoMode: this.lassoMode,
                 shapeType: this.shapeType,
                 snapGrid: this.snapGrid,
+                straightenLines: this.straightenLines,
             },
             {
                 onSelectProfile: (profileId) => this.applyPenProfile(profileId),
@@ -650,6 +657,10 @@ export class CanvasController {
                     this.toolbar?.setSnapGrid(enabled);
                     this.renderDirty = true;
                     this.schedulePaint();
+                },
+                onToggleStraighten: (enabled) => {
+                    this.setStraightenLines(enabled);
+                    this.options.onToggleStraighten?.(enabled);
                 },
                 onClose: () => undefined,
             },
@@ -1657,6 +1668,16 @@ export class CanvasController {
         this.schedulePaint();
     }
 
+    setStraightenLines(enabled: boolean): void {
+        this.straightenLines = enabled;
+        this.estuche?.updateState({ straightenLines: enabled });
+        this.options.eventBus?.emit('straighten:changed', enabled);
+    }
+
+    getStraightenLines(): boolean {
+        return this.straightenLines;
+    }
+
     private readonly onCanvasDblClick = (event: MouseEvent): void => {
         this.focusEditorAt(event.clientX, event.clientY);
     };
@@ -1787,7 +1808,7 @@ export class CanvasController {
 
         this.toolbar?.setTool(tool);
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
-        this.estuche?.updateState({ tool, color: this.style.color, width: this.style.width });
+        this.estuche?.updateState({ tool, color: this.style.color, width: this.style.width, straightenLines: this.straightenLines });
         this.options.eventBus?.emit('tool:changed', tool);
         this.schedulePaint();
     }
@@ -2197,7 +2218,24 @@ export class CanvasController {
     private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
         this.barrelActive = barrel;
-        for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
+        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+            const lastRaw = rawPoints[rawPoints.length - 1];
+            const currentDocPt: Point = {
+                x: (lastRaw.x + this.currentScrollLeft) / this.zoom,
+                y: (lastRaw.y + this.currentScrollTop) / this.zoom,
+                pressure: lastRaw.pressure,
+                time: lastRaw.time,
+            };
+            const { points } = computeStraightLinePoints(this.activeStart, currentDocPt, this.zoom);
+            this.points.clear();
+            for (let i = 0; i < points.length; i++) {
+                const pt = points[i];
+                this.points.push(pt.x, pt.y, pt.pressure ?? 0.5, pt.time ?? 0);
+            }
+            this.hasPrediction = false;
+        } else {
+            for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
+        }
 
         if (this.tool === 'eraser' || barrel) {
             const worldPoints = rawPoints.map(p => ({
@@ -2233,7 +2271,23 @@ export class CanvasController {
     private end(rawPoint: Point, barrel: boolean, releasedAt: number): void {
         if (!this.activeStart) return;
         const lastMotionAt = this.points.size > 0 ? this.points.getTime(this.points.size - 1) : releasedAt;
-        this.pushWorldPoint(rawPoint);
+        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+            const currentDocPt: Point = {
+                x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
+                y: (rawPoint.y + this.currentScrollTop) / this.zoom,
+                pressure: rawPoint.pressure,
+                time: rawPoint.time,
+            };
+            const { points } = computeStraightLinePoints(this.activeStart, currentDocPt, this.zoom);
+            this.points.clear();
+            for (let i = 0; i < points.length; i++) {
+                const pt = points[i];
+                this.points.push(pt.x, pt.y, pt.pressure ?? 0.5, pt.time ?? 0);
+            }
+            this.hasPrediction = false;
+        } else {
+            this.pushWorldPoint(rawPoint);
+        }
         const raw = this.readActivePoints();
 
         if (this.movingSelection && this.tool === 'lasso') {
@@ -2261,7 +2315,7 @@ export class CanvasController {
             if (this.tool === 'shape') {
                 this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
             } else {
-                const recognized = this.shapeRecognition ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
+                const recognized = (this.shapeRecognition && !this.straightenLines) ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
                 if (recognized) {
                     this.addShape(recognized.start, recognized.end, recognized.type);
                     this.toast?.show(`Forma reconocida: ${recognized.type}`);
@@ -2309,6 +2363,9 @@ export class CanvasController {
     private resetLiveBake(): void {
         this.liveBakedIndex = 0;
         this.liveBakeSegState = {};
+        if (this.liveBakeCtx && this.liveBakeCanvas) {
+            this.liveBakeCtx.clearRect(0, 0, this.liveBakeCanvas.width, this.liveBakeCanvas.height);
+        }
     }
 
     private pushWorldPoint(point: Point): void {
@@ -4180,7 +4237,7 @@ export class CanvasController {
                 context.stroke();
             }
 
-            if (this.hasPrediction && this.points.size > 0) {
+            if (!this.straightenLines && this.hasPrediction && this.points.size > 0) {
                 const isPredForbidden = bounds.contentTop > 0 && this.predictedPoint.y < forbiddenY;
                 if (!isPredForbidden) {
                     context.beginPath();
@@ -4243,7 +4300,7 @@ export class CanvasController {
         }
         context.restore();
 
-        if (this.hasPrediction && this.points.size > 0) {
+        if (!this.straightenLines && this.hasPrediction && this.points.size > 0) {
             context.save();
             const isPredForbidden = bounds.contentTop > 0 && this.predictedPoint.y < forbiddenY;
             if (isPredForbidden) {

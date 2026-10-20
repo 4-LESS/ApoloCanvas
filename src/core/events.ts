@@ -5,6 +5,7 @@ export interface EngineEvents {
     'style:changed': (style: Partial<StrokeStyle>, profileId?: PenProfileId) => void;
     'selection:changed': (selected: CanvasElement[], bounds: BoundingBox | null) => void;
     'pen:changed': (penEnabled: boolean) => void;
+    'straighten:changed': (enabled: boolean) => void;
     'snap:detected': (shapeType: ShapeType, x: number, y: number) => void;
     'canvas:dirty': (pageId: string) => void;
     'zoom:changed': (zoom: number) => void;
