@@ -1,4 +1,4 @@
-import type { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types.ts';
+import type { PenFavorite, PenProfile, PenProfileId, ShapeType, StrokePattern } from '../core/types.ts';
 
 /**
  * Checks whether Obsidian is currently rendering in dark theme.
@@ -270,20 +270,57 @@ export function createSvg(pathD: string, options: SvgOptions = {}): SVGSVGElemen
 }
 
 /**
- * Creates an SVG stroke preview wave for a given profile and color.
+ * Creates an SVG stroke preview wave for a given profile and color, or for a favorite preset configuration.
+ * Supports both modern preset signature (color, width, profileId, opacity, pattern)
+ * and legacy signature (profile, baseWidth, color, width, height).
  */
 export function createStrokeWavePreview(
-    profile: PenProfile,
+    colorOrProfile: string | PenProfile,
     baseWidth: number,
-    color: string,
+    profileIdOrColor?: PenProfileId | PenProfile | string,
+    opacityOrWidth?: number,
+    patternOrHeight?: StrokePattern | number,
     width = 150,
     height = 40,
 ): SVGSVGElement {
+    let color: string;
+    let profile: PenProfile;
+    let opacity: number;
+    let pattern: StrokePattern = 'solid';
+    let svgW = width;
+    let svgH = height;
+
+    if (typeof colorOrProfile === 'object' && colorOrProfile !== null) {
+        // Legacy: (profile, baseWidth, color, width?, height?)
+        profile = colorOrProfile;
+        color = typeof profileIdOrColor === 'string' ? profileIdOrColor : '#1F4FD8';
+        if (typeof opacityOrWidth === 'number') svgW = opacityOrWidth;
+        if (typeof patternOrHeight === 'number') svgH = patternOrHeight;
+        opacity = profile.op;
+    } else {
+        // Modern: (color, baseWidth, profileId?, opacity?, pattern?, width?, height?)
+        color = colorOrProfile;
+        const profId = typeof profileIdOrColor === 'string'
+            ? (profileIdOrColor as PenProfileId)
+            : (typeof profileIdOrColor === 'object' && profileIdOrColor ? profileIdOrColor.id : 'fountain');
+        profile = PEN_PROFILES[profId] ?? PEN_PROFILES.fountain;
+
+        if (typeof opacityOrWidth === 'number') {
+            opacity = opacityOrWidth > 1 ? opacityOrWidth / 100 : Math.max(0, opacityOrWidth);
+        } else {
+            opacity = profile.op;
+        }
+
+        if (typeof patternOrHeight === 'string') {
+            pattern = patternOrHeight as StrokePattern;
+        }
+    }
+
     const waveD = 'M4 28 C30 6 50 38 76 20 S120 8 146 24';
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', String(width));
-    svg.setAttribute('height', String(height));
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', String(svgW));
+    svg.setAttribute('height', String(svgH));
+    svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
 
@@ -291,12 +328,24 @@ export function createStrokeWavePreview(
     path.setAttribute('d', waveD);
     path.setAttribute('stroke', mapInkColorForDark(color));
     path.setAttribute('stroke-width', String(Math.max(1.5, baseWidth * profile.wm)));
-    path.setAttribute('stroke-linecap', profile.cap);
+    path.setAttribute('stroke-linecap', pattern === 'dashed' ? 'butt' : profile.cap);
     path.setAttribute('stroke-linejoin', 'round');
-    path.setAttribute('stroke-opacity', String(profile.op));
-    if (profile.dash) {
+    path.setAttribute('stroke-opacity', String(opacity));
+
+    if (pattern === 'dashed') {
+        const effWidth = Math.max(1.5, baseWidth * profile.wm);
+        const dashLen = Math.max(6, Math.round(effWidth * 2.5));
+        const gapLen = Math.max(4, Math.round(effWidth * 1.8));
+        path.setAttribute('stroke-dasharray', `${dashLen} ${gapLen}`);
+    } else if (pattern === 'dotted') {
+        const effWidth = Math.max(1.5, baseWidth * profile.wm);
+        const gapLen = Math.max(4, Math.round(effWidth * 2));
+        path.setAttribute('stroke-dasharray', `0.1 ${gapLen}`);
+        path.setAttribute('stroke-linecap', 'round');
+    } else if (profile.dash) {
         path.setAttribute('stroke-dasharray', profile.dash);
     }
+
     svg.appendChild(path);
     return svg;
 }
