@@ -1,15 +1,18 @@
 /**
  * sandbox/pens/pencil-sketch.js
  *
- * Lápiz 8 · Vector Sketch (Híbrido Vector + Grano Dual)
+ * Lápiz 12 · Vector Sketch (Híbrido O(1))
  *
  * Diseñado bajo orden estricto de prioridades:
- * 1. RENDIMIENTO (120 FPS en trazos largos):
- *    Exactamente 3 llamadas de dibujo por trazo (O(1) draw calls) + diezmado adaptativo
- *    al grosor:
- *      - Capa 1: Cinta exterior porosa con tapas semicirculares (1 fill nonzero).
- *      - Capa 2: Núcleo de grafito sensible a la presión local (1 fill nonzero).
- *      - Capa 3: Filamentos secos de borde en 1 solo path continuo (1 stroke con dash primo).
+ * 1. RENDIMIENTO (120 FPS incluso en trazos de 50.000 puntos):
+ *    - Espina dorsal e historial geométrico incremental O(ΔN) en arrays tipados (SoA):
+ *      cada nuevo evento pointermove procesa únicamente los puntos nuevos.
+ *    - Horneado incremental sin costuras (Seamless Strip Baking) para trazos en vivo
+ *      largos (> 64 nodos): sólo la tapa inicial lleva abanico semicircular al inicio,
+ *      los tramos intermedios se unen por su normal exacta sin tapas internas, y la
+ *      cola viva cierra con la tapa semicircular final.
+ *    - En renderizado completo / sprite / SVG ejecuta estrictamente 3 llamadas O(1):
+ *      (1) Cinta exterior porosa, (2) Núcleo dinámico por presión, (3) Filamentos secos.
  * 2. COMPATIBILIDAD (Paridad 1:1 Live Canvas <-> SVG Vector):
  *    Cero shadowBlur y cero filtros pesados (<feTurbulence> / <feDisplacementMap>).
  *    Canvas y SVG comparten exactamente la misma geometría vectorial y el mismo par de
@@ -24,18 +27,54 @@
 
 export const id = 'pencil-sketch';
 export const name = 'Lápiz 12 · Vector Sketch (Híbrido O(1))';
-export const description = 'Iteración 12: Híbrido vectorial de 3 pasadas O(1): doble cinta con grano de papel 128x128, filamentos secos y paridad 1:1 Canvas/SVG a cualquier grosor';
+export const description = 'Iteración 12: Híbrido vectorial O(1) con espina incremental para 50k puntos, doble cinta de grano 128x128 y paridad 1:1 Canvas/SVG';
 
 const TILE_SIZE = 128;
 const TILE_MASK = TILE_SIZE - 1;
+const CAP_STEPS = 5;
+const SEAM_EPS = 0.22;
 
 let cachedPaperField = null;
 const patternCache = new Map();
-const geometryCache = new WeakMap();
+const strokeStateByPoints = new WeakMap();
+const strokeStateById = new Map();
 
-/**
- * Hash entero determinista [0, 1) sin estado global.
- */
+// Buffer offscreen reutilizable para hornear tramos confirmados en trazos de hasta 50k+ puntos
+const liveSketchBake = {
+    canvas: null,
+    ctx: null,
+    strokeKey: '',
+    bakedSpineIdx: 0,
+};
+
+function ensureLiveBakeCanvas(targetCanvas) {
+    if (!targetCanvas || typeof document === 'undefined' || typeof document.createElement !== 'function') {
+        return null;
+    }
+    const w = targetCanvas.width || 1;
+    const h = targetCanvas.height || 1;
+    if (!liveSketchBake.canvas) {
+        liveSketchBake.canvas = document.createElement('canvas');
+        liveSketchBake.ctx = liveSketchBake.canvas.getContext && liveSketchBake.canvas.getContext('2d');
+    }
+    if (!liveSketchBake.ctx) return null;
+    if (liveSketchBake.canvas.width !== w || liveSketchBake.canvas.height !== h) {
+        liveSketchBake.canvas.width = w;
+        liveSketchBake.canvas.height = h;
+        liveSketchBake.strokeKey = '';
+        liveSketchBake.bakedSpineIdx = 0;
+    }
+    return liveSketchBake.ctx;
+}
+
+export function releasePencilStroke(idOrPoints) {
+    if (idOrPoints && typeof idOrPoints === 'object') {
+        strokeStateByPoints.delete(idOrPoints);
+    } else if (typeof idOrPoints === 'string') {
+        strokeStateById.delete(idOrPoints);
+    }
+}
+
 function hash2D(x, y, seed) {
     let h = Math.imul(x ^ seed, 374761393) + Math.imul(y ^ (seed >> 3), 668265263);
     h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -48,13 +87,6 @@ function hash1D(i, salt) {
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-/**
- * Genera el campo de altitud toroidal del papel (128x128) combinando:
- * - Fibra celulósica media (radio 2)
- * - Grano fino de poro (radio 1)
- * - Micro-asperidad directa (radio 0)
- * Rank-normalized en [0, 1) para garantizar control exacto de cobertura.
- */
 function getPaperField() {
     if (cachedPaperField) return cachedPaperField;
 
@@ -131,11 +163,6 @@ function parseColorRgb(colorStr) {
     return [43, 43, 43];
 }
 
-/**
- * Construye y cachea los 2 patrones complementarios de grafito por color:
- * - coarse: cobertura porosa (~48%) con penumbra suave en las crestas del papel.
- * - core: cobertura densa (~82%) para el núcleo donde la mina apoya con firmeza.
- */
 function getGrainPatterns(ctx, color, baseWidth) {
     const safeColor = color || '#2b2b2b';
     let entry = patternCache.get(safeColor);
@@ -181,7 +208,7 @@ function getGrainPatterns(ctx, color, baseWidth) {
                 cCtx.putImageData(img, 0, 0);
                 let url = '';
                 try {
-                    url = c.toDataURL('image/png');
+                    if (typeof c.toDataURL === 'function') url = c.toDataURL('image/png');
                 } catch {
                     url = '';
                 }
@@ -207,7 +234,6 @@ function getGrainPatterns(ctx, color, baseWidth) {
         patternCache.set(safeColor, entry);
     }
 
-    // Escala suave del grano según el grosor (trazos gruesos muestran poro ligeramente más amplio)
     const grainScale = Math.max(0.85, Math.min(1.55, 0.80 + baseWidth * 0.025));
 
     if (ctx && typeof ctx.createPattern === 'function' && entry.coarseTile && entry.coreTile) {
@@ -235,228 +261,22 @@ function getGrainPatterns(ctx, color, baseWidth) {
     };
 }
 
-/**
- * Curva de presión ergonómica para lápiz de grafito
- */
 function pencilPressureResponse(rawP) {
     const p = rawP !== undefined && !isNaN(rawP) && rawP > 0 ? Math.max(0.05, Math.min(1, rawP)) : 0.5;
     return Math.pow(p, 0.78);
 }
 
 /**
- * Construye una cinta poligonal cerrada con tapas semicirculares en ambos extremos
- * para que a cualquier grosor (incluso 40px) las puntas sean redondas y orgánicas.
+ * Estado incremental SoA por trazo: permite crecer hasta 50.000+ puntos en O(ΔN) por frame
  */
-function buildRoundedRibbonPolygon(spine, halfWidthsL, halfWidthsR) {
-    const n = spine.length;
-    if (n < 2) return new Float32Array(0);
-
-    const capSteps = 5;
-    // Total de vértices: n izquierda + (capSteps - 1) tapa final + n derecha + (capSteps - 1) tapa inicial
-    const totalVerts = n * 2 + (capSteps - 1) * 2;
-    const poly = new Float32Array(totalVerts * 2);
-    let ptr = 0;
-
-    // 1. Borde izquierdo de inicio a fin
-    for (let i = 0; i < n; i++) {
-        const pt = spine[i];
-        const hw = halfWidthsL[i];
-        poly[ptr++] = pt.x + pt.nx * hw;
-        poly[ptr++] = pt.y + pt.ny * hw;
-    }
-
-    // 2. Tapa semicircular final (de +normal a -normal pasando por +tangente)
-    const last = spine[n - 1];
-    const txEnd = last.ny;
-    const tyEnd = -last.nx;
-    const rEnd = (halfWidthsL[n - 1] + halfWidthsR[n - 1]) * 0.5;
-    for (let c = 1; c < capSteps; c++) {
-        const theta = (c / capSteps) * Math.PI;
-        const cosT = Math.cos(theta);
-        const sinT = Math.sin(theta);
-        poly[ptr++] = last.x + (last.nx * cosT + txEnd * sinT) * rEnd;
-        poly[ptr++] = last.y + (last.ny * cosT + tyEnd * sinT) * rEnd;
-    }
-
-    // 3. Borde derecho de fin a inicio
-    for (let i = n - 1; i >= 0; i--) {
-        const pt = spine[i];
-        const hw = halfWidthsR[i];
-        poly[ptr++] = pt.x - pt.nx * hw;
-        poly[ptr++] = pt.y - pt.ny * hw;
-    }
-
-    // 4. Tapa semicircular inicial (de -normal a +normal pasando por -tangente)
-    const first = spine[0];
-    const txStart = -first.ny;
-    const tyStart = first.nx;
-    const rStart = (halfWidthsL[0] + halfWidthsR[0]) * 0.5;
-    for (let c = 1; c < capSteps; c++) {
-        const theta = (c / capSteps) * Math.PI;
-        const cosT = -Math.cos(theta);
-        const sinT = Math.sin(theta);
-        poly[ptr++] = first.x + (first.nx * cosT + txStart * sinT) * rStart;
-        poly[ptr++] = first.y + (first.ny * cosT + tyStart * sinT) * rStart;
-    }
-
-    return poly;
-}
-
-/**
- * Prepara la espina dorsal suavizada y las 3 capas geométricas del lápiz.
- * Usa diezmado adaptativo al grosor para impedir auto-intersecciones y espinas en trazos anchos.
- */
-export function buildSketchGeometry(rawPoints, baseWidth) {
-    if (!rawPoints || rawPoints.length === 0) return null;
-
-    const cached = geometryCache.get(rawPoints);
-    if (cached && cached.rawLength === rawPoints.length && cached.baseWidth === baseWidth) {
-        return cached;
-    }
-
+function createIncrementalState(p0, baseWidth) {
+    const cap = 256;
     const seed =
-        (Math.imul(Math.round(rawPoints[0].x * 100), 73856093) ^
-            Math.imul(Math.round(rawPoints[0].y * 100), 19349663)) |
+        (Math.imul(Math.round(p0.x * 100), 73856093) ^
+            Math.imul(Math.round(p0.y * 100), 19349663)) |
         0;
-
-    // Paso mínimo proporcional al grosor: evita que puntos muy juntos con ancho 30-40px creen picos
+    const initP = pencilPressureResponse(p0.pressure);
     const minDist = Math.max(1.3, baseWidth * 0.22);
-    const filtered = [
-        {
-            x: rawPoints[0].x,
-            y: rawPoints[0].y,
-            p: pencilPressureResponse(rawPoints[0].pressure),
-        },
-    ];
-
-    for (let i = 1; i < rawPoints.length; i++) {
-        const pt = rawPoints[i];
-        const prev = filtered[filtered.length - 1];
-        const dist = Math.hypot(pt.x - prev.x, pt.y - prev.y);
-        const pVal = pencilPressureResponse(pt.pressure);
-
-        if (dist >= minDist) {
-            filtered.push({
-                x: pt.x,
-                y: pt.y,
-                p: prev.p * 0.35 + pVal * 0.65,
-            });
-        } else if (i === rawPoints.length - 1 && dist > 0.15) {
-            // Para el último punto muy cercano, actualizamos suavemente el extremo sin crear un escalón brusco
-            if (filtered.length === 1) {
-                filtered.push({ x: pt.x, y: pt.y, p: pVal });
-            } else {
-                prev.x = prev.x * 0.4 + pt.x * 0.6;
-                prev.y = prev.y * 0.4 + pt.y * 0.6;
-                prev.p = prev.p * 0.5 + pVal * 0.5;
-            }
-        }
-    }
-
-    if (filtered.length === 1) {
-        const p0 = filtered[0];
-        const result = {
-            rawLength: rawPoints.length,
-            baseWidth,
-            isSinglePoint: true,
-            x: p0.x,
-            y: p0.y,
-            outerRadius: Math.max(0.8, baseWidth * (0.38 + 0.28 * p0.p)),
-            coreRadius: Math.max(0.45, baseWidth * (0.20 + 0.25 * p0.p)),
-        };
-        geometryCache.set(rawPoints, result);
-        return result;
-    }
-
-    // Subdivisión por puntos medios (Chaikin cuadrático de 1 paso) para curvas limpias al hacer zoom
-    const spine = [];
-    spine.push({ x: filtered[0].x, y: filtered[0].y, p: filtered[0].p, nx: 0, ny: -1 });
-
-    for (let i = 0; i < filtered.length - 1; i++) {
-        const a = filtered[i];
-        const b = filtered[i + 1];
-        const mx = (a.x + b.x) * 0.5;
-        const my = (a.y + b.y) * 0.5;
-        const mp = (a.p + b.p) * 0.5;
-
-        if (i > 0) {
-            spine.push({
-                x: (spine[spine.length - 1].x + a.x) * 0.5,
-                y: (spine[spine.length - 1].y + a.y) * 0.5,
-                p: (spine[spine.length - 1].p + a.p) * 0.5,
-                nx: 0,
-                ny: -1,
-            });
-        }
-        spine.push({ x: mx, y: my, p: mp, nx: 0, ny: -1 });
-    }
-
-    const lastF = filtered[filtered.length - 1];
-    spine.push({ x: lastF.x, y: lastF.y, p: lastF.p, nx: 0, ny: -1 });
-
-    const n = spine.length;
-
-    // Cálculo de normales unitarias primero por diferencia central
-    const rawNx = new Float32Array(n);
-    const rawNy = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-        const prev = spine[Math.max(0, i - 1)];
-        const next = spine[Math.min(n - 1, i + 1)];
-        const dx = next.x - prev.x;
-        const dy = next.y - prev.y;
-        const len = Math.hypot(dx, dy) || 1;
-        rawNx[i] = -dy / len;
-        rawNy[i] = dx / len;
-    }
-
-    // Filtro de suavizado de normales (ventana 3) para evitar auto-intersecciones en curvas cerradas con grosor alto
-    for (let i = 0; i < n; i++) {
-        const i0 = Math.max(0, i - 1);
-        const i2 = Math.min(n - 1, i + 1);
-        const sx = rawNx[i0] * 0.25 + rawNx[i] * 0.5 + rawNx[i2] * 0.25;
-        const sy = rawNy[i0] * 0.25 + rawNy[i] * 0.5 + rawNy[i2] * 0.25;
-        const len = Math.hypot(sx, sy) || 1;
-        spine[i].nx = sx / len;
-        spine[i].ny = sy / len;
-    }
-
-    const outerL = new Float32Array(n);
-    const outerR = new Float32Array(n);
-    const coreL = new Float32Array(n);
-    const coreR = new Float32Array(n);
-    const strandLeft = new Float32Array(n * 2);
-    const strandRight = new Float32Array(n * 2);
-
-    for (let i = 0; i < n; i++) {
-        const pt = spine[i];
-        // Ruido de borde filtrado por media móvil de 3 pasos (orgánico pero sin dientes de sierra)
-        const nL =
-            (hash1D(i - 1, seed + 13) + hash1D(i, seed + 13) * 2 + hash1D(i + 1, seed + 13)) * 0.25 - 0.5;
-        const nR =
-            (hash1D(i - 1, seed + 47) + hash1D(i, seed + 47) * 2 + hash1D(i + 1, seed + 47)) * 0.25 - 0.5;
-
-        // Ancho exterior responde suavemente a la presión: [0.68 .. 1.16] * baseWidth
-        const outerHalf = baseWidth * 0.5 * (0.68 + 0.48 * pt.p);
-        outerL[i] = Math.max(0.4, outerHalf * (1 + nL * 0.16));
-        outerR[i] = Math.max(0.4, outerHalf * (1 + nR * 0.16));
-
-        // El núcleo interior se concentra cuando la presión es leve y se expande al apoyar fuerte
-        const coreRatio = 0.34 + 0.42 * pt.p;
-        const coreHalf = outerHalf * coreRatio;
-        coreL[i] = Math.max(0.28, coreHalf * (1 + nR * 0.10));
-        coreR[i] = Math.max(0.28, coreHalf * (1 + nL * 0.10));
-
-        // Hebras secas de grafito a ~78% del borde exterior para dar definición fibrosa al contorno
-        const sL = outerL[i] * 0.78;
-        const sR = outerR[i] * 0.78;
-        strandLeft[i * 2] = pt.x + pt.nx * sL;
-        strandLeft[i * 2 + 1] = pt.y + pt.ny * sL;
-        strandRight[i * 2] = pt.x - pt.nx * sR;
-        strandRight[i * 2 + 1] = pt.y - pt.ny * sR;
-    }
-
-    const outerPoly = buildRoundedRibbonPolygon(spine, outerL, outerR);
-    const corePoly = buildRoundedRibbonPolygon(spine, coreL, coreR);
 
     const filamentWidth = Math.max(0.55, Math.min(3.2, baseWidth * 0.11));
     const dashUnit = Math.max(1.8, baseWidth * 0.85);
@@ -467,119 +287,498 @@ export function buildSketchGeometry(rawPoints, baseWidth) {
         Math.round(dashUnit * 1.9 * 10) / 10,
     ];
 
-    const result = {
-        rawLength: rawPoints.length,
+    const state = {
         baseWidth,
-        isSinglePoint: false,
-        outerPoly,
-        corePoly,
-        strandLeft,
-        strandRight,
+        seed,
+        minDist,
         filamentWidth,
         filamentDash,
+        firstX: p0.x,
+        firstY: p0.y,
+        rawCount: 1,
+        // Puntos filtrados confirmados
+        fLen: 1,
+        fx: [p0.x],
+        fy: [p0.y],
+        fp: [initP],
+        // Espina dorsal confirmada (SoA)
+        sCap: cap,
+        sConfirmed: 1,
+        sTotal: 1,
+        sx: new Float32Array(cap),
+        sy: new Float32Array(cap),
+        sp: new Float32Array(cap),
+        nx: new Float32Array(cap),
+        ny: new Float32Array(cap),
+        outerL: new Float32Array(cap),
+        outerR: new Float32Array(cap),
+        coreL: new Float32Array(cap),
+        coreR: new Float32Array(cap),
+        strandLX: new Float32Array(cap),
+        strandLY: new Float32Array(cap),
+        strandRX: new Float32Array(cap),
+        strandRY: new Float32Array(cap),
     };
 
-    geometryCache.set(rawPoints, result);
-    return result;
+    state.sx[0] = p0.x;
+    state.sy[0] = p0.y;
+    state.sp[0] = initP;
+    state.nx[0] = 0;
+    state.ny[0] = -1;
+    computeNodeOffsets(state, 0);
+
+    return state;
 }
 
-function tracePolygonOnCtx(ctx, poly) {
-    if (!poly || poly.length < 4) return;
-    ctx.moveTo(poly[0], poly[1]);
-    for (let i = 2; i < poly.length; i += 2) {
-        ctx.lineTo(poly[i], poly[i + 1]);
+function ensureSpineCapacity(state, needed) {
+    if (needed <= state.sCap) return;
+    let newCap = state.sCap;
+    while (newCap < needed) newCap *= 2;
+    const keys = [
+        'sx', 'sy', 'sp', 'nx', 'ny',
+        'outerL', 'outerR', 'coreL', 'coreR',
+        'strandLX', 'strandLY', 'strandRX', 'strandRY',
+    ];
+    for (let k = 0; k < keys.length; k++) {
+        const key = keys[k];
+        const nextArr = new Float32Array(newCap);
+        nextArr.set(state[key]);
+        state[key] = nextArr;
     }
-    ctx.closePath();
+    state.sCap = newCap;
 }
 
-function tracePolylineOnCtx(ctx, coords) {
-    if (!coords || coords.length < 4) return;
-    ctx.moveTo(coords[0], coords[1]);
-    for (let i = 2; i < coords.length; i += 2) {
-        ctx.lineTo(coords[i], coords[i + 1]);
+function computeNodeOffsets(state, i) {
+    const seed = state.seed;
+    const baseWidth = state.baseWidth;
+    const p = state.sp[i];
+    const x = state.sx[i];
+    const y = state.sy[i];
+    const nx = state.nx[i];
+    const ny = state.ny[i];
+
+    const nL =
+        (hash1D(i - 1, seed + 13) + hash1D(i, seed + 13) * 2 + hash1D(i + 1, seed + 13)) * 0.25 - 0.5;
+    const nR =
+        (hash1D(i - 1, seed + 47) + hash1D(i, seed + 47) * 2 + hash1D(i + 1, seed + 47)) * 0.25 - 0.5;
+
+    const outerHalf = baseWidth * 0.5 * (0.68 + 0.48 * p);
+    const oL = Math.max(0.4, outerHalf * (1 + nL * 0.16));
+    const oR = Math.max(0.4, outerHalf * (1 + nR * 0.16));
+    state.outerL[i] = oL;
+    state.outerR[i] = oR;
+
+    const coreRatio = 0.34 + 0.42 * p;
+    const coreHalf = outerHalf * coreRatio;
+    state.coreL[i] = Math.max(0.28, coreHalf * (1 + nR * 0.10));
+    state.coreR[i] = Math.max(0.28, coreHalf * (1 + nL * 0.10));
+
+    const sL = oL * 0.78;
+    const sR = oR * 0.78;
+    state.strandLX[i] = x + nx * sL;
+    state.strandLY[i] = y + ny * sL;
+    state.strandRX[i] = x - nx * sR;
+    state.strandRY[i] = y - ny * sR;
+}
+
+function updateNormalsAndOffsetsRange(state, startIdx, endIdx) {
+    const from = Math.max(0, startIdx);
+    const last = endIdx;
+    for (let i = from; i <= last; i++) {
+        const iPrev = i > 0 ? i - 1 : 0;
+        const iNext = i < last ? i + 1 : last;
+        const dx = state.sx[iNext] - state.sx[iPrev];
+        const dy = state.sy[iNext] - state.sy[iPrev];
+        const len = Math.hypot(dx, dy) || 1;
+        state.nx[i] = -dy / len;
+        state.ny[i] = dx / len;
+    }
+    // Suavizado ligero con vecinos inmediatos y actualización de bordes
+    for (let i = from; i <= last; i++) {
+        if (i > 0 && i < last) {
+            const sx = state.nx[i - 1] * 0.25 + state.nx[i] * 0.5 + state.nx[i + 1] * 0.25;
+            const sy = state.ny[i - 1] * 0.25 + state.ny[i] * 0.5 + state.ny[i + 1] * 0.25;
+            const len = Math.hypot(sx, sy) || 1;
+            state.nx[i] = sx / len;
+            state.ny[i] = sy / len;
+        }
+        computeNodeOffsets(state, i);
     }
 }
 
 /**
- * Renderizado en Canvas 2D — Exactamente 3 llamadas de dibujo O(1)
+ * Avanza incrementalmente la espina dorsal sólo para los puntos nuevos añadidos desde el último frame
  */
-export function renderCanvas(ctx, points, style) {
+function advanceSketchState(rawPoints, baseWidth, style) {
+    const strokeId = style && style.strokeId;
+    let state = strokeId ? strokeStateById.get(strokeId) : strokeStateByPoints.get(rawPoints);
+
+    const p0 = rawPoints[0];
+    if (
+        !state ||
+        state.baseWidth !== baseWidth ||
+        state.firstX !== p0.x ||
+        state.firstY !== p0.y ||
+        rawPoints.length < state.rawCount
+    ) {
+        state = createIncrementalState(p0, baseWidth);
+        if (strokeId) {
+            strokeStateById.set(strokeId, state);
+            if (strokeStateById.size > 128) {
+                const oldest = strokeStateById.keys().next().value;
+                strokeStateById.delete(oldest);
+            }
+        } else {
+            strokeStateByPoints.set(rawPoints, state);
+        }
+    }
+
+    const prevConfirmedSpine = state.sConfirmed;
+
+    // 1. Filtrar únicamente los puntos crudos nuevos
+    for (let i = state.rawCount; i < rawPoints.length; i++) {
+        const pt = rawPoints[i];
+        const lastIdx = state.fLen - 1;
+        const lx = state.fx[lastIdx];
+        const ly = state.fy[lastIdx];
+        const lp = state.fp[lastIdx];
+        const dist = Math.hypot(pt.x - lx, pt.y - ly);
+
+        if (dist >= state.minDist) {
+            const pVal = pencilPressureResponse(pt.pressure);
+            const curFIdx = state.fLen;
+            state.fx.push(pt.x);
+            state.fy.push(pt.y);
+            const newP = lp * 0.35 + pVal * 0.65;
+            state.fp.push(newP);
+            state.fLen++;
+
+            // Añadir nodos Chaikin confirmados a la espina dorsal
+            ensureSpineCapacity(state, state.sConfirmed + 3);
+            if (curFIdx > 1) {
+                const prevS = state.sConfirmed - 1;
+                const qx = (state.sx[prevS] + lx) * 0.5;
+                const qy = (state.sy[prevS] + ly) * 0.5;
+                const qp = (state.sp[prevS] + lp) * 0.5;
+                state.sx[state.sConfirmed] = qx;
+                state.sy[state.sConfirmed] = qy;
+                state.sp[state.sConfirmed] = qp;
+                state.sConfirmed++;
+            }
+            state.sx[state.sConfirmed] = (lx + pt.x) * 0.5;
+            state.sy[state.sConfirmed] = (ly + pt.y) * 0.5;
+            state.sp[state.sConfirmed] = (lp + newP) * 0.5;
+            state.sConfirmed++;
+        }
+    }
+
+    state.rawCount = rawPoints.length;
+
+    // 2. Añadir el punto final vivo (cola actual) en la posición sConfirmed
+    const rawLast = rawPoints[rawPoints.length - 1];
+    const lastFIdx = state.fLen - 1;
+    let total = state.sConfirmed;
+
+    if (state.fLen === 1) {
+        const dEnd = Math.hypot(rawLast.x - state.fx[0], rawLast.y - state.fy[0]);
+        if (dEnd > 0.15) {
+            ensureSpineCapacity(state, 2);
+            state.sx[1] = rawLast.x;
+            state.sy[1] = rawLast.y;
+            state.sp[1] = pencilPressureResponse(rawLast.pressure);
+            total = 2;
+        } else {
+            total = 1;
+        }
+    } else {
+        ensureSpineCapacity(state, state.sConfirmed + 2);
+        state.sx[total] = state.fx[lastFIdx];
+        state.sy[total] = state.fy[lastFIdx];
+        state.sp[total] = state.fp[lastFIdx];
+        total++;
+
+        const dTail = Math.hypot(rawLast.x - state.fx[lastFIdx], rawLast.y - state.fy[lastFIdx]);
+        if (dTail > 0.15) {
+            state.sx[total] = rawLast.x;
+            state.sy[total] = rawLast.y;
+            state.sp[total] = pencilPressureResponse(rawLast.pressure);
+            total++;
+        }
+    }
+
+    state.sTotal = total;
+    if (total >= 2) {
+        updateNormalsAndOffsetsRange(state, Math.max(0, prevConfirmedSpine - 3), total - 1);
+    }
+
+    return state;
+}
+
+/**
+ * Traza en ctx un tramo [startIdx .. endIdx] de una cinta (outer o core).
+ * - includeStartCap: añade abanico semicircular en startIdx (sólo para startIdx === 0)
+ * - includeEndCap: añade abanico semicircular en endIdx (sólo para el final del trazo)
+ */
+function traceRibbonRangeOnCtx(ctx, state, hwLeft, hwRight, startIdx, endIdx, includeStartCap, includeEndCap) {
+    if (endIdx <= startIdx) return;
+
+    const sx = state.sx;
+    const sy = state.sy;
+    const nx = state.nx;
+    const ny = state.ny;
+
+    // Solape sub-píxel en uniones internas para impedir micro-fisuras de antialiasing
+    const extStart = !includeStartCap && startIdx > 0 ? SEAM_EPS : 0;
+    const tx0 = -ny[startIdx] * extStart;
+    const ty0 = nx[startIdx] * extStart;
+
+    ctx.moveTo(
+        sx[startIdx] + nx[startIdx] * hwLeft[startIdx] + tx0,
+        sy[startIdx] + ny[startIdx] * hwLeft[startIdx] + ty0
+    );
+
+    for (let i = startIdx + 1; i <= endIdx; i++) {
+        ctx.lineTo(sx[i] + nx[i] * hwLeft[i], sy[i] + ny[i] * hwLeft[i]);
+    }
+
+    if (includeEndCap) {
+        const txEnd = ny[endIdx];
+        const tyEnd = -nx[endIdx];
+        const rEnd = (hwLeft[endIdx] + hwRight[endIdx]) * 0.5;
+        for (let c = 1; c < CAP_STEPS; c++) {
+            const theta = (c / CAP_STEPS) * Math.PI;
+            const cosT = Math.cos(theta);
+            const sinT = Math.sin(theta);
+            ctx.lineTo(
+                sx[endIdx] + (nx[endIdx] * cosT + txEnd * sinT) * rEnd,
+                sy[endIdx] + (ny[endIdx] * cosT + tyEnd * sinT) * rEnd
+            );
+        }
+    }
+
+    for (let i = endIdx; i >= startIdx; i--) {
+        const ox = i === startIdx ? tx0 : 0;
+        const oy = i === startIdx ? ty0 : 0;
+        ctx.lineTo(sx[i] - nx[i] * hwRight[i] + ox, sy[i] - ny[i] * hwRight[i] + oy);
+    }
+
+    if (includeStartCap) {
+        const txStart = -ny[startIdx];
+        const tyStart = nx[startIdx];
+        const rStart = (hwLeft[startIdx] + hwRight[startIdx]) * 0.5;
+        for (let c = 1; c < CAP_STEPS; c++) {
+            const theta = (c / CAP_STEPS) * Math.PI;
+            const cosT = -Math.cos(theta);
+            const sinT = Math.sin(theta);
+            ctx.lineTo(
+                sx[startIdx] + (nx[startIdx] * cosT + txStart * sinT) * rStart,
+                sy[startIdx] + (ny[startIdx] * cosT + tyStart * sinT) * rStart
+            );
+        }
+    }
+
+    ctx.closePath();
+}
+
+function drawSpineRange(ctx, state, grain, color, opacity, startIdx, endIdx, includeStartCap, includeEndCap) {
+    if (endIdx <= startIdx) return;
+
+    // Pasada 1: Cuerpo poroso exterior
+    ctx.globalAlpha = opacity * 0.62;
+    ctx.fillStyle = grain.coarsePattern;
+    ctx.beginPath();
+    traceRibbonRangeOnCtx(ctx, state, state.outerL, state.outerR, startIdx, endIdx, includeStartCap, includeEndCap);
+    ctx.fill('nonzero');
+
+    // Pasada 2: Núcleo de grafito sensible a la presión
+    ctx.globalAlpha = opacity * 0.92;
+    ctx.fillStyle = grain.corePattern;
+    ctx.beginPath();
+    traceRibbonRangeOnCtx(ctx, state, state.coreL, state.coreR, startIdx, endIdx, includeStartCap, includeEndCap);
+    ctx.fill('nonzero');
+
+    // Pasada 3: Filamentos secos de borde (1 solo stroke continuo)
+    ctx.globalAlpha = opacity * 0.34;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = state.filamentWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (typeof ctx.setLineDash === 'function') {
+        ctx.setLineDash(state.filamentDash);
+    }
+    ctx.beginPath();
+    ctx.moveTo(state.strandLX[startIdx], state.strandLY[startIdx]);
+    for (let i = startIdx + 1; i <= endIdx; i++) {
+        ctx.lineTo(state.strandLX[i], state.strandLY[i]);
+    }
+    ctx.moveTo(state.strandRX[startIdx], state.strandRY[startIdx]);
+    for (let i = startIdx + 1; i <= endIdx; i++) {
+        ctx.lineTo(state.strandRX[i], state.strandRY[i]);
+    }
+    ctx.stroke();
+}
+
+export function buildSketchGeometry(rawPoints, baseWidth, style = {}) {
+    if (!rawPoints || rawPoints.length === 0) return null;
+    return advanceSketchState(rawPoints, baseWidth, style);
+}
+
+/**
+ * Renderizado en Canvas 2D — 3 llamadas O(1) + Horneado Incremental sin costuras para 50.000+ puntos
+ */
+export function renderCanvas(ctx, points, style = {}) {
     if (!points || points.length === 0) return;
 
     const baseWidth = Math.max(1, style.width || 3);
     const color = style.color || '#2b2b2b';
     const opacity = style.opacity !== undefined ? style.opacity : 0.88;
 
-    const geom = buildSketchGeometry(points, baseWidth);
-    if (!geom) return;
-
+    const state = advanceSketchState(points, baseWidth, style);
     const grain = getGrainPatterns(ctx, color, baseWidth);
 
     ctx.save();
 
-    if (geom.isSinglePoint) {
+    if (state.sTotal < 2) {
+        const p0 = state.sp[0];
+        const outerR = Math.max(0.8, baseWidth * (0.38 + 0.28 * p0));
+        const coreR = Math.max(0.45, baseWidth * (0.20 + 0.25 * p0));
+
         ctx.globalAlpha = opacity * 0.62;
         ctx.fillStyle = grain.coarsePattern;
         ctx.beginPath();
-        ctx.arc(geom.x, geom.y, geom.outerRadius, 0, Math.PI * 2);
+        ctx.arc(state.sx[0], state.sy[0], outerR, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.globalAlpha = opacity * 0.90;
         ctx.fillStyle = grain.corePattern;
         ctx.beginPath();
-        ctx.arc(geom.x, geom.y, geom.coreRadius, 0, Math.PI * 2);
+        ctx.arc(state.sx[0], state.sy[0], coreR, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore();
         return;
     }
 
-    // Pasada 1: Cuerpo poroso exterior (textura de diente de papel abierto)
-    ctx.globalAlpha = opacity * 0.62;
-    ctx.fillStyle = grain.coarsePattern;
-    ctx.beginPath();
-    tracePolygonOnCtx(ctx, geom.outerPoly);
-    ctx.fill('nonzero');
+    const targetCanvas = ctx.canvas;
+    const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
 
-    // Pasada 2: Núcleo de grafito sensible a la presión (textura densa en valles)
-    ctx.globalAlpha = opacity * 0.92;
-    ctx.fillStyle = grain.corePattern;
-    ctx.beginPath();
-    tracePolygonOnCtx(ctx, geom.corePoly);
-    ctx.fill('nonzero');
+    // En trazos largos en vivo (> 48 nodos de espina), congelamos los tramos confirmados en O(1)
+    if (state.sTotal > 48 && targetCanvas && !style.viewport && targetCanvas.id === 'drawingCanvas') {
+        const bakeCtx = ensureLiveBakeCanvas(targetCanvas);
+        if (bakeCtx) {
+            const strokeKey = `${style.strokeId || ''}|${state.firstX}|${state.firstY}|${baseWidth}|${color}|${opacity.toFixed(3)}`;
+            if (liveSketchBake.strokeKey !== strokeKey || state.sConfirmed < liveSketchBake.bakedSpineIdx) {
+                liveSketchBake.strokeKey = strokeKey;
+                liveSketchBake.bakedSpineIdx = 0;
+                bakeCtx.save();
+                bakeCtx.setTransform(1, 0, 0, 1, 0, 0);
+                bakeCtx.clearRect(0, 0, liveSketchBake.canvas.width, liveSketchBake.canvas.height);
+                bakeCtx.restore();
+            }
 
-    // Pasada 3: Filamentos secos de borde (1 solo stroke continuo con dash primo)
-    ctx.globalAlpha = opacity * 0.34;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = geom.filamentWidth;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    if (typeof ctx.setLineDash === 'function') {
-        ctx.setLineDash(geom.filamentDash);
+            const freezeTarget = Math.max(0, state.sConfirmed - 6);
+            if (freezeTarget - liveSketchBake.bakedSpineIdx >= 16) {
+                const fromIdx = liveSketchBake.bakedSpineIdx;
+                bakeCtx.save();
+                bakeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                drawSpineRange(
+                    bakeCtx,
+                    state,
+                    grain,
+                    color,
+                    opacity,
+                    fromIdx,
+                    freezeTarget,
+                    fromIdx === 0,
+                    false
+                );
+                bakeCtx.restore();
+                liveSketchBake.bakedSpineIdx = freezeTarget;
+            }
+
+            if (liveSketchBake.bakedSpineIdx > 0) {
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.drawImage(liveSketchBake.canvas, 0, 0);
+                ctx.restore();
+            }
+
+            const tailStart = liveSketchBake.bakedSpineIdx;
+            drawSpineRange(
+                ctx,
+                state,
+                grain,
+                color,
+                opacity,
+                tailStart,
+                state.sTotal - 1,
+                tailStart === 0,
+                true
+            );
+            ctx.restore();
+            return;
+        }
     }
-    ctx.beginPath();
-    tracePolylineOnCtx(ctx, geom.strandLeft);
-    tracePolylineOnCtx(ctx, geom.strandRight);
-    ctx.stroke();
 
+    drawSpineRange(ctx, state, grain, color, opacity, 0, state.sTotal - 1, true, true);
     ctx.restore();
 }
 
 export const renderPen = renderCanvas;
 
+function buildRibbonSvgPathD(state, hwLeft, hwRight) {
+    const n = state.sTotal;
+    if (n < 2) return '';
+    const f = (v) => (Math.round(v * 10) / 10).toString();
+    const sx = state.sx;
+    const sy = state.sy;
+    const nx = state.nx;
+    const ny = state.ny;
+
+    let d = `M${f(sx[0] + nx[0] * hwLeft[0])} ${f(sy[0] + ny[0] * hwLeft[0])}`;
+    for (let i = 1; i < n; i++) {
+        d += `L${f(sx[i] + nx[i] * hwLeft[i])} ${f(sy[i] + ny[i] * hwLeft[i])}`;
+    }
+
+    const last = n - 1;
+    const txEnd = ny[last];
+    const tyEnd = -nx[last];
+    const rEnd = (hwLeft[last] + hwRight[last]) * 0.5;
+    for (let c = 1; c < CAP_STEPS; c++) {
+        const theta = (c / CAP_STEPS) * Math.PI;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        d += `L${f(sx[last] + (nx[last] * cosT + txEnd * sinT) * rEnd)} ${f(sy[last] + (ny[last] * cosT + tyEnd * sinT) * rEnd)}`;
+    }
+
+    for (let i = last; i >= 0; i--) {
+        d += `L${f(sx[i] - nx[i] * hwRight[i])} ${f(sy[i] - ny[i] * hwRight[i])}`;
+    }
+
+    const txStart = -ny[0];
+    const tyStart = nx[0];
+    const rStart = (hwLeft[0] + hwRight[0]) * 0.5;
+    for (let c = 1; c < CAP_STEPS; c++) {
+        const theta = (c / CAP_STEPS) * Math.PI;
+        const cosT = -Math.cos(theta);
+        const sinT = Math.sin(theta);
+        d += `L${f(sx[0] + (nx[0] * cosT + txStart * sinT) * rStart)} ${f(sy[0] + (ny[0] * cosT + tyStart * sinT) * rStart)}`;
+    }
+
+    return d + 'Z';
+}
+
 /**
  * Renderizado en SVG Vector — Equivalencia 1:1 con renderCanvas (misma geometría y patrones PNG)
  */
-export function renderSvg(points, style) {
+export function renderSvg(points, style = {}) {
     if (!points || points.length === 0) return { defs: {}, body: '' };
 
     const baseWidth = Math.max(1, style.width || 3);
     const color = style.color || '#2b2b2b';
     const opacity = style.opacity !== undefined ? style.opacity : 0.88;
 
-    const geom = buildSketchGeometry(points, baseWidth);
-    if (!geom) return { defs: {}, body: '' };
-
+    const state = advanceSketchState(points, baseWidth, style);
     const grain = getGrainPatterns(null, color, baseWidth);
     const f = (n) => (Math.round(n * 10) / 10).toString();
     const colorSlug = color.replace(/[^a-zA-Z0-9]/g, '');
@@ -605,43 +804,37 @@ export function renderSvg(points, style) {
     const coarseFill = grain.coarseUrl ? `url(#${coarseId})` : color;
     const coreFill = grain.coreUrl ? `url(#${coreId})` : color;
 
-    if (geom.isSinglePoint) {
+    if (state.sTotal < 2) {
+        const p0 = state.sp[0];
+        const outerR = Math.max(0.8, baseWidth * (0.38 + 0.28 * p0));
+        const coreR = Math.max(0.45, baseWidth * (0.20 + 0.25 * p0));
         const body =
             `<g stroke="none">` +
-            `<circle cx="${f(geom.x)}" cy="${f(geom.y)}" r="${f(geom.outerRadius)}" fill="${coarseFill}" fill-opacity="${(opacity * 0.62).toFixed(2)}"/>` +
-            `<circle cx="${f(geom.x)}" cy="${f(geom.y)}" r="${f(geom.coreRadius)}" fill="${coreFill}" fill-opacity="${(opacity * 0.90).toFixed(2)}"/>` +
+            `<circle cx="${f(state.sx[0])}" cy="${f(state.sy[0])}" r="${f(outerR)}" fill="${coarseFill}" fill-opacity="${(opacity * 0.62).toFixed(2)}"/>` +
+            `<circle cx="${f(state.sx[0])}" cy="${f(state.sy[0])}" r="${f(coreR)}" fill="${coreFill}" fill-opacity="${(opacity * 0.90).toFixed(2)}"/>` +
             `</g>`;
         return { defs, body };
     }
 
-    const polyToD = (poly) => {
-        if (!poly || poly.length < 4) return '';
-        let d = `M${f(poly[0])} ${f(poly[1])}`;
-        for (let i = 2; i < poly.length; i += 2) {
-            d += `L${f(poly[i])} ${f(poly[i + 1])}`;
-        }
-        return d + 'Z';
-    };
+    const outerD = buildRibbonSvgPathD(state, state.outerL, state.outerR);
+    const coreD = buildRibbonSvgPathD(state, state.coreL, state.coreR);
 
-    const polylineToD = (coords) => {
-        if (!coords || coords.length < 4) return '';
-        let d = `M${f(coords[0])} ${f(coords[1])}`;
-        for (let i = 2; i < coords.length; i += 2) {
-            d += `L${f(coords[i])} ${f(coords[i + 1])}`;
-        }
-        return d;
-    };
+    let strandsD = `M${f(state.strandLX[0])} ${f(state.strandLY[0])}`;
+    for (let i = 1; i < state.sTotal; i++) {
+        strandsD += `L${f(state.strandLX[i])} ${f(state.strandLY[i])}`;
+    }
+    strandsD += `M${f(state.strandRX[0])} ${f(state.strandRY[0])}`;
+    for (let i = 1; i < state.sTotal; i++) {
+        strandsD += `L${f(state.strandRX[i])} ${f(state.strandRY[i])}`;
+    }
 
-    const outerD = polyToD(geom.outerPoly);
-    const coreD = polyToD(geom.corePoly);
-    const strandsD = polylineToD(geom.strandLeft) + polylineToD(geom.strandRight);
-    const dashAttr = geom.filamentDash.join(' ');
+    const dashAttr = state.filamentDash.join(' ');
 
     const body =
         `<g>` +
         `<path d="${outerD}" fill="${coarseFill}" fill-rule="nonzero" fill-opacity="${(opacity * 0.62).toFixed(2)}" stroke="none"/>` +
         `<path d="${coreD}" fill="${coreFill}" fill-rule="nonzero" fill-opacity="${(opacity * 0.92).toFixed(2)}" stroke="none"/>` +
-        `<path d="${strandsD}" fill="none" stroke="${color}" stroke-width="${f(geom.filamentWidth)}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${dashAttr}" stroke-opacity="${(opacity * 0.34).toFixed(2)}"/>` +
+        `<path d="${strandsD}" fill="none" stroke="${color}" stroke-width="${f(state.filamentWidth)}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${dashAttr}" stroke-opacity="${(opacity * 0.34).toFixed(2)}"/>` +
         `</g>`;
 
     return { defs, body };
@@ -657,5 +850,6 @@ if (typeof globalThis !== 'undefined') {
         renderCanvas,
         renderSvg,
         buildSketchGeometry,
+        releasePencilStroke,
     };
 }

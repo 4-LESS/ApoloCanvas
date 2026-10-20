@@ -192,12 +192,127 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 6px;
         }
 
         .pen-card-name {
             font-size: 12px;
             font-weight: 600;
             color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pen-card-score {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-panel-secondary);
+            color: var(--text-secondary);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .pen-card-score.score-good {
+            color: var(--success-color);
+            background: rgba(22, 163, 74, 0.08);
+            border-color: rgba(22, 163, 74, 0.25);
+        }
+
+        .pen-card-score.score-warn {
+            color: var(--warning-color);
+            background: rgba(217, 119, 6, 0.08);
+            border-color: rgba(217, 119, 6, 0.25);
+        }
+
+        .pen-card-score.score-bad {
+            color: var(--danger-color);
+            background: rgba(220, 38, 38, 0.08);
+            border-color: rgba(220, 38, 38, 0.25);
+        }
+
+        /* Panel Flotante de Puntuación 50k Puntos */
+        .bench50k-panel {
+            position: absolute;
+            top: 66px;
+            right: 12px;
+            width: 460px;
+            max-height: calc(100vh - 90px);
+            background: var(--bg-panel);
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-md);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+            z-index: 35;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .bench50k-panel.open {
+            display: flex;
+        }
+
+        .bench50k-header {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-card);
+        }
+
+        .bench50k-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .bench50k-subtitle {
+            font-size: 10px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .bench50k-body {
+            padding: 8px 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .bench50k-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+
+        .bench50k-table th {
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            padding: 4px 6px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .bench50k-table td {
+            padding: 5px 6px;
+            border-bottom: 1px solid var(--border-color);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .bench50k-row {
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .bench50k-row:hover {
+            background: var(--bg-panel-secondary);
         }
 
         .pen-card-preview {
@@ -651,7 +766,9 @@
                 <button id="redoBtn" class="btn" title="Rehacer (Ctrl+Y)">Rehacer</button>
                 <button id="clearBtn" class="btn btn-danger" title="Limpiar lienzo">Limpiar</button>
                 <button id="exportBtn" class="btn btn-primary" title="Exportar a PNG">Exportar PNG</button>
-                <button id="stressTestBtn" class="btn btn-full" title="Genera 20 trazos de lápiz">Benchmark Estrés</button>
+                <button id="bench50kAllBtn" class="btn btn-primary btn-full" title="Evalúa los FPS promedio de todos los lápices al llegar a 50.000 puntos en un trazo">Test 50k Puntos (Todos)</button>
+                <button id="bench50kActiveBtn" class="btn" title="Dibuja y mide un trazo único de 50.000 puntos con la pluma activa">50k (Activo)</button>
+                <button id="stressTestBtn" class="btn" title="Genera 20 trazos cortos">20 Trazos</button>
                 <button id="widthTestBtn" class="btn btn-full" title="Muestras a 2px, 10px y 25px">Muestras 2 / 10 / 25 px</button>
             </div>
         </div>
@@ -693,6 +810,35 @@
         <div class="svg-panel" id="svgPanel">
             <div id="svgHost"></div>
             <span class="svg-panel-label">SVG Vector Preview</span>
+        </div>
+
+        <!-- Tabla de Puntuaciones: Benchmark 50.000 Puntos en un Trazo -->
+        <div class="bench50k-panel" id="bench50kPanel">
+            <div class="bench50k-header">
+                <div>
+                    <div class="bench50k-title">Benchmark 50.000 Puntos (1 Trazo Largo)</div>
+                    <div class="bench50k-subtitle" id="bench50kStatus">Haz clic en una fila para renderizar el trazo de 50k pts</div>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                    <button id="rerunBench50kBtn" class="btn" style="padding: 3px 8px; font-size: 11px;">Re-ejecutar</button>
+                    <button id="closeBench50kBtn" class="btn" style="padding: 3px 8px; font-size: 11px;">Cerrar</button>
+                </div>
+            </div>
+            <div class="bench50k-body">
+                <table class="bench50k-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Lápiz / Pluma</th>
+                            <th>FPS Prom.</th>
+                            <th>ms Prom.</th>
+                            <th>ms @ 50k</th>
+                            <th>Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bench50kTableBody"></tbody>
+                </table>
+            </div>
         </div>
 
         <div id="toast" class="toast">Notificación</div>
@@ -1016,6 +1162,7 @@
                     card.innerHTML = `
                         <div class="pen-card-top">
                             <span class="pen-card-name"></span>
+                            <span class="pen-card-score" data-pen-score="${penId}" title="FPS promedio y tiempo por frame al llegar a 50.000 puntos">50k: --</span>
                         </div>
                         <canvas class="pen-card-preview" width="260" height="28"></canvas>
                     `;
@@ -1029,6 +1176,7 @@
                     }
                     card.classList.toggle('active', penId === state.activePenId);
                 }
+                updatePenCardScoreBadge(penId, card);
                 penListEl.appendChild(card);
             }
 
@@ -1404,7 +1552,13 @@
                 showToast('Exportado a PNG');
             });
 
-            // Benchmark de Estrés Automatizado
+            // Benchmark de Estrés Automatizado y Test 50k Puntos
+            document.getElementById('bench50kAllBtn').addEventListener('click', () => runBench50kAll(true));
+            document.getElementById('bench50kActiveBtn').addEventListener('click', () => runBench50kSingleOnCanvas(state.activePenId));
+            document.getElementById('rerunBench50kBtn').addEventListener('click', () => runBench50kAll(true));
+            document.getElementById('closeBench50kBtn').addEventListener('click', () => {
+                document.getElementById('bench50kPanel').classList.remove('open');
+            });
             document.getElementById('stressTestBtn').addEventListener('click', runStressBenchmark);
             document.getElementById('widthTestBtn').addEventListener('click', runWidthSamples);
 
@@ -1495,6 +1649,287 @@
             showToast(`Muestras 2/10/25 px: ${penId}`);
         }
 
+        // ===== Benchmark 50.000 Puntos en un Trazo (Nota Larga Continua) =====
+        state.bench50kScores = {};
+        let cached50kPoints = null;
+        let cached50kDims = '';
+        let benchOffscreenCanvas = null;
+        let benchRunning = false;
+
+        function getOrCreate50kStrokePoints() {
+            const dpr = window.devicePixelRatio || 1;
+            const w = Math.max(600, Math.round(canvas.width / dpr));
+            const h = Math.max(450, Math.round(canvas.height / dpr));
+            const dimKey = `${w}x${h}`;
+            if (cached50kPoints && cached50kDims === dimKey) {
+                return cached50kPoints;
+            }
+
+            const totalPoints = 50000;
+            const rows = 25;
+            const ptsPerRow = totalPoints / rows; // 2.000 puntos por renglón de nota
+            const marginX = 55;
+            const marginY = 70;
+            const usableW = Math.max(300, w - marginX * 2);
+            const usableH = Math.max(240, h - marginY * 2);
+            const pts = new Array(totalPoints);
+
+            let idx = 0;
+            for (let r = 0; r < rows; r++) {
+                const rowY = marginY + (r / (rows - 1)) * usableH;
+                const dir = r % 2 === 0 ? 1 : -1;
+                for (let j = 0; j < ptsPerRow; j++) {
+                    const u = j / (ptsPerRow - 1);
+                    const baseT = dir === 1 ? u : 1 - u;
+                    // Oscilación cursiva realista (paso ~1.6px entre muestras consecutivas)
+                    const x = marginX + baseT * usableW + Math.cos(j * 0.35) * 2.2;
+                    const y = rowY + Math.sin(j * 0.28 + r) * 6.5 + Math.cos(j * 0.07) * 2.5;
+                    const pressure = 0.25 + 0.65 * (0.5 + 0.5 * Math.sin(j * 0.04 + r * 0.7));
+                    pts[idx++] = { x, y, pressure, time: idx * 4 };
+                }
+            }
+
+            cached50kPoints = pts;
+            cached50kDims = dimKey;
+            return pts;
+        }
+
+        function computeScoreFromMetrics(avgFps, avgMs, msAt50k) {
+            // Puntuación 0..100 ponderando fluidez sostenida (FPS promedio) y latencia en el punto 50.000
+            const fpsRatio = Math.min(1, avgFps / 120);
+            const tailPenalty = Math.max(0, 1 - Math.max(0, msAt50k - 2.5) / 65);
+            return Math.max(1, Math.min(100, Math.round(fpsRatio * 70 + tailPenalty * 30)));
+        }
+
+        function updatePenCardScoreBadge(penId, cardEl) {
+            const card = cardEl || document.querySelector(`.pen-card[data-pen="${penId}"]`);
+            if (!card) return;
+            const badge = card.querySelector('.pen-card-score');
+            if (!badge) return;
+
+            const data = state.bench50kScores[penId];
+            badge.classList.remove('score-good', 'score-warn', 'score-bad');
+            if (!data) {
+                badge.textContent = '50k: --';
+                return;
+            }
+
+            badge.textContent = `${data.avgFps} FPS · ${data.avgMs.toFixed(1)}ms`;
+            badge.title = `50.000 pts → Promedio: ${data.avgFps} FPS (${data.avgMs.toFixed(2)} ms/frame) | En 50k: ${data.msAt50k.toFixed(2)} ms | Score: ${data.score}/100`;
+            if (data.avgFps >= 55) {
+                badge.classList.add('score-good');
+            } else if (data.avgFps >= 25) {
+                badge.classList.add('score-warn');
+            } else {
+                badge.classList.add('score-bad');
+            }
+        }
+
+        async function evaluatePen50k(penId) {
+            const renderer = await loadPenModule(penId);
+            if (typeof renderer !== 'function') return null;
+
+            const mod = state.penModules[penId] || {};
+            const allPts = getOrCreate50kStrokePoints();
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.width / dpr;
+            const h = canvas.height / dpr;
+
+            if (!benchOffscreenCanvas) {
+                benchOffscreenCanvas = document.createElement('canvas');
+                benchOffscreenCanvas.id = 'drawingCanvas';
+            }
+            if (benchOffscreenCanvas.width !== canvas.width || benchOffscreenCanvas.height !== canvas.height) {
+                benchOffscreenCanvas.width = canvas.width;
+                benchOffscreenCanvas.height = canvas.height;
+            }
+            const bCtx = benchOffscreenCanvas.getContext('2d');
+
+            const strokeId = `bench50k_${penId}_${Date.now()}`;
+            const benchStyle = {
+                ...state.style,
+                penId,
+                strokeId,
+            };
+
+            // Simulamos el crecimiento progresivo en vivo de 0 a 50.000 puntos en 25 pasos de +2.000 puntos
+            const totalSteps = 25;
+            const chunkSize = 50000 / totalSteps;
+            const livePoints = [];
+            const frameTimes = [];
+            let cumulativeMs = 0;
+            let abortedEarly = false;
+
+            for (let step = 1; step <= totalSteps; step++) {
+                const targetCount = step * chunkSize;
+                while (livePoints.length < targetCount) {
+                    livePoints.push(allPts[livePoints.length]);
+                }
+
+                bCtx.save();
+                bCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                bCtx.clearRect(0, 0, w, h);
+
+                const t0 = performance.now();
+                renderer(bCtx, livePoints, benchStyle);
+                const dt = performance.now() - t0;
+
+                bCtx.restore();
+                frameTimes.push({ count: targetCount, ms: dt });
+                cumulativeMs += dt;
+
+                // Si un lápiz O(N) sin caché tarda > 260ms acumulados antes de llegar a 50k,
+                // medimos directamente o extrapolamos el punto 50.000 para no congelar la pestaña
+                if (cumulativeMs > 260 && step < totalSteps) {
+                    abortedEarly = true;
+                    break;
+                }
+            }
+
+            let msAt50k = frameTimes[frameTimes.length - 1].ms;
+            let avgMs = 0;
+
+            if (!abortedEarly) {
+                let sumMs = 0;
+                for (let i = 0; i < frameTimes.length; i++) sumMs += frameTimes[i].ms;
+                avgMs = sumMs / frameTimes.length;
+            } else {
+                const lastSample = frameTimes[frameTimes.length - 1];
+                // Para lápices O(N) lineales, el costo en N=50.000 escala con (50000 / lastSample.count)
+                msAt50k = lastSample.ms * (50000 / lastSample.count);
+                avgMs = msAt50k * 0.52;
+            }
+
+            // Calculamos el FPS promedio sobre la curva de crecimiento hasta 50.000 puntos
+            let fpsSum = 0;
+            for (let step = 1; step <= totalSteps; step++) {
+                const frac = step / totalSteps;
+                const estMs = !abortedEarly
+                    ? frameTimes[step - 1].ms
+                    : Math.max(0.1, msAt50k * frac);
+                const stepFps = Math.min(120, 1000 / Math.max(0.1, estMs));
+                fpsSum += stepFps;
+            }
+            const avgFps = Math.max(1, Math.min(120, Math.round(fpsSum / totalSteps)));
+            const score = computeScoreFromMetrics(avgFps, avgMs, msAt50k);
+
+            if (typeof mod.releasePencilStroke === 'function') {
+                try {
+                    mod.releasePencilStroke(strokeId);
+                    mod.releasePencilStroke(livePoints);
+                } catch {
+                    // Ignorar
+                }
+            }
+
+            const result = {
+                penId,
+                name: mod.name || penId,
+                avgFps,
+                avgMs,
+                msAt50k,
+                score,
+            };
+
+            state.bench50kScores[penId] = result;
+            updatePenCardScoreBadge(penId);
+            return result;
+        }
+
+        function renderBench50kTable() {
+            const tbody = document.getElementById('bench50kTableBody');
+            if (!tbody) return;
+
+            const rows = Object.values(state.bench50kScores).sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                return a.avgMs - b.avgMs;
+            });
+
+            tbody.innerHTML = '';
+            rows.forEach((r, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'bench50k-row';
+                const fpsClass = r.avgFps >= 55 ? 'fps-good' : (r.avgFps >= 25 ? 'fps-warn' : 'fps-bad');
+                tr.innerHTML = `
+                    <td style="font-family: var(--font-mono); color: var(--text-secondary);">${idx + 1}</td>
+                    <td style="font-weight: 600;">${r.name}</td>
+                    <td class="${fpsClass}" style="font-family: var(--font-mono); font-weight: 700;">${r.avgFps} FPS</td>
+                    <td style="font-family: var(--font-mono);">${r.avgMs.toFixed(2)} ms</td>
+                    <td style="font-family: var(--font-mono);">${r.msAt50k.toFixed(2)} ms</td>
+                    <td style="font-family: var(--font-mono); font-weight: 700;">${r.score}/100</td>
+                `;
+                tr.addEventListener('click', () => {
+                    runBench50kSingleOnCanvas(r.penId);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function runBench50kSingleOnCanvas(penId) {
+            await switchPen(penId);
+            const res = await evaluatePen50k(penId);
+            renderBench50kTable();
+
+            const pts = getOrCreate50kStrokePoints();
+            const renderer = await loadPenModule(penId);
+            if (state.engineInstance && typeof renderer === 'function') {
+                const strokeId = `stroke50k_${penId}_${Date.now()}`;
+                state.engineInstance.setStrokes([
+                    {
+                        id: strokeId,
+                        points: pts,
+                        style: {
+                            ...state.style,
+                            penId,
+                            strokeId,
+                        },
+                        renderPen: renderer,
+                    },
+                ]);
+                if (res) {
+                    fpsCounter.textContent = res.avgFps;
+                    fpsCounter.className = 'hud-metric-value ' + (res.avgFps >= 50 ? 'fps-good' : (res.avgFps >= 25 ? 'fps-warn' : 'fps-bad'));
+                    renderTimeCounter.textContent = `${res.avgMs.toFixed(2)} ms`;
+                    statsCounter.textContent = `1 / 50000`;
+                    showToast(`${res.name}: ${res.avgFps} FPS prom. (${res.avgMs.toFixed(2)} ms) en 50k pts`);
+                }
+            }
+        }
+
+        async function runBench50kAll(openModal = true) {
+            if (benchRunning) return;
+            benchRunning = true;
+
+            const panel = document.getElementById('bench50kPanel');
+            const statusEl = document.getElementById('bench50kStatus');
+            if (openModal && panel) {
+                panel.classList.add('open');
+            }
+
+            const cards = [...document.querySelectorAll('.pen-card')];
+            const penIds = cards.map(c => c.dataset.pen).filter(Boolean);
+
+            for (let i = 0; i < penIds.length; i++) {
+                const pid = penIds[i];
+                const modName = state.penModules[pid]?.name || pid;
+                if (statusEl) {
+                    statusEl.textContent = `Evaluando (${i + 1}/${penIds.length}) a 50.000 pts: ${modName}...`;
+                }
+                await new Promise(r => requestAnimationFrame(r));
+                await evaluatePen50k(pid);
+                renderBench50kTable();
+            }
+
+            if (statusEl) {
+                statusEl.textContent = `Completado en ${penIds.length} lápices (50.000 pts/trazo). Clic en una fila para ver en lienzo.`;
+            }
+            benchRunning = false;
+
+            if (openModal) {
+                await runBench50kSingleOnCanvas(state.activePenId);
+            }
+        }
+
         // Inicialización de la aplicación
         async function init() {
             resizeCanvas();
@@ -1507,6 +1942,11 @@
             await switchPen(state.activePenId);
             await switchEngine(state.activeEngineId);
             renderAllPenPreviews();
+
+            // Evaluar puntuaciones de 50k puntos en segundo plano para mostrar los badges de cada pluma
+            setTimeout(() => {
+                runBench50kAll(false);
+            }, 150);
         }
 
         init();
