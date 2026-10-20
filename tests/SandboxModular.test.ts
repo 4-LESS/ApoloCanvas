@@ -238,7 +238,7 @@ describe('Sandbox Modular Canvas Architecture', () => {
         assert.strictEqual(recordedStrokes.length, 1, 'pencil must execute 1 dry edge filament stroke');
     });
 
-    it('SVG companion export includes userSpaceOnUse apolo-pencil-grain filter when pencil stroke is present', async () => {
+    it('SVG companion export includes deduplicated Vector Sketch pattern defs and O(1) WeakMap memoization', async () => {
         const { renderBoxSvg } = await import('../src/io/PersistenceQueue.ts');
 
         const elements: any[] = [
@@ -259,16 +259,40 @@ describe('Sandbox Modular Canvas Architecture', () => {
                     pattern: 'solid',
                 },
             },
+            {
+                id: 'el-2',
+                type: 'stroke',
+                timestamp: Date.now() + 1,
+                zIndex: 2,
+                blockId: 'block-1',
+                anchorText: 'test',
+                points: [0.5, 0.2, 0.5, 0, 0.6, 0.4, 0.6, 50, 0.7, 0.6, 0.5, 100],
+                bounds: { minX: 0.5, maxX: 0.7, minY: 0.2, maxY: 0.6 },
+                style: {
+                    color: '#2b2b2b',
+                    width: 4,
+                    opacity: 0.85,
+                    profile: 'pencil',
+                    pattern: 'solid',
+                },
+            },
         ];
 
         const svgOutput = renderBoxSvg('box-1', elements, 800, 280);
 
-        assert.ok(svgOutput.includes('id="apolo-pencil-grain"'), 'SVG defs must define apolo-pencil-grain');
-        assert.ok(svgOutput.includes('filterUnits="userSpaceOnUse"'), 'Filter must use filterUnits="userSpaceOnUse"');
-        assert.ok(svgOutput.includes('feTurbulence'), 'Filter must include feTurbulence');
-        assert.ok(svgOutput.includes('feColorMatrix'), 'Filter must include feColorMatrix');
-        assert.ok(svgOutput.includes('feDisplacementMap'), 'Filter must include feDisplacementMap');
-        assert.ok(svgOutput.includes('filter="url(#apolo-pencil-grain)"'), 'Pencil stroke must reference apolo-pencil-grain filter');
+        assert.ok(svgOutput.includes('<defs>'), 'SVG output must include a root <defs> block');
+        assert.ok(svgOutput.includes('id="apolo-sketch-coarse-2b2b2b-'), 'SVG defs must define apolo-sketch-coarse pattern');
+        assert.ok(svgOutput.includes('id="apolo-sketch-core-2b2b2b-'), 'SVG defs must define apolo-sketch-core pattern');
+        assert.ok(svgOutput.includes('patternUnits="userSpaceOnUse"'), 'Pattern defs must use patternUnits="userSpaceOnUse"');
+        assert.ok(!svgOutput.includes('feTurbulence'), 'SVG must not include legacy feTurbulence filter');
+        assert.strictEqual(
+            svgOutput.split('id="apolo-sketch-coarse-2b2b2b-').length - 1,
+            1,
+            'Shared pattern defs must be deduplicated across multiple strokes of the same color'
+        );
+
+        const cachedOutput = renderBoxSvg('box-1', elements, 800, 280);
+        assert.strictEqual(cachedOutput, svgOutput, 'Memoized SVG output must be identical on subsequent calls');
     });
 
     it('pencil-sketch (Lápiz 8) renders long strokes in O(1) draw calls (2 fills + 1 stroke) and matches SVG without heavy filters', async () => {

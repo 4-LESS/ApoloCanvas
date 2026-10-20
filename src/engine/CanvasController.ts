@@ -29,7 +29,7 @@ import { PointBuffer } from './input/PointBuffer';
 import { applyStrokePattern, drawPatternedStrokePath, renderContinuousSolidStroke } from './PatternedStrokeRenderer';
 import { getPenPlugin } from './pens/index';
 import { SpatialGrid } from './spatial/SpatialGrid';
-import { PersistenceQueue } from '../io/PersistenceQueue';
+import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer';
 import { Predictor } from './input/Predictor';
 import { EngineEventBus } from '../core/events';
@@ -41,7 +41,7 @@ import { ZoomPill } from '../ui/ZoomPill';
 import { Toast } from '../ui/Toast';
 import { PopoverController } from '../ui/kit';
 import { LinkSuggestModal, openLocalGraph } from '../ui/LinkSuggestModal';
-import { createDotsIcon, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
+import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme';
 import { smoothPressure } from './input/PressureCurve';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser';
 import {
@@ -1335,7 +1335,30 @@ export class CanvasController {
             if (isPreview) {
                 if (existingHandle) existingHandle.remove();
                 if (existingOptions) existingOptions.remove();
+
+                const boxElements = this.document.elements.filter(e => e.blockId === `space:${id}`);
+                let previewSvgWrap = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
+                if (boxElements.length > 0) {
+                    if (!previewSvgWrap) {
+                        previewSvgWrap = document.createElement('div');
+                        previewSvgWrap.className = 'apolo-box-preview-svg';
+                        el.appendChild(previewSvgWrap);
+                    }
+                    const targetW = Math.round(boxWidth || 800);
+                    const svgHash = `${boxElements.length}:${targetW}:${h}`;
+                    if (previewSvgWrap.dataset.apoloSvgHash !== svgHash || previewSvgWrap.children.length === 0) {
+                        const svgMarkup = renderBoxSvg(id, boxElements, targetW, h);
+                        const parsedSvg = createSvgFromMarkup(svgMarkup);
+                        previewSvgWrap.replaceChildren(parsedSvg);
+                        previewSvgWrap.dataset.apoloSvgHash = svgHash;
+                    }
+                } else if (previewSvgWrap) {
+                    previewSvgWrap.remove();
+                }
             } else {
+                const existingPreviewSvg = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
+                if (existingPreviewSvg) existingPreviewSvg.remove();
+
                 // 1. Subtle top-left 3-dots button
                 if (!existingOptions) {
                     const optBtn = document.createElement('button');
@@ -3825,7 +3848,15 @@ export class CanvasController {
             this.index.query(viewport, this.visible);
             this.visible.sort((a, b) => a.zIndex - b.zIndex);
             const isDark = isDarkTheme();
+            const isPreview = !!this.options.readonly || !!this.scroller.closest('.markdown-preview-view');
             for (const element of this.visible) {
+                if (isPreview && element.blockId?.startsWith('space:')) {
+                    const spaceId = element.blockId.slice(6);
+                    const spaceEl = this.findSpaceElementById(spaceId);
+                    if (spaceEl?.querySelector('.apolo-box-preview-svg')) {
+                        continue;
+                    }
+                }
                 if (this.isHighlighter(element)) {
                     this.paintHighlighterStroke(element as StrokeElement, this.highlighterDryContext, isDark);
                 } else {

@@ -35,6 +35,8 @@ export const incrementalBake = true;
 
 const TILE_SIZE = 128;
 const TILE_MASK = TILE_SIZE - 1;
+const FALLBACK_PNG_DATA_URL =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 let cachedPaperField: Float32Array | null = null;
 
@@ -147,8 +149,8 @@ export function getGrainPatterns(
 
         let coarseTile: HTMLCanvasElement | null = null;
         let coreTile: HTMLCanvasElement | null = null;
-        let coarseUrl = '';
-        let coreUrl = '';
+        let coarseUrl = FALLBACK_PNG_DATA_URL;
+        let coreUrl = FALLBACK_PNG_DATA_URL;
 
         if (isDoc) {
             const createBinaryTile = (threshold: number): { canvas: HTMLCanvasElement | null; url: string } => {
@@ -157,7 +159,9 @@ export function getGrainPatterns(
                     c.width = TILE_SIZE;
                     c.height = TILE_SIZE;
                     const cCtx = c.getContext && c.getContext('2d');
-                    if (!cCtx || typeof cCtx.createImageData !== 'function') return { canvas: null, url: '' };
+                    if (!cCtx || typeof cCtx.createImageData !== 'function') {
+                        return { canvas: null, url: FALLBACK_PNG_DATA_URL };
+                    }
 
                     const img = cCtx.createImageData(TILE_SIZE, TILE_SIZE);
                     const data = img.data;
@@ -172,15 +176,20 @@ export function getGrainPatterns(
                         }
                     }
                     cCtx.putImageData(img, 0, 0);
-                    let url = '';
+                    let url = FALLBACK_PNG_DATA_URL;
                     try {
-                        if (typeof c.toDataURL === 'function') url = c.toDataURL('image/png');
+                        if (typeof c.toDataURL === 'function') {
+                            const generated = c.toDataURL('image/png');
+                            if (generated && generated.startsWith('data:image/')) {
+                                url = generated;
+                            }
+                        }
                     } catch {
-                        url = '';
+                        url = FALLBACK_PNG_DATA_URL;
                     }
                     return { canvas: c, url };
                 } catch {
-                    return { canvas: null, url: '' };
+                    return { canvas: null, url: FALLBACK_PNG_DATA_URL };
                 }
             };
 

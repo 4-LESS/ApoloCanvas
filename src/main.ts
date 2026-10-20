@@ -244,9 +244,11 @@ export default class ApoloCanvasPlugin extends Plugin {
                                 previewSvgWrap.className = 'apolo-box-preview-svg';
                                 s.appendChild(previewSvgWrap);
                             }
-                            const svgMarkup = renderBoxSvg(id, boxElements, 800, h);
+                            const boxW = Math.round(s.clientWidth || s.offsetWidth || 800);
+                            const svgMarkup = renderBoxSvg(id, boxElements, boxW, h);
                             const parsedSvg = createSvgFromMarkup(svgMarkup);
-                            previewSvgWrap.replaceChildren(...Array.from(parsedSvg.children ?? []));
+                            previewSvgWrap.replaceChildren(parsedSvg);
+                            previewSvgWrap.dataset.apoloSvgHash = `${boxElements.length}:${boxW}:${h}`;
                         } else if (previewSvgWrap) {
                             previewSvgWrap.remove();
                         }

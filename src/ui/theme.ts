@@ -204,15 +204,21 @@ function applySvgAttributes(node: Element, attributeString: string): void {
 }
 
 function appendSvgMarkup(parent: Element, markup: string): void {
-    const tagRegex = /<([A-Za-z0-9:-]+)([^>]*)>([\s\S]*?)<\/\1>|<([A-Za-z0-9:-]+)([^>]*)\s*\/?>/g;
+    const tagRegex = /<([A-Za-z0-9:-]+)([^>]*?)\/>|<([A-Za-z0-9:-]+)([^>]*)>([\s\S]*?)<\/\3>|<([A-Za-z0-9:-]+)([^>]*)\s*\/?>/g;
     let tagMatch: RegExpExecArray | null;
     while ((tagMatch = tagRegex.exec(markup)) !== null) {
-        const tagName = tagMatch[1] ?? tagMatch[4];
-        const attributeString = tagMatch[2] ?? tagMatch[5] ?? '';
-        const innerMarkup = tagMatch[3] ?? '';
+        const tagName = tagMatch[1] ?? tagMatch[3] ?? tagMatch[6];
+        const attributeString = (tagMatch[2] ?? tagMatch[4] ?? tagMatch[7] ?? '').replace(/\/\s*$/, '');
+        const innerMarkup = tagMatch[5] ?? '';
         const node = document.createElementNS('http://www.w3.org/2000/svg', tagName);
         applySvgAttributes(node, attributeString);
-        if (innerMarkup) appendSvgMarkup(node, innerMarkup);
+        if (innerMarkup) {
+            if (/<[A-Za-z0-9:-]+/.test(innerMarkup)) {
+                appendSvgMarkup(node, innerMarkup);
+            } else {
+                node.textContent = innerMarkup;
+            }
+        }
         parent.appendChild(node);
     }
 }

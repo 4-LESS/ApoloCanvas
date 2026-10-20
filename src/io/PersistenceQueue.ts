@@ -1,8 +1,8 @@
 import type { App, TFile } from 'obsidian';
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, ShapeElement } from '../core/types.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, Point, ShapeElement, StrokeElement } from '../core/types.ts';
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
-import { buildCalligraphicChiselPath } from '../engine/PatternedStrokeRenderer.ts';
+import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -550,20 +550,9 @@ export function renderBoxSvg(
         gridDef = `<pattern id="apolo-grid-${safeBoxId}" width="100%" height="${step}" patternUnits="userSpaceOnUse"><line x1="0" y1="${step}" x2="100%" y2="${step}" stroke="rgba(128,128,128,0.2)" stroke-width="1"/></pattern><rect width="100%" height="100%" fill="url(#apolo-grid-${safeBoxId})"/>`;
     }
 
-    const hasPencil = elements.some(el => el.type === 'stroke' && el.style.profile === 'pencil');
-    const pencilFilterDef = hasPencil
-        ? `<filter id="apolo-pencil-grain" filterUnits="userSpaceOnUse" x="-50" y="-50" width="10000" height="10000">` +
-          `<feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="3" seed="17" result="noise"/>` +
-          `<feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1.45 -0.22" in="noise" result="grainMask"/>` +
-          `<feComposite operator="in" in="SourceGraphic" in2="grainMask" result="textured"/>` +
-          `<feDisplacementMap in="textured" in2="noise" scale="1.6" xChannelSelector="R" yChannelSelector="G"/>` +
-          `</filter>`
-        : '';
-
-    const content = elements.map(el => renderElement(el, scale)).join('\n');
-    const defsContent = [pencilFilterDef].filter(Boolean).join('');
-    const defsTag = defsContent ? `<defs>${defsContent}</defs>` : '<defs/>';
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${defsTag}${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
+    const { defsMarkup, contentMarkup } = collectDefsAndRenderElements(elements, scale);
+    const defsTag = defsMarkup ? `<defs>${defsMarkup}</defs>` : '<defs/>';
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${defsTag}${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${contentMarkup}</g></svg>`;
 }
 
 function vaultRelativeLink(notePath: string, assetPath: string): string {
@@ -572,7 +561,7 @@ function vaultRelativeLink(notePath: string, assetPath: string): string {
     return assetPath.startsWith(prefix) ? assetPath.slice(prefix.length) : assetPath;
 }
 
-function renderSvg(document: PageDocument): string {
+export function renderSvg(document: PageDocument): string {
     const scale = 800;
     let minX = 0; let minY = 0; let maxX = 800; let maxY = 600;
     if (document.elements.length) {
@@ -584,22 +573,149 @@ function renderSvg(document: PageDocument): string {
         }
     }
     const padding = 16;
-    const hasPencil = document.elements.some(el => el.type === 'stroke' && el.style.profile === 'pencil');
-    const pencilFilterDef = hasPencil
-        ? `<defs><filter id="apolo-pencil-grain" filterUnits="userSpaceOnUse" x="-50" y="-50" width="10000" height="10000">` +
-          `<feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="3" seed="17" result="noise"/>` +
-          `<feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1.45 -0.22" in="noise" result="grainMask"/>` +
-          `<feComposite operator="in" in="SourceGraphic" in2="grainMask" result="textured"/>` +
-          `<feDisplacementMap in="textured" in2="noise" scale="1.6" xChannelSelector="R" yChannelSelector="G"/>` +
-          `</filter></defs>`
-        : '';
-    const content = document.elements.map(el => renderElement(el, scale)).join('\n');
+    const { defsMarkup, contentMarkup } = collectDefsAndRenderElements(document.elements, scale);
+    const defsTag = defsMarkup ? `<defs>${defsMarkup}</defs>` : '';
     const width = Math.max(1, maxX - minX + padding * 2);
     const height = Math.max(1, maxY - minY + padding * 2);
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - padding} ${minY - padding} ${width} ${height}" width="${width}" height="${height}">${pencilFilterDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${content}</g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX - padding} ${minY - padding} ${width} ${height}" width="${width}" height="${height}">${defsTag}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${contentMarkup}</g></svg>`;
 }
 
-function renderElement(element: CanvasElement, scale = 800): string {
+interface CachedStrokeSvg {
+    profile: string;
+    color: string;
+    width: number;
+    opacity: number;
+    contentWidth: number;
+    anchorOffsetY: number;
+    pointLength: number;
+    firstX: number;
+    firstY: number;
+    out: PenSvgOutput;
+}
+
+const strokeSvgWeakCache = new WeakMap<StrokeElement, CachedStrokeSvg>();
+const strokeSvgIdCache = new Map<string, CachedStrokeSvg>();
+
+function getOrRenderSolidStrokeSvg(
+    el: StrokeElement,
+    contentWidth: number,
+    anchorOffsetY = 0,
+): PenSvgOutput {
+    const data = el.points;
+    if (data.length < 4) return { defs: {}, body: '' };
+
+    const profile = el.style.profile ?? 'ball';
+    const color = escapeXml(el.style.color || '#1e1e1e');
+    const width = el.style.width || 3;
+    const opacity = el.style.opacity !== undefined ? el.style.opacity : 1;
+    const firstX = data[0];
+    const firstY = data[1];
+
+    const matchesCache = (hit: CachedStrokeSvg | undefined): hit is CachedStrokeSvg =>
+        Boolean(
+            hit &&
+            hit.profile === profile &&
+            hit.color === color &&
+            hit.width === width &&
+            hit.opacity === opacity &&
+            Math.abs(hit.contentWidth - contentWidth) < 1e-3 &&
+            Math.abs(hit.anchorOffsetY - anchorOffsetY) < 1e-3 &&
+            hit.pointLength === data.length &&
+            hit.firstX === firstX &&
+            hit.firstY === firstY,
+        );
+
+    const weakHit = strokeSvgWeakCache.get(el);
+    if (matchesCache(weakHit)) {
+        return weakHit.out;
+    }
+
+    if (el.id) {
+        const idHit = strokeSvgIdCache.get(el.id);
+        if (matchesCache(idHit)) {
+            strokeSvgWeakCache.set(el, idHit);
+            return idHit.out;
+        }
+    }
+
+    const pixelPoints: Point[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+        pixelPoints.push({
+            x: data[i] * contentWidth,
+            y: data[i + 1] * contentWidth + anchorOffsetY,
+            pressure: data[i + 2],
+            time: data[i + 3],
+        });
+    }
+
+    const out = getPenPlugin(profile).renderSvg(pixelPoints, {
+        ...el.style,
+        color,
+        width,
+        opacity,
+    });
+
+    const entry: CachedStrokeSvg = {
+        profile,
+        color,
+        width,
+        opacity,
+        contentWidth,
+        anchorOffsetY,
+        pointLength: data.length,
+        firstX,
+        firstY,
+        out,
+    };
+
+    strokeSvgWeakCache.set(el, entry);
+    if (el.id) {
+        if (strokeSvgIdCache.size > 2000) {
+            strokeSvgIdCache.clear();
+        }
+        strokeSvgIdCache.set(el.id, entry);
+    }
+    return out;
+}
+
+function collectDefsAndRenderElements(
+    elements: readonly CanvasElement[],
+    scale: number,
+): { defsMarkup: string; contentMarkup: string } {
+    const defsMap = new Map<string, string>();
+    const bodies: string[] = [];
+
+    for (const el of elements) {
+        const { defs, body } = renderElementWithDefs(el, scale, 0);
+        if (defs) {
+            if (typeof defs === 'string') {
+                if (!defsMap.has(defs)) defsMap.set(defs, defs);
+            } else {
+                for (const [k, v] of Object.entries(defs)) {
+                    if (v && !defsMap.has(k)) {
+                        defsMap.set(k, v);
+                    }
+                }
+            }
+        }
+        if (body) {
+            bodies.push(body);
+        }
+    }
+
+    return {
+        defsMarkup: Array.from(defsMap.values()).join(''),
+        contentMarkup: bodies.join('\n'),
+    };
+}
+
+function isHighlighterStroke(el: StrokeElement): boolean {
+    if (el.style.isHighlighter) return true;
+    if (el.style.profile === 'hlr' || el.style.profile === 'hlf') return true;
+    return false;
+}
+
+function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffsetY = 0): PenSvgOutput {
     const strokeWidth = element.style.width;
     const pattern = element.style.pattern;
     const lineCap = pattern === 'dashed' ? 'butt' : pattern === 'dotted' ? 'round' : element.style.lineCap ?? 'round';
@@ -609,54 +725,56 @@ function renderElement(element: CanvasElement, scale = 800): string {
             ? `0.5 ${Math.round(Math.max(4, strokeWidth * 2.2) * 10) / 10}`
             : '';
     const dash = dashArray ? ` stroke-dasharray="${dashArray}"` : '';
-    const isPencil = element.type === 'stroke' && element.style.profile === 'pencil';
-    const filterAttr = isPencil ? ' filter="url(#apolo-pencil-grain)"' : '';
-    const style = `stroke="${escapeXml(element.style.color)}" opacity="${element.style.opacity}" stroke-linecap="${lineCap}" stroke-linejoin="round"${dash}${filterAttr}`;
+    const style = `stroke="${escapeXml(element.style.color)}" opacity="${element.style.opacity}" stroke-linecap="${lineCap}" stroke-linejoin="round"${dash}`;
+
     if (element.type === 'stroke') {
         const points = element.points;
-        if (points.length < 4) return '';
-        if (points.length === 4) return `<circle cx="${points[0] * scale}" cy="${points[1] * scale}" r="${element.style.width * pressureScale(points[2]) / 2}" fill="${escapeXml(element.style.color)}" opacity="${element.style.opacity}"${filterAttr}/>`;
-        if (element.style.pattern === 'solid' && element.style.profile === 'calli') {
-            const rawPoints: { x: number; y: number }[] = [];
-            for (let i = 0; i < points.length; i += 4) {
-                rawPoints.push({ x: points[i] * scale, y: points[i + 1] * scale });
-            }
-            const chisel = buildCalligraphicChiselPath(rawPoints, element.style.width);
-            return `<path d="${chisel.toSvgPathD()}" fill="${escapeXml(element.style.color)}" fill-rule="nonzero" opacity="${element.style.opacity}" stroke="none"/>`;
+        if (points.length < 4) return { defs: {}, body: '' };
+
+        if (pattern === 'solid' && !isHighlighterStroke(element)) {
+            return getOrRenderSolidStrokeSvg(element, scale, anchorOffsetY);
         }
-        if (element.style.pattern !== 'solid' || isPencil) {
-            let path = `M ${points[0] * scale} ${points[1] * scale}`;
-            for (let i = 4; i < points.length; i += 4) path += ` L ${points[i] * scale} ${points[i + 1] * scale}`;
-            return `<path d="${path}" ${style} stroke-width="${element.style.width}"/>`;
+
+        if (points.length === 4) {
+            return {
+                defs: {},
+                body: `<circle cx="${points[0] * scale}" cy="${points[1] * scale + anchorOffsetY}" r="${element.style.width / 2}" fill="${escapeXml(element.style.color)}" opacity="${element.style.opacity}"/>`,
+            };
         }
-        let paths = '';
+
+        let path = `M ${points[0] * scale} ${points[1] * scale + anchorOffsetY}`;
         for (let i = 4; i < points.length; i += 4) {
-            const width = element.style.width * pressureScale((points[i - 2] + points[i + 2]) / 2);
-            paths += `<path d="M ${points[i - 4] * scale} ${points[i - 3] * scale} L ${points[i] * scale} ${points[i + 1] * scale}" ${style} stroke-width="${width}"/>`;
+            path += ` L ${points[i] * scale} ${points[i + 1] * scale + anchorOffsetY}`;
         }
-        return paths;
+        return {
+            defs: {},
+            body: `<path d="${path}" ${style} stroke-width="${element.style.width}"/>`,
+        };
     }
+
     const startX = element.startX * scale;
-    const startY = element.startY * scale;
+    const startY = element.startY * scale + anchorOffsetY;
     const endX = element.endX * scale;
-    const endY = element.endY * scale;
+    const endY = element.endY * scale + anchorOffsetY;
     const x = Math.min(startX, endX); const y = Math.min(startY, endY);
     const width = Math.abs(endX - startX); const height = Math.abs(endY - startY);
     const fill = element.fillColor ? ` fill="${escapeXml(element.fillColor)}"` : '';
     const shape: ShapeElement = element;
     switch (shape.shapeType) {
-        case 'line': return `<path d="M ${startX} ${startY} L ${endX} ${endY}" ${style}/>`;
-        case 'arrow': return `<path d="M ${startX} ${startY} L ${endX} ${endY} M ${endX - 10} ${endY - 5} L ${endX} ${endY} L ${endX - 5} ${endY - 10}" ${style}/>`;
-        case 'ellipse': return `<ellipse cx="${x + width / 2}" cy="${y + height / 2}" rx="${width / 2}" ry="${height / 2}" ${style}${fill}/>`;
-        case 'triangle': return `<path d="M ${x + width / 2} ${y} L ${x + width} ${y + height} L ${x} ${y + height} Z" ${style}${fill}/>`;
-        case 'rounded-rect': return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" ${style}${fill}/>`;
-        default: return `<rect x="${x}" y="${y}" width="${width}" height="${height}" ${style}${fill}/>`;
+        case 'line': return { defs: {}, body: `<path d="M ${startX} ${startY} L ${endX} ${endY}" ${style}/>` };
+        case 'arrow': return { defs: {}, body: `<path d="M ${startX} ${startY} L ${endX} ${endY} M ${endX - 10} ${endY - 5} L ${endX} ${endY} L ${endX - 5} ${endY - 10}" ${style}/>` };
+        case 'ellipse': return { defs: {}, body: `<ellipse cx="${x + width / 2}" cy="${y + height / 2}" rx="${width / 2}" ry="${height / 2}" ${style}${fill}/>` };
+        case 'triangle': return { defs: {}, body: `<path d="M ${x + width / 2} ${y} L ${x + width} ${y + height} L ${x} ${y + height} Z" ${style}${fill}/>` };
+        case 'rounded-rect': return { defs: {}, body: `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" ${style}${fill}/>` };
+        default: return { defs: {}, body: `<rect x="${x}" y="${y}" width="${width}" height="${height}" ${style}${fill}/>` };
     }
+}
+
+export function renderElement(element: CanvasElement, scale = 800): string {
+    return renderElementWithDefs(element, scale, 0).body;
 }
 
 function escapeXml(value: string): string {
     return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character] ?? character);
 }
-
-function pressureScale(pressure: number): number { return 0.18 + Math.max(0, Math.min(1, pressure)) * 1.42; }
 
