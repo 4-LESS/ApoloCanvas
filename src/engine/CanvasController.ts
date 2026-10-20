@@ -26,7 +26,14 @@ import {
 } from '../core/types';
 import { InputManager } from './input/InputManager';
 import { PointBuffer } from './input/PointBuffer';
-import { applyStrokePattern, drawPatternedStrokePath, renderContinuousSolidStroke } from './PatternedStrokeRenderer';
+import {
+    applyStrokePattern,
+    bakeLiveStrokeSegment,
+    drawPatternedStrokePath,
+    getOrCreateStrokeSprite,
+    LiveBakeState,
+    renderContinuousSolidStroke,
+} from './PatternedStrokeRenderer';
 import { getPenPlugin } from './pens/index';
 import { SpatialGrid } from './spatial/SpatialGrid';
 import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue';
@@ -3977,90 +3984,9 @@ export class CanvasController {
     }
 
     private getOrCreateStrokeCache(el: StrokeElement): HTMLCanvasElement | null {
-        if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-            return null;
-        }
-
         const geom = this.getElementAnchorGeometry(el.blockId, el.anchorText);
-        const contentLeft = geom.originX;
-        const contentWidth = geom.scaleWidth;
-        const blockTop = geom.originY;
-
-        const pad = Math.ceil(el.style.width * 2) + 8;
-        const docMinX = contentLeft + el.bounds.minX * contentWidth;
-        const docMaxX = contentLeft + el.bounds.maxX * contentWidth;
-        const docMinY = blockTop + el.bounds.minY * contentWidth;
-        const docMaxY = blockTop + el.bounds.maxY * contentWidth;
-
-        const cssW = Math.max(1, Math.ceil(docMaxX - docMinX + pad * 2));
-        const cssH = Math.max(1, Math.ceil(docMaxY - docMinY + pad * 2));
-
         const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
-        const rawScale = ratio * this.zoom;
-        const maxDim = 4096;
-        const scale = Math.min(rawScale, maxDim / Math.max(cssW, cssH));
-        const profile = el.style.profile ?? 'fountain';
-
-        const existing = this.strokeCache.get(el.id);
-        if (existing) {
-            const meta = (existing as any)._cacheMeta;
-            if (
-                meta &&
-                Math.abs(meta.scale - scale) < 1e-3 &&
-                meta.color === el.style.color &&
-                meta.width === el.style.width &&
-                meta.opacity === el.style.opacity &&
-                meta.profile === profile &&
-                Math.abs(meta.contentWidth - contentWidth) < 0.5
-            ) {
-                return existing;
-            }
-        }
-
-        const offscreen = document.createElement('canvas');
-        offscreen.width = Math.max(1, Math.round(cssW * scale));
-        offscreen.height = Math.max(1, Math.round(cssH * scale));
-        const oCtx = typeof offscreen.getContext === 'function' ? offscreen.getContext('2d') : null;
-        if (!oCtx) return null;
-
-        oCtx.save();
-        if (typeof oCtx.setTransform === 'function') {
-            oCtx.setTransform(
-                scale,
-                0,
-                0,
-                scale,
-                (-docMinX + pad) * scale,
-                (-docMinY + pad) * scale,
-            );
-        }
-        const worldPoints: { x: number; y: number; pressure?: number; time?: number }[] = [];
-        for (let i = 0; i < el.points.length; i += 4) {
-            worldPoints.push({
-                x: contentLeft + el.points[i] * contentWidth,
-                y: blockTop + el.points[i + 1] * contentWidth,
-                pressure: el.points[i + 2],
-                time: el.points[i + 3],
-            });
-        }
-        renderContinuousSolidStroke(oCtx, worldPoints, el.style);
-        oCtx.restore();
-
-        (offscreen as any)._cacheMeta = {
-            scale,
-            color: el.style.color,
-            width: el.style.width,
-            opacity: el.style.opacity,
-            profile,
-            contentWidth,
-            pad,
-            cssW,
-            cssH,
-        };
-
-        this.strokeCache.set(el.id, offscreen);
-        el.cacheCanvas = offscreen;
-        return offscreen;
+        return getOrCreateStrokeSprite(el, this.strokeCache, geom, this.zoom, ratio);
     }
 
     private getOrCreatePencilCache(el: StrokeElement): HTMLCanvasElement | null {
@@ -4285,93 +4211,26 @@ export class CanvasController {
             const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
             const penPlugin = getPenPlugin(this.penProfileId);
 
-            if (
-                !this.straightenLines &&
-                validRuns.length === 1 &&
-                validRuns[0].length === rawPoints.length &&
-                rawPoints.length >= 2 &&
-                penPlugin.renderSegment &&
-                typeof document !== 'undefined' &&
-                typeof document.createElement === 'function' &&
-                typeof context.drawImage === 'function'
-            ) {
-                const run = validRuns[0];
+            if (!this.straightenLines && validRuns.length === 1 && validRuns[0].length === rawPoints.length) {
                 const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
-                const sLeft = this.currentScrollLeft;
-                const sTop = this.currentScrollTop;
-                const styleKey = `${this.penProfileId}|${this.style.color}|${this.style.width}|${this.style.opacity}`;
-
-                if (!this.liveBakeCanvas) {
-                    this.liveBakeCanvas = document.createElement('canvas');
-                    this.liveBakeCtx = typeof this.liveBakeCanvas.getContext === 'function'
-                        ? this.liveBakeCanvas.getContext('2d')
-                        : null;
-                }
-
-                const bakeCanvas = this.liveBakeCanvas;
-                const bakeCtx = this.liveBakeCtx;
-
-                if (bakeCanvas && bakeCtx && this.canvas.width > 0 && this.canvas.height > 0) {
-                    const sizeChanged =
-                        bakeCanvas.width !== this.canvas.width ||
-                        bakeCanvas.height !== this.canvas.height;
-                    if (sizeChanged) {
-                        bakeCanvas.width = this.canvas.width;
-                        bakeCanvas.height = this.canvas.height;
-                    }
-
-                    if (
-                        sizeChanged ||
-                        this.liveBakedIndex === 0 ||
-                        run.length < this.liveBakedIndex ||
-                        this.liveBakeZoom !== this.zoom ||
-                        this.liveBakeScrollLeft !== sLeft ||
-                        this.liveBakeScrollTop !== sTop ||
-                        this.liveBakeStyleKey !== styleKey
-                    ) {
-                        bakeCtx.setTransform(1, 0, 0, 1, 0, 0);
-                        bakeCtx.clearRect(0, 0, bakeCanvas.width, bakeCanvas.height);
-                        this.liveBakedIndex = 0;
-                        this.liveBakeSegState = {};
-                        this.liveBakeZoom = this.zoom;
-                        this.liveBakeScrollLeft = sLeft;
-                        this.liveBakeScrollTop = sTop;
-                        this.liveBakeStyleKey = styleKey;
-                    }
-
-                    if (run.length > this.liveBakedIndex) {
-                        bakeCtx.save();
-                        bakeCtx.setTransform(
-                            ratio * this.zoom,
-                            0,
-                            0,
-                            ratio * this.zoom,
-                            -ratio * sLeft,
-                            -ratio * sTop,
-                        );
-                        if (this.activeAnchor.blockId.startsWith('space:')) {
-                            const geom = this.getElementAnchorGeometry(this.activeAnchor.blockId);
-                            bakeCtx.beginPath();
-                            bakeCtx.rect(geom.originX, geom.originY, geom.scaleWidth, geom.boxHeight);
-                            bakeCtx.clip();
-                        }
-                        penPlugin.renderSegment(
-                            bakeCtx,
-                            run,
-                            this.liveBakedIndex,
-                            { ...activeStyle, opacity: 1 },
-                            this.liveBakeSegState,
-                        );
-                        bakeCtx.restore();
-                        this.liveBakedIndex = run.length;
-                    }
-
-                    context.save();
-                    context.setTransform(1, 0, 0, 1, 0, 0);
-                    context.globalAlpha = this.style.opacity;
-                    context.drawImage(bakeCanvas, 0, 0);
-                    context.restore();
-                } else {
+                const boxClip = this.activeAnchor.blockId.startsWith('space:')
+                    ? this.getElementAnchorGeometry(this.activeAnchor.blockId)
+                    : null;
+                const baked = bakeLiveStrokeSegment(
+                    this as unknown as LiveBakeState,
+                    context,
+                    validRuns[0],
+                    activeStyle,
+                    this.penProfileId,
+                    this.canvas.width,
+                    this.canvas.height,
+                    this.zoom,
+                    this.currentScrollLeft,
+                    this.currentScrollTop,
+                    ratio,
+                    boxClip,
+                );
+                if (!baked) {
                     for (const run of validRuns) {
                         renderContinuousSolidStroke(context, run, activeStyle);
                     }
