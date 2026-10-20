@@ -34,6 +34,7 @@ const MIME_TYPES = {
 const PREFERRED_ORDER = [
     'ball',
     'fountain',
+    'fountain-v2',
     'calli',
     'pencil-simple',
     'pencil-multistrand',
