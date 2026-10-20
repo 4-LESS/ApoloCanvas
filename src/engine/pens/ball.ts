@@ -30,6 +30,7 @@ interface BallState {
     lastMidX: number;
     lastMidY: number;
     _initialized?: boolean;
+    _isIncrementalSegment?: boolean;
 }
 
 /**
@@ -81,7 +82,7 @@ function strokeBallpointDelta(
         }
     }
 
-    if (rawEnd === points.length - 1) {
+    if (rawEnd === points.length - 1 && !state._isIncrementalSegment) {
         const lastPt = points[rawEnd];
         ctx.lineTo(lastPt.x, lastPt.y);
         countInBatch++;

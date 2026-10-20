@@ -46,6 +46,7 @@ interface CalliState {
     lastMidX: number;
     lastMidY: number;
     _initialized?: boolean;
+    _isIncrementalSegment?: boolean;
 }
 
 /**
@@ -188,7 +189,7 @@ function renderCalliV2Delta(
         prevMidY = subPrevY;
     }
 
-    if (rawEnd === points.length - 1) {
+    if (rawEnd === points.length - 1 && !state._isIncrementalSegment) {
         const lastPt = points[rawEnd];
         const d = Math.hypot(lastPt.x - prevMidX, lastPt.y - prevMidY);
         if (d >= 0.05) {

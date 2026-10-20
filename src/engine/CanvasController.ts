@@ -27,6 +27,7 @@ import {
 import { InputManager } from './input/InputManager';
 import { PointBuffer } from './input/PointBuffer';
 import { applyStrokePattern, drawPatternedStrokePath, renderContinuousSolidStroke } from './PatternedStrokeRenderer';
+import { getPenPlugin } from './pens/index';
 import { SpatialGrid } from './spatial/SpatialGrid';
 import { PersistenceQueue } from '../io/PersistenceQueue';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer';
@@ -232,6 +233,17 @@ export class CanvasController {
     private clipboard: CanvasElement[] = [];
     private readonly predictedPoint: Point = { x: 0, y: 0, pressure: 0, time: 0 };
     private hasPrediction = false;
+
+    // Live O(1) Incremental Baking Buffer
+    private liveBakeCanvas: HTMLCanvasElement | null = null;
+    private liveBakeCtx: CanvasRenderingContext2D | null = null;
+    private liveBakedIndex = 0;
+    private liveBakeSegState: Record<string, unknown> = {};
+    private liveBakeZoom = -1;
+    private liveBakeScrollLeft = -1;
+    private liveBakeScrollTop = -1;
+    private liveBakeStyleKey = '';
+    private straightenLines = false;
 
     // Zoom & Viewport State (Single Source of Truth: {zoom, scrollLeft, scrollTop})
     private zoom = 1.0;
@@ -2121,6 +2133,7 @@ export class CanvasController {
 
         this.points.clear();
         this.predictor.reset();
+        this.resetLiveBake();
 
         const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
         this.activeContentLeft = contentLeft;
@@ -2239,10 +2252,12 @@ export class CanvasController {
 
         this.points.clear();
         this.predictor.reset();
+        this.resetLiveBake();
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
         this.barrelActive = false;
+        this.renderDirty = true;
         this.rebuildIndex();
         this.schedulePaint();
         this.persistSoon();
@@ -2252,12 +2267,18 @@ export class CanvasController {
     private cancel(): void {
         this.points.clear();
         this.predictor.reset();
+        this.resetLiveBake();
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
         this.movingSelection = false;
         this.barrelActive = false;
         this.schedulePaint();
+    }
+
+    private resetLiveBake(): void {
+        this.liveBakedIndex = 0;
+        this.liveBakeSegState = {};
     }
 
     private pushWorldPoint(point: Point): void {
@@ -2356,9 +2377,10 @@ export class CanvasController {
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
         this.document.elements.push(element);
-        if (element.style.profile === 'pencil' && element.style.pattern === 'solid') {
-            this.getOrCreatePencilCache(element);
+        if (element.style.pattern === 'solid' && !isHl) {
+            this.getOrCreateStrokeCache(element);
         }
+        this.renderDirty = true;
     }
 
     private isScribble(points: Point[]): boolean {
@@ -3888,66 +3910,31 @@ export class CanvasController {
             if (data.length >= 4) {
                 if (element.style.pattern !== 'solid') {
                     drawPatternedStrokePath(context, data, contentLeft, contentWidth, blockTop, element.style);
-                } else if (element.style.profile === 'pencil') {
-                    const cacheCanvas = this.getOrCreatePencilCache(element);
+                } else {
+                    const cacheCanvas = this.getOrCreateStrokeCache(element);
                     if (cacheCanvas && typeof context.drawImage === 'function') {
-                        const pad = Math.max(16, Math.ceil(element.style.width + 4));
+                        const meta = (cacheCanvas as any)._cacheMeta;
+                        const pad = meta?.pad ?? (Math.ceil(element.style.width * 2) + 8);
+                        const cssW = meta?.cssW ?? cacheCanvas.width;
+                        const cssH = meta?.cssH ?? cacheCanvas.height;
                         const docMinX = contentLeft + element.bounds.minX * contentWidth;
                         const docMinY = blockTop + element.bounds.minY * contentWidth;
                         context.save();
                         context.globalAlpha = 1;
-                        context.drawImage(cacheCanvas, docMinX - pad, docMinY - pad);
+                        context.drawImage(cacheCanvas, docMinX - pad, docMinY - pad, cssW, cssH);
                         context.restore();
                     } else {
-                        const points: { x: number; y: number; pressure?: number }[] = [];
+                        const points: { x: number; y: number; pressure?: number; time?: number }[] = [];
                         for (let i = 0; i < data.length; i += 4) {
                             points.push({
                                 x: contentLeft + data[i] * contentWidth,
                                 y: blockTop + data[i + 1] * contentWidth,
                                 pressure: data[i + 2],
+                                time: data[i + 3],
                             });
                         }
                         renderContinuousSolidStroke(context, points, element.style);
                     }
-                } else if (element.style.profile === 'calli') {
-                    const cached = (element as any)._calliPointsCache;
-                    let points: { x: number; y: number; pressure?: number }[];
-                    if (
-                        cached &&
-                        cached.contentLeft === contentLeft &&
-                        cached.contentWidth === contentWidth &&
-                        cached.blockTop === blockTop &&
-                        cached.dataRef === data
-                    ) {
-                        points = cached.points;
-                    } else {
-                        points = [];
-                        for (let i = 0; i < data.length; i += 4) {
-                            points.push({
-                                x: contentLeft + data[i] * contentWidth,
-                                y: blockTop + data[i + 1] * contentWidth,
-                                pressure: data[i + 2],
-                            });
-                        }
-                        (element as any)._calliPointsCache = {
-                            contentLeft,
-                            contentWidth,
-                            blockTop,
-                            dataRef: data,
-                            points,
-                        };
-                    }
-                    renderContinuousSolidStroke(context, points, element.style);
-                } else {
-                    const points: { x: number; y: number; pressure?: number }[] = [];
-                    for (let i = 0; i < data.length; i += 4) {
-                        points.push({
-                            x: contentLeft + data[i] * contentWidth,
-                            y: blockTop + data[i + 1] * contentWidth,
-                            pressure: data[i + 2],
-                        });
-                    }
-                    renderContinuousSolidStroke(context, points, element.style);
                 }
             }
         } else {
@@ -3958,46 +3945,95 @@ export class CanvasController {
         context.restore();
     }
 
-    private getOrCreatePencilCache(el: StrokeElement): HTMLCanvasElement | null {
-        if (this.strokeCache.has(el.id)) {
-            return this.strokeCache.get(el.id)!;
-        }
-
+    private getOrCreateStrokeCache(el: StrokeElement): HTMLCanvasElement | null {
         if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
             return null;
         }
 
         const geom = this.getElementAnchorGeometry(el.blockId, el.anchorText);
+        const contentLeft = geom.originX;
         const contentWidth = geom.scaleWidth;
+        const blockTop = geom.originY;
 
-        const pad = Math.max(16, Math.ceil(el.style.width + 4));
-        const strokeW = Math.max(1, (el.bounds.maxX - el.bounds.minX) * contentWidth);
-        const strokeH = Math.max(1, (el.bounds.maxY - el.bounds.minY) * contentWidth);
-        const width = Math.ceil(strokeW + pad * 2);
-        const height = Math.ceil(strokeH + pad * 2);
+        const pad = Math.ceil(el.style.width * 2) + 8;
+        const docMinX = contentLeft + el.bounds.minX * contentWidth;
+        const docMaxX = contentLeft + el.bounds.maxX * contentWidth;
+        const docMinY = blockTop + el.bounds.minY * contentWidth;
+        const docMaxY = blockTop + el.bounds.maxY * contentWidth;
+
+        const cssW = Math.max(1, Math.ceil(docMaxX - docMinX + pad * 2));
+        const cssH = Math.max(1, Math.ceil(docMaxY - docMinY + pad * 2));
+
+        const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
+        const rawScale = ratio * this.zoom;
+        const maxDim = 4096;
+        const scale = Math.min(rawScale, maxDim / Math.max(cssW, cssH));
+        const profile = el.style.profile ?? 'fountain';
+
+        const existing = this.strokeCache.get(el.id);
+        if (existing) {
+            const meta = (existing as any)._cacheMeta;
+            if (
+                meta &&
+                Math.abs(meta.scale - scale) < 1e-3 &&
+                meta.color === el.style.color &&
+                meta.width === el.style.width &&
+                meta.opacity === el.style.opacity &&
+                meta.profile === profile &&
+                Math.abs(meta.contentWidth - contentWidth) < 0.5
+            ) {
+                return existing;
+            }
+        }
 
         const offscreen = document.createElement('canvas');
-        offscreen.width = Math.max(1, width);
-        offscreen.height = Math.max(1, height);
-        const oCtx = offscreen.getContext('2d');
+        offscreen.width = Math.max(1, Math.round(cssW * scale));
+        offscreen.height = Math.max(1, Math.round(cssH * scale));
+        const oCtx = typeof offscreen.getContext === 'function' ? offscreen.getContext('2d') : null;
+        if (!oCtx) return null;
 
-        if (oCtx) {
-            oCtx.save();
-            const localPoints: { x: number; y: number; pressure?: number }[] = [];
-            for (let i = 0; i < el.points.length; i += 4) {
-                localPoints.push({
-                    x: pad + (el.points[i] - el.bounds.minX) * contentWidth,
-                    y: pad + (el.points[i + 1] - el.bounds.minY) * contentWidth,
-                    pressure: el.points[i + 2],
-                });
-            }
-            renderContinuousSolidStroke(oCtx, localPoints, el.style);
-            oCtx.restore();
+        oCtx.save();
+        if (typeof oCtx.setTransform === 'function') {
+            oCtx.setTransform(
+                scale,
+                0,
+                0,
+                scale,
+                (-docMinX + pad) * scale,
+                (-docMinY + pad) * scale,
+            );
         }
+        const worldPoints: { x: number; y: number; pressure?: number; time?: number }[] = [];
+        for (let i = 0; i < el.points.length; i += 4) {
+            worldPoints.push({
+                x: contentLeft + el.points[i] * contentWidth,
+                y: blockTop + el.points[i + 1] * contentWidth,
+                pressure: el.points[i + 2],
+                time: el.points[i + 3],
+            });
+        }
+        renderContinuousSolidStroke(oCtx, worldPoints, el.style);
+        oCtx.restore();
+
+        (offscreen as any)._cacheMeta = {
+            scale,
+            color: el.style.color,
+            width: el.style.width,
+            opacity: el.style.opacity,
+            profile,
+            contentWidth,
+            pad,
+            cssW,
+            cssH,
+        };
 
         this.strokeCache.set(el.id, offscreen);
         el.cacheCanvas = offscreen;
         return offscreen;
+    }
+
+    private getOrCreatePencilCache(el: StrokeElement): HTMLCanvasElement | null {
+        return this.getOrCreateStrokeCache(el);
     }
 
     private isHighlighter(element: CanvasElement): boolean {
@@ -4209,14 +4245,110 @@ export class CanvasController {
         }
 
         if (this.activeAnchor) {
+            const rawPoints = this.readActivePoints();
             const validRuns = splitStrokeIntoValidRuns(
-                this.readActivePoints(),
+                rawPoints,
                 bounds.contentTop,
                 DEFAULT_INK_LIMITS.topMarginPx,
             );
             const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
-            for (const run of validRuns) {
-                renderContinuousSolidStroke(context, run, activeStyle);
+            const penPlugin = getPenPlugin(this.penProfileId);
+
+            if (
+                !this.straightenLines &&
+                validRuns.length === 1 &&
+                validRuns[0].length === rawPoints.length &&
+                rawPoints.length >= 2 &&
+                penPlugin.renderSegment &&
+                typeof document !== 'undefined' &&
+                typeof document.createElement === 'function' &&
+                typeof context.drawImage === 'function'
+            ) {
+                const run = validRuns[0];
+                const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
+                const sLeft = this.currentScrollLeft;
+                const sTop = this.currentScrollTop;
+                const styleKey = `${this.penProfileId}|${this.style.color}|${this.style.width}|${this.style.opacity}`;
+
+                if (!this.liveBakeCanvas) {
+                    this.liveBakeCanvas = document.createElement('canvas');
+                    this.liveBakeCtx = typeof this.liveBakeCanvas.getContext === 'function'
+                        ? this.liveBakeCanvas.getContext('2d')
+                        : null;
+                }
+
+                const bakeCanvas = this.liveBakeCanvas;
+                const bakeCtx = this.liveBakeCtx;
+
+                if (bakeCanvas && bakeCtx && this.canvas.width > 0 && this.canvas.height > 0) {
+                    const sizeChanged =
+                        bakeCanvas.width !== this.canvas.width ||
+                        bakeCanvas.height !== this.canvas.height;
+                    if (sizeChanged) {
+                        bakeCanvas.width = this.canvas.width;
+                        bakeCanvas.height = this.canvas.height;
+                    }
+
+                    if (
+                        sizeChanged ||
+                        this.liveBakedIndex === 0 ||
+                        run.length < this.liveBakedIndex ||
+                        this.liveBakeZoom !== this.zoom ||
+                        this.liveBakeScrollLeft !== sLeft ||
+                        this.liveBakeScrollTop !== sTop ||
+                        this.liveBakeStyleKey !== styleKey
+                    ) {
+                        bakeCtx.setTransform(1, 0, 0, 1, 0, 0);
+                        bakeCtx.clearRect(0, 0, bakeCanvas.width, bakeCanvas.height);
+                        this.liveBakedIndex = 0;
+                        this.liveBakeSegState = {};
+                        this.liveBakeZoom = this.zoom;
+                        this.liveBakeScrollLeft = sLeft;
+                        this.liveBakeScrollTop = sTop;
+                        this.liveBakeStyleKey = styleKey;
+                    }
+
+                    if (run.length > this.liveBakedIndex) {
+                        bakeCtx.save();
+                        bakeCtx.setTransform(
+                            ratio * this.zoom,
+                            0,
+                            0,
+                            ratio * this.zoom,
+                            -ratio * sLeft,
+                            -ratio * sTop,
+                        );
+                        if (this.activeAnchor.blockId.startsWith('space:')) {
+                            const geom = this.getElementAnchorGeometry(this.activeAnchor.blockId);
+                            bakeCtx.beginPath();
+                            bakeCtx.rect(geom.originX, geom.originY, geom.scaleWidth, geom.boxHeight);
+                            bakeCtx.clip();
+                        }
+                        penPlugin.renderSegment(
+                            bakeCtx,
+                            run,
+                            this.liveBakedIndex,
+                            { ...activeStyle, opacity: 1 },
+                            this.liveBakeSegState,
+                        );
+                        bakeCtx.restore();
+                        this.liveBakedIndex = run.length;
+                    }
+
+                    context.save();
+                    context.setTransform(1, 0, 0, 1, 0, 0);
+                    context.globalAlpha = this.style.opacity;
+                    context.drawImage(bakeCanvas, 0, 0);
+                    context.restore();
+                } else {
+                    for (const run of validRuns) {
+                        renderContinuousSolidStroke(context, run, activeStyle);
+                    }
+                }
+            } else {
+                for (const run of validRuns) {
+                    renderContinuousSolidStroke(context, run, activeStyle);
+                }
             }
         }
         context.restore();

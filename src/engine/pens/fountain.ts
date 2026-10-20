@@ -34,6 +34,7 @@ interface FountainState {
     lastR: number;
     lastEmaP: number;
     _initialized?: boolean;
+    _isIncrementalSegment?: boolean;
 }
 
 export function calculateFountainV2PressureScale(rawPressure?: number): number {
@@ -164,7 +165,7 @@ function renderFountainDelta(
         prevR = subPrevR;
     }
 
-    if (rawEnd === points.length - 1) {
+    if (rawEnd === points.length - 1 && !state._isIncrementalSegment) {
         const lastPt = points[rawEnd];
         const tipEmaP = emaP * 0.82 + (lastPt.pressure ?? 0.5) * 0.18;
         const desiredR = Math.max(0.75, (baseWidth * calculateFountainV2PressureScale(tipEmaP)) * 0.5);

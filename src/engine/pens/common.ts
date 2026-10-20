@@ -550,17 +550,19 @@ export function createIncrementalPen<
         const ctxData = buildCtxData(ctx, points, style);
         const { color, opacity } = ctxData;
 
+        const stateObj = (segState ?? {}) as TState;
+        (stateObj as Record<string, unknown>)._isIncrementalSegment = true;
+
+        if (fromIndex === 0 || !stateObj._initialized) {
+            const initial = initState(points, style, ctxData);
+            Object.assign(stateObj, initial, { _initialized: true, _isIncrementalSegment: true });
+        }
+
         if (points.length === 1 && fromIndex === 0) {
             ctx.save();
             renderSinglePoint(ctx, points[0], style, ctxData);
             ctx.restore();
             return;
-        }
-
-        const stateObj = (segState ?? {}) as TState;
-        if (fromIndex === 0 || !stateObj._initialized) {
-            const initial = initState(points, style, ctxData);
-            Object.assign(stateObj, initial, { _initialized: true });
         }
 
         const rawStart = overlapPoint ? Math.max(0, fromIndex - 1) : Math.max(0, fromIndex);
