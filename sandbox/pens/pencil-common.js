@@ -39,6 +39,11 @@ export function normals(points) {
 
 /** Traza en ctx un camino cuadrático por puntos medios (1 path continuo). */
 export function tracePath(ctx, pts) {
+    if (pts.length === 1) {
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[0].x + 0.01, pts[0].y);
+        return;
+    }
     ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) {
         const p = pts[i - 1], c = pts[i];

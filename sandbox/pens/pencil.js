@@ -12,8 +12,8 @@
  */
 
 export const id = 'pencil';
-export const name = 'Lápiz de Mina';
-export const description = 'Mina de grafito multi-filamento con respuesta local de presión, grano de papel bimodal y horneado O(1)';
+export const name = 'Lápiz 6 · Filament Bake (3 Hebras)';
+export const description = 'Iteración 6: 3 micro-filamentos asimétricos con grano bimodal 64x64 y horneado incremental O(1)';
 
 let graphiteTileCache = null;
 
@@ -268,8 +268,9 @@ export function renderCanvas(ctx, points, style) {
     const targetCanvas = ctx.canvas;
     const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
 
-    // Si el trazo supera los 40 puntos en vivo, activamos el horneado incremental O(1)
-    if (points.length > 40 && targetCanvas) {
+    // Si el trazo supera los 40 puntos en vivo sobre el lienzo principal, activamos el horneado incremental O(1).
+    // Nunca activar durante el horneado de sprites offscreen (style.viewport) donde el contexto tiene traslación local.
+    if (points.length > 40 && targetCanvas && !style.viewport && targetCanvas.id === 'drawingCanvas') {
         const bakeCtx = ensureLiveBakeLayer(targetCanvas);
         if (bakeCtx) {
             const isSameLiveStroke =

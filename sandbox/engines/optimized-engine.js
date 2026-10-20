@@ -1,25 +1,7 @@
 /**
  * sandbox/engines/optimized-engine.js
  * 
- * Motor Optimizado con Caché de Capas y Sprites (Optimized Engine)
- * 
- * Implementa las técnicas de alto rendimiento de ApoloCanvas:
- * 1. Capa "Dry" fuera de pantalla (Double buffering): Los trazos completados se hornean
- *    en un canvas secundario y se vuelcan a la GPU en una única llamada `drawImage` (~0.05ms).
- * 2. Pre-renderizado en Sprite por trazo (Pencil Bitmap Cache): Cada trazo de lápiz pesado
- *    se almacena en un canvas miniatura ajustado a su Bounding Box (`getOrCreatePencilCache`),
- *    haciendo que Undo/Redo sea instantáneo.
- * 3. Vista previa ligera en arrastre: Durante `pointermove`, el lápiz muestra una guía fluida
- *    y hornea las partículas estocásticas de grafito al levantar el lápiz (`pointerup`).
- * 
- * Contrato:
- * export class SandboxEngine {
- *     constructor(canvas, ctx, options) { ... }
- *     handlePointerDown(e) { ... }
- *     handlePointerMove(e) { ... }
- *     handlePointerUp(e) { ... }
- *     clear() { ... }
- * }
+ * Motor Optimizado con Caché de Capas, Coordenadas de Mundo DPR y Gestión de Tiles (v3)
  */
 
 export class SandboxEngine {
@@ -29,25 +11,28 @@ export class SandboxEngine {
         this.options = options;
 
         this.getPenRenderer = options.getPenRenderer || (() => null);
-        this.getStyle = options.getStyle || (() => ({ width: 3, opacity: 1, color: '#1e1e1e', smoothing: 0.5 }));
+        this.getStyle = options.getStyle || (() => ({ width: 3, opacity: 1, color: '#1e1e1e', smoothing: 0.25 }));
         this.onStats = options.onStats || (() => {});
 
         this.strokes = [];
         this.redoStack = [];
 
         this.isDrawing = false;
+        this.activeStrokeId = null;
         this.activePoints = [];
         this.activeStyle = null;
         this.activeRenderPen = null;
+
+        this.cachedRect = null;
+
+        // Caché de sprites por ID de trazo (inicializado ANTES de syncDryCanvasSize)
+        this.strokeSpriteCache = new Map();
 
         // Capa seca (Dry Layer) para trazos finalizados
         const isDoc = typeof document !== 'undefined' && typeof document.createElement === 'function';
         this.dryCanvas = isDoc ? document.createElement('canvas') : null;
         this.dryCtx = this.dryCanvas ? this.dryCanvas.getContext('2d') : null;
         this.syncDryCanvasSize();
-
-        // Caché de sprites por ID de trazo
-        this.strokeSpriteCache = new Map();
 
         // Estado para suavizado de presión y coordenadas
         this.lastRawPoint = null;
@@ -63,10 +48,13 @@ export class SandboxEngine {
 
     syncDryCanvasSize() {
         if (!this.dryCanvas) return;
-        const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
+        this.cachedRect = null;
         if (this.dryCanvas.width !== this.canvas.width || this.dryCanvas.height !== this.canvas.height) {
             this.dryCanvas.width = this.canvas.width;
             this.dryCanvas.height = this.canvas.height;
+            if (this.strokeSpriteCache) {
+                this.strokeSpriteCache.clear();
+            }
             this.rebakeDryLayer();
         }
     }
@@ -91,8 +79,18 @@ export class SandboxEngine {
         this.redraw();
     }
 
+    releaseLivePenState(strokeId, pointsRef) {
+        const atlasPen = typeof globalThis !== 'undefined'
+            ? globalThis.ApoloSandbox?.pens?.['pencil-atlas']
+            : null;
+        if (atlasPen && typeof atlasPen.releasePencilStroke === 'function') {
+            if (strokeId) atlasPen.releasePencilStroke(strokeId);
+            if (pointsRef) atlasPen.releasePencilStroke(pointsRef);
+        }
+    }
+
     getCanvasPoint(e) {
-        const rect = this.canvas.getBoundingClientRect();
+        const rect = this.cachedRect || this.canvas.getBoundingClientRect();
         const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
         const x = (e.clientX - rect.left) * (this.canvas.width / (rect.width * dpr));
         const y = (e.clientY - rect.top) * (this.canvas.height / (rect.height * dpr));
@@ -119,35 +117,30 @@ export class SandboxEngine {
     }
 
     smoothPoint(raw) {
-    const style = this.getStyle();
-    const smoothing = Math.max(0, Math.min(0.85, style.smoothing !== undefined ? style.smoothing : 0.25));
+        const style = this.getStyle();
+        const smoothing = Math.max(0, Math.min(0.85, style.smoothing !== undefined ? style.smoothing : 0.25));
 
-    // Respuesta inmediata en el arranque del trazo (cero lag al tocar)
-    if (!this.lastSmoothedPoint || this.activePoints.length < 2 || smoothing <= 0.02) {
-        this.lastSmoothedPoint = { ...raw };
+        if (!this.lastSmoothedPoint || this.activePoints.length < 2 || smoothing <= 0.02) {
+            this.lastSmoothedPoint = { ...raw };
+            return this.lastSmoothedPoint;
+        }
+
+        const dist = Math.hypot(raw.x - this.lastSmoothedPoint.x, raw.y - this.lastSmoothedPoint.y);
+        const dynamicAlpha = Math.min(1, (1 - smoothing) + Math.min(dist / 25, 0.45));
+
+        const sx = this.lastSmoothedPoint.x + (raw.x - this.lastSmoothedPoint.x) * dynamicAlpha;
+        const sy = this.lastSmoothedPoint.y + (raw.y - this.lastSmoothedPoint.y) * dynamicAlpha;
+
+        this.lastSmoothedPoint = {
+            x: sx,
+            y: sy,
+            pressure: raw.pressure,
+            time: raw.time,
+        };
+
         return this.lastSmoothedPoint;
     }
 
-    // Suavizado adaptativo a la velocidad: a mayor distancia, menor retardo
-    const dist = Math.hypot(raw.x - this.lastSmoothedPoint.x, raw.y - this.lastSmoothedPoint.y);
-    const dynamicAlpha = Math.min(1, (1 - smoothing) + Math.min(dist / 25, 0.45));
-
-    const sx = this.lastSmoothedPoint.x + (raw.x - this.lastSmoothedPoint.x) * dynamicAlpha;
-    const sy = this.lastSmoothedPoint.y + (raw.y - this.lastSmoothedPoint.y) * dynamicAlpha;
-
-    this.lastSmoothedPoint = {
-        x: sx,
-        y: sy,
-        pressure: raw.pressure,
-        time: raw.time,
-    };
-
-    return this.lastSmoothedPoint;
-}
-
-    /**
-     * Calcula la caja delimitadora (Bounding Box) de un trazo con padding
-     */
     calculateBounds(points, padding = 16) {
         if (!points || points.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 };
         let minX = points[0].x;
@@ -161,19 +154,20 @@ export class SandboxEngine {
             if (p.y < minY) minY = p.y;
             if (p.y > maxY) maxY = p.y;
         }
+        const bMinX = Math.floor(minX - padding);
+        const bMinY = Math.floor(minY - padding);
+        const bMaxX = Math.ceil(maxX + padding);
+        const bMaxY = Math.ceil(maxY + padding);
         return {
-            minX: Math.floor(minX - padding),
-            minY: Math.floor(minY - padding),
-            maxX: Math.ceil(maxX + padding),
-            maxY: Math.ceil(maxY + padding),
-            width: Math.ceil(maxX - minX + padding * 2),
-            height: Math.ceil(maxY - minY + padding * 2),
+            minX: bMinX,
+            minY: bMinY,
+            maxX: bMaxX,
+            maxY: bMaxY,
+            width: Math.max(1, bMaxX - bMinX),
+            height: Math.max(1, bMaxY - bMinY),
         };
     }
 
-    /**
-     * Genera un sprite fuera de pantalla en coordenadas de mundo reales y resolución DPR nativa
-     */
     getOrCreateStrokeSprite(stroke) {
         if (!stroke.id) {
             stroke.id = 'stroke_' + Math.random().toString(36).substring(2, 9);
@@ -183,45 +177,43 @@ export class SandboxEngine {
         }
 
         const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
-        const pad = Math.max(16, Math.ceil((stroke.style.width || 3) * 2));
+        const pad = Math.max(16, Math.ceil((stroke.style.width || 3) * 2.5));
         const bounds = this.calculateBounds(stroke.points, pad);
-        const w = Math.max(1, bounds.width);
-        const h = Math.max(1, bounds.height);
+        const w = bounds.width;
+        const h = bounds.height;
 
         const isDoc = typeof document !== 'undefined' && typeof document.createElement === 'function';
         const sprite = isDoc ? document.createElement('canvas') : null;
         if (!sprite) return null;
 
-        // Resolución física exacta para evitar filtrado bilineal y pérdida de grano
-        sprite.width = Math.ceil(w * dpr);
-        sprite.height = Math.ceil(h * dpr);
+        sprite.width = Math.max(1, Math.ceil(w * dpr));
+        sprite.height = Math.max(1, Math.ceil(h * dpr));
         const sCtx = sprite.getContext('2d');
 
         if (sCtx && typeof stroke.renderPen === 'function') {
             sCtx.save();
-            // Trasladamos el contexto en vez de mutar las coordenadas de los puntos:
-            // así el patrón de papel (0,0) y el seed coinciden 100% con Live Preview y SVG
             sCtx.setTransform(dpr, 0, 0, dpr, -bounds.minX * dpr, -bounds.minY * dpr);
-            stroke.renderPen(sCtx, stroke.points, stroke.style);
+            const renderStyle = {
+                ...stroke.style,
+                strokeId: stroke.id,
+                viewport: {
+                    x: bounds.minX,
+                    y: bounds.minY,
+                    width: bounds.width,
+                    height: bounds.height,
+                },
+            };
+            stroke.renderPen(sCtx, stroke.points, renderStyle);
             sCtx.restore();
+
+            this.releaseLivePenState(stroke.id, stroke.points);
         }
 
         const entry = { sprite, bounds };
         this.strokeSpriteCache.set(stroke.id, entry);
-
-        if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlas']?.releasePencilStroke === 'function') {
-            globalThis.ApoloSandbox.pens['pencil-atlas'].releasePencilStroke(stroke.points);
-        }
-        if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlasv2']?.releasePencilStroke === 'function') {
-            globalThis.ApoloSandbox.pens['pencil-atlasv2'].releasePencilStroke(stroke.points);
-        }
-
         return entry;
     }
 
-    /**
-     * Re-hornea la capa "dry" completa con aceleración por sprite
-     */
     rebakeDryLayer() {
         if (!this.dryCtx) return;
         const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
@@ -254,6 +246,7 @@ export class SandboxEngine {
     handlePointerDown(e) {
         if (e.button !== 0 && e.pointerType === 'mouse') return;
 
+        this.cachedRect = this.canvas.getBoundingClientRect();
         this.isDrawing = true;
         this.lastRawPoint = null;
         this.lastSmoothedPoint = null;
@@ -263,8 +256,12 @@ export class SandboxEngine {
         this.lastRawPoint = rawPt;
         const pt = this.smoothPoint(rawPt);
 
+        this.activeStrokeId = 'stroke_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
         this.activePoints = [pt];
-        this.activeStyle = { ...this.getStyle() };
+        this.activeStyle = {
+            ...this.getStyle(),
+            strokeId: this.activeStrokeId,
+        };
         this.activeRenderPen = this.getPenRenderer();
 
         this.redoStack = [];
@@ -298,19 +295,21 @@ export class SandboxEngine {
         this.isDrawing = false;
 
         if (this.activePoints.length > 0 && this.activeRenderPen) {
+            const strokeId = this.activeStrokeId || ('stroke_' + Math.random().toString(36).substring(2, 9));
             const stroke = {
-                id: 'stroke_' + Math.random().toString(36).substring(2, 9),
-                points: [...this.activePoints],
-                style: { ...this.activeStyle },
+                id: strokeId,
+                points: this.activePoints,
+                style: {
+                    ...this.activeStyle,
+                    strokeId,
+                },
                 renderPen: this.activeRenderPen,
             };
 
             this.strokes.push(stroke);
 
-            // Genera sprite en caché para el trazo horneado
             const cached = this.getOrCreateStrokeSprite(stroke);
 
-            // Estampa inmediatamente el nuevo trazo en la capa dry sin necesidad de redibujar los anteriores
             const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
             this.dryCtx.save();
             this.dryCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -326,15 +325,9 @@ export class SandboxEngine {
                 stroke.renderPen(this.dryCtx, stroke.points, stroke.style);
             }
             this.dryCtx.restore();
-
-            if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlas']?.releasePencilStroke === 'function') {
-                globalThis.ApoloSandbox.pens['pencil-atlas'].releasePencilStroke(stroke.points);
-            }
-            if (typeof globalThis.ApoloSandbox?.pens?.['pencil-atlasv2']?.releasePencilStroke === 'function') {
-                globalThis.ApoloSandbox.pens['pencil-atlasv2'].releasePencilStroke(stroke.points);
-            }
         }
 
+        this.activeStrokeId = null;
         this.activePoints = [];
         this.activeStyle = null;
         this.activeRenderPen = null;
@@ -345,7 +338,11 @@ export class SandboxEngine {
     }
 
     handlePointerCancel(e) {
+        if (this.activeStrokeId || this.activePoints.length > 0) {
+            this.releaseLivePenState(this.activeStrokeId, this.activePoints);
+        }
         this.isDrawing = false;
+        this.activeStrokeId = null;
         this.activePoints = [];
         this.lastRawPoint = null;
         this.lastSmoothedPoint = null;
@@ -353,8 +350,12 @@ export class SandboxEngine {
     }
 
     clear() {
+        if (this.activeStrokeId || this.activePoints.length > 0) {
+            this.releaseLivePenState(this.activeStrokeId, this.activePoints);
+        }
         this.strokes = [];
         this.redoStack = [];
+        this.activeStrokeId = null;
         this.activePoints = [];
         this.strokeSpriteCache.clear();
         this.isDrawing = false;
@@ -387,10 +388,6 @@ export class SandboxEngine {
         this.redraw();
     }
 
-    /**
-     * Redibujado ultrarrápido: Vuelca la capa "dry" completa en una sola llamada GPU
-     * y dibuja únicamente el trazo activo actual (con vista previa optimizada en arrastre).
-     */
     redraw() {
         const start = performance.now();
         const dpr = (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1;
@@ -401,10 +398,8 @@ export class SandboxEngine {
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.ctx.clearRect(0, 0, width, height);
 
-        // Blit acelerado por hardware de todos los trazos horneados
         this.ctx.drawImage(this.dryCanvas, 0, 0, width, height);
 
-        // Trazo activo: renderiza directamente con la pluma activa a 120fps
         if (this.activePoints.length > 0 && typeof this.activeRenderPen === 'function') {
             this.activeRenderPen(this.ctx, this.activePoints, this.activeStyle);
         }
@@ -432,7 +427,7 @@ export class SandboxEngine {
         totalPoints += this.activePoints.length;
 
         this.onStats({
-            engineName: 'Optimized Engine (Dry Canvas + Sprite Cache)',
+            engineName: 'Optimized Engine v3 (World-DPR Sprite + Tile Pool)',
             fps: this.fps,
             renderTimeMs: this.renderTimeMs,
             strokeCount: this.strokes.length + (this.isDrawing ? 1 : 0),

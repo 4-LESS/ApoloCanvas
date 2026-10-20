@@ -12,8 +12,8 @@
  */
 
 export const id = 'pencil-simple';
-export const name = 'Lápiz Simple';
-export const description = 'Segmentos conectados con ancho variable pseudo-aleatorio sutil';
+export const name = 'Lápiz 1 · Simple (Segmentos)';
+export const description = 'Iteración 1: Segmentos conectados punto a punto con ancho pseudo-aleatorio discreto';
 
 /**
  * Generador pseudo-aleatorio determinista basado en índice y semilla para evitar

@@ -6,7 +6,8 @@
 import { hash, pressureScale, meanPressure, tracePath, svgPathD, fmt, colorId } from './pencil-common.js';
 
 export const id = 'pencil-paper-grain';
-export const name = 'Lápiz Paper Grain';
+export const name = 'Lápiz 4 · Paper Grain (Patrón + Blur)';
+export const description = 'Iteración 4: Patrón procedural de motas 48x48 con shadowBlur en Canvas y feGaussianBlur en SVG';
 
 const SIZE = 48;
 const SPECKS = 520;

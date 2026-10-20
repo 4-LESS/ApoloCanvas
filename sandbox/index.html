@@ -559,77 +559,13 @@
             </div>
         </div>
 
-        <!-- Selector de Plumas (Lista Vertical con Muestra en Vivo) -->
+        <!-- Selector de Plumas (Auto-descubrimiento dinámico desde sandbox/pens/*.js) -->
         <div class="control-section">
-            <div class="section-title">Herramienta / Pluma</div>
-            <div class="pen-list" id="penList">
-                <div class="pen-card active" data-pen="ball">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Bolígrafo</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="fountain">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Estilográfica</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="calli">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Caligráfica</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Lápiz Mina</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil-multistrand">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Multistrand</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil-paper-grain">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Paper Grain</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil-ribbon-jitter">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Ribbon Jitter</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil-svg-turbulence">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">SVG Turbulence</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil-simple">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Lápiz Simple</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil-atlas">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Lápiz Atlas</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
-                <div class="pen-card" data-pen="pencil-atlasv2">
-                    <div class="pen-card-top">
-                        <span class="pen-card-name">Lápiz Atlas v2</span>
-                    </div>
-                    <canvas class="pen-card-preview" width="260" height="28"></canvas>
-                </div>
+            <div class="section-title">
+                <span>Herramienta / Pluma</span>
+                <span id="penCountLabel" style="font-family: var(--font-mono); font-size: 0.65rem;"></span>
             </div>
+            <div class="pen-list" id="penList"></div>
         </div>
 
         <!-- Parámetros en Tiempo Real -->
@@ -764,7 +700,25 @@
 
     <!-- Script de Integración Modular y Hot-swapping -->
     <script type="module">
-        // Estado de la aplicación sandbox
+        // Estado de la aplicación sandbox (orden base e iteraciones 1..8 del lápiz mina)
+        const FALLBACK_PEN_IDS = [
+            'ball',
+            'fountain',
+            'calli',
+            'pencil-simple',
+            'pencil-multistrand',
+            'pencil-ribbon-jitter',
+            'pencil-paper-grain',
+            'pencil-svg-turbulence',
+            'pencil',
+            'pencilv2',
+            'pencil-atlas',
+            'pencil-atlasv2',
+            'pencil-atlasv4',
+            'pencil-atlasClaude',
+            'pencil-sketch',
+        ];
+
         const state = {
             activeEngineId: 'optimized-engine',
             activePenId: 'ball',
@@ -781,6 +735,8 @@
             engineInstance: null,
             loadedPens: {},
             penModules: {},
+            penMtimes: {},
+            nonPenFiles: new Set(),
             loadedEngines: {},
         };
 
@@ -909,31 +865,239 @@
 
         window.addEventListener('resize', resizeCanvas);
 
-        // Cargador dinámico de Módulos de Lápices (pens/*.js)
-        async function loadPenModule(penId) {
-            if (state.loadedPens[penId]) {
+        // Cargador dinámico de Módulos de Lápices (pens/*.js) con soporte de hot-reload por mtime
+        async function loadPenModule(penId, mtime = 0) {
+            const prevMtime = state.penMtimes[penId] || 0;
+            const needsReload = mtime > 0 && mtime !== prevMtime;
+
+            if (!needsReload && state.loadedPens[penId]) {
                 return state.loadedPens[penId];
+            }
+            if (!needsReload && state.nonPenFiles.has(penId)) {
+                return null;
             }
 
             try {
-                const module = await import(`./pens/${penId}.js`);
+                const query = mtime ? `?v=${mtime}` : '';
+                const module = await import(`./pens/${penId}.js${query}`);
                 const fn = module.renderCanvas || module.renderPen;
                 if (typeof fn === 'function') {
                     state.loadedPens[penId] = fn;
                     state.penModules[penId] = module;
+                    state.penMtimes[penId] = mtime || 1;
+                    state.nonPenFiles.delete(penId);
                     return fn;
+                } else {
+                    // Archivo auxiliar en pens/ (p.ej. pencil-common.js), no es una pluma seleccionable
+                    state.nonPenFiles.add(penId);
+                    state.penMtimes[penId] = mtime || 1;
+                    return null;
                 }
             } catch (err) {
                 console.warn(`[Sandbox] Dynamic import failed for pen ${penId}, trying global registry fallback:`, err);
             }
 
             if (window.ApoloSandbox?.pens?.[penId]?.renderPen) {
-                const fn = window.ApoloSandbox.pens[penId].renderPen;
+                const mod = window.ApoloSandbox.pens[penId];
+                const fn = mod.renderCanvas || mod.renderPen;
                 state.loadedPens[penId] = fn;
+                state.penModules[penId] = mod;
+                state.penMtimes[penId] = mtime || 1;
                 return fn;
             }
 
-            throw new Error(`No se pudo cargar el módulo de lápiz: ${penId}`);
+            return null;
+        }
+
+        // Auto-descubrimiento de archivos .js en sandbox/pens/
+        async function discoverPenEntries() {
+            // 1. Intentar endpoint JSON /api/pens de sandbox/server.mjs
+            try {
+                const res = await fetch('./api/pens', { cache: 'no-store' });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data?.files)) {
+                        return data.files;
+                    }
+                }
+            } catch {
+                // Ignorar si no está corriendo server.mjs
+            }
+
+            // 2. Intentar listado de directorio estándar /pens/ (Live Server, python http.server, npx serve, etc.)
+            try {
+                const res = await fetch('./pens/', { cache: 'no-store' });
+                if (res.ok) {
+                    const html = await res.text();
+                    const matches = [...html.matchAll(/href=["']([^"']*?\.js)["']/gi)];
+                    const seen = new Set();
+                    const entries = [];
+                    for (const m of matches) {
+                        const rawHref = m[1].split('?')[0];
+                        const fileName = rawHref.split('/').pop();
+                        if (!fileName || !fileName.endsWith('.js')) continue;
+                        const id = decodeURIComponent(fileName.slice(0, -3));
+                        if (seen.has(id)) continue;
+                        seen.add(id);
+                        entries.push({ id, file: fileName, mtime: 0 });
+                    }
+                    if (entries.length > 0) {
+                        entries.sort((a, b) => {
+                            const ia = FALLBACK_PEN_IDS.indexOf(a.id);
+                            const ib = FALLBACK_PEN_IDS.indexOf(b.id);
+                            if (ia !== -1 && ib !== -1) return ia - ib;
+                            if (ia !== -1) return -1;
+                            if (ib !== -1) return 1;
+                            return a.id.localeCompare(b.id);
+                        });
+                        return entries;
+                    }
+                }
+            } catch {
+                // Ignorar
+            }
+
+            // 3. Fallback offline (file://)
+            return FALLBACK_PEN_IDS.map(id => ({ id, file: `${id}.js`, mtime: 0 }));
+        }
+
+        // Sincroniza el DOM de #penList con los módulos válidos en sandbox/pens/*.js sin recargar la página
+        async function syncPenList(rawEntries) {
+            const entries = rawEntries || await discoverPenEntries();
+            const penListEl = document.getElementById('penList');
+            const penCountLabel = document.getElementById('penCountLabel');
+
+            const validIds = [];
+            let anyHotReloaded = false;
+
+            for (const item of entries) {
+                const penId = item.id;
+                const mtime = item.mtime || 0;
+                const wasLoaded = Boolean(state.loadedPens[penId]);
+                const prevMtime = state.penMtimes[penId] || 0;
+
+                const fn = await loadPenModule(penId, mtime);
+                if (typeof fn === 'function') {
+                    validIds.push(penId);
+                    if (wasLoaded && mtime > 0 && prevMtime > 0 && mtime !== prevMtime) {
+                        anyHotReloaded = true;
+                        showToast(`Pluma actualizada: ${state.penModules[penId]?.name || penId}`);
+                    }
+                }
+            }
+
+            // Eliminar tarjetas de plumas cuyos archivos .js fueron borrados
+            const existingCards = new Map();
+            penListEl.querySelectorAll('.pen-card').forEach(card => {
+                existingCards.set(card.dataset.pen, card);
+            });
+
+            for (const [penId, card] of existingCards.entries()) {
+                if (!validIds.includes(penId)) {
+                    card.remove();
+                    existingCards.delete(penId);
+                    delete state.loadedPens[penId];
+                    delete state.penModules[penId];
+                    delete state.penMtimes[penId];
+                }
+            }
+
+            // Crear o actualizar tarjetas en el orden descubierto
+            let addedCount = 0;
+            for (const penId of validIds) {
+                const mod = state.penModules[penId] || {};
+                const displayName = mod.name || penId;
+                let card = existingCards.get(penId);
+
+                if (!card) {
+                    card = document.createElement('div');
+                    card.className = 'pen-card' + (penId === state.activePenId ? ' active' : '');
+                    card.dataset.pen = penId;
+                    card.innerHTML = `
+                        <div class="pen-card-top">
+                            <span class="pen-card-name"></span>
+                        </div>
+                        <canvas class="pen-card-preview" width="260" height="28"></canvas>
+                    `;
+                    card.querySelector('.pen-card-name').textContent = displayName;
+                    existingCards.set(penId, card);
+                    addedCount++;
+                } else {
+                    const nameEl = card.querySelector('.pen-card-name');
+                    if (nameEl && nameEl.textContent !== displayName) {
+                        nameEl.textContent = displayName;
+                    }
+                    card.classList.toggle('active', penId === state.activePenId);
+                }
+                penListEl.appendChild(card);
+            }
+
+            if (penCountLabel) {
+                penCountLabel.textContent = `${validIds.length}`;
+            }
+
+            // Si la pluma activa fue eliminada, cambiar a la primera disponible
+            if (validIds.length > 0 && !validIds.includes(state.activePenId)) {
+                await switchPen(validIds[0]);
+            }
+
+            // Si un archivo .js existente se recargó en caliente, actualizar trazos en el motor
+            if (anyHotReloaded && state.engineInstance) {
+                if (state.loadedPens[state.activePenId]) {
+                    state.engineInstance.setPenRenderer(state.loadedPens[state.activePenId]);
+                }
+                const strokes = state.engineInstance.getStrokes?.() || [];
+                for (const s of strokes) {
+                    const pid = s.style?.penId;
+                    if (pid && state.loadedPens[pid]) {
+                        s.renderPen = state.loadedPens[pid];
+                    }
+                }
+                state.engineInstance.setStrokes?.(strokes);
+                scheduleSvgUpdate();
+            }
+
+            if (addedCount > 0 || anyHotReloaded) {
+                schedulePreviewUpdates();
+            }
+        }
+
+        // Suscripción en tiempo real a cambios en sandbox/pens/ (SSE + fallback polling)
+        function setupPenDirectoryWatcher() {
+            let sseConnected = false;
+
+            if (typeof EventSource !== 'undefined' && location.protocol.startsWith('http')) {
+                try {
+                    const es = new EventSource('./api/pens/events');
+                    es.onopen = () => {
+                        sseConnected = true;
+                    };
+                    es.onmessage = (ev) => {
+                        try {
+                            const payload = JSON.parse(ev.data);
+                            if (Array.isArray(payload?.files)) {
+                                syncPenList(payload.files);
+                            }
+                        } catch {
+                            // Ignorar mensaje malformado
+                        }
+                    };
+                    es.onerror = () => {
+                        sseConnected = false;
+                    };
+                } catch {
+                    sseConnected = false;
+                }
+            }
+
+            // Polling ligero de respaldo (para servidores estáticos sin SSE como Live Server / npx serve)
+            if (location.protocol.startsWith('http')) {
+                setInterval(() => {
+                    if (!sseConnected) {
+                        syncPenList();
+                    }
+                }, 2000);
+            }
         }
 
         // Cargador dinámico de Módulos de Motores (engines/*.js)
@@ -1123,9 +1287,12 @@
                 btn.addEventListener('click', () => switchEngine(btn.dataset.engine));
             });
 
-            // Pen Cards
-            document.querySelectorAll('.pen-card').forEach(card => {
-                card.addEventListener('click', () => switchPen(card.dataset.pen));
+            // Pen Cards (delegación de eventos para soportar plumas descubiertas en caliente)
+            document.getElementById('penList').addEventListener('click', (e) => {
+                const card = e.target.closest('.pen-card');
+                if (card && card.dataset.pen) {
+                    switchPen(card.dataset.pen);
+                }
             });
 
             // Width Slider
@@ -1333,6 +1500,9 @@
             resizeCanvas();
             setupCanvasEvents();
             setupUIControls();
+
+            await syncPenList();
+            setupPenDirectoryWatcher();
 
             await switchPen(state.activePenId);
             await switchEngine(state.activeEngineId);

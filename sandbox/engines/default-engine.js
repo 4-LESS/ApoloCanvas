@@ -111,9 +111,12 @@ export class SandboxEngine {
             return this.lastSmoothedPoint;
         }
 
-        const alpha = 1 - smoothing;
-        const sx = this.lastSmoothedPoint.x + (raw.x - this.lastSmoothedPoint.x) * alpha;
-        const sy = this.lastSmoothedPoint.y + (raw.y - this.lastSmoothedPoint.y) * alpha;
+        const baseAlpha = 1 - smoothing;
+        const dist = Math.hypot(raw.x - this.lastSmoothedPoint.x, raw.y - this.lastSmoothedPoint.y);
+        const dynamicAlpha = Math.min(1, baseAlpha + Math.min(dist / 25, 0.45));
+
+        const sx = this.lastSmoothedPoint.x + (raw.x - this.lastSmoothedPoint.x) * dynamicAlpha;
+        const sy = this.lastSmoothedPoint.y + (raw.y - this.lastSmoothedPoint.y) * dynamicAlpha;
 
         this.lastSmoothedPoint = {
             x: sx,

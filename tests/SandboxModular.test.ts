@@ -17,9 +17,11 @@ describe('Sandbox Modular Canvas Architecture', () => {
         assert.ok(fs.existsSync(path.join(sandboxDir, 'pens', 'pencil-simple.js')), 'pens/pencil-simple.js must exist');
     });
 
-    it('pens export renderPen function and execute without error', async () => {
-        const pens = ['ball', 'fountain', 'calli', 'pencil', 'pencil-simple', 'pencil-atlas', 'pencil-atlasv2'];
-        
+    it('pens export renderPen/renderCanvas function and execute without error via dynamic folder scan', async () => {
+        const pensDir = path.join(sandboxDir, 'pens');
+        const jsFiles = fs.readdirSync(pensDir).filter(f => f.endsWith('.js'));
+        assert.ok(jsFiles.length >= 6, 'sandbox/pens must contain pen modules');
+
         // Mock CanvasRenderingContext2D
         const mockCtx: any = {
             save: () => {},
@@ -32,6 +34,8 @@ describe('Sandbox Modular Canvas Architecture', () => {
             fill: () => {},
             stroke: () => {},
             closePath: () => {},
+            setLineDash: () => {},
+            createPattern: () => null,
             lineWidth: 1,
             strokeStyle: '#000',
             fillStyle: '#000',
@@ -55,20 +59,28 @@ describe('Sandbox Modular Canvas Architecture', () => {
             tiltAngle: -Math.PI / 4,
         };
 
-        for (const penId of pens) {
-            const penModule = await import(`../sandbox/pens/${penId}.js`);
-            assert.strictEqual(typeof penModule.renderPen, 'function', `${penId}.js must export renderPen`);
+        let testedPenCount = 0;
+        for (const file of jsFiles) {
+            const penId = file.slice(0, -3);
+            const penModule = await import(`../sandbox/pens/${file}`);
+            const renderFn = penModule.renderCanvas || penModule.renderPen;
+            if (typeof renderFn !== 'function') {
+                // Helper module like pencil-common.js
+                continue;
+            }
+            testedPenCount++;
 
             // Execute single point
             assert.doesNotThrow(() => {
-                penModule.renderPen(mockCtx, [testPoints[0]], testStyle);
+                renderFn(mockCtx, [testPoints[0]], testStyle);
             }, `Single point rendering in ${penId} should not throw`);
 
             // Execute continuous points
             assert.doesNotThrow(() => {
-                penModule.renderPen(mockCtx, testPoints, testStyle);
+                renderFn(mockCtx, testPoints, testStyle);
             }, `Continuous points rendering in ${penId} should not throw`);
         }
+        assert.ok(testedPenCount >= 6, 'At least 6 executable pen modules must be auto-discovered');
 
         const calliMod = await import('../sandbox/pens/calli.js');
         assert.strictEqual(typeof calliMod.renderSvg, 'function');
@@ -265,33 +277,47 @@ describe('Sandbox Modular Canvas Architecture', () => {
         assert.ok(svgOutput.includes('filter="url(#apolo-pencil-grain)"'), 'Pencil stroke must reference apolo-pencil-grain filter');
     });
 
-    it('pencil-atlasv2 exports compliant dual Canvas and compact RDP SVG without heavy filters', async () => {
-        const v2Mod = await import('../sandbox/pens/pencil-atlasv2.js');
+    it('pencil-sketch (Lápiz 8) renders long strokes in O(1) draw calls (2 fills + 1 stroke) and matches SVG without heavy filters', async () => {
+        const sketchMod = await import('../sandbox/pens/pencil-sketch.js');
+        assert.strictEqual(sketchMod.id, 'pencil-sketch');
 
-        assert.strictEqual(typeof v2Mod.renderPen, 'function');
-        assert.strictEqual(typeof v2Mod.renderCanvas, 'function');
-        assert.strictEqual(typeof v2Mod.renderSvg, 'function');
-        assert.strictEqual(typeof v2Mod.releasePencilStroke, 'function');
+        let fillCalls = 0;
+        let strokeCalls = 0;
+        const mockCtx: any = {
+            save: () => {},
+            restore: () => {},
+            beginPath: () => {},
+            moveTo: () => {},
+            lineTo: () => {},
+            arc: () => {},
+            closePath: () => {},
+            setLineDash: () => {},
+            createPattern: () => null,
+            fill: () => { fillCalls++; },
+            stroke: () => { strokeCalls++; },
+            lineWidth: 1,
+            globalAlpha: 1,
+            strokeStyle: '#000',
+            fillStyle: '#000',
+        };
 
-        const testPoints = [
-            { x: 10, y: 10, pressure: 0.2 },
-            { x: 30, y: 40, pressure: 0.5 },
-            { x: 70, y: 80, pressure: 0.8 },
-            { x: 120, y: 110, pressure: 0.6 },
-            { x: 180, y: 150, pressure: 0.4 },
-        ];
-        const style = { width: 4, opacity: 0.85, color: '#2b2b2b' };
+        // Generate a 500-point long stroke
+        const longPoints = [];
+        for (let i = 0; i < 500; i++) {
+            longPoints.push({
+                x: i * 2.5,
+                y: Math.sin(i * 0.08) * 30 + 100,
+                pressure: 0.25 + 0.65 * Math.sin((i / 500) * Math.PI),
+            });
+        }
 
-        const svg = v2Mod.renderSvg(testPoints, style);
-        assert.ok(svg.body.includes('fill-rule="nonzero"'), 'SVG body must include nonzero fill rule');
-        assert.ok(svg.body.includes('fill-opacity="0.85"'), 'SVG body must include correct opacity');
-        assert.ok(svg.body.includes('l'), 'SVG path d must use compact relative coordinates');
-        assert.ok(!svg.body.includes('feTurbulence'), 'Must not use heavy SVG filter turbulence');
-        assert.ok(!svg.body.includes('feDisplacementMap'), 'Must not use heavy SVG displacement map');
+        sketchMod.renderCanvas(mockCtx, longPoints, { width: 28, color: '#2b2b2b', opacity: 0.9 });
+        assert.strictEqual(fillCalls, 2, 'Long stroke must execute exactly 2 fill calls (outer porous ribbon + inner core ribbon)');
+        assert.strictEqual(strokeCalls, 1, 'Long stroke must execute exactly 1 stroke call (batched edge filaments)');
 
-        // Verify releasePencilStroke does not throw
-        assert.doesNotThrow(() => {
-            v2Mod.releasePencilStroke(testPoints);
-        });
+        const svgOut = sketchMod.renderSvg(longPoints, { width: 28, color: '#2b2b2b', opacity: 0.9 });
+        assert.ok(svgOut.body.includes('fill-rule="nonzero"'), 'SVG output must use nonzero ribbon fills');
+        assert.ok(svgOut.body.includes('stroke-dasharray='), 'SVG output must include dry edge filaments');
+        assert.ok(!svgOut.body.includes('feTurbulence'), 'SVG output must not rely on slow feTurbulence filters');
     });
 });

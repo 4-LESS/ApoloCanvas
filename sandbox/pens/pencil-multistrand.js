@@ -6,7 +6,8 @@
 import { pressureScale, meanPressure, normals, tracePath, svgPathD, fmt } from './pencil-common.js';
 
 export const id = 'pencil-multistrand';
-export const name = 'Lápiz Multistrand';
+export const name = 'Lápiz 2 · Multistrand (Fibras)';
+export const description = 'Iteración 2: 6 hebras paralelas desplazadas por la normal con lineDash primo';
 
 const OFFSETS = [-0.42, -0.22, -0.06, 0.08, 0.25, 0.40];
 const SUBW    = [0.22, 0.30, 0.38, 0.36, 0.30, 0.20];

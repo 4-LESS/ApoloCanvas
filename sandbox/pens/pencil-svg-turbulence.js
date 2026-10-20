@@ -7,7 +7,8 @@ import { pressureScale, meanPressure, svgPathD, fmt } from './pencil-common.js';
 import { drawGrainPasses } from './pencil-paper-grain.js';
 
 export const id = 'pencil-svg-turbulence';
-export const name = 'Lápiz SVG Turbulence';
+export const name = 'Lápiz 5 · SVG Turbulence (Filtro SVG)';
+export const description = 'Iteración 5: Patrón de grano en Canvas y filtro nativo feTurbulence + feDisplacementMap en SVG';
 
 export function renderCanvas(ctx, points, style) {
     if (!points || !points.length) return;

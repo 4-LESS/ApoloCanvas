@@ -6,7 +6,8 @@
 import { hash, pressureScale, normals, tracePath, svgPathD, svgPolygonD, fmt } from './pencil-common.js';
 
 export const id = 'pencil-ribbon-jitter';
-export const name = 'Lápiz Ribbon Jitter';
+export const name = 'Lápiz 3 · Ribbon Jitter (Contorno)';
+export const description = 'Iteración 3: Cinta poligonal de ancho variable modulada por presión con jitter normal ±18%';
 
 const JITTER = 0.18;
 const CAP_STEPS = 6;
