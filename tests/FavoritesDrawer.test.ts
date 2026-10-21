@@ -60,8 +60,8 @@ function createMockEnvironment() {
         const matchesSelector = (node: any, sel: string): boolean => {
             if (!node || typeof node !== 'object') return false;
             if (sel.startsWith('.')) {
-                const targetCls = sel.slice(1);
-                return Boolean(node.classList?.contains(targetCls) || node.className?.split(/\s+/).includes(targetCls));
+                const targetClasses = sel.slice(1).split('.');
+                return targetClasses.every(cls => Boolean(node.classList?.contains(cls) || node.className?.split(/\s+/).includes(cls)));
             }
             if (sel.startsWith('#')) {
                 return node.id === sel.slice(1);
@@ -87,7 +87,13 @@ function createMockEnvironment() {
             style: styleObj,
             dataset: {},
             hidden: false,
-            className: '',
+            get className(): string {
+                return [...classes].join(' ');
+            },
+            set className(v: string) {
+                classes.clear();
+                for (const c of String(v).split(/\s+/).filter(Boolean)) classes.add(c);
+            },
             children,
             title: '',
             type: '',
@@ -638,16 +644,61 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             estuche.open();
 
             const cards = root.querySelectorAll('.apolo-favorite-card');
-            const downBtn = cards[0].querySelector('.apolo-favorite-reorder-down');
-            assert.ok(downBtn);
+            const handle = cards[0].querySelector('.apolo-favorite-drag-handle');
+            assert.ok(handle, 'Card must have drag handle');
 
-            downBtn.onclick({ stopPropagation: () => {} });
+            cards[1].ondrop?.({
+                preventDefault: () => {},
+                dataTransfer: { getData: () => '0' },
+            } as any);
             assert.deepStrictEqual(reordered, [0, 1]);
 
             // Reorder store helper test
             const reorderedList = reorderFavorites([fav1, fav2], 0, 1);
             assert.strictEqual(reorderedList[0].id, fav2.id);
             assert.strictEqual(reorderedList[1].id, fav1.id);
+        });
+
+        test('clicking handle toggles action menu with rename and delete', () => {
+            const fav1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#111', width: 2 });
+            let renamed: [string, string] | null = null;
+            const { estuche, root } = createEstucheHelper(
+                {
+                    favorites: [fav1],
+                    showingFavorites: true,
+                },
+                {
+                    onRenameFavorite: (id, newName) => { renamed = [id, newName]; },
+                },
+            );
+            estuche.open();
+
+            const card = root.querySelector('.apolo-favorite-card') as HTMLElement;
+            const handle = card.querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+            assert.ok(handle);
+
+            const menu = card.querySelector('.apolo-card-menu') as HTMLElement;
+            assert.ok(menu);
+            assert.strictEqual(menu.style.display, 'none');
+
+            // Click handle opens menu
+            handle.onclick?.({ stopPropagation: () => {} } as any);
+            assert.strictEqual(menu.style.display, 'flex');
+
+            // Click rename button opens rename input row
+            const renameBtn = menu.querySelector('.apolo-card-rename-btn') as HTMLElement;
+            assert.ok(renameBtn);
+            renameBtn.onclick?.({ stopPropagation: () => {} } as any);
+
+            const renameInput = card.querySelector('.apolo-card-rename-input') as HTMLInputElement;
+            assert.ok(renameInput);
+            renameInput.value = 'Mi pluma azul';
+
+            const saveBtn = card.querySelector('.apolo-card-rename-save') as HTMLElement;
+            assert.ok(saveBtn);
+            saveBtn.onclick?.({ stopPropagation: () => {} } as any);
+
+            assert.deepStrictEqual(renamed, [fav1.id, 'Mi pluma azul']);
         });
     });
 

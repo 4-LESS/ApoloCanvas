@@ -407,10 +407,13 @@ describe('ToolEstuche Favorites Integration (Task 3 of 4)', () => {
         delBtn.onclick({ stopPropagation: () => {} });
         assert.strictEqual(deletedId, fav1.id);
 
-        // 3. Click down button on first card
-        const downBtn = cards[0].querySelector('.apolo-favorite-reorder-down');
-        assert.ok(downBtn);
-        downBtn.onclick({ stopPropagation: () => {} });
+        // 3. Drag handle on first card triggers reorder
+        const handle = cards[0].querySelector('.apolo-favorite-drag-handle');
+        assert.ok(handle, 'Card must have drag handle');
+        cards[1].ondrop?.({
+            preventDefault: () => {},
+            dataTransfer: { getData: () => '0' },
+        } as any);
         assert.deepStrictEqual(reorderParams, [0, 1]);
     });
 });

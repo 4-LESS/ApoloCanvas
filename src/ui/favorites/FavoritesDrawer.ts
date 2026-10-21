@@ -16,6 +16,7 @@ export interface FavoritesDrawerCallbacks {
     onSelectFavorite: (preset: ToolFavoritePreset) => void;
     onDeleteFavorite: (presetId: string) => void;
     onReorderFavorite: (fromIndex: number, toIndex: number) => void;
+    onRenameFavorite?: (presetId: string, newName: string) => void;
     onSwitchProfile?: (profileId: string) => void;
     onSelectProfile?: (profileId: string) => void;
     onCreateProfile?: (name: string) => void;
@@ -27,6 +28,9 @@ export interface FavoritesDrawerCallbacks {
  * Returns a human-friendly Spanish label for a favorite preset.
  */
 export function getPresetLabel(preset: ToolFavoritePreset): string {
+    if (preset.name && preset.name.trim().length > 0) {
+        return preset.name.trim();
+    }
     if (preset.tool === 'pen') {
         const pen = preset as PenFavoritePreset;
         switch (pen.profileId) {
@@ -287,6 +291,15 @@ export class FavoritesDrawer {
 
         this.setupSwipeListeners();
 
+        this.el.addEventListener('click', (e) => {
+            const target = e.target as HTMLElement | null;
+            if (!target?.closest?.('.apolo-favorite-handle-wrap')) {
+                this.el.querySelectorAll('.apolo-card-menu').forEach((m) => {
+                    (m as HTMLElement).style.display = 'none';
+                });
+            }
+        });
+
         if (parent) {
             parent.appendChild(this.el);
         }
@@ -370,27 +383,79 @@ export class FavoritesDrawer {
         dotsContainer.style.display = 'flex';
         dotsContainer.style.alignItems = 'center';
         dotsContainer.style.justifyContent = 'center';
-        dotsContainer.style.gap = '8px';
+        dotsContainer.style.gap = '6px';
+
+        const currIdx = this.profiles.findIndex(p => p.id === this.activeProfileId);
+        const safeIdx = currIdx !== -1 ? currIdx : 0;
+        const isLastProfile = safeIdx === this.profiles.length - 1;
+
+        // 1. Prev Navigation Chevron (<)
+        const prevBtn = document.createElement('button');
+        prevBtn.type = 'button';
+        prevBtn.className = 'apolo-kit-nav-btn apolo-kit-nav-prev';
+        prevBtn.title = 'Perfil anterior';
+        prevBtn.setAttribute('aria-label', 'Perfil anterior');
+        prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 12, strokeWidth: 2 }));
+        if (safeIdx === 0) {
+            prevBtn.classList.add('is-disabled');
+            prevBtn.disabled = true;
+        } else {
+            prevBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.switchProfile(this.profiles[safeIdx - 1].id);
+            };
+        }
+        dotsContainer.appendChild(prevBtn);
+
+        // 2. Track of dots
+        const track = document.createElement('div');
+        track.className = 'apolo-kit-dots-track';
+
         this.profiles.forEach((p, idx) => {
             const dot = document.createElement('button');
             dot.type = 'button';
-            const isActive = p.id === this.activeProfileId || (!this.activeProfileId && idx === 0);
-            dot.className = `apolo-kit-dot${isActive ? ' is-active' : ''}`;
+            const isActive = idx === safeIdx;
+            dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
             dot.title = p.name;
             dot.setAttribute('aria-label', `Perfil ${p.name}`);
-            dot.style.display = 'inline-block';
-            dot.style.width = '7px';
-            dot.style.height = '7px';
-            dot.style.minWidth = '7px';
-            dot.style.minHeight = '7px';
-            dot.style.borderRadius = '50%';
-            dot.style.cursor = 'pointer';
             dot.onclick = (e) => {
                 e.stopPropagation();
                 this.switchProfile(p.id);
             };
-            dotsContainer.appendChild(dot);
+            track.appendChild(dot);
         });
+
+        // Add Profile dot indicator at the end
+        const addDot = document.createElement('button');
+        addDot.type = 'button';
+        addDot.className = `popover-header-dot apolo-kit-dot is-add-dot${isLastProfile ? ' is-next-hint' : ''}`;
+        addDot.title = 'Nuevo perfil';
+        addDot.setAttribute('aria-label', 'Crear nuevo perfil');
+        addDot.appendChild(createSvg(ICONS.plus, { size: 8, strokeWidth: 2.2 }));
+        addDot.onclick = (e) => {
+            e.stopPropagation();
+            this.openCreateProfileForm();
+        };
+        track.appendChild(addDot);
+        dotsContainer.appendChild(track);
+
+        // 3. Next Navigation Chevron (>)
+        const nextBtn = document.createElement('button');
+        nextBtn.type = 'button';
+        nextBtn.className = 'apolo-kit-nav-btn apolo-kit-nav-next';
+        nextBtn.title = isLastProfile ? 'Nuevo perfil' : 'Perfil siguiente';
+        nextBtn.setAttribute('aria-label', nextBtn.title);
+        nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
+        nextBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (safeIdx < this.profiles.length - 1) {
+                this.switchProfile(this.profiles[safeIdx + 1].id);
+            } else {
+                this.openCreateProfileForm();
+            }
+        };
+        dotsContainer.appendChild(nextBtn);
+
         if (container) {
             container.appendChild(dotsContainer);
         }
@@ -591,7 +656,7 @@ export class FavoritesDrawer {
     }
 
     /**
-     * Card = [tool glyph] [stroke/shape preview] [thickness dot] + floating actions.
+     * Card = [tool glyph] [stroke/shape preview] [thickness dot] + drag handle & actions.
      * Label, thickness number, pattern and fill live in the tooltip / aria-label.
      */
     private buildCard(preset: ToolFavoritePreset, index: number, isActive: boolean): HTMLElement {
@@ -608,7 +673,6 @@ export class FavoritesDrawer {
 
         card.onclick = () => this.callbacks.onSelectFavorite(preset);
         card.onkeydown = (e) => {
-            // Ignore keys coming from the inner buttons (reorder / delete).
             if (e.target !== card) return;
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -622,6 +686,9 @@ export class FavoritesDrawer {
         glyph.appendChild(createSvg(getPresetIcon(preset), { size: 18 }));
 
         // 2) Preview (wave is drawn wide; shapes keep their compact box)
+        const previewWrap = document.createElement('div');
+        previewWrap.className = 'apolo-favorite-preview-wrap';
+
         const previewEl = document.createElement('div');
         previewEl.className = 'apolo-favorite-preview';
         if (preset.tool === 'pen' || preset.tool === 'highlighter') {
@@ -631,6 +698,14 @@ export class FavoritesDrawer {
             );
         } else if (preset.tool === 'shape') {
             previewEl.appendChild(createShapePreview(preset as ShapeFavoritePreset));
+        }
+        previewWrap.appendChild(previewEl);
+
+        if (preset.name) {
+            const nameBadge = document.createElement('span');
+            nameBadge.className = 'apolo-favorite-custom-name';
+            nameBadge.textContent = preset.name;
+            previewWrap.appendChild(nameBadge);
         }
 
         // 3) Thickness as a dot instead of "7px"
@@ -642,50 +717,220 @@ export class FavoritesDrawer {
         dot.style.setProperty('--dot', `${Math.max(3, Math.min(14, 2 + preset.width * 0.8))}px`);
         size.appendChild(dot);
 
-        // 4) Floating actions (visible on hover / focus; always visible on touch)
-        const actions = document.createElement('div');
-        actions.className = 'apolo-favorite-actions';
+        // 4) Drag Handle & Contextual Menu (Rename & Delete)
+        const handleWrap = document.createElement('div');
+        handleWrap.className = 'apolo-favorite-handle-wrap';
 
-        if (this.favorites.length > 1) {
-            const reorder = document.createElement('div');
-            reorder.className = 'apolo-favorite-reorder';
-            reorder.append(
-                this.createActionButton('apolo-favorite-reorder-btn apolo-favorite-reorder-up', 'Mover arriba', ICONS.chevronUp, 12, index === 0,
-                    () => this.callbacks.onReorderFavorite(index, index - 1)),
-                this.createActionButton('apolo-favorite-reorder-btn apolo-favorite-reorder-down', 'Mover abajo', ICONS.chevronDown, 12, index === this.favorites.length - 1,
-                    () => this.callbacks.onReorderFavorite(index, index + 1)),
-            );
-            actions.appendChild(reorder);
-        }
-        actions.appendChild(
-            this.createActionButton('apolo-favorite-delete-btn', 'Eliminar favorito', ICONS.trash, 15, false,
-                () => this.callbacks.onDeleteFavorite(preset.id)),
-        );
+        const handleBtn = document.createElement('button');
+        handleBtn.type = 'button';
+        handleBtn.className = 'apolo-favorite-drag-handle';
+        handleBtn.title = 'Arrastrar para reordenar / Clic para opciones';
+        handleBtn.setAttribute('aria-label', 'Mover o editar favorito');
+        handleBtn.appendChild(createSvg(ICONS.dragGrip, {
+            size: 14,
+            width: 14,
+            height: 14,
+            viewBox: '0 0 14 14',
+            fill: 'currentColor',
+            stroke: 'none',
+            strokeWidth: 0,
+        }));
 
-        card.append(glyph, previewEl, size, actions);
+        const menu = document.createElement('div');
+        menu.className = 'apolo-card-menu';
+        menu.style.display = 'none';
+
+        const renameBtn = document.createElement('button');
+        renameBtn.type = 'button';
+        renameBtn.className = 'apolo-card-menu-btn apolo-card-rename-btn';
+        renameBtn.title = 'Cambiar nombre';
+        renameBtn.setAttribute('aria-label', 'Cambiar nombre');
+        renameBtn.appendChild(createSvg(ICONS.pencil, { size: 14, strokeWidth: 1.8 }));
+        renameBtn.onclick = (e) => {
+            e.stopPropagation();
+            menu.style.display = 'none';
+            this.openRenameCardRow(card, preset);
+        };
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'apolo-card-menu-btn apolo-favorite-delete-btn';
+        deleteBtn.title = 'Eliminar favorito';
+        deleteBtn.setAttribute('aria-label', 'Eliminar favorito');
+        deleteBtn.appendChild(createSvg(ICONS.trash, { size: 14, strokeWidth: 1.8 }));
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            menu.style.display = 'none';
+            this.callbacks.onDeleteFavorite(preset.id);
+        };
+
+        menu.append(renameBtn, deleteBtn);
+        handleWrap.append(handleBtn, menu);
+
+        // Dragging & Clicking interactions
+        let isDragging = false;
+        let startX = 0;
+        let startY = 0;
+
+        handleBtn.onpointerdown = (e) => {
+            e.stopPropagation();
+            isDragging = false;
+            startX = e.clientX;
+            startY = e.clientY;
+            card.setAttribute('draggable', 'true');
+
+            const onPointerMove = (moveEv: PointerEvent) => {
+                const dy = moveEv.clientY - startY;
+                const dx = moveEv.clientX - startX;
+                if (Math.hypot(dx, dy) > 6) {
+                    isDragging = true;
+                    card.classList.add('is-dragging');
+                }
+            };
+
+            const onPointerUp = (upEv: PointerEvent) => {
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+                card.removeAttribute('draggable');
+                card.classList.remove('is-dragging');
+
+                if (isDragging) {
+                    const elemBelow = document.elementFromPoint(upEv.clientX, upEv.clientY);
+                    const targetCard = elemBelow?.closest?.('.apolo-favorite-card') as HTMLElement | null;
+                    if (targetCard && targetCard !== card) {
+                        const targetId = targetCard.dataset.presetId;
+                        const toIdx = this.favorites.findIndex(f => f.id === targetId);
+                        if (toIdx !== -1 && toIdx !== index) {
+                            this.callbacks.onReorderFavorite(index, toIdx);
+                        }
+                    }
+                }
+            };
+
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
+        };
+
+        handleBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (isDragging) return;
+            const isShowing = menu.style.display !== 'none';
+            this.el.querySelectorAll('.apolo-card-menu').forEach((m) => {
+                (m as HTMLElement).style.display = 'none';
+            });
+            menu.style.display = isShowing ? 'none' : 'flex';
+        };
+
+        // Native HTML5 Drag and Drop on card
+        card.ondragstart = (e) => {
+            e.dataTransfer?.setData('text/plain', String(index));
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+            }
+            card.classList.add('is-dragging');
+        };
+
+        card.ondragover = (e) => {
+            e.preventDefault();
+            if (e.dataTransfer) {
+                e.dataTransfer.dropEffect = 'move';
+            }
+            card.classList.add('is-drag-over');
+        };
+
+        card.ondragleave = () => {
+            card.classList.remove('is-drag-over');
+        };
+
+        card.ondrop = (e) => {
+            e.preventDefault();
+            card.classList.remove('is-drag-over');
+            const rawFrom = e.dataTransfer?.getData('text/plain');
+            const fromIdx = Number(rawFrom);
+            if (!isNaN(fromIdx) && fromIdx !== index && fromIdx >= 0 && fromIdx < this.favorites.length) {
+                this.callbacks.onReorderFavorite(fromIdx, index);
+            }
+        };
+
+        card.ondragend = () => {
+            card.classList.remove('is-dragging');
+            card.classList.remove('is-drag-over');
+            card.removeAttribute('draggable');
+        };
+
+        card.append(glyph, previewWrap, size, handleWrap);
         return card;
     }
 
-    private createActionButton(
-        className: string,
-        label: string,
-        icon: string,
-        iconSize: number,
-        disabled: boolean,
-        onClick: () => void,
-    ): HTMLButtonElement {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = className;
-        btn.setAttribute('aria-label', label);
-        btn.title = label;
-        btn.disabled = disabled;
-        btn.appendChild(createSvg(icon, { size: iconSize, strokeWidth: 2 }));
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            onClick();
+    private openRenameCardRow(card: HTMLElement, preset: ToolFavoritePreset): void {
+        const originalChildren = Array.from(card.children);
+        originalChildren.forEach((child) => {
+            (child as HTMLElement).style.display = 'none';
+        });
+
+        const renameRow = document.createElement('div');
+        renameRow.className = 'apolo-card-rename-row';
+        renameRow.onclick = (e) => e.stopPropagation();
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'apolo-card-rename-input';
+        input.value = preset.name || getPresetLabel(preset);
+        input.maxLength = 28;
+        input.placeholder = 'Nombre del favorito...';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'apolo-card-rename-btn apolo-card-rename-save';
+        saveBtn.title = 'Guardar nombre';
+        saveBtn.setAttribute('aria-label', 'Guardar nombre');
+        saveBtn.appendChild(createSvg(ICONS.check, { size: 14, strokeWidth: 2.2 }));
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'apolo-card-rename-btn apolo-card-rename-cancel';
+        cancelBtn.title = 'Cancelar';
+        cancelBtn.setAttribute('aria-label', 'Cancelar');
+        cancelBtn.appendChild(createSvg(ICONS.close, { size: 14, strokeWidth: 2 }));
+
+        const finish = () => {
+            renameRow.remove();
+            originalChildren.forEach((child) => {
+                (child as HTMLElement).style.display = '';
+            });
         };
-        return btn;
+
+        const submit = () => {
+            const val = input.value.trim();
+            preset.name = val || undefined;
+            this.callbacks.onRenameFavorite?.(preset.id, val);
+            finish();
+            this.render();
+        };
+
+        saveBtn.onclick = (e) => {
+            e.stopPropagation();
+            submit();
+        };
+
+        cancelBtn.onclick = (e) => {
+            e.stopPropagation();
+            finish();
+        };
+
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                finish();
+            }
+        };
+
+        renameRow.append(input, saveBtn, cancelBtn);
+        card.appendChild(renameRow);
+        setTimeout(() => input.focus?.(), 0);
     }
 
     /**

@@ -9,6 +9,7 @@ import type {
     BoxMetadata,
     CanvasElement,
     EraserMode,
+    FavoritableTool,
     LassoMode,
     PageDocument,
     PenFavorite,
@@ -64,6 +65,11 @@ import {
     switchShapeProfile,
     createStrokeProfile,
     createShapeProfile,
+    renameStrokeProfile,
+    deleteStrokeProfile,
+    renameShapeProfile,
+    deleteShapeProfile,
+    renameFavoritePreset,
     type ToolFavoritePreset,
     type PenFavoritePreset,
     type HighlighterFavoritePreset,
@@ -775,6 +781,7 @@ export class CanvasController {
                 onApplyFavorite: (preset) => this.applyToolFavoritePreset(preset),
                 onDeleteFavorite: (presetId) => this.deleteToolFavoritePreset(presetId),
                 onReorderFavorites: (fromIndex, toIndex) => this.reorderToolFavorites(fromIndex, toIndex),
+                onRenameFavorite: (presetId, newName) => this.renameFavoritePreset(presetId, newName),
                 onSwitchProfile: (profileId) => this.switchFavoriteProfile(profileId),
                 onCreateProfile: (name) => this.createFavoriteProfile(name),
                 onToggleSyncProfiles: (sync) => this.toggleSyncFavoriteProfiles(sync),
@@ -2234,13 +2241,69 @@ export class CanvasController {
     public createFavoriteProfile(name: string): void {
         const isShape = this.tool === 'shape';
         if (isShape) {
-            createShapeProfile(this.toolState, name);
+            this.createShapeProfile(name);
         } else {
-            createStrokeProfile(this.toolState, name);
+            this.createStrokeProfile(name);
         }
+    }
+
+    public createStrokeProfile(name: string): void {
+        createStrokeProfile(this.toolState, name);
         this.syncEstucheFavoriteState();
         this.notifyToolStateChange();
         this.toast?.show(`Perfil "${name}" creado`);
+    }
+
+    public createShapeProfile(name: string): void {
+        createShapeProfile(this.toolState, name);
+        this.syncEstucheFavoriteState();
+        this.notifyToolStateChange();
+        this.toast?.show(`Perfil "${name}" creado`);
+    }
+
+    public renameStrokeProfile(profileId: string, name: string): boolean {
+        const success = renameStrokeProfile(this.toolState, profileId, name);
+        if (success) {
+            this.syncEstucheFavoriteState();
+            this.notifyToolStateChange();
+        }
+        return success;
+    }
+
+    public deleteStrokeProfile(profileId: string): boolean {
+        const success = deleteStrokeProfile(this.toolState, profileId);
+        if (success) {
+            this.syncEstucheFavoriteState();
+            this.notifyToolStateChange();
+        }
+        return success;
+    }
+
+    public renameShapeProfile(profileId: string, name: string): boolean {
+        const success = renameShapeProfile(this.toolState, profileId, name);
+        if (success) {
+            this.syncEstucheFavoriteState();
+            this.notifyToolStateChange();
+        }
+        return success;
+    }
+
+    public deleteShapeProfile(profileId: string): boolean {
+        const success = deleteShapeProfile(this.toolState, profileId);
+        if (success) {
+            this.syncEstucheFavoriteState();
+            this.notifyToolStateChange();
+        }
+        return success;
+    }
+
+    public renameFavoritePreset(presetId: string, newName: string): boolean {
+        const success = renameFavoritePreset(this.toolState, this.tool as FavoritableTool, presetId, newName);
+        if (success) {
+            this.syncEstucheFavoriteState();
+            this.notifyToolStateChange();
+        }
+        return success;
     }
 
     public toggleSyncFavoriteProfiles(sync: boolean): void {

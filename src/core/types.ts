@@ -56,6 +56,7 @@ export type FavoritableTool = 'pen' | 'highlighter' | 'shape';
 export interface BaseFavoritePreset {
     id: string;
     tool: FavoritableTool;
+    name?: string;
     color: string;
     width: number;
     opacity: number; // normalized 0..1 or 10..100 matching WorkspaceToolState convention

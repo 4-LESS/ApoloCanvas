@@ -67,6 +67,7 @@ export interface ToolEstucheCallbacks {
     onApplyFavorite?: (preset: ToolFavoritePreset) => void;
     onDeleteFavorite?: (presetId: string) => void;
     onReorderFavorites?: (fromIndex: number, toIndex: number) => void;
+    onRenameFavorite?: (presetId: string, newName: string) => void;
     onSwitchProfile?: (profileId: string) => void;
     onCreateProfile?: (name: string) => void;
     onToggleSyncProfiles?: (sync: boolean) => void;
@@ -554,42 +555,84 @@ export class ToolEstuche implements PopoverInstance {
             if (!this.headerDotsContainer && this.titleEl.parentElement) {
                 const dotsContainer = document.createElement('div');
                 dotsContainer.className = 'popover-header-profile-dots apolo-kit-dots-indicator';
-                dotsContainer.style.display = 'flex';
-                dotsContainer.style.alignItems = 'center';
-                dotsContainer.style.justifyContent = 'center';
-                dotsContainer.style.gap = '8px';
                 this.titleEl.parentElement.appendChild(dotsContainer);
                 this.headerDotsContainer = dotsContainer;
             }
 
             if (this.headerDotsContainer) {
                 this.headerDotsContainer.replaceChildren();
-                this.headerDotsContainer.style.display = 'flex';
-                this.headerDotsContainer.style.alignItems = 'center';
-                this.headerDotsContainer.style.justifyContent = 'center';
-                this.headerDotsContainer.style.gap = '8px';
                 const profiles = this.getActiveToolProfiles();
                 const activeProfileId = this.getActiveProfileId();
+                const currIdx = profiles.findIndex(p => p.id === activeProfileId);
+                const safeIdx = currIdx !== -1 ? currIdx : 0;
+                const isLastProfile = safeIdx === profiles.length - 1;
+
+                // 1. Prev Navigation Chevron (<)
+                const prevBtn = document.createElement('button');
+                prevBtn.type = 'button';
+                prevBtn.className = 'apolo-kit-nav-btn apolo-kit-nav-prev';
+                prevBtn.title = 'Perfil anterior';
+                prevBtn.setAttribute('aria-label', 'Perfil anterior');
+                prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 12, strokeWidth: 2 }));
+                if (safeIdx === 0) {
+                    prevBtn.classList.add('is-disabled');
+                    prevBtn.disabled = true;
+                } else {
+                    prevBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        this.switchProfile(profiles[safeIdx - 1].id);
+                    };
+                }
+                this.headerDotsContainer.appendChild(prevBtn);
+
+                // 2. Track of dots
+                const track = document.createElement('div');
+                track.className = 'apolo-kit-dots-track';
+
                 profiles.forEach((p, idx) => {
                     const dot = document.createElement('button');
                     dot.type = 'button';
-                    const isActive = p.id === activeProfileId || (!activeProfileId && idx === 0);
+                    const isActive = idx === safeIdx;
                     dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
                     dot.title = p.name;
                     dot.setAttribute('aria-label', `Perfil ${p.name}`);
-                    dot.style.display = 'inline-block';
-                    dot.style.width = '7px';
-                    dot.style.height = '7px';
-                    dot.style.minWidth = '7px';
-                    dot.style.minHeight = '7px';
-                    dot.style.borderRadius = '50%';
-                    dot.style.cursor = 'pointer';
                     dot.onclick = (e) => {
                         e.stopPropagation();
                         this.switchProfile(p.id);
                     };
-                    this.headerDotsContainer!.appendChild(dot);
+                    track.appendChild(dot);
                 });
+
+                // Add Profile dot indicator at the end
+                const addDot = document.createElement('button');
+                addDot.type = 'button';
+                addDot.className = `popover-header-dot apolo-kit-dot is-add-dot${isLastProfile ? ' is-next-hint' : ''}`;
+                addDot.title = 'Nuevo perfil';
+                addDot.setAttribute('aria-label', 'Crear nuevo perfil');
+                addDot.appendChild(createSvg(ICONS.plus, { size: 8, strokeWidth: 2.2 }));
+                addDot.onclick = (e) => {
+                    e.stopPropagation();
+                    this.favoritesDrawer?.openCreateProfileForm();
+                };
+                track.appendChild(addDot);
+                this.headerDotsContainer.appendChild(track);
+
+                // 3. Next Navigation Chevron (>)
+                const nextBtn = document.createElement('button');
+                nextBtn.type = 'button';
+                nextBtn.className = 'apolo-kit-nav-btn apolo-kit-nav-next';
+                nextBtn.title = isLastProfile ? 'Nuevo perfil' : 'Perfil siguiente';
+                nextBtn.setAttribute('aria-label', nextBtn.title);
+                nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
+                nextBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    if (safeIdx < profiles.length - 1) {
+                        this.switchProfile(profiles[safeIdx + 1].id);
+                    } else {
+                        this.favoritesDrawer?.openCreateProfileForm();
+                    }
+                };
+                this.headerDotsContainer.appendChild(nextBtn);
             }
         } else {
             this.titleEl.textContent = this.getTitleForTool(this.state.tool);
@@ -720,6 +763,9 @@ export class ToolEstuche implements PopoverInstance {
                 onReorderFavorite: (fromIndex, toIndex) => {
                     this.callbacks.onReorderFavorites?.(fromIndex, toIndex);
                 },
+                onRenameFavorite: (presetId, newName) => {
+                    this.callbacks.onRenameFavorite?.(presetId, newName);
+                },
                 onSwitchProfile: (profileId) => {
                     this.switchProfile(profileId);
                 },
@@ -782,34 +828,9 @@ export class ToolEstuche implements PopoverInstance {
         if (this.state.showingFavorites) {
             const dotsContainer = document.createElement('div');
             dotsContainer.className = 'popover-header-profile-dots apolo-kit-dots-indicator';
-            dotsContainer.style.display = 'flex';
-            dotsContainer.style.alignItems = 'center';
-            dotsContainer.style.justifyContent = 'center';
-            dotsContainer.style.gap = '8px';
-            const profiles = this.getActiveToolProfiles();
-            const activeProfileId = this.getActiveProfileId();
-            profiles.forEach((p, idx) => {
-                const dot = document.createElement('button');
-                dot.type = 'button';
-                const isActive = p.id === activeProfileId || (!activeProfileId && idx === 0);
-                dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
-                dot.title = p.name;
-                dot.setAttribute('aria-label', `Perfil ${p.name}`);
-                dot.style.display = 'inline-block';
-                dot.style.width = '7px';
-                dot.style.height = '7px';
-                dot.style.minWidth = '7px';
-                dot.style.minHeight = '7px';
-                dot.style.borderRadius = '50%';
-                dot.style.cursor = 'pointer';
-                dot.onclick = (e) => {
-                    e.stopPropagation();
-                    this.switchProfile(p.id);
-                };
-                dotsContainer.appendChild(dot);
-            });
             titleContainer.appendChild(dotsContainer);
             this.headerDotsContainer = dotsContainer;
+            this.updateHeaderTitleVisual();
         } else {
             this.headerDotsContainer = undefined;
         }

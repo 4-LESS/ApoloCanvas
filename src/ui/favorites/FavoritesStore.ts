@@ -488,3 +488,100 @@ export function createShapeProfile(state: WorkspaceToolState, rawName: string): 
     syncLegacyFavoritesSlice(state);
     return newProfile;
 }
+
+/**
+ * Renames an existing stroke profile.
+ */
+export function renameStrokeProfile(state: WorkspaceToolState, profileId: string, rawName: string): boolean {
+    if (!Array.isArray(state.strokeFavoriteProfiles)) return false;
+    const prof = state.strokeFavoriteProfiles.find(p => p.id === profileId);
+    if (!prof) return false;
+    const name = (rawName || '').trim().slice(0, 24) || prof.name;
+    prof.name = name;
+    if (state.syncFavoriteProfiles && Array.isArray(state.shapeFavoriteProfiles)) {
+        const matchingShape = state.shapeFavoriteProfiles.find(p => p.id === profileId);
+        if (matchingShape) matchingShape.name = name;
+    }
+    return true;
+}
+
+/**
+ * Deletes a stroke profile if more than 1 profile exists.
+ */
+export function deleteStrokeProfile(state: WorkspaceToolState, profileId: string): boolean {
+    if (!Array.isArray(state.strokeFavoriteProfiles) || state.strokeFavoriteProfiles.length <= 1) {
+        return false;
+    }
+    const idx = state.strokeFavoriteProfiles.findIndex(p => p.id === profileId);
+    if (idx === -1) return false;
+    state.strokeFavoriteProfiles.splice(idx, 1);
+    if (state.activeStrokeProfileId === profileId) {
+        state.activeStrokeProfileId = state.strokeFavoriteProfiles[0].id;
+    }
+    syncLegacyFavoritesSlice(state);
+    return true;
+}
+
+/**
+ * Renames an existing shape profile.
+ */
+export function renameShapeProfile(state: WorkspaceToolState, profileId: string, rawName: string): boolean {
+    if (!Array.isArray(state.shapeFavoriteProfiles)) return false;
+    const prof = state.shapeFavoriteProfiles.find(p => p.id === profileId);
+    if (!prof) return false;
+    const name = (rawName || '').trim().slice(0, 24) || prof.name;
+    prof.name = name;
+    if (state.syncFavoriteProfiles && Array.isArray(state.strokeFavoriteProfiles)) {
+        const matchingStroke = state.strokeFavoriteProfiles.find(p => p.id === profileId);
+        if (matchingStroke) matchingStroke.name = name;
+    }
+    return true;
+}
+
+/**
+ * Deletes a shape profile if more than 1 profile exists.
+ */
+export function deleteShapeProfile(state: WorkspaceToolState, profileId: string): boolean {
+    if (!Array.isArray(state.shapeFavoriteProfiles) || state.shapeFavoriteProfiles.length <= 1) {
+        return false;
+    }
+    const idx = state.shapeFavoriteProfiles.findIndex(p => p.id === profileId);
+    if (idx === -1) return false;
+    state.shapeFavoriteProfiles.splice(idx, 1);
+    if (state.activeShapeProfileId === profileId) {
+        state.activeShapeProfileId = state.shapeFavoriteProfiles[0].id;
+    }
+    syncLegacyFavoritesSlice(state);
+    return true;
+}
+
+/**
+ * Renames a favorite preset within the active profile.
+ */
+export function renameFavoritePreset(
+    state: WorkspaceToolState,
+    tool: FavoritableTool,
+    presetId: string,
+    rawName: string,
+): boolean {
+    const name = (rawName || '').trim().slice(0, 28);
+    if (tool === 'pen' || tool === 'highlighter') {
+        const strokeProfile = getActiveStrokeProfile(state);
+        const list = tool === 'pen' ? strokeProfile.pen : strokeProfile.highlighter;
+        const preset = list.find(p => p.id === presetId);
+        if (preset) {
+            preset.name = name || undefined;
+            syncLegacyFavoritesSlice(state);
+            return true;
+        }
+    } else if (tool === 'shape') {
+        const shapeProfile = getActiveShapeProfile(state);
+        const preset = shapeProfile.shape.find(p => p.id === presetId);
+        if (preset) {
+            preset.name = name || undefined;
+            syncLegacyFavoritesSlice(state);
+            return true;
+        }
+    }
+    return false;
+}

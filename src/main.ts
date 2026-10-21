@@ -1,7 +1,7 @@
 import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { EngineEventBus } from './core/events.ts';
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
-import { DEFAULT_WORKSPACE_TOOL_STATE, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, StrokeFavoriteProfile, ShapeFavoriteProfile, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
+import { DEFAULT_WORKSPACE_TOOL_STATE, DEFAULT_STROKE_FAVORITE_PROFILES, DEFAULT_SHAPE_FAVORITE_PROFILES, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
 import {
     computeFavoriteFingerprint,
     findMatchingFavorite,
@@ -15,6 +15,11 @@ import {
     switchShapeProfile,
     createStrokeProfile,
     createShapeProfile,
+    renameStrokeProfile,
+    deleteStrokeProfile,
+    renameShapeProfile,
+    deleteShapeProfile,
+    renameFavoritePreset,
     type ToolFavoritePreset,
     type PenFavoritePreset,
     type HighlighterFavoritePreset,
@@ -705,6 +710,89 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.debouncedSaveSettings();
     }
 
+    getStrokeFavoriteProfiles(): StrokeFavoriteProfile[] {
+        if (!Array.isArray(this.settings.toolState.strokeFavoriteProfiles) || this.settings.toolState.strokeFavoriteProfiles.length === 0) {
+            this.settings.toolState.strokeFavoriteProfiles = DEFAULT_STROKE_FAVORITE_PROFILES.map(sp => ({
+                ...sp,
+                pen: [...sp.pen],
+                highlighter: [...sp.highlighter],
+            }));
+        }
+        return this.settings.toolState.strokeFavoriteProfiles;
+    }
+
+    getShapeFavoriteProfiles(): ShapeFavoriteProfile[] {
+        if (!Array.isArray(this.settings.toolState.shapeFavoriteProfiles) || this.settings.toolState.shapeFavoriteProfiles.length === 0) {
+            this.settings.toolState.shapeFavoriteProfiles = DEFAULT_SHAPE_FAVORITE_PROFILES.map(shp => ({
+                ...shp,
+                shape: [...shp.shape],
+            }));
+        }
+        return this.settings.toolState.shapeFavoriteProfiles;
+    }
+
+    async renameStrokeProfile(profileId: string, name: string): Promise<boolean> {
+        let success = false;
+        if (this.controller) {
+            success = this.controller.renameStrokeProfile(profileId, name);
+        } else {
+            success = renameStrokeProfile(this.settings.toolState, profileId, name);
+        }
+        await this.saveSettings();
+        return success;
+    }
+
+    async deleteStrokeProfile(profileId: string): Promise<boolean> {
+        let success = false;
+        if (this.controller) {
+            success = this.controller.deleteStrokeProfile(profileId);
+        } else {
+            success = deleteStrokeProfile(this.settings.toolState, profileId);
+        }
+        await this.saveSettings();
+        return success;
+    }
+
+    async createStrokeProfile(name: string): Promise<void> {
+        if (this.controller) {
+            this.controller.createStrokeProfile(name);
+        } else {
+            createStrokeProfile(this.settings.toolState, name);
+        }
+        await this.saveSettings();
+    }
+
+    async renameShapeProfile(profileId: string, name: string): Promise<boolean> {
+        let success = false;
+        if (this.controller) {
+            success = this.controller.renameShapeProfile(profileId, name);
+        } else {
+            success = renameShapeProfile(this.settings.toolState, profileId, name);
+        }
+        await this.saveSettings();
+        return success;
+    }
+
+    async deleteShapeProfile(profileId: string): Promise<boolean> {
+        let success = false;
+        if (this.controller) {
+            success = this.controller.deleteShapeProfile(profileId);
+        } else {
+            success = deleteShapeProfile(this.settings.toolState, profileId);
+        }
+        await this.saveSettings();
+        return success;
+    }
+
+    async createShapeProfile(name: string): Promise<void> {
+        if (this.controller) {
+            this.controller.createShapeProfile(name);
+        } else {
+            createShapeProfile(this.settings.toolState, name);
+        }
+        await this.saveSettings();
+    }
+
     toggleSyncFavoriteProfiles(sync: boolean): void {
         if (this.controller) {
             this.controller.toggleSyncFavoriteProfiles(sync);
@@ -1375,6 +1463,8 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        containerEl.createEl('h3', { text: 'Perfiles de Favoritos' });
+
         new Setting(containerEl)
             .setName('Sincronizar perfiles de favoritos (Lápices y Formas)')
             .setDesc('Al cambiar de perfil de favoritos en Lápices o Marcadores, cambia automáticamente al perfil equivalente en Formas.')
@@ -1383,6 +1473,90 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .onChange(async value => {
                     this.plugin.toggleSyncFavoriteProfiles(value);
                     await this.plugin.saveSettings();
+                }));
+
+        containerEl.createEl('h4', { text: 'Perfiles de Trazos (Plumas y Marcadores)' });
+
+        const strokeProfiles = this.plugin.getStrokeFavoriteProfiles();
+        strokeProfiles.forEach((prof) => {
+            const canDelete = strokeProfiles.length > 1;
+            const setting = new Setting(containerEl)
+                .addText(text => text
+                    .setValue(prof.name)
+                    .setPlaceholder('Nombre del perfil')
+                    .onChange(async (val) => {
+                        await this.plugin.renameStrokeProfile(prof.id, val);
+                    }))
+                .addExtraButton(btn => btn
+                    .setIcon('trash')
+                    .setTooltip(canDelete ? 'Eliminar perfil' : 'No se puede eliminar el único perfil')
+                    .setDisabled(!canDelete)
+                    .onClick(async () => {
+                        if (canDelete) {
+                            await this.plugin.deleteStrokeProfile(prof.id);
+                            this.display();
+                        }
+                    }));
+            setting.settingEl.style.borderTop = 'none';
+            setting.settingEl.style.padding = '4px 0';
+        });
+
+        let newStrokeName = '';
+        new Setting(containerEl)
+            .setName('Añadir perfil de trazos')
+            .addText(text => text
+                .setPlaceholder('Ej: Matemáticas')
+                .onChange(val => { newStrokeName = val; }))
+            .addButton(btn => btn
+                .setButtonText('+ Añadir')
+                .setCta()
+                .onClick(async () => {
+                    const name = newStrokeName.trim() || 'Nuevo perfil';
+                    await this.plugin.createStrokeProfile(name);
+                    newStrokeName = '';
+                    this.display();
+                }));
+
+        containerEl.createEl('h4', { text: 'Perfiles de Formas' });
+
+        const shapeProfiles = this.plugin.getShapeFavoriteProfiles();
+        shapeProfiles.forEach((prof) => {
+            const canDelete = shapeProfiles.length > 1;
+            const setting = new Setting(containerEl)
+                .addText(text => text
+                    .setValue(prof.name)
+                    .setPlaceholder('Nombre del perfil')
+                    .onChange(async (val) => {
+                        await this.plugin.renameShapeProfile(prof.id, val);
+                    }))
+                .addExtraButton(btn => btn
+                    .setIcon('trash')
+                    .setTooltip(canDelete ? 'Eliminar perfil' : 'No se puede eliminar el único perfil')
+                    .setDisabled(!canDelete)
+                    .onClick(async () => {
+                        if (canDelete) {
+                            await this.plugin.deleteShapeProfile(prof.id);
+                            this.display();
+                        }
+                    }));
+            setting.settingEl.style.borderTop = 'none';
+            setting.settingEl.style.padding = '4px 0';
+        });
+
+        let newShapeName = '';
+        new Setting(containerEl)
+            .setName('Añadir perfil de formas')
+            .addText(text => text
+                .setPlaceholder('Ej: Diagramas')
+                .onChange(val => { newShapeName = val; }))
+            .addButton(btn => btn
+                .setButtonText('+ Añadir')
+                .setCta()
+                .onClick(async () => {
+                    const name = newShapeName.trim() || 'Nuevo perfil';
+                    await this.plugin.createShapeProfile(name);
+                    newShapeName = '';
+                    this.display();
                 }));
 
         containerEl.createEl('h3', { text: 'Cajas de Dibujo (Canvas)' });

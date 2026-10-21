@@ -15,6 +15,11 @@ import {
     switchShapeProfile,
     createStrokeProfile,
     createShapeProfile,
+    renameStrokeProfile,
+    deleteStrokeProfile,
+    renameShapeProfile,
+    deleteShapeProfile,
+    renameFavoritePreset,
 } from '../src/ui/favorites/FavoritesStore.ts';
 import {
     ToolEstuche,
@@ -62,8 +67,8 @@ function createMockEnvironment() {
                 return !matchesSelector(node, negatedSel);
             }
             if (sel.startsWith('.')) {
-                const targetCls = sel.slice(1);
-                return Boolean(node.classList?.contains(targetCls) || node.className?.split(/\s+/).includes(targetCls));
+                const targetClasses = sel.slice(1).split('.');
+                return targetClasses.every(cls => Boolean(node.classList?.contains(cls) || node.className?.split(/\s+/).includes(cls)));
             }
             if (sel.startsWith('#')) {
                 return node.id === sel.slice(1);
@@ -89,7 +94,13 @@ function createMockEnvironment() {
             style: styleObj,
             dataset: {},
             hidden: false,
-            className: '',
+            get className(): string {
+                return [...classes].join(' ');
+            },
+            set className(v: string) {
+                classes.clear();
+                for (const c of String(v).split(/\s+/).filter(Boolean)) classes.add(c);
+            },
             children,
             title: '',
             type: '',
@@ -471,8 +482,8 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
             const dotsIndicator = root.querySelector('.apolo-kit-dots-indicator');
             assert.ok(dotsIndicator, '.apolo-kit-dots-indicator must be rendered under title');
 
-            // Pagination dots rendered in header area
-            const dots = root.querySelectorAll('.popover-header-dot');
+            // Pagination dots rendered in header area (profile dots + add-dot indicator)
+            const dots = root.querySelectorAll('.popover-header-dot:not(.is-add-dot)');
             assert.strictEqual(dots.length, 2);
             assert.ok(dots[0].classList.contains('is-active'));
             assert.ok(dots[0].classList.contains('apolo-kit-dot'));
@@ -481,11 +492,21 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
             assert.ok(dots[1].classList.contains('apolo-kit-dot'));
             assert.strictEqual((dots[1] as HTMLElement).title, 'Académico');
 
+            // Add profile dot indicator at the end
+            const addDot = root.querySelector('.popover-header-dot.is-add-dot');
+            assert.ok(addDot, 'Add profile dot indicator must exist');
+
+            // Navigation chevrons flanking the dots
+            const prevBtn = root.querySelector('.apolo-kit-nav-prev');
+            assert.ok(prevBtn, 'Previous profile chevron must exist');
+            const nextBtn = root.querySelector('.apolo-kit-nav-next');
+            assert.ok(nextBtn, 'Next profile chevron must exist');
+
             // Click dot 1 to switch to 'academic'
             dots[1].onclick?.({ stopPropagation: () => {} } as any);
             assert.strictEqual(switchedProfileId, 'academic');
             assert.strictEqual(titleEl.textContent, 'Académico');
-            const updatedDots = root.querySelectorAll('.popover-header-dot');
+            const updatedDots = root.querySelectorAll('.popover-header-dot:not(.is-add-dot)');
             assert.ok(!updatedDots[0].classList.contains('is-active'));
             assert.ok(updatedDots[1].classList.contains('is-active'));
 
@@ -519,11 +540,15 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
 
             const indicator = drawer.el.querySelector('.apolo-kit-dots-indicator');
             assert.ok(indicator, 'FavoritesDrawer with showDotsIndicator must render .apolo-kit-dots-indicator');
-            const dots = indicator.querySelectorAll('.apolo-kit-dot');
+            const dots = indicator.querySelectorAll('.apolo-kit-dot:not(.is-add-dot)');
             assert.strictEqual(dots.length, 3);
             assert.ok(dots[0].classList.contains('is-active'));
             assert.strictEqual((dots[0] as HTMLElement).title, 'Kit 1');
             assert.strictEqual((dots[1] as HTMLElement).title, 'Kit 2');
+
+            // Add dot indicator at the end
+            const addDot = indicator.querySelector('.apolo-kit-dot.is-add-dot');
+            assert.ok(addDot, 'Add profile dot indicator must exist');
 
             // Click dot 2 switches to 'p2'
             (dots[1] as HTMLElement).onclick?.({ stopPropagation: () => {} } as any);
@@ -744,6 +769,68 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
             assert.strictEqual(hydrated.favorites.pen[0].id, p1.id);
             assert.strictEqual(hydrated.favorites.shape.length, 1);
             assert.strictEqual(hydrated.favorites.shape[0].id, s1.id);
+        });
+    });
+
+    // =========================================================================
+    // 5. Profile & Preset Management (Rename, Delete, Create)
+    // =========================================================================
+    describe('5. Profile & Preset Management', () => {
+        test('renameStrokeProfile and renameShapeProfile update profile name and sync when enabled', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            state.syncFavoriteProfiles = true;
+
+            assert.strictEqual(state.strokeFavoriteProfiles[0].name, 'Notas');
+            assert.strictEqual(state.shapeFavoriteProfiles[0].name, 'General');
+
+            renameStrokeProfile(state, 'notes', 'Borrador Rápido');
+            assert.strictEqual(state.strokeFavoriteProfiles[0].name, 'Borrador Rápido');
+
+            renameShapeProfile(state, 'general', 'Figuras');
+            assert.strictEqual(state.shapeFavoriteProfiles[0].name, 'Figuras');
+        });
+
+        test('deleteStrokeProfile and deleteShapeProfile remove profile and prevent deleting last profile', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            assert.strictEqual(state.strokeFavoriteProfiles.length, 3);
+
+            // Delete academic profile
+            const deleted = deleteStrokeProfile(state, 'academic');
+            assert.strictEqual(deleted, true);
+            assert.strictEqual(state.strokeFavoriteProfiles.length, 2);
+            assert.ok(!state.strokeFavoriteProfiles.some(p => p.id === 'academic'));
+
+            // Delete engineering profile
+            deleteStrokeProfile(state, 'engineering');
+            assert.strictEqual(state.strokeFavoriteProfiles.length, 1);
+
+            // Attempt to delete last remaining profile should fail
+            const cannotDeleteLast = deleteStrokeProfile(state, 'notes');
+            assert.strictEqual(cannotDeleteLast, false);
+            assert.strictEqual(state.strokeFavoriteProfiles.length, 1);
+
+            // Same for shapes
+            assert.strictEqual(state.shapeFavoriteProfiles.length, 3);
+            deleteShapeProfile(state, 'diagrams');
+            deleteShapeProfile(state, 'engineering');
+            assert.strictEqual(state.shapeFavoriteProfiles.length, 1);
+            const cannotDeleteLastShape = deleteShapeProfile(state, 'general');
+            assert.strictEqual(cannotDeleteLastShape, false);
+            assert.strictEqual(state.shapeFavoriteProfiles.length, 1);
+        });
+
+        test('renameFavoritePreset updates preset name in active profile', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#111', width: 3 });
+            state.strokeFavoriteProfiles[0].pen.push(p1);
+
+            const renamed = renameFavoritePreset(state, 'pen', p1.id, 'Mi Pluma Favorita');
+            assert.strictEqual(renamed, true);
+            assert.strictEqual(state.strokeFavoriteProfiles[0].pen[0].name, 'Mi Pluma Favorita');
+
+            // Renaming to empty string clears the custom name
+            renameFavoritePreset(state, 'pen', p1.id, '');
+            assert.strictEqual(state.strokeFavoriteProfiles[0].pen[0].name, undefined);
         });
     });
 });
