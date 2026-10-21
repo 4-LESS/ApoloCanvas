@@ -159,8 +159,8 @@ function createMockEnvironment() {
             hasAttribute: (k: string) => attributes.has(k),
             removeAttribute: (k: string) => { attributes.delete(k); },
             appendChild: (child: any) => { children.push(child); child.parentElement = el; return child; },
-            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c) c.parentElement = el; },
+            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c && typeof c === 'object') c.parentElement = el; },
+            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c && typeof c === 'object') c.parentElement = el; },
             remove: () => {
                 if (el.parentElement?.children) {
                     const idx = el.parentElement.children.indexOf(el);
@@ -812,6 +812,288 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
 
             assert.strictEqual(prevented, true, 'contextmenu must be prevented');
             assert.strictEqual(stopped, true, 'contextmenu must stop propagation');
+
+            controller.destroy();
+        });
+
+        test('Android WebView Hover Barrel Press: pointermove with pointerType: pen, buttons: 1, pressure: 0 when isPenTipDown is false triggers favorites:cycle once on rising edge', async () => {
+            const scroller = mockEnv.mockDocument.createElement('div');
+            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
+            const mockFile = { path: 'test.md', basename: 'test' } as any;
+            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
+
+            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const strokeProf = getActiveStrokeProfile(toolState);
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
+            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
+            strokeProf.pen = [p1, p2];
+
+            const eventBus = new EngineEventBus();
+            let cycleCount = 0;
+            eventBus.on('favorites:cycle', () => { cycleCount++; });
+
+            const controller = new CanvasController(
+                scroller as any,
+                undefined,
+                docModel,
+                mockFile,
+                'test.md',
+                mockPersistence,
+                { toolState, eventBus },
+            );
+
+            const canvas = (controller as any).canvas;
+
+            // Hovering over screen with Samsung S-Pen barrel button pressed (Android reports buttons: 1)
+            let prevented = false;
+            let stopped = false;
+            canvas.dispatchEvent({
+                type: 'pointermove',
+                pointerType: 'pen',
+                buttons: 1,
+                button: -1,
+                pressure: 0,
+                clientX: 200,
+                clientY: 200,
+                preventDefault: () => { prevented = true; },
+                stopPropagation: () => { stopped = true; },
+                stopImmediatePropagation: () => { stopped = true; },
+            });
+
+            assert.strictEqual(cycleCount, 1, 'First hover with buttons=1 must trigger cycle once');
+            assert.strictEqual(prevented, true, 'Default action must be prevented');
+            assert.strictEqual(stopped, true, 'Propagation must be stopped');
+            assert.strictEqual((controller as any).penBarrelPressed, true, 'Latch must be set to true');
+
+            // Subsequent 240Hz frame with button still held
+            canvas.dispatchEvent({
+                type: 'pointermove',
+                pointerType: 'pen',
+                buttons: 1,
+                button: -1,
+                pressure: 0,
+                clientX: 205,
+                clientY: 205,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+                stopImmediatePropagation: () => {},
+            });
+            assert.strictEqual(cycleCount, 1, 'Subsequent frame must not re-trigger while held');
+
+            // Release button in hover
+            canvas.dispatchEvent({
+                type: 'pointermove',
+                pointerType: 'pen',
+                buttons: 0,
+                button: -1,
+                pressure: 0,
+                clientX: 210,
+                clientY: 210,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+                stopImmediatePropagation: () => {},
+            });
+            assert.strictEqual((controller as any).penBarrelPressed, false, 'Latch must be reset when buttons=0');
+
+            // Wait > 250ms for debounce
+            await new Promise((resolve) => setTimeout(resolve, 260));
+
+            // Press again in hover
+            canvas.dispatchEvent({
+                type: 'pointermove',
+                pointerType: 'pen',
+                buttons: 1,
+                button: -1,
+                pressure: 0,
+                clientX: 215,
+                clientY: 215,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+                stopImmediatePropagation: () => {},
+            });
+            assert.strictEqual(cycleCount, 2, 'Second press after release must cycle again');
+
+            controller.destroy();
+        });
+
+        test('Android WebView Contact contextmenu: pointerdown followed within 80ms by contextmenu cancels nascent stroke and triggers favorites:cycle', () => {
+            const scroller = mockEnv.mockDocument.createElement('div');
+            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
+            const mockFile = { path: 'test.md', basename: 'test' } as any;
+            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
+
+            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const strokeProf = getActiveStrokeProfile(toolState);
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
+            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
+            strokeProf.pen = [p1, p2];
+
+            const eventBus = new EngineEventBus();
+            let cycleCount = 0;
+            eventBus.on('favorites:cycle', () => { cycleCount++; });
+
+            const controller = new CanvasController(
+                scroller as any,
+                undefined,
+                docModel,
+                mockFile,
+                'test.md',
+                mockPersistence,
+                { toolState, eventBus },
+            );
+
+            const canvas = (controller as any).canvas;
+
+            // Step 1: Android WebView fires pointerdown with normal stylus contact
+            canvas.dispatchEvent({
+                type: 'pointerdown',
+                pointerType: 'pen',
+                button: 0,
+                buttons: 1,
+                pressure: 0.6,
+                clientX: 120,
+                clientY: 120,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            });
+
+            // Stroke has started in controller
+            assert.strictEqual(controller.isDrawing, true, 'Nascent stroke is active');
+
+            // Step 2: 30ms later, Android WebView delivers contextmenu due to barrel button contact
+            let cmPrevented = false;
+            let cmStopped = false;
+            canvas.dispatchEvent({
+                type: 'contextmenu',
+                pointerType: 'pen',
+                clientX: 122,
+                clientY: 122,
+                preventDefault: () => { cmPrevented = true; },
+                stopPropagation: () => { cmStopped = true; },
+                stopImmediatePropagation: () => { cmStopped = true; },
+            });
+
+            assert.strictEqual(cmPrevented, true, 'Native contextmenu must be prevented');
+            assert.strictEqual(cmStopped, true, 'Propagation must be stopped');
+            assert.strictEqual(cycleCount, 1, 'Barrel contact must trigger favorites:cycle once');
+            assert.strictEqual(controller.isDrawing, false, 'Nascent stroke must be cancelled');
+            assert.strictEqual((controller as any).points.size, 0, 'No points should remain in active points');
+            assert.strictEqual(docModel.elements.length, 0, 'Zero ink strokes committed to document');
+
+            controller.destroy();
+        });
+
+        test('Hover Exit Cleanup: pointerleave while penBarrelPressed is true resets latch so next hover press works cleanly', async () => {
+            const scroller = mockEnv.mockDocument.createElement('div');
+            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
+            const mockFile = { path: 'test.md', basename: 'test' } as any;
+            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
+
+            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const strokeProf = getActiveStrokeProfile(toolState);
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
+            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
+            strokeProf.pen = [p1, p2];
+
+            const eventBus = new EngineEventBus();
+            let cycleCount = 0;
+            eventBus.on('favorites:cycle', () => { cycleCount++; });
+
+            const controller = new CanvasController(
+                scroller as any,
+                undefined,
+                docModel,
+                mockFile,
+                'test.md',
+                mockPersistence,
+                { toolState, eventBus },
+            );
+
+            const canvas = (controller as any).canvas;
+
+            // 1. Press barrel button while hovering
+            canvas.dispatchEvent({
+                type: 'pointermove',
+                pointerType: 'pen',
+                buttons: 1,
+                button: -1,
+                pressure: 0,
+                clientX: 100,
+                clientY: 100,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            });
+            assert.strictEqual(cycleCount, 1);
+            assert.strictEqual((controller as any).penBarrelPressed, true);
+
+            // 2. S-Pen pulled out of hover range while button is still pressed
+            canvas.dispatchEvent({
+                type: 'pointerleave',
+                pointerType: 'pen',
+                clientX: -50,
+                clientY: -50,
+            });
+            assert.strictEqual((controller as any).penBarrelPressed, false, 'pointerleave must reset penBarrelPressed');
+            assert.strictEqual((controller as any).isPenTipDown, false, 'pointerleave must reset isPenTipDown');
+
+            // Wait > 250ms debounce
+            await new Promise((resolve) => setTimeout(resolve, 260));
+
+            // 3. S-Pen re-enters hover range with button pressed: must trigger next cycle cleanly
+            canvas.dispatchEvent({
+                type: 'pointermove',
+                pointerType: 'pen',
+                buttons: 1,
+                button: -1,
+                pressure: 0,
+                clientX: 100,
+                clientY: 100,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            });
+            assert.strictEqual(cycleCount, 2, 'Re-entering hover with button pressed must trigger cycle');
+
+            controller.destroy();
+        });
+
+        test('On-Screen S-Pen Diagnostic HUD can be toggled and records telemetry lines with pure DOM', () => {
+            const scroller = mockEnv.mockDocument.createElement('div');
+            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
+            const mockFile = { path: 'test.md', basename: 'test' } as any;
+            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
+
+            const controller = new CanvasController(
+                scroller as any,
+                undefined,
+                docModel,
+                mockFile,
+                'test.md',
+                mockPersistence,
+                { showSpenDebugHud: true },
+            );
+
+            const uiRoot = (controller as any).uiRoot as HTMLElement;
+            const hudEl = uiRoot.querySelector('.apolo-spen-debug-hud');
+            assert.ok(hudEl, 'Debug HUD element must be mounted when showSpenDebugHud is true');
+
+            const canvas = (controller as any).canvas;
+            canvas.dispatchEvent({
+                type: 'pointermove',
+                pointerType: 'pen',
+                button: -1,
+                buttons: 1,
+                pressure: 0.45,
+                clientX: 50,
+                clientY: 50,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            });
+
+            assert.match(hudEl.textContent || '', /\[pointermove.*ptr=pen btn=-1 btns=1 p=0\.45/);
+
+            // Toggle off
+            controller.setSpenDebugHud(false);
+            assert.strictEqual(uiRoot.querySelector('.apolo-spen-debug-hud'), null, 'HUD should be removed when disabled');
 
             controller.destroy();
         });

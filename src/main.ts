@@ -49,6 +49,7 @@ export interface ApoloCanvasSettings {
     defaultBoxBgTheme: BoxBgTheme;
     defaultBoxCustomBgColor: string;
     defaultBoxAccentColor: BoxAccentColor;
+    showSpenDebugHud?: boolean;
 }
 
 export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     enableMouseDrawing: false,
     shapeRecognition: true,
     straightenLines: false,
+    showSpenDebugHud: false,
     toolState: DEFAULT_WORKSPACE_TOOL_STATE,
     toolbarSlot: 'tc',
     favorites: [
@@ -353,6 +355,25 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.eventBus.on('save:status', (isSaving) => {
             if (this.saveStatusBarItem) {
                 this.saveStatusBarItem.setText(isSaving ? 'Apolo Canvas: Guardando…' : 'Apolo Canvas: Guardado');
+            }
+        });
+
+        this.eventBus.on('favorites:cycle', () => {
+            const tool = this.controller ? this.controller.getTool() : this.settings.toolState.activeTool;
+            if (tool === 'eraser' || tool === 'lasso') {
+                if (this.controller) {
+                    this.controller.setTool('pen');
+                } else {
+                    this.settings.toolState.activeTool = 'pen';
+                }
+                new Notice('Apolo: Pluma');
+                return;
+            }
+            const count = this.controller ? this.controller.getActiveToolFavoritesCount() : this.getActiveToolFavoritesCount();
+            if (count < 2) {
+                if (this.controller) {
+                    this.controller.toggleEstucheFavorites();
+                }
             }
         });
 
@@ -693,11 +714,29 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.debouncedSaveSettings();
     }
 
+    getActiveToolFavoritesCount(): number {
+        const tool = this.settings.toolState.activeTool;
+        if (tool === 'pen' || tool === 'highlighter') {
+            const profile = getActiveStrokeProfile(this.settings.toolState);
+            return (tool === 'pen' ? profile.pen : profile.highlighter).length;
+        } else if (tool === 'shape') {
+            const profile = getActiveShapeProfile(this.settings.toolState);
+            return profile.shape.length;
+        }
+        return 0;
+    }
+
     cycleActiveToolFavorite(): boolean {
         if (this.controller) {
             return this.controller.cycleActiveToolFavorite();
         }
         const tool = this.settings.toolState.activeTool;
+        if (tool === 'eraser' || tool === 'lasso') {
+            this.settings.toolState.activeTool = 'pen';
+            new Notice('Apolo: Pluma');
+            this.debouncedSaveSettings();
+            return true;
+        }
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return false;
 
         let list: ToolFavoritePreset[] = [];
@@ -717,7 +756,10 @@ export default class ApoloCanvasPlugin extends Plugin {
             profileName = profile.name;
         }
 
-        if (!list || list.length === 0) return false;
+        if (!list || list.length < 2) {
+            new Notice(`${profileName}: Sin favoritos para ciclar`);
+            return false;
+        }
 
         const currentSlice = tool === 'pen'
             ? { tool: 'pen', ...this.settings.toolState.pen }
@@ -846,6 +888,19 @@ export default class ApoloCanvasPlugin extends Plugin {
             name: 'Apolo Canvas: Cambiar al siguiente perfil de favoritos de la herramienta activa',
             callback: () => {
                 this.cycleActiveToolProfile();
+            },
+        });
+
+        this.addCommand({
+            id: 'apolo-toggle-spen-debug-hud',
+            name: 'Apolo Canvas: Mostrar/Ocultar diagnóstico de eventos S-Pen en pantalla',
+            callback: () => {
+                this.settings.showSpenDebugHud = !this.settings.showSpenDebugHud;
+                if (this.controller) {
+                    this.controller.setSpenDebugHud(this.settings.showSpenDebugHud);
+                }
+                new Notice(`Apolo S-Pen HUD: ${this.settings.showSpenDebugHud ? 'Activado' : 'Desactivado'}`);
+                void this.saveSettings();
             },
         });
 
@@ -985,6 +1040,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                 shapeRecognition: this.settings.shapeRecognition,
                 straightenLines: this.settings.straightenLines,
                 toolbarSlot: this.settings.toolbarSlot,
+                showSpenDebugHud: this.settings.showSpenDebugHud,
                 favorites: this.settings.favorites,
                 gridDensity: this.settings.gridDensity,
                 defaultBoxHeight: this.settings.defaultBoxHeight,
@@ -1173,6 +1229,11 @@ export default class ApoloCanvasPlugin extends Plugin {
     setPalmRejectionCooldown(ms: number): void {
         this.settings.palmRejectionCooldownMs = ms;
         this.controller?.setPalmRejectionCooldown(ms);
+    }
+
+    setSpenDebugHud(enabled: boolean): void {
+        this.settings.showSpenDebugHud = enabled;
+        this.controller?.setSpenDebugHud(enabled);
     }
 
     private async flushAndDestroy(): Promise<void> {
@@ -1415,6 +1476,16 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.defaultBoxBorderOutline ?? false)
                 .onChange(async value => {
                     this.plugin.settings.defaultBoxBorderOutline = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Diagnóstico de eventos S-Pen en pantalla')
+            .setDesc('Muestra un panel flotante semitransparente con los últimos eventos del lápiz (pointerdown, pointermove, contextmenu) para depuración en tabletas.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.showSpenDebugHud ?? false)
+                .onChange(async value => {
+                    this.plugin.setSpenDebugHud(value);
                     await this.plugin.saveSettings();
                 }));
     }

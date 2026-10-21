@@ -125,6 +125,7 @@ export interface CanvasControllerOptions {
     viewContainer?: HTMLElement;
     readonly?: boolean;
     toolbarSlot?: ToolbarSlot;
+    showSpenDebugHud?: boolean;
     favorites?: PenFavorite[];
     toolPalettes?: {
         pen?: { colors: string[]; opacities: number[] };
@@ -246,6 +247,12 @@ export class CanvasController {
     private barrelActive = false;
     private penBarrelPressed = false;
     private lastBarrelCycleTime = 0;
+    private isPenTipDown = false;
+    private lastPenEventTime = 0;
+    private strokeStartTime = 0;
+    private showSpenDebugHud = false;
+    private debugInputHudEl: HTMLElement | null = null;
+    private readonly debugHudLogs: string[] = [];
     private eraserMode: EraserMode = 'whole';
     private eraserRadius = 18;
     private scribbleToErase = true;
@@ -443,6 +450,11 @@ export class CanvasController {
             this.initZoomPill();
             this.initBoxMenu();
 
+            this.showSpenDebugHud = Boolean(options.showSpenDebugHud);
+            if (this.showSpenDebugHud) {
+                this.ensureDebugHud();
+            }
+
             this.scroller.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
             this.scroller.addEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true, passive: false });
             this.canvas.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
@@ -451,8 +463,11 @@ export class CanvasController {
             this.canvas.addEventListener('pointermove', this.onPointerMove, { capture: true, passive: false });
             this.scroller.addEventListener('pointerup', this.onPointerUp, { capture: true, passive: false });
             this.canvas.addEventListener('pointerup', this.onPointerUp, { capture: true, passive: false });
-            this.scroller.addEventListener('pointercancel', this.onPointerUp, { capture: true, passive: false });
-            this.canvas.addEventListener('pointercancel', this.onPointerUp, { capture: true, passive: false });
+            this.scroller.addEventListener('pointercancel', this.onPointerCancel, { capture: true, passive: false });
+            this.canvas.addEventListener('pointercancel', this.onPointerCancel, { capture: true, passive: false });
+            this.scroller.addEventListener('pointerleave', this.onPointerLeave, { capture: true, passive: false });
+            this.canvas.addEventListener('pointerleave', this.onPointerLeave, { capture: true, passive: false });
+            this.canvas.addEventListener('lostpointercapture', this.onLostPointerCapture);
             this.scroller.addEventListener('contextmenu', this.onCanvasContextMenu);
             this.canvas.addEventListener('contextmenu', this.onCanvasContextMenu);
 
@@ -481,7 +496,7 @@ export class CanvasController {
             window.addEventListener('pointerup', this.onWindowPointerUpHandleDrag, { passive: false });
             window.addEventListener('pointercancel', this.onWindowPointerUpHandleDrag, { passive: false });
             window.addEventListener('pointerup', this.onPointerUp, { passive: false });
-            window.addEventListener('pointercancel', this.onPointerUp, { passive: false });
+            window.addEventListener('pointercancel', this.onPointerCancel, { passive: false });
 
             this.canvas.addEventListener('pointerdown', this.onTouchDown, { passive: false });
             this.canvas.addEventListener('pointermove', this.onTouchMove, { passive: false });
@@ -1203,6 +1218,36 @@ export class CanvasController {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
+
+        const isPenEvent = (event as PointerEvent).pointerType === 'pen'
+            || (performance.now() - this.lastPenEventTime < 500);
+
+        if (isPenEvent) {
+            // Check if accidental nascent stroke was started in pointerdown right before contextmenu
+            if (this.isDrawing && this.activeStart) {
+                const elapsed = performance.now() - this.strokeStartTime;
+                let dist = 0;
+                if (this.points.size > 0) {
+                    const lastPt = this.points.get(this.points.size - 1);
+                    dist = Math.hypot(lastPt.x - this.activeStart.x, lastPt.y - this.activeStart.y) * this.zoom;
+                }
+                if (elapsed < 180 && dist < 12) {
+                    this.cancelActiveStroke();
+                }
+            }
+
+            this.isPenTipDown = false;
+
+            const now = performance.now();
+            if (now - this.lastBarrelCycleTime > 250) {
+                this.lastBarrelCycleTime = now;
+                this.penBarrelPressed = true;
+                this.cycleActiveToolFavorite();
+                this.options.eventBus?.emit('favorites:cycle');
+            }
+        }
+
+        this.updateDebugHud(event, 'contextmenu');
     };
 
     private isPenBarrelEvent(e: PointerEvent | MouseEvent): boolean {
@@ -1214,6 +1259,12 @@ export class CanvasController {
     }
 
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
+        if (event.pointerType === 'pen') {
+            this.lastPenEventTime = performance.now();
+            this.isPenTipDown = true;
+        }
+        this.updateDebugHud(event);
+
         if (this.handledBoxEvents.has(event)) return;
 
         // S-Pen barrel button: single-action cycle favorites when not mid-stroke
@@ -1296,24 +1347,44 @@ export class CanvasController {
 
     private readonly onPointerMove = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
-            const barrelActive = this.isPenBarrelEvent(e);
-            if (barrelActive && !this.penBarrelPressed && !this.isDrawing) {
-                this.penBarrelPressed = true;
-                const now = performance.now();
-                if (now - this.lastBarrelCycleTime > 250) {
-                    this.lastBarrelCycleTime = now;
-                    this.cycleActiveToolFavorite();
-                    this.options.eventBus?.emit('favorites:cycle');
+            this.lastPenEventTime = performance.now();
+
+            // On Android WebView, hovering with S-Pen barrel button reports buttons === 1
+            // without pointerdown ever firing (isPenTipDown === false).
+            // On Windows Ink / W3C, it reports buttons & 32, buttons & 2, button 2, or button 5.
+            const barrelHoverActive = !this.isPenTipDown && !this.isDrawing && (
+                e.buttons === 1 ||
+                (e.buttons & 2) !== 0 ||
+                (e.buttons & 32) !== 0 ||
+                e.button === 2 ||
+                e.button === 5
+            );
+
+            if (barrelHoverActive) {
+                if (!this.penBarrelPressed) {
+                    this.penBarrelPressed = true;
+                    const now = performance.now();
+                    if (now - this.lastBarrelCycleTime > 250) {
+                        this.lastBarrelCycleTime = now;
+                        this.cycleActiveToolFavorite();
+                        this.options.eventBus?.emit('favorites:cycle');
+                    }
                 }
+                this.updateDebugHud(e, 'hover-barrel');
                 e.preventDefault();
                 e.stopPropagation();
                 e.stopImmediatePropagation?.();
                 return;
             }
-            if (!barrelActive && this.penBarrelPressed) {
-                this.penBarrelPressed = false;
+
+            if (this.penBarrelPressed && !barrelHoverActive) {
+                if (e.buttons === 0 || !this.isPenBarrelEvent(e)) {
+                    this.penBarrelPressed = false;
+                }
             }
         }
+
+        this.updateDebugHud(e);
 
         if (!this.isDrawing) {
             return;
@@ -1321,12 +1392,109 @@ export class CanvasController {
     };
 
     private readonly onPointerUp = (e: PointerEvent): void => {
-        if (!this.isPenBarrelEvent(e)) {
-            this.penBarrelPressed = false;
+        if (e.pointerType === 'pen') {
+            this.isPenTipDown = false;
+            this.lastPenEventTime = performance.now();
+            if (!this.isPenBarrelEvent(e) || e.buttons === 0) {
+                this.penBarrelPressed = false;
+            }
         }
+        this.updateDebugHud(e);
+    };
+
+    private readonly onPointerCancel = (e: PointerEvent): void => {
+        if (e.pointerType === 'pen') {
+            this.isPenTipDown = false;
+            this.penBarrelPressed = false;
+            this.lastPenEventTime = performance.now();
+        }
+        this.updateDebugHud(e);
+    };
+
+    private readonly onPointerLeave = (e: PointerEvent): void => {
+        if (e.pointerType === 'pen') {
+            this.isPenTipDown = false;
+            this.penBarrelPressed = false;
+            this.lastPenEventTime = performance.now();
+        }
+        this.updateDebugHud(e);
+    };
+
+    private readonly onLostPointerCapture = (e: PointerEvent): void => {
+        if (e.pointerType === 'pen') {
+            this.isPenTipDown = false;
+        }
+        this.updateDebugHud(e);
     };
 
     private readonly onPointerDown = this.onCanvasPointerDownHandleCheck;
+
+    public cancelActiveStroke(): void {
+        this.input?.cancelActiveDrawing();
+        this.cancel();
+    }
+
+    public setSpenDebugHud(enabled: boolean): void {
+        this.showSpenDebugHud = enabled;
+        if (!enabled) {
+            if (this.debugInputHudEl) {
+                this.debugInputHudEl.remove();
+                this.debugInputHudEl = null;
+            }
+        } else {
+            this.ensureDebugHud();
+        }
+    }
+
+    public toggleSpenDebugHud(): boolean {
+        this.setSpenDebugHud(!this.showSpenDebugHud);
+        return this.showSpenDebugHud;
+    }
+
+    private ensureDebugHud(): void {
+        if (this.debugInputHudEl) return;
+        const hud = document.createElement('div');
+        hud.className = 'apolo-spen-debug-hud';
+        hud.style.position = 'absolute';
+        hud.style.bottom = '12px';
+        hud.style.left = '12px';
+        hud.style.zIndex = '1000';
+        hud.style.pointerEvents = 'none';
+        hud.style.fontFamily = 'monospace';
+        hud.style.fontSize = '11px';
+        hud.style.lineHeight = '1.3';
+        hud.style.whiteSpace = 'pre';
+        hud.style.backgroundColor = 'rgba(0, 0, 0, 0.75)';
+        hud.style.color = '#00ff66';
+        hud.style.padding = '6px 10px';
+        hud.style.borderRadius = '6px';
+        hud.style.border = '1px solid rgba(0, 255, 102, 0.4)';
+        hud.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+        hud.textContent = 'S-Pen HUD Activo — Esperando eventos...';
+        this.uiRoot.appendChild(hud);
+        this.debugInputHudEl = hud;
+    }
+
+    private updateDebugHud(e: PointerEvent | MouseEvent, context?: string): void {
+        if (!this.showSpenDebugHud) return;
+        this.ensureDebugHud();
+        if (!this.debugInputHudEl) return;
+
+        const pEvent = e as PointerEvent;
+        const pType = pEvent.pointerType ?? 'mouse';
+        const btn = typeof e.button === 'number' ? e.button : -1;
+        const btns = typeof e.buttons === 'number' ? e.buttons : 0;
+        const press = typeof pEvent.pressure === 'number' ? pEvent.pressure.toFixed(2) : '0.00';
+        const ctxLabel = context ? ` (${context})` : '';
+
+        const line = `[${e.type}${ctxLabel}] ptr=${pType} btn=${btn} btns=${btns} p=${press} tipDown=${this.isPenTipDown} barrel=${this.penBarrelPressed}`;
+        this.debugHudLogs.push(line);
+        if (this.debugHudLogs.length > 4) {
+            this.debugHudLogs.shift();
+        }
+
+        this.debugInputHudEl.textContent = this.debugHudLogs.join('\n');
+    }
 
     private startHandleDrag(event: PointerEvent, handleEl: HTMLElement): void {
         const boxId = handleEl.dataset.apoloHandleId
@@ -2100,8 +2268,78 @@ export class CanvasController {
         this.toast?.show(sync ? 'Perfiles sincronizados' : 'Perfiles independientes');
     }
 
+    public getTool(): ToolType {
+        return this.tool;
+    }
+
+    public getToolFavorites(tool: 'pen' | 'highlighter' | 'shape'): ToolFavoritePreset[] {
+        if (tool === 'pen') {
+            return getActiveStrokeProfile(this.toolState).pen;
+        } else if (tool === 'highlighter') {
+            return getActiveStrokeProfile(this.toolState).highlighter;
+        } else if (tool === 'shape') {
+            return getActiveShapeProfile(this.toolState).shape;
+        }
+        return [];
+    }
+
+    public getActiveToolFavoritesCount(): number {
+        const tool = this.tool;
+        if (tool === 'pen' || tool === 'highlighter' || tool === 'shape') {
+            return this.getToolFavorites(tool).length;
+        }
+        return 0;
+    }
+
+    public toggleEstucheFavorites(): void {
+        const tool = this.tool;
+        if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
+        if (this.estuche?.isOpen()) {
+            this.estuche.close();
+        } else {
+            const toolBtn = this.toolbar?.getToolButton(tool);
+            const favsList = this.getToolFavorites(tool);
+            const isFav = this.isCurrentToolFavorited();
+            this.estuche?.open({
+                tool,
+                slot: this.toolbarSlot,
+                color: this.style.color,
+                width: this.style.width,
+                profileId: this.penProfileId,
+                smoothing: this.smoothing,
+                pressureSensitivity: this.pressureSensitivity,
+                opacity: this.style.opacity,
+                lineStyle: this.style.pattern,
+                pattern: this.style.pattern,
+                favorites: favsList,
+                isCurrentFavorite: isFav,
+                showingFavorites: true,
+                eraserMode: this.eraserMode,
+                eraserRadius: this.eraserRadius,
+                scribbleToErase: this.scribbleToErase,
+                lassoMode: this.lassoMode,
+                shapeType: this.shapeType,
+                snapGrid: this.snapGrid,
+                straightenLines: this.straightenLines,
+                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
+                strokeFavoriteProfiles: this.toolState.strokeFavoriteProfiles,
+                activeStrokeProfileId: this.toolState.activeStrokeProfileId,
+                shapeFavoriteProfiles: this.toolState.shapeFavoriteProfiles,
+                activeShapeProfileId: this.toolState.activeShapeProfileId,
+            }, toolBtn);
+        }
+    }
+
     public cycleActiveToolFavorite(): boolean {
         const tool = this.tool;
+
+        // Fallback: if active tool is eraser or lasso, switch to pen so barrel button is never a dead no-op
+        if (tool === 'eraser' || tool === 'lasso') {
+            this.setTool('pen');
+            this.toast?.show('Herramienta: Pluma');
+            return true;
+        }
+
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return false;
 
         let list: ToolFavoritePreset[] = [];
@@ -2121,7 +2359,12 @@ export class CanvasController {
             profileName = profile.name;
         }
 
-        if (!list || list.length === 0) return false;
+        // If active profile has no favorites, open ToolEstuche on Favorites view for immediate visual feedback
+        if (!list || list.length === 0) {
+            this.toggleEstucheFavorites();
+            this.toast?.show(`${profileName} · Sin favoritos guardados`);
+            return false;
+        }
 
         const currentSlice = this.getCurrentToolSlice();
         const next = getNextFavoritePreset(list, currentSlice);
@@ -2635,15 +2878,18 @@ export class CanvasController {
         this.canvas.removeEventListener('pointermove', this.onPointerMove, { capture: true });
         this.scroller.removeEventListener('pointerup', this.onPointerUp, { capture: true });
         this.canvas.removeEventListener('pointerup', this.onPointerUp, { capture: true });
-        this.scroller.removeEventListener('pointercancel', this.onPointerUp, { capture: true });
-        this.canvas.removeEventListener('pointercancel', this.onPointerUp, { capture: true });
+        this.scroller.removeEventListener('pointercancel', this.onPointerCancel, { capture: true });
+        this.canvas.removeEventListener('pointercancel', this.onPointerCancel, { capture: true });
+        this.scroller.removeEventListener('pointerleave', this.onPointerLeave, { capture: true });
+        this.canvas.removeEventListener('pointerleave', this.onPointerLeave, { capture: true });
+        this.canvas.removeEventListener('lostpointercapture', this.onLostPointerCapture);
         this.scroller.removeEventListener('contextmenu', this.onCanvasContextMenu);
         this.canvas.removeEventListener('contextmenu', this.onCanvasContextMenu);
         window.removeEventListener('pointermove', this.onWindowPointerMoveHandleDrag);
         window.removeEventListener('pointerup', this.onWindowPointerUpHandleDrag);
         window.removeEventListener('pointercancel', this.onWindowPointerUpHandleDrag);
         window.removeEventListener('pointerup', this.onPointerUp);
-        window.removeEventListener('pointercancel', this.onPointerUp);
+        window.removeEventListener('pointercancel', this.onPointerCancel);
         this.canvas.removeEventListener('pointerdown', this.onTouchDown);
         this.canvas.removeEventListener('pointermove', this.onTouchMove);
         this.canvas.removeEventListener('pointerup', this.onTouchEnd);
@@ -2669,6 +2915,10 @@ export class CanvasController {
         this.zoomPill = null;
         this.toast = null;
         this.boxMenu = null;
+        if (this.debugInputHudEl) {
+            this.debugInputHudEl.remove();
+            this.debugInputHudEl = null;
+        }
         this.uiRoot.replaceChildren();
         this.uiRoot.remove();
 

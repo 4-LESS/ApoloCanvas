@@ -340,9 +340,21 @@ export class InputManager {
         this.options.onStrokeCancel?.();
     };
 
+    public cancelActiveDrawing(): void {
+        if (this.activeDrawingPointerId !== null) {
+            this.activeDrawingPointerId = null;
+            this.activeDrawingPointerType = null;
+            this.activeBarrel = false;
+            this.options.onStrokeCancel?.();
+        }
+    }
+
     private readonly handleContextMenu = (event: MouseEvent): void => {
         event.preventDefault?.();
         event.stopPropagation?.();
+        if ((event as any).pointerType === 'pen' || Date.now() - this.lastPenContactAt < 500) {
+            this.cancelActiveDrawing();
+        }
     };
 
     private stopDrawingEvent(event: PointerEvent): void {
