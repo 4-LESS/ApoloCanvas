@@ -3310,12 +3310,27 @@ button.apolo-box-menu-swatch,
   padding: 0 !important;
   z-index: 2;
 }
+.popover-track-wrap input[type="range"].popover-range-native::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  cursor: pointer;
+}
+.popover-track-wrap input[type="range"].popover-range-native::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+}
 .slider-thumb,
 .popover-bubble-val {
   position: absolute;
   top: 50%;
-  left: var(--val, 35%);
-  transform: translate(-50%, -50%);
+  left: 0;
+  transform: translateY(-50%);
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -3335,7 +3350,7 @@ button.apolo-box-menu-swatch,
 .slider-track:hover .slider-thumb,
 .popover-track-wrap:hover .slider-thumb,
 .popover-track-wrap:hover .popover-bubble-val {
-  transform: translate(-50%, -50%) scale(1.06);
+  transform: translateY(-50%) scale(1.06);
 }
 
 /* 3. Patrones de Línea */

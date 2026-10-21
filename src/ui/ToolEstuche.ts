@@ -340,7 +340,7 @@ export class ToolEstuche implements PopoverInstance {
             const max = Number(this.widthInput.max) || 20;
             const ratio = Math.max(0, Math.min(1, (partial.width - min) / (max - min)));
             const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.widthBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.widthBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
             const track = this.widthInput.parentElement;
             if (track) {
                 track.style.setProperty?.('--val', pct);
@@ -357,7 +357,7 @@ export class ToolEstuche implements PopoverInstance {
             this.smoothingBubble.textContent = String(val);
             const ratio = Math.max(0, Math.min(1, val / 10));
             const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.smoothingBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.smoothingBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
             const track = this.smoothingInput.parentElement;
             if (track) {
                 track.style.setProperty?.('--val', pct);
@@ -374,7 +374,7 @@ export class ToolEstuche implements PopoverInstance {
             this.opacityBubble.textContent = String(val);
             const ratio = Math.max(0, Math.min(1, val / 100));
             const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
             this.opacityBubble.style.backgroundColor = this.state.color;
             this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
             const track = this.opacityInput.parentElement;
@@ -389,7 +389,7 @@ export class ToolEstuche implements PopoverInstance {
             this.opacityBubble.textContent = String(val);
             const ratio = Math.max(0, Math.min(1, val / 100));
             const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
             this.opacityBubble.style.backgroundColor = this.state.color;
             this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
             const track = this.opacityInput.parentElement;
@@ -448,7 +448,7 @@ export class ToolEstuche implements PopoverInstance {
             const min = Number(this.eraserRadiusInput.min) || 8;
             const max = Number(this.eraserRadiusInput.max) || 60;
             const ratio = Math.max(0, Math.min(1, (partial.eraserRadius - min) / (max - min)));
-            this.eraserRadiusBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            this.eraserRadiusBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
             if (this.eraserPreviewDot) {
                 const dotSize = Math.max(12, Math.min(36, partial.eraserRadius * 0.7));
                 this.eraserPreviewDot.style.width = `${dotSize}px`;
@@ -1531,7 +1531,7 @@ export class ToolEstuche implements PopoverInstance {
             const ratio = Math.max(0, Math.min(1, (val - min) / (max - min)));
             const pct = `${(ratio * 100).toFixed(1)}%`;
             track.style.setProperty('--val', pct);
-            bubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+            bubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
             fill.style.width = pct;
             if (isOpacity) {
                 bubble.style.backgroundColor = this.state.color;
@@ -1767,7 +1767,7 @@ export class ToolEstuche implements PopoverInstance {
                         this.opacityInput.value = String(nextOpacity);
                         this.opacityBubble.textContent = String(nextOpacity);
                         const ratio = Math.max(0, Math.min(1, nextOpacity / 100));
-                        this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 26}px)`;
+                        this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
                         this.opacityBubble.style.backgroundColor = newColor;
                         this.opacityBubble.style.opacity = String(Math.max(0.35, nextOpacity / 100));
                     }
