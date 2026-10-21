@@ -240,6 +240,33 @@ export function createSvgFromMarkup(markup: string): SVGSVGElement {
     return svg;
 }
 
+/**
+ * Sets an accessible tooltip on an element for Obsidian without triggering
+ * duplicate native browser tooltips.
+ * In Obsidian WebView, setting `aria-label` triggers Obsidian's rich tooltip.
+ * If `title` is also set as a DOM attribute, Chromium spawns a second native tooltip.
+ * We set `aria-label` and define a JS `.title` getter so unit tests still pass.
+ */
+export function setAccessibleTooltip(el: HTMLElement, label: string, jsTitle?: string): void {
+    el.setAttribute?.('aria-label', label);
+    if (typeof el.removeAttribute === 'function') {
+        el.removeAttribute('title');
+    }
+    const titleVal = jsTitle ?? label;
+    try {
+        Object.defineProperty(el, 'title', {
+            get: () => titleVal,
+            set: () => {},
+            configurable: true,
+        });
+    } catch {
+        (el as any).title = titleVal;
+    }
+    if ((el as any).title !== titleVal) {
+        (el as any).title = titleVal;
+    }
+}
+
 export function createSvg(pathD: string, options: SvgOptions = {}): SVGSVGElement {
     const size = options.size ?? 24;
     const w = options.width ?? size;

@@ -10,7 +10,7 @@ import {
     DEFAULT_SHAPE_FAVORITE_PROFILES,
 } from '../../core/types.ts';
 import { computeFavoriteFingerprint, inferTool } from './FavoritesStore.ts';
-import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark } from '../theme.ts';
+import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark, setAccessibleTooltip } from '../theme.ts';
 
 export interface FavoritesDrawerCallbacks {
     onSelectFavorite: (preset: ToolFavoritePreset) => void;
@@ -417,8 +417,7 @@ export class FavoritesDrawer {
         const prevBtn = document.createElement('button');
         prevBtn.type = 'button';
         prevBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-prev' + (safeIdx === 0 ? ' is-disabled' : '');
-        prevBtn.title = 'Perfil anterior';
-        prevBtn.setAttribute('aria-label', 'Perfil anterior');
+        setAccessibleTooltip(prevBtn, 'Perfil anterior');
         prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 12, strokeWidth: 2 }));
         if (safeIdx === 0) {
             prevBtn.disabled = true;
@@ -439,8 +438,7 @@ export class FavoritesDrawer {
             dot.type = 'button';
             const isActive = idx === safeIdx;
             dot.className = `dot popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
-            dot.title = p.name;
-            dot.setAttribute('aria-label', `Perfil ${p.name}`);
+            setAccessibleTooltip(dot, `Perfil ${p.name}`, p.name);
             dot.onclick = (e) => {
                 e.stopPropagation();
                 this.switchProfile(p.id);
@@ -452,8 +450,7 @@ export class FavoritesDrawer {
         const addDot = document.createElement('button');
         addDot.type = 'button';
         addDot.className = `dot-add popover-header-dot apolo-kit-dot is-add-dot${isLastProfile ? ' is-next-hint' : ''}`;
-        addDot.title = 'Nuevo perfil';
-        addDot.setAttribute('aria-label', 'Crear nuevo perfil');
+        setAccessibleTooltip(addDot, 'Nuevo perfil');
         addDot.appendChild(createSvg(ICONS.plus, { size: 8, strokeWidth: 2.2 }));
         addDot.onclick = (e) => {
             e.stopPropagation();
@@ -466,8 +463,7 @@ export class FavoritesDrawer {
         const nextBtn = document.createElement('button');
         nextBtn.type = 'button';
         nextBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-next';
-        nextBtn.title = isLastProfile ? 'Nuevo perfil' : 'Perfil siguiente';
-        nextBtn.setAttribute('aria-label', nextBtn.title);
+        setAccessibleTooltip(nextBtn, isLastProfile ? 'Nuevo perfil' : 'Perfil siguiente');
         nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
         nextBtn.onclick = (e) => {
             e.stopPropagation();
@@ -593,8 +589,7 @@ export class FavoritesDrawer {
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
         cancelBtn.className = 'ibtn apolo-profile-cancel-btn';
-        cancelBtn.title = 'Cancelar';
-        cancelBtn.setAttribute('aria-label', 'Cancelar');
+        setAccessibleTooltip(cancelBtn, 'Cancelar');
         cancelBtn.appendChild(createSvg(ICONS.close, { size: 14, strokeWidth: 2 }));
         cancelBtn.onclick = (e) => {
             e.stopPropagation();
@@ -604,8 +599,7 @@ export class FavoritesDrawer {
         const createBtn = document.createElement('button');
         createBtn.type = 'button';
         createBtn.className = 'btn-ok apolo-profile-create-btn';
-        createBtn.title = 'Crear perfil';
-        createBtn.setAttribute('aria-label', 'Crear perfil');
+        setAccessibleTooltip(createBtn, 'Crear perfil');
         createBtn.appendChild(createSvg(ICONS.check, { size: 14, strokeWidth: 2.2 }));
 
         const submit = () => {
@@ -696,8 +690,7 @@ export class FavoritesDrawer {
         card.setAttribute('role', 'button');
         card.setAttribute('tabindex', '0');
         card.setAttribute('aria-pressed', String(isActive));
-        card.setAttribute('aria-label', tooltip);
-        card.title = tooltip;
+        setAccessibleTooltip(card, tooltip);
 
         card.onclick = () => this.callbacks.onSelectFavorite(preset);
         card.onkeydown = (e) => {
@@ -740,8 +733,7 @@ export class FavoritesDrawer {
         const handleBtn = document.createElement('button');
         handleBtn.type = 'button';
         handleBtn.className = 'grip apolo-favorite-handle-wrap apolo-favorite-drag-handle';
-        handleBtn.title = 'Arrastrar para reordenar / Clic para opciones';
-        handleBtn.setAttribute('aria-label', 'Mover o editar favorito');
+        setAccessibleTooltip(handleBtn, 'Arrastrar para reordenar / Clic para opciones');
         handleBtn.appendChild(create6DotGripSvg());
 
         const menu = document.createElement('div');
@@ -751,8 +743,7 @@ export class FavoritesDrawer {
         const renameBtn = document.createElement('button');
         renameBtn.type = 'button';
         renameBtn.className = 'ibtn apolo-card-menu-btn apolo-card-rename-btn';
-        renameBtn.title = 'Cambiar nombre';
-        renameBtn.setAttribute('aria-label', 'Cambiar nombre');
+        setAccessibleTooltip(renameBtn, 'Cambiar nombre');
         renameBtn.appendChild(createSvg(ICONS.pencil, { size: 14, strokeWidth: 1.8 }));
         renameBtn.onclick = (e) => {
             e.stopPropagation();
@@ -764,8 +755,7 @@ export class FavoritesDrawer {
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
         deleteBtn.className = 'ibtn danger apolo-card-menu-btn apolo-favorite-delete-btn';
-        deleteBtn.title = 'Eliminar favorito';
-        deleteBtn.setAttribute('aria-label', 'Eliminar favorito');
+        setAccessibleTooltip(deleteBtn, 'Eliminar favorito');
         deleteBtn.appendChild(createSvg(ICONS.trash, { size: 14, strokeWidth: 1.8 }));
         deleteBtn.onclick = (e) => {
             e.stopPropagation();
@@ -907,15 +897,13 @@ export class FavoritesDrawer {
         const saveBtn = document.createElement('button');
         saveBtn.type = 'button';
         saveBtn.className = 'ibtn btn-ok apolo-card-rename-btn apolo-card-rename-save';
-        saveBtn.title = 'Guardar nombre';
-        saveBtn.setAttribute('aria-label', 'Guardar nombre');
+        setAccessibleTooltip(saveBtn, 'Guardar nombre');
         saveBtn.appendChild(createSvg(ICONS.check, { size: 14, strokeWidth: 2.2 }));
 
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
         cancelBtn.className = 'ibtn apolo-card-rename-btn apolo-card-rename-cancel';
-        cancelBtn.title = 'Cancelar';
-        cancelBtn.setAttribute('aria-label', 'Cancelar');
+        setAccessibleTooltip(cancelBtn, 'Cancelar');
         cancelBtn.appendChild(createSvg(ICONS.close, { size: 14, strokeWidth: 2 }));
 
         const finish = () => {

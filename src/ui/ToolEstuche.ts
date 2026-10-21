@@ -16,7 +16,7 @@ import {
     DEFAULT_STROKE_FAVORITE_PROFILES,
     DEFAULT_SHAPE_FAVORITE_PROFILES,
 } from '../core/types.ts';
-import { ICONS, createSvg } from './theme.ts';
+import { ICONS, createSvg, setAccessibleTooltip } from './theme.ts';
 import type { PopoverController, PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { applyPopoverGeometry } from './popover/PopoverGeometry.ts';
@@ -497,16 +497,14 @@ export class ToolEstuche implements PopoverInstance {
         this.starBtn.classList.toggle('is-active', isFav);
         this.starBtn.classList.toggle('is-fav-saved', isFav);
         this.starBtn.setAttribute('aria-pressed', String(isFav));
-        this.starBtn.title = isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito';
-        this.starBtn.setAttribute('aria-label', this.starBtn.title);
+        setAccessibleTooltip(this.starBtn, isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito');
     }
 
     private updateFavsButtonVisual(): void {
         if (!this.favsBtn) return;
         const isShowing = Boolean(this.state.showingFavorites);
         this.favsBtn.classList.toggle('is-active', isShowing);
-        this.favsBtn.title = isShowing ? 'Ver herramientas' : 'Ver favoritos guardados';
-        this.favsBtn.setAttribute('aria-label', this.favsBtn.title);
+        setAccessibleTooltip(this.favsBtn, isShowing ? 'Ver herramientas' : 'Ver favoritos guardados');
 
         const count = this.getToolFavorites().length;
         let badge = this.favsBtn.querySelector('.popover-favs-badge') as HTMLElement | null;
@@ -604,8 +602,7 @@ export class ToolEstuche implements PopoverInstance {
                 const prevBtn = document.createElement('button');
                 prevBtn.type = 'button';
                 prevBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-prev';
-                prevBtn.title = 'Perfil anterior';
-                prevBtn.setAttribute('aria-label', 'Perfil anterior');
+                setAccessibleTooltip(prevBtn, 'Perfil anterior');
                 prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 12, strokeWidth: 2 }));
                 if (safeIdx === 0) {
                     prevBtn.classList.add('is-disabled');
@@ -627,8 +624,7 @@ export class ToolEstuche implements PopoverInstance {
                     dot.type = 'button';
                     const isActive = idx === safeIdx;
                     dot.className = `dot popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
-                    dot.title = p.name;
-                    dot.setAttribute('aria-label', `Perfil ${p.name}`);
+                    setAccessibleTooltip(dot, `Perfil ${p.name}`, p.name);
                     dot.onclick = (e) => {
                         e.stopPropagation();
                         this.switchProfile(p.id);
@@ -640,8 +636,7 @@ export class ToolEstuche implements PopoverInstance {
                 const addDot = document.createElement('button');
                 addDot.type = 'button';
                 addDot.className = `dot-add popover-header-dot apolo-kit-dot is-add-dot${isLastProfile ? ' is-next-hint' : ''}`;
-                addDot.title = 'Nuevo perfil';
-                addDot.setAttribute('aria-label', 'Crear nuevo perfil');
+                setAccessibleTooltip(addDot, 'Nuevo perfil');
                 addDot.appendChild(createSvg(ICONS.plus, { size: 10, strokeWidth: 2.2 }));
                 addDot.onclick = (e) => {
                     e.stopPropagation();
@@ -654,8 +649,7 @@ export class ToolEstuche implements PopoverInstance {
                 const nextBtn = document.createElement('button');
                 nextBtn.type = 'button';
                 nextBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-next';
-                nextBtn.title = isLastProfile ? 'Nuevo perfil' : 'Perfil siguiente';
-                nextBtn.setAttribute('aria-label', nextBtn.title);
+                setAccessibleTooltip(nextBtn, isLastProfile ? 'Nuevo perfil' : 'Perfil siguiente');
                 nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
                 nextBtn.onclick = (e) => {
                     e.stopPropagation();
@@ -685,8 +679,7 @@ export class ToolEstuche implements PopoverInstance {
         const prevBtn = document.createElement('button');
         prevBtn.type = 'button';
         prevBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-prev';
-        prevBtn.title = 'Cancelar y volver';
-        prevBtn.setAttribute('aria-label', 'Cancelar y volver');
+        setAccessibleTooltip(prevBtn, 'Cancelar y volver');
         prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 12, strokeWidth: 2 }));
         prevBtn.onclick = (e) => {
             e.stopPropagation();
@@ -703,8 +696,7 @@ export class ToolEstuche implements PopoverInstance {
             const dot = document.createElement('button');
             dot.type = 'button';
             dot.className = 'dot popover-header-dot apolo-kit-dot';
-            dot.title = p.name;
-            dot.setAttribute('aria-label', `Perfil ${p.name}`);
+            setAccessibleTooltip(dot, `Perfil ${p.name}`, p.name);
             dot.onclick = (e) => {
                 e.stopPropagation();
                 this.favoritesDrawer?.closeCreateProfileForm?.();
@@ -717,8 +709,7 @@ export class ToolEstuche implements PopoverInstance {
         const addDot = document.createElement('button');
         addDot.type = 'button';
         addDot.className = 'dot-add popover-header-dot apolo-kit-dot is-add-dot is-active';
-        addDot.title = 'Nuevo perfil';
-        addDot.setAttribute('aria-label', 'Nuevo perfil');
+        setAccessibleTooltip(addDot, 'Nuevo perfil');
         addDot.appendChild(createSvg(ICONS.plus, { size: 10, strokeWidth: 2.2 }));
         track.appendChild(addDot);
         this.headerDotsContainer.appendChild(track);
@@ -728,8 +719,7 @@ export class ToolEstuche implements PopoverInstance {
         nextBtn.type = 'button';
         nextBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-next is-disabled';
         nextBtn.disabled = true;
-        nextBtn.title = 'Perfil siguiente';
-        nextBtn.setAttribute('aria-label', 'Perfil siguiente');
+        setAccessibleTooltip(nextBtn, 'Perfil siguiente');
         nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
         this.headerDotsContainer.appendChild(nextBtn);
     }
@@ -893,8 +883,7 @@ export class ToolEstuche implements PopoverInstance {
         const favsBtn = document.createElement('button');
         favsBtn.type = 'button';
         favsBtn.className = `hd-bookmark-btn popover-hdr-btn popover-favs-btn ${this.state.showingFavorites ? 'is-active' : ''}`;
-        favsBtn.title = this.state.showingFavorites ? 'Ver herramientas' : 'Ver favoritos guardados';
-        favsBtn.setAttribute('aria-label', favsBtn.title);
+        setAccessibleTooltip(favsBtn, this.state.showingFavorites ? 'Ver herramientas' : 'Ver favoritos guardados');
         favsBtn.appendChild(createSvg(ICONS.bookmark, { size: 18 }));
 
         const count = this.getToolFavorites().length;
@@ -938,8 +927,7 @@ export class ToolEstuche implements PopoverInstance {
         starBtn.type = 'button';
         const isFav = Boolean(this.state.isCurrentFavorite);
         starBtn.className = `ibtn popover-hdr-btn popover-star-btn ${isFav ? 'is-active is-fav-saved' : ''}`;
-        starBtn.title = isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito';
-        starBtn.setAttribute('aria-label', starBtn.title);
+        setAccessibleTooltip(starBtn, isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito');
         starBtn.setAttribute('aria-pressed', String(isFav));
         starBtn.appendChild(createSvg(ICONS.star, { size: 18 }));
 
@@ -959,8 +947,7 @@ export class ToolEstuche implements PopoverInstance {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'ibtn popover-hdr-btn popover-close';
-        closeBtn.title = 'Cerrar';
-        closeBtn.setAttribute('aria-label', 'Cerrar');
+        setAccessibleTooltip(closeBtn, 'Cerrar');
         closeBtn.appendChild(createSvg(ICONS.close, { size: 16 }));
         closeBtn.onclick = () => this.close();
 
@@ -991,8 +978,7 @@ export class ToolEstuche implements PopoverInstance {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'ibtn popover-hdr-btn popover-close';
-        closeBtn.title = 'Cerrar';
-        closeBtn.setAttribute('aria-label', 'Cerrar');
+        setAccessibleTooltip(closeBtn, 'Cerrar');
         closeBtn.appendChild(createSvg(ICONS.close, { size: 16 }));
         closeBtn.onclick = () => this.close();
 
@@ -1022,8 +1008,7 @@ export class ToolEstuche implements PopoverInstance {
             btn.type = 'button';
             const isActive = this.state.profileId === t.id;
             btn.className = `tool-btn popover-tool-opt ${isActive ? 'is-active' : ''}`;
-            btn.title = t.label;
-            btn.setAttribute('aria-label', t.label);
+            setAccessibleTooltip(btn, t.label);
             btn.setAttribute('aria-pressed', String(isActive));
 
             const wrap = document.createElement('div');
@@ -1124,8 +1109,7 @@ export class ToolEstuche implements PopoverInstance {
             btn.type = 'button';
             const isActive = activeTip === t.id;
             btn.className = `tool-btn popover-tool-opt ${isActive ? 'is-active' : ''}`;
-            btn.title = t.label;
-            btn.setAttribute('aria-label', t.label);
+            setAccessibleTooltip(btn, t.label);
             btn.setAttribute('aria-pressed', String(isActive));
 
             const wrap = document.createElement('div');
@@ -1309,8 +1293,7 @@ export class ToolEstuche implements PopoverInstance {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = `shape-grid-btn ${this.state.shapeType === def.type ? 'is-active' : ''}`;
-            btn.title = def.label;
-            btn.setAttribute('aria-label', def.label);
+            setAccessibleTooltip(btn, def.label);
             btn.appendChild(createSvg(def.iconD, { size: 24 }));
 
             btn.onclick = () => {
@@ -1430,8 +1413,7 @@ export class ToolEstuche implements PopoverInstance {
         const minusBtn = document.createElement('button');
         minusBtn.type = 'button';
         minusBtn.className = 'slider-step popover-step-btn';
-        minusBtn.title = 'Disminuir';
-        minusBtn.setAttribute('aria-label', `Disminuir ${label.toLowerCase()}`);
+        setAccessibleTooltip(minusBtn, `Disminuir ${label.toLowerCase()}`);
         minusBtn.appendChild(createSvg(ICONS.minus, { size: 14 }));
 
         const track = document.createElement('div');
@@ -1465,8 +1447,7 @@ export class ToolEstuche implements PopoverInstance {
         const plusBtn = document.createElement('button');
         plusBtn.type = 'button';
         plusBtn.className = 'slider-step popover-step-btn';
-        plusBtn.title = 'Aumentar';
-        plusBtn.setAttribute('aria-label', `Aumentar ${label.toLowerCase()}`);
+        setAccessibleTooltip(plusBtn, `Aumentar ${label.toLowerCase()}`);
         plusBtn.appendChild(createSvg(ICONS.plus, { size: 14 }));
 
         row.append(minusBtn, track, plusBtn);
@@ -1525,8 +1506,7 @@ export class ToolEstuche implements PopoverInstance {
             const isActive = s.id === activePattern;
             btn.className = `line-chip popover-line-chip ${isActive ? 'is-active' : ''}`;
             btn.setAttribute('aria-pressed', String(isActive));
-            btn.title = s.label;
-            btn.setAttribute('aria-label', s.label);
+            setAccessibleTooltip(btn, s.label);
 
             const pill = document.createElement('span');
             pill.className = 'popover-line-chip-pill';
@@ -1568,7 +1548,7 @@ export class ToolEstuche implements PopoverInstance {
         sw.className = `switch popover-switch ${initialChecked ? 'is-on is-checked' : ''}`;
         sw.setAttribute('role', 'switch');
         sw.setAttribute('aria-checked', String(initialChecked));
-        sw.setAttribute('aria-label', title);
+        setAccessibleTooltip(sw, title);
 
         const thumb = document.createElement('span');
         thumb.className = 'popover-switch-thumb';
@@ -1630,8 +1610,7 @@ export class ToolEstuche implements PopoverInstance {
             sw.type = 'button';
             const isActive = this.state.color.toUpperCase() === col.toUpperCase();
             sw.className = `swatch popover-swatch-circle ${isActive ? 'is-active' : ''}`;
-            sw.title = col;
-            sw.setAttribute('aria-label', `Color ${col}`);
+            setAccessibleTooltip(sw, `Color ${col}`);
             sw.style.backgroundColor = col;
             sw.style.setProperty('--c', col);
             sw.style.setProperty('--swatch-color', col);
@@ -1661,8 +1640,7 @@ export class ToolEstuche implements PopoverInstance {
         addBtn.type = 'button';
         addBtn.className = 'swatch-add popover-color-add';
         addBtn.setAttribute('data-apolo-popover-trigger', 'true');
-        addBtn.title = 'Personalizar color';
-        addBtn.setAttribute('aria-label', 'Añadir color');
+        setAccessibleTooltip(addBtn, 'Personalizar color');
         addBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
 
         addBtn.onclick = (e) => {
@@ -1707,7 +1685,7 @@ export class ToolEstuche implements PopoverInstance {
             dot.type = 'button';
             const isActive = i === this.currentPageIndex;
             dot.className = `${i === 0 ? 'ibtn ' : 'dot '}popover-pag-dot ${isActive ? 'is-active' : ''}`;
-            dot.setAttribute('aria-label', i === 0 ? 'Colores recientes' : `Página ${i + 1}`);
+            setAccessibleTooltip(dot, i === 0 ? 'Colores recientes' : `Página ${i + 1}`);
             if (i === 0) {
                 dot.appendChild(createSvg(ICONS.clock, { size: 14 }));
             } else {

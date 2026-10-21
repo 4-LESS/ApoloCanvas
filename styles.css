@@ -3117,16 +3117,17 @@ button.apolo-box-menu-swatch,
 .tool-btn,
 .popover-tool-opt {
   all: unset;
-  height: 42px;
+  height: 44px;
   border-radius: 12px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1.5px solid transparent;
   color: var(--muted);
   box-sizing: border-box;
-  transition: background .12s, border-color .12s, color .12s;
+  transition: transform .18s cubic-bezier(.34, 1.56, .64, 1), background .15s, border-color .15s, color .15s, box-shadow .15s;
 }
 .tool-btn:hover,
 .popover-tool-opt:hover {
@@ -3141,23 +3142,27 @@ button.apolo-box-menu-swatch,
 .tool-btn.is-active,
 .popover-tool-opt.is-active {
   background: var(--accent-subtle);
-  border-color: var(--accent-light);
+  border-color: var(--accent);
   color: var(--accent);
-  transform: none;
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(47, 107, 255, 0.22);
 }
-.popover-tool-opt .icon-wrap {
+.popover-tool-opt .icon-wrap,
+.tool-btn .icon-wrap {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 10px;
   color: inherit;
   background: transparent;
+  transition: background .15s, color .15s;
 }
-.popover-tool-opt.is-active .icon-wrap {
-  color: inherit;
-  background: transparent;
+.popover-tool-opt.is-active .icon-wrap,
+.tool-btn.is-active .icon-wrap {
+  color: var(--accent);
+  background: var(--accent-light);
 }
 
 /* 2. Grupos de Control (Sliders) */
@@ -3289,28 +3294,31 @@ button.apolo-box-menu-swatch,
 .line-chip,
 .popover-line-chip {
   all: unset;
-  height: 34px;
+  height: 36px;
   border-radius: 10px;
   padding: 0 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--card);
-  border: 1px solid transparent;
-  color: var(--text);
+  border: 1.5px solid var(--border);
+  color: var(--muted);
   cursor: pointer;
   box-sizing: border-box;
-  transition: background .12s, border-color .12s, color .12s;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
 }
 .line-chip:hover,
 .popover-line-chip:hover {
   background: var(--card-hover);
+  color: var(--text);
+  border-color: var(--muted);
 }
 .line-chip.is-active,
 .popover-line-chip.is-active {
   background: var(--accent-subtle);
-  border-color: var(--accent-light);
+  border-color: var(--accent);
   color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 8px rgba(47, 107, 255, 0.2);
 }
 .line-chip .popover-line-chip-pill,
 .popover-line-chip .popover-line-chip-pill {
@@ -3320,22 +3328,42 @@ button.apolo-box-menu-swatch,
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  border-radius: 8px;
+  transition: background-color .15s, color .15s;
+}
+.line-chip.is-active .popover-line-chip-pill,
+.popover-line-chip.is-active .popover-line-chip-pill {
+  color: var(--accent);
 }
 .line-chip .popover-line-bar,
 .popover-line-chip .popover-line-bar {
   width: 100%;
-  height: 2.4px;
+  height: 2.6px;
   border-radius: 999px;
   background-color: currentColor;
+  transition: background-color .15s, border-color .15s;
+}
+.line-chip.is-active .popover-line-bar,
+.popover-line-chip.is-active .popover-line-bar {
+  background-color: var(--accent);
+  color: var(--accent);
 }
 .line-chip .popover-line-bar.is-dashed,
 .popover-line-chip .popover-line-bar.is-dashed {
   background: none;
-  border-top: 2.4px dashed currentColor;
+  border-top: 2.6px dashed currentColor;
+}
+.line-chip.is-active .popover-line-bar.is-dashed,
+.popover-line-chip.is-active .popover-line-bar.is-dashed {
+  border-top-color: var(--accent);
 }
 .line-chip .popover-line-bar.is-dotted,
 .popover-line-chip .popover-line-bar.is-dotted {
-  background: radial-gradient(circle, currentColor 1.2px, transparent 1.6px) left center / 6px 2.4px repeat-x;
+  background: radial-gradient(circle, currentColor 1.3px, transparent 1.7px) left center / 6px 2.6px repeat-x;
+}
+.line-chip.is-active .popover-line-bar.is-dotted,
+.popover-line-chip.is-active .popover-line-bar.is-dotted {
+  background: radial-gradient(circle, var(--accent) 1.3px, transparent 1.7px) left center / 6px 2.6px repeat-x;
 }
 .line-chip svg,
 .popover-line-chip svg {
@@ -3346,8 +3374,12 @@ button.apolo-box-menu-swatch,
 .line-chip line,
 .popover-line-chip line {
   stroke: currentColor;
-  stroke-width: 2.4;
+  stroke-width: 2.6;
   stroke-linecap: round;
+}
+.line-chip.is-active line,
+.popover-line-chip.is-active line {
+  stroke: var(--accent);
 }
 
 /* 4. Interruptor (Toggle) */
@@ -3356,29 +3388,36 @@ button.apolo-box-menu-swatch,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 28px;
+  width: 100%;
+  min-height: 32px;
   cursor: pointer;
   user-select: none;
+  box-sizing: border-box;
 }
 .toggle-label,
 .popover-toggle-title {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text);
+  flex: 1;
 }
 .switch,
 .popover-switch {
   all: unset;
+  display: inline-flex;
   position: relative;
   width: 40px;
+  min-width: 40px;
   height: 22px;
+  min-height: 22px;
   border-radius: 999px;
-  background: var(--card-hover);
+  background: var(--card-hover, rgba(128, 128, 128, 0.2));
   cursor: pointer;
   transition: background .16s;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
-.switch::after,
+.switch:empty::after,
 .popover-switch-thumb {
   content: "";
   position: absolute;
@@ -3390,14 +3429,15 @@ button.apolo-box-menu-swatch,
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
   transition: transform .16s cubic-bezier(.2, .8, .2, 1);
+  pointer-events: none;
 }
 .switch.is-on,
 .popover-switch.is-checked {
-  background: var(--accent);
+  background: var(--accent, #2f6bff);
 }
-.switch.is-on::after,
+.switch.is-on:empty::after,
 .popover-switch.is-checked .popover-switch-thumb,
-.popover-switch.is-checked::after {
+.popover-switch.is-checked:empty::after {
   transform: translateX(18px);
 }
 
