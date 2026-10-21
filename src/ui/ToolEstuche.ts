@@ -509,26 +509,33 @@ export class ToolEstuche implements PopoverInstance {
         this.starBtn.classList.toggle('is-active', isFav);
         this.starBtn.classList.toggle('is-fav-saved', isFav);
         this.starBtn.setAttribute('aria-pressed', String(isFav));
-        setAccessibleTooltip(this.starBtn, isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito');
+        setAccessibleTooltip(this.starBtn, isFav ? 'Quitar de favoritos' : 'Guardar en favoritos');
+        this.starBtn.replaceChildren(createSvg(isFav ? ICONS.starOff : ICONS.star, { size: 18 }));
     }
 
     private updateFavsButtonVisual(): void {
         if (!this.favsBtn) return;
         const isShowing = Boolean(this.state.showingFavorites);
-        this.favsBtn.classList.toggle('is-active', isShowing);
-        setAccessibleTooltip(this.favsBtn, isShowing ? 'Ver herramientas' : 'Ver favoritos guardados');
+        if (isShowing) {
+            this.favsBtn.className = 'ibtn popover-hdr-btn popover-back-btn';
+            setAccessibleTooltip(this.favsBtn, 'Volver al estuche');
+            this.favsBtn.onclick = () => this.setShowingFavorites(false);
+            this.favsBtn.replaceChildren(createSvg(ICONS.arrowLeft, { size: 18, strokeWidth: 2 }));
+            return;
+        }
+
+        this.favsBtn.className = 'hd-bookmark-btn popover-hdr-btn popover-favs-btn';
+        setAccessibleTooltip(this.favsBtn, 'Ver favoritos guardados');
+        this.favsBtn.onclick = () => this.setShowingFavorites(true);
 
         const count = this.getToolFavorites().length;
-        let badge = this.favsBtn.querySelector('.popover-favs-badge') as HTMLElement | null;
+        const bookmarkSvg = createSvg(ICONS.bookmark, { size: 18 });
+        this.favsBtn.replaceChildren(bookmarkSvg);
         if (count > 0) {
-            if (!badge) {
-                badge = document.createElement('span');
-                badge.className = 'popover-favs-badge';
-                this.favsBtn.appendChild(badge);
-            }
+            const badge = document.createElement('span');
+            badge.className = 'popover-favs-badge';
             badge.textContent = String(count);
-        } else if (badge) {
-            badge.remove();
+            this.favsBtn.appendChild(badge);
         }
     }
 
@@ -892,36 +899,51 @@ export class ToolEstuche implements PopoverInstance {
         const hdLeft = document.createElement('div');
         hdLeft.className = 'hd-left';
 
-        const favsBtn = document.createElement('button');
-        favsBtn.type = 'button';
-        favsBtn.className = `hd-bookmark-btn popover-hdr-btn popover-favs-btn ${this.state.showingFavorites ? 'is-active' : ''}`;
-        setAccessibleTooltip(favsBtn, this.state.showingFavorites ? 'Ver herramientas' : 'Ver favoritos guardados');
-        favsBtn.appendChild(createSvg(ICONS.bookmark, { size: 18 }));
+        const isShowingFavs = Boolean(this.state.showingFavorites);
 
-        const count = this.getToolFavorites().length;
-        if (count > 0) {
-            const badge = document.createElement('span');
-            badge.className = 'popover-favs-badge';
-            badge.textContent = String(count);
-            favsBtn.appendChild(badge);
+        if (isShowingFavs) {
+            const backBtn = document.createElement('button');
+            backBtn.type = 'button';
+            backBtn.className = 'ibtn popover-hdr-btn popover-favs-btn popover-back-btn';
+            setAccessibleTooltip(backBtn, 'Volver al estuche');
+            backBtn.appendChild(createSvg(ICONS.arrowLeft, { size: 18, strokeWidth: 2 }));
+            backBtn.onclick = () => {
+                this.setShowingFavorites(false);
+            };
+            this.favsBtn = backBtn;
+            hdLeft.appendChild(backBtn);
+        } else {
+            const favsBtn = document.createElement('button');
+            favsBtn.type = 'button';
+            favsBtn.className = 'hd-bookmark-btn popover-hdr-btn popover-favs-btn';
+            setAccessibleTooltip(favsBtn, 'Ver favoritos guardados');
+            favsBtn.appendChild(createSvg(ICONS.bookmark, { size: 18 }));
+
+            const count = this.getToolFavorites().length;
+            if (count > 0) {
+                const badge = document.createElement('span');
+                badge.className = 'popover-favs-badge';
+                badge.textContent = String(count);
+                favsBtn.appendChild(badge);
+            }
+
+            favsBtn.onclick = () => {
+                this.setShowingFavorites(true);
+            };
+            this.favsBtn = favsBtn;
+            hdLeft.appendChild(favsBtn);
         }
-
-        favsBtn.onclick = () => {
-            this.setShowingFavorites(!this.state.showingFavorites);
-        };
-        this.favsBtn = favsBtn;
-        hdLeft.appendChild(favsBtn);
 
         const titleContainer = document.createElement('div');
         titleContainer.className = 'hd-center popover-title-container popover-title-wrap';
 
         const title = document.createElement('h2');
         title.className = 'title popover-title';
-        title.textContent = this.state.showingFavorites ? this.getActiveProfileName() : titleText;
+        title.textContent = isShowingFavs ? this.getActiveProfileName() : titleText;
         titleContainer.appendChild(title);
         this.titleEl = title;
 
-        if (this.state.showingFavorites) {
+        if (isShowingFavs) {
             const dotsContainer = document.createElement('nav');
             dotsContainer.className = 'pager popover-header-profile-dots apolo-kit-dots-indicator';
             dotsContainer.setAttribute('aria-label', 'Perfiles');
@@ -939,9 +961,9 @@ export class ToolEstuche implements PopoverInstance {
         starBtn.type = 'button';
         const isFav = Boolean(this.state.isCurrentFavorite);
         starBtn.className = `ibtn popover-hdr-btn popover-star-btn ${isFav ? 'is-active is-fav-saved' : ''}`;
-        setAccessibleTooltip(starBtn, isFav ? 'Quitar de favoritos' : 'Marcar actual como favorito');
+        setAccessibleTooltip(starBtn, isFav ? 'Quitar de favoritos' : 'Guardar en favoritos');
         starBtn.setAttribute('aria-pressed', String(isFav));
-        starBtn.appendChild(createSvg(ICONS.star, { size: 18 }));
+        starBtn.appendChild(createSvg(isFav ? ICONS.starOff : ICONS.star, { size: 18 }));
 
         starBtn.onclick = () => {
             if (this.callbacks.onToggleFavorite) {

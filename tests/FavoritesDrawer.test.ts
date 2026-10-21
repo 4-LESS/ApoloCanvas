@@ -549,8 +549,9 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             assert.ok(preview, 'Visual preview container must exist');
             assert.ok(preview.querySelector('svg'), 'SVG preview must be present inside preview container');
 
-            // Click bookmark again -> toggles back to controls
-            favsBtn.onclick();
+            // Click back button -> toggles back to controls
+            const backBtn = (root.querySelector('.popover-back-btn') ?? root.querySelector('.popover-favs-btn')) as HTMLElement;
+            backBtn.onclick();
             assert.strictEqual(root.querySelector('.apolo-favorites-drawer'), null);
         });
 
@@ -659,46 +660,27 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             assert.strictEqual(reorderedList[1].id, fav1.id);
         });
 
-        test('clicking handle toggles action menu with rename and delete', () => {
+        test('drawer cards do not render rename menu, dragging handle reorders or deletes', () => {
             const fav1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#111', width: 2 });
-            let renamed: [string, string] | null = null;
+            let deletedId: string | null = null;
             const { estuche, root } = createEstucheHelper(
                 {
                     favorites: [fav1],
                     showingFavorites: true,
                 },
                 {
-                    onRenameFavorite: (id, newName) => { renamed = [id, newName]; },
+                    onDeleteFavorite: (id) => { deletedId = id; },
                 },
             );
             estuche.open();
 
             const card = root.querySelector('.apolo-favorite-card') as HTMLElement;
             const handle = card.querySelector('.apolo-favorite-drag-handle') as HTMLElement;
-            assert.ok(handle);
+            assert.ok(handle, 'Card must have drag handle');
+            assert.strictEqual(card.querySelector('.apolo-card-menu'), null, 'Rename menu must be removed from drawer card');
 
-            const menu = card.querySelector('.apolo-card-menu') as HTMLElement;
-            assert.ok(menu);
-            assert.strictEqual(menu.style.display, 'none');
-
-            // Click handle opens menu
-            handle.onclick?.({ stopPropagation: () => {} } as any);
-            assert.strictEqual(menu.style.display, 'flex');
-
-            // Click rename button opens rename input row
-            const renameBtn = menu.querySelector('.apolo-card-rename-btn') as HTMLElement;
-            assert.ok(renameBtn);
-            renameBtn.onclick?.({ stopPropagation: () => {} } as any);
-
-            const renameInput = card.querySelector('.apolo-card-rename-input') as HTMLInputElement;
-            assert.ok(renameInput);
-            renameInput.value = 'Mi pluma azul';
-
-            const saveBtn = card.querySelector('.apolo-card-rename-save') as HTMLElement;
-            assert.ok(saveBtn);
-            saveBtn.onclick?.({ stopPropagation: () => {} } as any);
-
-            assert.deepStrictEqual(renamed, [fav1.id, 'Mi pluma azul']);
+            // Handle is rendered clean without extra menu
+            assert.ok(card.querySelector('.apolo-favorite-delete-btn'));
         });
     });
 
@@ -894,11 +876,11 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             assert.ok(preview);
             assert.ok(preview.querySelector('svg'));
 
-            // Size dot
+            // Size dot removed per design requirement
             const size = card.querySelector('.apolo-favorite-size');
-            assert.ok(size);
-            const dot = card.querySelector('.apolo-favorite-size-dot');
-            assert.ok(dot);
+            assert.strictEqual(size, null, 'Thickness dot must be removed');
+            const handle = card.querySelector('.apolo-favorite-drag-handle');
+            assert.ok(handle, 'Drag handle must exist');
 
             // Tooltip and aria-label
             const expectedTooltip = getPresetTooltip(p1);

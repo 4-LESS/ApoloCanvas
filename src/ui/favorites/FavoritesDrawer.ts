@@ -244,19 +244,19 @@ export function createShapePreview(
  */
 export function create6DotGripSvg(): SVGSVGElement {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('viewBox', '0 0 16 20');
     svg.setAttribute('fill', 'currentColor');
     svg.setAttribute('aria-hidden', 'true');
     const coords: [number, number][] = [
-        [5, 4], [11, 4],
-        [5, 8], [11, 8],
-        [5, 12], [11, 12],
+        [4.5, 4], [11.5, 4],
+        [4.5, 10], [11.5, 10],
+        [4.5, 16], [11.5, 16],
     ];
     for (const [cx, cy] of coords) {
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', String(cx));
         circle.setAttribute('cy', String(cy));
-        circle.setAttribute('r', '1.2');
+        circle.setAttribute('r', '1.5');
         svg.appendChild(circle);
     }
     return svg;
@@ -317,16 +317,6 @@ export class FavoritesDrawer {
         this.el.className = 'drawer apolo-favorites-drawer';
 
         this.setupSwipeListeners();
-
-        this.el.addEventListener('click', (e) => {
-            const target = e.target as HTMLElement | null;
-            if (!target?.closest?.('.apolo-favorite-handle-wrap, .grip')) {
-                this.el.querySelectorAll('.apolo-card-menu').forEach((m) => {
-                    (m as HTMLElement).style.display = 'none';
-                    m.classList.remove('is-pinned', 'is-visible');
-                });
-            }
-        });
 
         if (parent) {
             parent.appendChild(this.el);
@@ -718,125 +708,134 @@ export class FavoritesDrawer {
             previewEl.appendChild(createShapePreview(preset as ShapeFavoritePreset));
         }
 
-        // 3) Thickness as a dot instead of "7px"
-        const size = document.createElement('span');
-        size.className = 'size apolo-favorite-size';
-        size.setAttribute('aria-hidden', 'true');
-        const dot = document.createElement('i');
-        dot.className = 'apolo-favorite-size-dot';
-        const dVal = `${Math.max(3, Math.min(14, 2 + preset.width * 0.8))}px`;
-        dot.style.setProperty('--d', dVal);
-        dot.style.setProperty('--dot', dVal);
-        size.appendChild(dot);
-
-        // 4) Drag Handle & Contextual Menu (Rename & Delete)
+        // 3) Drag Handle (Reorder & Drag out to delete)
         const handleBtn = document.createElement('button');
         handleBtn.type = 'button';
         handleBtn.className = 'grip apolo-favorite-handle-wrap apolo-favorite-drag-handle';
-        setAccessibleTooltip(handleBtn, 'Arrastrar para reordenar / Clic para opciones');
+        setAccessibleTooltip(handleBtn, 'Arrastrar para reordenar o sacar para eliminar');
         handleBtn.appendChild(create6DotGripSvg());
 
-        const menu = document.createElement('div');
-        menu.className = 'actions apolo-card-menu';
-        menu.style.display = 'none';
-
-        const renameBtn = document.createElement('button');
-        renameBtn.type = 'button';
-        renameBtn.className = 'ibtn apolo-card-menu-btn apolo-card-rename-btn';
-        setAccessibleTooltip(renameBtn, 'Cambiar nombre');
-        renameBtn.appendChild(createSvg(ICONS.pencil, { size: 14, strokeWidth: 1.8 }));
-        renameBtn.onclick = (e) => {
-            e.stopPropagation();
-            menu.style.display = 'none';
-            menu.classList.remove('is-pinned', 'is-visible');
-            this.openRenameCardRow(card, preset);
-        };
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.className = 'ibtn danger apolo-card-menu-btn apolo-favorite-delete-btn';
-        setAccessibleTooltip(deleteBtn, 'Eliminar favorito');
-        deleteBtn.appendChild(createSvg(ICONS.trash, { size: 14, strokeWidth: 1.8 }));
-        deleteBtn.onclick = (e) => {
-            e.stopPropagation();
-            menu.style.display = 'none';
-            menu.classList.remove('is-pinned', 'is-visible');
-            this.callbacks.onDeleteFavorite(preset.id);
-        };
-
-        menu.append(renameBtn, deleteBtn);
-
-        // Hover & click listeners for menu
-        card.onpointerenter = () => {
-            if (menu.style.display === 'none' && !menu.classList.contains('is-pinned')) {
-                menu.style.display = 'flex';
-            }
-        };
-        card.onpointerleave = () => {
-            if (!menu.classList.contains('is-pinned')) {
-                menu.style.display = 'none';
-            }
-        };
-
-        // Dragging & Clicking interactions on handle
         let isDragging = false;
         let startX = 0;
         let startY = 0;
+        let currentTargetIdx = index;
+        let isDragOut = false;
 
-        handleBtn.onpointerdown = (e) => {
+        handleBtn.onpointerdown = (e: PointerEvent) => {
             e.stopPropagation();
             isDragging = false;
+            isDragOut = false;
             startX = e.clientX;
             startY = e.clientY;
-            card.setAttribute('draggable', 'true');
+            currentTargetIdx = index;
+
+            const listEl = card.parentElement as HTMLElement | null;
+            const allCards = listEl ? (Array.from(listEl.children) as HTMLElement[]) : [];
+            const drawerRect = this.el.getBoundingClientRect();
+            const cardHeight = (card.offsetHeight || 48) + 4;
 
             const onPointerMove = (moveEv: PointerEvent) => {
-                const dy = moveEv.clientY - startY;
                 const dx = moveEv.clientX - startX;
-                if (Math.hypot(dx, dy) > 6) {
+                const dy = moveEv.clientY - startY;
+
+                if (!isDragging && Math.hypot(dx, dy) > 4) {
                     isDragging = true;
                     card.classList.add('is-dragging');
+                    card.style.zIndex = '30';
+                    card.style.transition = 'none';
+                }
+
+                if (!isDragging) return;
+
+                card.style.transform = `translate(${dx}px, ${dy}px) scale(1.02)`;
+
+                const isOutside = moveEv.clientX < drawerRect.left - 15 ||
+                                  moveEv.clientX > drawerRect.right + 15 ||
+                                  Math.abs(dx) > 80;
+
+                if (isOutside) {
+                    isDragOut = true;
+                    card.classList.add('is-drag-out');
+                    allCards.forEach(c => {
+                        if (c !== card) c.style.transform = 'translateY(0px)';
+                    });
+                } else {
+                    isDragOut = false;
+                    card.classList.remove('is-drag-out');
+
+                    const offsetIndex = Math.round(dy / cardHeight);
+                    const newTargetIdx = Math.max(0, Math.min(this.favorites.length - 1, index + offsetIndex));
+                    currentTargetIdx = newTargetIdx;
+
+                    allCards.forEach((c, cIdx) => {
+                        if (c === card) return;
+                        c.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)';
+                        if (index < currentTargetIdx && cIdx > index && cIdx <= currentTargetIdx) {
+                            c.style.transform = `translateY(-${cardHeight}px)`;
+                        } else if (index > currentTargetIdx && cIdx < index && cIdx >= currentTargetIdx) {
+                            c.style.transform = `translateY(${cardHeight}px)`;
+                        } else {
+                            c.style.transform = 'translateY(0px)';
+                        }
+                    });
                 }
             };
 
             const onPointerUp = (upEv: PointerEvent) => {
                 window.removeEventListener('pointermove', onPointerMove);
                 window.removeEventListener('pointerup', onPointerUp);
-                card.removeAttribute('draggable');
-                card.classList.remove('is-dragging');
+                window.removeEventListener('pointercancel', onPointerUp);
 
-                if (isDragging) {
-                    const elemBelow = document.elementFromPoint(upEv.clientX, upEv.clientY);
-                    const targetCard = elemBelow?.closest?.('.apolo-favorite-card') as HTMLElement | null;
-                    if (targetCard && targetCard !== card) {
-                        const targetId = targetCard.dataset.presetId;
-                        const toIdx = this.favorites.findIndex(f => f.id === targetId);
-                        if (toIdx !== -1 && toIdx !== index) {
-                            this.callbacks.onReorderFavorite(index, toIdx);
-                        }
+                if (!isDragging) return;
+
+                if (isDragOut) {
+                    const finalDx = upEv.clientX - startX;
+                    const flyX = finalDx >= 0 ? 180 : -180;
+                    card.style.transition = 'transform 0.22s ease, opacity 0.2s ease, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease';
+                    card.style.transform = `translate(${flyX}px, ${upEv.clientY - startY}px) scale(0.7)`;
+                    card.style.opacity = '0';
+                    card.style.maxHeight = '0';
+                    card.style.padding = '0';
+                    card.style.margin = '0';
+                    card.style.overflow = 'hidden';
+
+                    setTimeout(() => {
+                        this.callbacks.onDeleteFavorite(preset.id);
+                    }, 220);
+                } else {
+                    card.classList.remove('is-dragging');
+                    if (currentTargetIdx !== index) {
+                        const targetY = (currentTargetIdx - index) * cardHeight;
+                        card.style.transition = 'transform 0.18s cubic-bezier(0.2, 0, 0, 1)';
+                        card.style.transform = `translate(0px, ${targetY}px)`;
+                        setTimeout(() => {
+                            allCards.forEach(c => {
+                                c.style.transform = '';
+                                c.style.transition = '';
+                                c.style.zIndex = '';
+                            });
+                            this.callbacks.onReorderFavorite(index, currentTargetIdx);
+                        }, 180);
+                    } else {
+                        card.style.transition = 'transform 0.18s ease';
+                        card.style.transform = 'translate(0px, 0px)';
+                        setTimeout(() => {
+                            allCards.forEach(c => {
+                                c.style.transform = '';
+                                c.style.transition = '';
+                                c.style.zIndex = '';
+                            });
+                        }, 180);
                     }
                 }
             };
 
             window.addEventListener('pointermove', onPointerMove);
             window.addEventListener('pointerup', onPointerUp);
+            window.addEventListener('pointercancel', onPointerUp);
         };
 
-        handleBtn.onclick = (e) => {
-            e.stopPropagation();
-            if (isDragging) return;
-            const isShowing = menu.classList.contains('is-pinned');
-            this.el.querySelectorAll('.apolo-card-menu').forEach((m) => {
-                (m as HTMLElement).style.display = 'none';
-                m.classList.remove('is-pinned', 'is-visible');
-            });
-            if (!isShowing) {
-                menu.style.display = 'flex';
-                menu.classList.add('is-pinned', 'is-visible');
-            }
-        };
-
-        // Native HTML5 Drag and Drop on card
+        // Native HTML5 Drag and Drop fallback on card
         card.ondragstart = (e) => {
             e.dataTransfer?.setData('text/plain', String(index));
             if (e.dataTransfer) {
@@ -873,82 +872,18 @@ export class FavoritesDrawer {
             card.removeAttribute('draggable');
         };
 
-        card.append(glyph, previewEl, size, handleBtn, menu);
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'apolo-favorite-delete-btn';
+        deleteBtn.style.display = 'none';
+        deleteBtn.setAttribute('aria-hidden', 'true');
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.callbacks.onDeleteFavorite(preset.id);
+        };
+
+        card.append(glyph, previewEl, handleBtn, deleteBtn);
         return card;
-    }
-
-    private openRenameCardRow(card: HTMLElement, preset: ToolFavoritePreset): void {
-        const originalChildren = Array.from(card.children);
-        originalChildren.forEach((child) => {
-            (child as HTMLElement).style.display = 'none';
-        });
-
-        const renameRow = document.createElement('div');
-        renameRow.className = 'apolo-card-rename-row';
-        renameRow.onclick = (e) => e.stopPropagation();
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'apolo-card-rename-input';
-        input.value = preset.name || getPresetLabel(preset);
-        input.maxLength = 28;
-        input.placeholder = 'Nombre del favorito...';
-
-        const saveBtn = document.createElement('button');
-        saveBtn.type = 'button';
-        saveBtn.className = 'ibtn btn-ok apolo-card-rename-btn apolo-card-rename-save';
-        setAccessibleTooltip(saveBtn, 'Guardar nombre');
-        saveBtn.appendChild(createSvg(ICONS.check, { size: 14, strokeWidth: 2.2 }));
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.type = 'button';
-        cancelBtn.className = 'ibtn apolo-card-rename-btn apolo-card-rename-cancel';
-        setAccessibleTooltip(cancelBtn, 'Cancelar');
-        cancelBtn.appendChild(createSvg(ICONS.close, { size: 14, strokeWidth: 2 }));
-
-        const finish = () => {
-            renameRow.remove();
-            originalChildren.forEach((child) => {
-                if (child.classList.contains('apolo-card-menu')) {
-                    (child as HTMLElement).style.display = 'none';
-                    child.classList.remove('is-pinned', 'is-visible');
-                } else {
-                    (child as HTMLElement).style.display = '';
-                }
-            });
-        };
-
-        const submit = () => {
-            const val = input.value.trim();
-            preset.name = val || undefined;
-            this.callbacks.onRenameFavorite?.(preset.id, val);
-            finish();
-            this.render();
-        };
-
-        saveBtn.onclick = (e) => {
-            e.stopPropagation();
-            submit();
-        };
-
-        cancelBtn.onclick = (e) => {
-            e.stopPropagation();
-            finish();
-        };
-
-        input.onkeydown = (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submit();
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                finish();
-            }
-        };
-
-        renameRow.append(input, saveBtn, cancelBtn);
-        card.appendChild(renameRow);
-        setTimeout(() => input.focus?.(), 0);
     }
 
     /**

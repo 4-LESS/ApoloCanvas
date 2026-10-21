@@ -4005,7 +4005,7 @@ button.apolo-box-menu-swatch,
 .apolo-favorite-card {
   position: relative;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 16px 16px;
+  grid-template-columns: 22px minmax(0, 1fr) 28px;
   align-items: center;
   column-gap: 12px;
   height: 48px;
@@ -4016,7 +4016,7 @@ button.apolo-box-menu-swatch,
   cursor: pointer;
   user-select: none;
   box-sizing: border-box;
-  transition: background .12s, border-color .12s;
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease, background .12s, border-color .12s, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
 }
 .card:hover,
 .card.is-hover,
@@ -4030,19 +4030,20 @@ button.apolo-box-menu-swatch,
 }
 .card.is-active,
 .apolo-favorite-card.is-active {
-  background: var(--accent-subtle);
-  border-color: var(--accent-light);
+  background: var(--accent-subtle) !important;
+  border-color: var(--accent-light) !important;
 }
-.card.is-active::before,
-.apolo-favorite-card.is-active::before {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 11px;
-  bottom: 11px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
+.theme-light .card.is-active,
+.theme-light .apolo-favorite-card.is-active,
+:root .card.is-active,
+:root .apolo-favorite-card.is-active {
+  background: #eef3ff !important;
+  border-color: rgba(47, 107, 255, 0.24) !important;
+}
+.theme-dark .card.is-active,
+.theme-dark .apolo-favorite-card.is-active {
+  background: rgba(91, 140, 255, 0.18) !important;
+  border-color: rgba(91, 140, 255, 0.30) !important;
 }
 
 .glyph,
@@ -4080,98 +4081,55 @@ button.apolo-box-menu-swatch,
   vector-effect: non-scaling-stroke;
 }
 
-.size,
-.apolo-favorite-size {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-}
-.size i,
-.apolo-favorite-size-dot {
-  display: block;
-  width: var(--d, var(--dot, 6px));
-  height: var(--d, var(--dot, 6px));
-  border-radius: 50%;
-  background: var(--faint);
-}
-
 .grip,
 .apolo-favorite-handle-wrap,
 .apolo-favorite-drag-handle {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 28px;
-  color: var(--faint);
-  cursor: grab;
-  touch-action: none;
-  border: none;
-  background: transparent;
-  padding: 0;
+  all: unset !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 34px !important;
+  color: var(--muted) !important;
+  cursor: grab !important;
+  touch-action: none !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+  transition: color 0.15s ease, transform 0.15s ease !important;
 }
 .grip:hover,
 .apolo-favorite-drag-handle:hover {
-  color: var(--text);
+  color: var(--text) !important;
+  background: transparent !important;
+}
+.grip:active,
+.apolo-favorite-drag-handle:active,
+.card.is-dragging .grip {
+  cursor: grabbing !important;
+  color: var(--text) !important;
 }
 .grip svg,
 .apolo-favorite-drag-handle svg {
-  width: 12px;
-  height: 16px;
+  width: 14px;
+  height: 18px;
   fill: currentColor;
 }
 
-/* Pastilla flotante de acciones (editar / borrar) */
-.actions,
-.apolo-card-menu {
-  position: absolute;
-  right: 44px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--bg);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .18), 0 0 0 1px var(--border);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .12s;
-  z-index: 10;
+.card.is-dragging,
+.apolo-favorite-card.is-dragging {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+  cursor: grabbing !important;
+  z-index: 30 !important;
 }
-.card:hover .actions,
-.card.is-hover .actions,
-.card:focus-within .actions,
-.apolo-favorite-card:hover .apolo-card-menu,
-.apolo-favorite-card:focus-within .apolo-card-menu,
-.actions.is-visible,
-.apolo-card-menu.is-visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-.actions .ibtn,
-.apolo-card-menu .apolo-card-menu-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  cursor: pointer;
-  background: transparent;
-  border: none;
-  padding: 0;
-  transition: background .12s, color .12s;
-}
-.actions .ibtn:hover,
-.apolo-card-menu .apolo-card-menu-btn:hover {
-  background: var(--card-hover);
-  color: var(--text);
-}
-.actions .ibtn.danger:hover,
-.apolo-card-menu .apolo-favorite-delete-btn:hover {
-  color: var(--danger);
-  background: rgba(239, 68, 68, .12);
+.card.is-drag-out,
+.apolo-favorite-card.is-drag-out {
+  background: rgba(239, 68, 68, 0.14) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  opacity: 0.65 !important;
+  transform: scale(0.96) !important;
 }
 
 /* Estado Vacío */
