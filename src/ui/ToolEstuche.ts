@@ -492,8 +492,12 @@ export class ToolEstuche implements PopoverInstance {
     private getActiveToolProfiles(): Array<{ id: string; name: string }> {
         const isShape = this.state.tool === 'shape';
         const profiles = isShape
-            ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
-            : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
+            ? (Array.isArray(this.state.shapeFavoriteProfiles) && this.state.shapeFavoriteProfiles.length > 0
+                ? this.state.shapeFavoriteProfiles
+                : DEFAULT_SHAPE_FAVORITE_PROFILES)
+            : (Array.isArray(this.state.strokeFavoriteProfiles) && this.state.strokeFavoriteProfiles.length > 0
+                ? this.state.strokeFavoriteProfiles
+                : DEFAULT_STROKE_FAVORITE_PROFILES);
         return profiles.map(p => ({ id: p.id, name: p.name }));
     }
 
@@ -523,8 +527,12 @@ export class ToolEstuche implements PopoverInstance {
         if (this.favoritesDrawer) {
             const tool = this.state.tool as FavoritableTool;
             const profiles = isShape
-                ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
-                : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
+                ? (Array.isArray(this.state.shapeFavoriteProfiles) && this.state.shapeFavoriteProfiles.length > 0
+                    ? this.state.shapeFavoriteProfiles
+                    : DEFAULT_SHAPE_FAVORITE_PROFILES)
+                : (Array.isArray(this.state.strokeFavoriteProfiles) && this.state.strokeFavoriteProfiles.length > 0
+                    ? this.state.strokeFavoriteProfiles
+                    : DEFAULT_STROKE_FAVORITE_PROFILES);
             this.favoritesDrawer.update(
                 tool,
                 this.getToolFavorites(),
@@ -546,12 +554,20 @@ export class ToolEstuche implements PopoverInstance {
             if (!this.headerDotsContainer && this.titleEl.parentElement) {
                 const dotsContainer = document.createElement('div');
                 dotsContainer.className = 'popover-header-profile-dots apolo-kit-dots-indicator';
+                dotsContainer.style.display = 'flex';
+                dotsContainer.style.alignItems = 'center';
+                dotsContainer.style.justifyContent = 'center';
+                dotsContainer.style.gap = '8px';
                 this.titleEl.parentElement.appendChild(dotsContainer);
                 this.headerDotsContainer = dotsContainer;
             }
 
             if (this.headerDotsContainer) {
                 this.headerDotsContainer.replaceChildren();
+                this.headerDotsContainer.style.display = 'flex';
+                this.headerDotsContainer.style.alignItems = 'center';
+                this.headerDotsContainer.style.justifyContent = 'center';
+                this.headerDotsContainer.style.gap = '8px';
                 const profiles = this.getActiveToolProfiles();
                 const activeProfileId = this.getActiveProfileId();
                 profiles.forEach((p, idx) => {
@@ -561,6 +577,13 @@ export class ToolEstuche implements PopoverInstance {
                     dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
                     dot.title = p.name;
                     dot.setAttribute('aria-label', `Perfil ${p.name}`);
+                    dot.style.display = 'inline-block';
+                    dot.style.width = '7px';
+                    dot.style.height = '7px';
+                    dot.style.minWidth = '7px';
+                    dot.style.minHeight = '7px';
+                    dot.style.borderRadius = '50%';
+                    dot.style.cursor = 'pointer';
                     dot.onclick = (e) => {
                         e.stopPropagation();
                         this.switchProfile(p.id);
@@ -674,8 +697,12 @@ export class ToolEstuche implements PopoverInstance {
         const currentSlice = this.getCurrentToolSlice();
         const isShape = tool === 'shape';
         const profiles = isShape
-            ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
-            : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
+            ? (Array.isArray(this.state.shapeFavoriteProfiles) && this.state.shapeFavoriteProfiles.length > 0
+                ? this.state.shapeFavoriteProfiles
+                : DEFAULT_SHAPE_FAVORITE_PROFILES)
+            : (Array.isArray(this.state.strokeFavoriteProfiles) && this.state.strokeFavoriteProfiles.length > 0
+                ? this.state.strokeFavoriteProfiles
+                : DEFAULT_STROKE_FAVORITE_PROFILES);
         const activeProfileId = isShape
             ? (this.state.activeShapeProfileId ?? 'general')
             : (this.state.activeStrokeProfileId ?? 'notes');
@@ -755,6 +782,10 @@ export class ToolEstuche implements PopoverInstance {
         if (this.state.showingFavorites) {
             const dotsContainer = document.createElement('div');
             dotsContainer.className = 'popover-header-profile-dots apolo-kit-dots-indicator';
+            dotsContainer.style.display = 'flex';
+            dotsContainer.style.alignItems = 'center';
+            dotsContainer.style.justifyContent = 'center';
+            dotsContainer.style.gap = '8px';
             const profiles = this.getActiveToolProfiles();
             const activeProfileId = this.getActiveProfileId();
             profiles.forEach((p, idx) => {
@@ -764,6 +795,13 @@ export class ToolEstuche implements PopoverInstance {
                 dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
                 dot.title = p.name;
                 dot.setAttribute('aria-label', `Perfil ${p.name}`);
+                dot.style.display = 'inline-block';
+                dot.style.width = '7px';
+                dot.style.height = '7px';
+                dot.style.minWidth = '7px';
+                dot.style.minHeight = '7px';
+                dot.style.borderRadius = '50%';
+                dot.style.cursor = 'pointer';
                 dot.onclick = (e) => {
                     e.stopPropagation();
                     this.switchProfile(p.id);

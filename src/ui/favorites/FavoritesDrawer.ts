@@ -367,6 +367,10 @@ export class FavoritesDrawer {
     public renderDotsIndicator(container?: HTMLElement): HTMLElement {
         const dotsContainer = document.createElement('div');
         dotsContainer.className = 'apolo-kit-dots-indicator';
+        dotsContainer.style.display = 'flex';
+        dotsContainer.style.alignItems = 'center';
+        dotsContainer.style.justifyContent = 'center';
+        dotsContainer.style.gap = '8px';
         this.profiles.forEach((p, idx) => {
             const dot = document.createElement('button');
             dot.type = 'button';
@@ -374,6 +378,13 @@ export class FavoritesDrawer {
             dot.className = `apolo-kit-dot${isActive ? ' is-active' : ''}`;
             dot.title = p.name;
             dot.setAttribute('aria-label', `Perfil ${p.name}`);
+            dot.style.display = 'inline-block';
+            dot.style.width = '7px';
+            dot.style.height = '7px';
+            dot.style.minWidth = '7px';
+            dot.style.minHeight = '7px';
+            dot.style.borderRadius = '50%';
+            dot.style.cursor = 'pointer';
             dot.onclick = (e) => {
                 e.stopPropagation();
                 this.switchProfile(p.id);

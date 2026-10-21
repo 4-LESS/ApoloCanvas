@@ -679,6 +679,11 @@ export class CanvasController {
                         snapGrid: this.snapGrid,
                         straightenLines: this.straightenLines,
                         onlyHighlighter: this.toolState.eraser.onlyHighlighter,
+                        strokeFavoriteProfiles: this.toolState.strokeFavoriteProfiles,
+                        activeStrokeProfileId: this.toolState.activeStrokeProfileId,
+                        shapeFavoriteProfiles: this.toolState.shapeFavoriteProfiles,
+                        activeShapeProfileId: this.toolState.activeShapeProfileId,
+                        syncFavoriteProfiles: this.toolState.syncFavoriteProfiles,
                     }, toolBtn);
                 }
             },
