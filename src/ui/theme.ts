@@ -336,6 +336,7 @@ export function createStrokeWavePreview(
     svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('preserveAspectRatio', 'none');
 
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', waveD);
@@ -344,6 +345,7 @@ export function createStrokeWavePreview(
     path.setAttribute('stroke-linecap', pattern === 'dashed' ? 'butt' : profile.cap);
     path.setAttribute('stroke-linejoin', 'round');
     path.setAttribute('stroke-opacity', String(opacity));
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
 
     if (pattern === 'dashed') {
         const dashLen = Math.max(6, Math.round(effWidth * 2.5));

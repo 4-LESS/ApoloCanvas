@@ -88,7 +88,9 @@ export function getPresetIcon(preset: ToolFavoritePreset): string {
  * Tooltip / aria text: the info that no longer takes space on the card.
  */
 export function getPresetTooltip(preset: ToolFavoritePreset): string {
-    const parts = [getPresetLabel(preset), `${preset.width}px`];
+    const parts: string[] = [];
+    if (preset.name) parts.push(preset.name);
+    parts.push(getPresetLabel(preset), `${preset.width}px`);
     if (preset.pattern === 'dashed') parts.push('rayas');
     else if (preset.pattern === 'dotted') parts.push('puntos');
     if (preset.tool === 'shape' && (preset as ShapeFavoritePreset).fillEnabled) parts.push('relleno');
@@ -109,6 +111,7 @@ export function createShapePreview(
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
     const strokeColor = mapInkColorForDark(preset.color || '#2F6BFF');
     const strokeWidth = Math.max(1.5, Math.min(6, preset.width || 3));
@@ -128,6 +131,7 @@ export function createShapePreview(
         el.setAttribute('stroke', strokeColor);
         el.setAttribute('stroke-width', String(strokeWidth));
         el.setAttribute('stroke-opacity', String(strokeOpacity));
+        el.setAttribute('vector-effect', 'non-scaling-stroke');
         el.setAttribute('fill', fill);
         if (fill !== 'none') {
             el.setAttribute('fill-opacity', String(fillOpacity));
@@ -236,6 +240,29 @@ export function createShapePreview(
 }
 
 /**
+ * Creates a pure DOM 6-dot drag grip icon matching the unified design mockup.
+ */
+export function create6DotGripSvg(): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('aria-hidden', 'true');
+    const coords: [number, number][] = [
+        [5, 4], [11, 4],
+        [5, 8], [11, 8],
+        [5, 12], [11, 12],
+    ];
+    for (const [cx, cy] of coords) {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(cx));
+        circle.setAttribute('cy', String(cy));
+        circle.setAttribute('r', '1.2');
+        svg.appendChild(circle);
+    }
+    return svg;
+}
+
+/**
  * Pure DOM reusable favorites drawer component.
  * Displays saved presets for pen, highlighter, or shape tools.
  */
@@ -287,15 +314,16 @@ export class FavoritesDrawer {
             : (this.profiles[0]?.id || (initialTool === 'shape' ? 'general' : 'notes'));
 
         this.el = document.createElement('div');
-        this.el.className = 'apolo-favorites-drawer';
+        this.el.className = 'drawer apolo-favorites-drawer';
 
         this.setupSwipeListeners();
 
         this.el.addEventListener('click', (e) => {
             const target = e.target as HTMLElement | null;
-            if (!target?.closest?.('.apolo-favorite-handle-wrap')) {
+            if (!target?.closest?.('.apolo-favorite-handle-wrap, .grip')) {
                 this.el.querySelectorAll('.apolo-card-menu').forEach((m) => {
                     (m as HTMLElement).style.display = 'none';
+                    m.classList.remove('is-pinned', 'is-visible');
                 });
             }
         });
@@ -310,7 +338,7 @@ export class FavoritesDrawer {
     private setupSwipeListeners(): void {
         this.el.addEventListener('pointerdown', (e: PointerEvent) => {
             const target = e.target as HTMLElement | null;
-            if (target?.closest?.('.apolo-profile-name-input, .apolo-profile-create-btn, .apolo-profile-cancel-btn')) {
+            if (target?.closest?.('.apolo-profile-name-input, .apolo-profile-create-btn, .apolo-profile-cancel-btn, .field, .btn-ok')) {
                 return;
             }
             this.pointerStartX = e.clientX;
@@ -379,11 +407,7 @@ export class FavoritesDrawer {
 
     public renderDotsIndicator(container?: HTMLElement): HTMLElement {
         const dotsContainer = document.createElement('div');
-        dotsContainer.className = 'apolo-kit-dots-indicator';
-        dotsContainer.style.display = 'flex';
-        dotsContainer.style.alignItems = 'center';
-        dotsContainer.style.justifyContent = 'center';
-        dotsContainer.style.gap = '6px';
+        dotsContainer.className = 'pager popover-header-profile-dots apolo-kit-dots-indicator';
 
         const currIdx = this.profiles.findIndex(p => p.id === this.activeProfileId);
         const safeIdx = currIdx !== -1 ? currIdx : 0;
@@ -392,12 +416,11 @@ export class FavoritesDrawer {
         // 1. Prev Navigation Chevron (<)
         const prevBtn = document.createElement('button');
         prevBtn.type = 'button';
-        prevBtn.className = 'apolo-kit-nav-btn apolo-kit-nav-prev';
+        prevBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-prev' + (safeIdx === 0 ? ' is-disabled' : '');
         prevBtn.title = 'Perfil anterior';
         prevBtn.setAttribute('aria-label', 'Perfil anterior');
         prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 12, strokeWidth: 2 }));
         if (safeIdx === 0) {
-            prevBtn.classList.add('is-disabled');
             prevBtn.disabled = true;
         } else {
             prevBtn.onclick = (e) => {
@@ -415,7 +438,7 @@ export class FavoritesDrawer {
             const dot = document.createElement('button');
             dot.type = 'button';
             const isActive = idx === safeIdx;
-            dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
+            dot.className = `dot popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
             dot.title = p.name;
             dot.setAttribute('aria-label', `Perfil ${p.name}`);
             dot.onclick = (e) => {
@@ -428,7 +451,7 @@ export class FavoritesDrawer {
         // Add Profile dot indicator at the end
         const addDot = document.createElement('button');
         addDot.type = 'button';
-        addDot.className = `popover-header-dot apolo-kit-dot is-add-dot${isLastProfile ? ' is-next-hint' : ''}`;
+        addDot.className = `dot-add popover-header-dot apolo-kit-dot is-add-dot${isLastProfile ? ' is-next-hint' : ''}`;
         addDot.title = 'Nuevo perfil';
         addDot.setAttribute('aria-label', 'Crear nuevo perfil');
         addDot.appendChild(createSvg(ICONS.plus, { size: 8, strokeWidth: 2.2 }));
@@ -442,7 +465,7 @@ export class FavoritesDrawer {
         // 3. Next Navigation Chevron (>)
         const nextBtn = document.createElement('button');
         nextBtn.type = 'button';
-        nextBtn.className = 'apolo-kit-nav-btn apolo-kit-nav-next';
+        nextBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-next';
         nextBtn.title = isLastProfile ? 'Nuevo perfil' : 'Perfil siguiente';
         nextBtn.setAttribute('aria-label', nextBtn.title);
         nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
@@ -466,6 +489,12 @@ export class FavoritesDrawer {
         this.isCreatingProfile = true;
         this.render();
         this.callbacks.onProfileModeChange?.('create');
+    }
+
+    public closeCreateProfileForm(): void {
+        this.isCreatingProfile = false;
+        this.render();
+        this.callbacks.onProfileModeChange?.('list');
     }
 
     /**
@@ -545,32 +574,28 @@ export class FavoritesDrawer {
      * Renders the inline "Nuevo perfil" creation form.
      */
     private renderCreateProfileForm(): void {
-        const form = document.createElement('div');
-        form.className = 'apolo-profile-create-form';
+        const form = document.createElement('label');
+        form.className = 'field apolo-profile-create-form';
 
-        const title = document.createElement('span');
-        title.className = 'apolo-profile-create-title';
-        title.textContent = 'Nuevo perfil';
+        const icon = createSvg(ICONS.bookmark, { size: 18, strokeWidth: 1.8 });
+        icon.classList.add('field-ic');
 
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'apolo-profile-name-input';
-        input.placeholder = 'Nombre del nuevo perfil...';
+        input.placeholder = 'Nuevo perfil…';
         input.maxLength = 24;
 
-        const actions = document.createElement('div');
-        actions.className = 'apolo-profile-create-actions';
-
         const cancel = () => {
-            this.isCreatingProfile = false;
-            this.render();
-            this.callbacks.onProfileModeChange?.('list');
+            this.closeCreateProfileForm();
         };
 
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
-        cancelBtn.className = 'apolo-profile-cancel-btn';
-        cancelBtn.textContent = 'Cancelar';
+        cancelBtn.className = 'ibtn apolo-profile-cancel-btn';
+        cancelBtn.title = 'Cancelar';
+        cancelBtn.setAttribute('aria-label', 'Cancelar');
+        cancelBtn.appendChild(createSvg(ICONS.close, { size: 14, strokeWidth: 2 }));
         cancelBtn.onclick = (e) => {
             e.stopPropagation();
             cancel();
@@ -578,8 +603,10 @@ export class FavoritesDrawer {
 
         const createBtn = document.createElement('button');
         createBtn.type = 'button';
-        createBtn.className = 'apolo-profile-create-btn';
-        createBtn.textContent = 'Crear';
+        createBtn.className = 'btn-ok apolo-profile-create-btn';
+        createBtn.title = 'Crear perfil';
+        createBtn.setAttribute('aria-label', 'Crear perfil');
+        createBtn.appendChild(createSvg(ICONS.check, { size: 14, strokeWidth: 2.2 }));
 
         const submit = () => {
             const rawName = input.value.trim();
@@ -613,8 +640,7 @@ export class FavoritesDrawer {
             }
         };
 
-        actions.append(cancelBtn, createBtn);
-        form.append(title, input, actions);
+        form.append(icon, input, cancelBtn, createBtn);
         this.el.appendChild(form);
 
         setTimeout(() => input.focus?.(), 0);
@@ -625,11 +651,13 @@ export class FavoritesDrawer {
      */
     private renderEmptyState(): void {
         const emptyContainer = document.createElement('div');
-        emptyContainer.className = 'apolo-favorites-empty';
+        emptyContainer.className = 'empty apolo-favorites-empty';
 
-        const bookmarkIcon = createSvg(ICONS.bookmark, { size: 24 });
+        const bookmarkIcon = createSvg(ICONS.bookmark, { size: 28 });
+        bookmarkIcon.classList.add('empty-ic');
+
         const text = document.createElement('p');
-        text.className = 'apolo-favorites-empty-text';
+        text.className = 'empty-txt apolo-favorites-empty-text';
         text.append('Toca ', createSvg(ICONS.star, { size: 13 }), ' para guardar el trazo actual');
 
         emptyContainer.append(bookmarkIcon, text);
@@ -641,7 +669,7 @@ export class FavoritesDrawer {
      */
     private renderFavoritesList(): void {
         const listContainer = document.createElement('div');
-        listContainer.className = 'apolo-favorites-list';
+        listContainer.className = 'list apolo-favorites-list';
 
         const activeFp = this.currentSlice
             ? computeFavoriteFingerprint({ ...this.currentSlice, tool: inferTool(this.currentSlice, this.tool) })
@@ -663,7 +691,7 @@ export class FavoritesDrawer {
         const tooltip = getPresetTooltip(preset);
 
         const card = document.createElement('div');
-        card.className = `apolo-favorite-card${isActive ? ' is-active' : ''}`;
+        card.className = `card apolo-favorite-card${isActive ? ' is-active' : ''}`;
         card.dataset.presetId = preset.id;
         card.setAttribute('role', 'button');
         card.setAttribute('tabindex', '0');
@@ -682,15 +710,12 @@ export class FavoritesDrawer {
 
         // 1) Tool glyph
         const glyph = document.createElement('span');
-        glyph.className = 'apolo-favorite-glyph';
+        glyph.className = 'glyph apolo-favorite-glyph';
         glyph.appendChild(createSvg(getPresetIcon(preset), { size: 18 }));
 
         // 2) Preview (wave is drawn wide; shapes keep their compact box)
-        const previewWrap = document.createElement('div');
-        previewWrap.className = 'apolo-favorite-preview-wrap';
-
         const previewEl = document.createElement('div');
-        previewEl.className = 'apolo-favorite-preview';
+        previewEl.className = 'preview apolo-favorite-preview';
         if (preset.tool === 'pen' || preset.tool === 'highlighter') {
             const stroke = preset as PenFavoritePreset | HighlighterFavoritePreset;
             previewEl.appendChild(
@@ -699,75 +724,71 @@ export class FavoritesDrawer {
         } else if (preset.tool === 'shape') {
             previewEl.appendChild(createShapePreview(preset as ShapeFavoritePreset));
         }
-        previewWrap.appendChild(previewEl);
-
-        if (preset.name) {
-            const nameBadge = document.createElement('span');
-            nameBadge.className = 'apolo-favorite-custom-name';
-            nameBadge.textContent = preset.name;
-            previewWrap.appendChild(nameBadge);
-        }
 
         // 3) Thickness as a dot instead of "7px"
         const size = document.createElement('span');
-        size.className = 'apolo-favorite-size';
+        size.className = 'size apolo-favorite-size';
         size.setAttribute('aria-hidden', 'true');
-        const dot = document.createElement('span');
+        const dot = document.createElement('i');
         dot.className = 'apolo-favorite-size-dot';
-        dot.style.setProperty('--dot', `${Math.max(3, Math.min(14, 2 + preset.width * 0.8))}px`);
+        const dVal = `${Math.max(3, Math.min(14, 2 + preset.width * 0.8))}px`;
+        dot.style.setProperty('--d', dVal);
+        dot.style.setProperty('--dot', dVal);
         size.appendChild(dot);
 
         // 4) Drag Handle & Contextual Menu (Rename & Delete)
-        const handleWrap = document.createElement('div');
-        handleWrap.className = 'apolo-favorite-handle-wrap';
-
         const handleBtn = document.createElement('button');
         handleBtn.type = 'button';
-        handleBtn.className = 'apolo-favorite-drag-handle';
+        handleBtn.className = 'grip apolo-favorite-handle-wrap apolo-favorite-drag-handle';
         handleBtn.title = 'Arrastrar para reordenar / Clic para opciones';
         handleBtn.setAttribute('aria-label', 'Mover o editar favorito');
-        handleBtn.appendChild(createSvg(ICONS.dragGrip, {
-            size: 14,
-            width: 14,
-            height: 14,
-            viewBox: '0 0 14 14',
-            fill: 'currentColor',
-            stroke: 'none',
-            strokeWidth: 0,
-        }));
+        handleBtn.appendChild(create6DotGripSvg());
 
         const menu = document.createElement('div');
-        menu.className = 'apolo-card-menu';
+        menu.className = 'actions apolo-card-menu';
         menu.style.display = 'none';
 
         const renameBtn = document.createElement('button');
         renameBtn.type = 'button';
-        renameBtn.className = 'apolo-card-menu-btn apolo-card-rename-btn';
+        renameBtn.className = 'ibtn apolo-card-menu-btn apolo-card-rename-btn';
         renameBtn.title = 'Cambiar nombre';
         renameBtn.setAttribute('aria-label', 'Cambiar nombre');
         renameBtn.appendChild(createSvg(ICONS.pencil, { size: 14, strokeWidth: 1.8 }));
         renameBtn.onclick = (e) => {
             e.stopPropagation();
             menu.style.display = 'none';
+            menu.classList.remove('is-pinned', 'is-visible');
             this.openRenameCardRow(card, preset);
         };
 
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
-        deleteBtn.className = 'apolo-card-menu-btn apolo-favorite-delete-btn';
+        deleteBtn.className = 'ibtn danger apolo-card-menu-btn apolo-favorite-delete-btn';
         deleteBtn.title = 'Eliminar favorito';
         deleteBtn.setAttribute('aria-label', 'Eliminar favorito');
         deleteBtn.appendChild(createSvg(ICONS.trash, { size: 14, strokeWidth: 1.8 }));
         deleteBtn.onclick = (e) => {
             e.stopPropagation();
             menu.style.display = 'none';
+            menu.classList.remove('is-pinned', 'is-visible');
             this.callbacks.onDeleteFavorite(preset.id);
         };
 
         menu.append(renameBtn, deleteBtn);
-        handleWrap.append(handleBtn, menu);
 
-        // Dragging & Clicking interactions
+        // Hover & click listeners for menu
+        card.onpointerenter = () => {
+            if (menu.style.display === 'none' && !menu.classList.contains('is-pinned')) {
+                menu.style.display = 'flex';
+            }
+        };
+        card.onpointerleave = () => {
+            if (!menu.classList.contains('is-pinned')) {
+                menu.style.display = 'none';
+            }
+        };
+
+        // Dragging & Clicking interactions on handle
         let isDragging = false;
         let startX = 0;
         let startY = 0;
@@ -814,11 +835,15 @@ export class FavoritesDrawer {
         handleBtn.onclick = (e) => {
             e.stopPropagation();
             if (isDragging) return;
-            const isShowing = menu.style.display !== 'none';
+            const isShowing = menu.classList.contains('is-pinned');
             this.el.querySelectorAll('.apolo-card-menu').forEach((m) => {
                 (m as HTMLElement).style.display = 'none';
+                m.classList.remove('is-pinned', 'is-visible');
             });
-            menu.style.display = isShowing ? 'none' : 'flex';
+            if (!isShowing) {
+                menu.style.display = 'flex';
+                menu.classList.add('is-pinned', 'is-visible');
+            }
         };
 
         // Native HTML5 Drag and Drop on card
@@ -858,7 +883,7 @@ export class FavoritesDrawer {
             card.removeAttribute('draggable');
         };
 
-        card.append(glyph, previewWrap, size, handleWrap);
+        card.append(glyph, previewEl, size, handleBtn, menu);
         return card;
     }
 
@@ -881,14 +906,14 @@ export class FavoritesDrawer {
 
         const saveBtn = document.createElement('button');
         saveBtn.type = 'button';
-        saveBtn.className = 'apolo-card-rename-btn apolo-card-rename-save';
+        saveBtn.className = 'ibtn btn-ok apolo-card-rename-btn apolo-card-rename-save';
         saveBtn.title = 'Guardar nombre';
         saveBtn.setAttribute('aria-label', 'Guardar nombre');
         saveBtn.appendChild(createSvg(ICONS.check, { size: 14, strokeWidth: 2.2 }));
 
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
-        cancelBtn.className = 'apolo-card-rename-btn apolo-card-rename-cancel';
+        cancelBtn.className = 'ibtn apolo-card-rename-btn apolo-card-rename-cancel';
         cancelBtn.title = 'Cancelar';
         cancelBtn.setAttribute('aria-label', 'Cancelar');
         cancelBtn.appendChild(createSvg(ICONS.close, { size: 14, strokeWidth: 2 }));
@@ -896,7 +921,12 @@ export class FavoritesDrawer {
         const finish = () => {
             renameRow.remove();
             originalChildren.forEach((child) => {
-                (child as HTMLElement).style.display = '';
+                if (child.classList.contains('apolo-card-menu')) {
+                    (child as HTMLElement).style.display = 'none';
+                    child.classList.remove('is-pinned', 'is-visible');
+                } else {
+                    (child as HTMLElement).style.display = '';
+                }
             });
         };
 
