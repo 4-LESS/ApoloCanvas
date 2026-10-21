@@ -309,7 +309,7 @@ describe('ToolEstuche Favorites Integration (Task 3 of 4)', () => {
         favsBtn.onclick();
         assert.strictEqual(estuche.isShowingFavorites(), true);
         const titleInDrawer = root.querySelector('.popover-title');
-        assert.strictEqual(titleInDrawer.textContent, 'Favoritos');
+        assert.strictEqual(titleInDrawer.textContent, 'Notas');
         assert.ok(root.querySelector('.apolo-favorites-drawer'), 'FavoritesDrawer should be rendered');
 
         // Click bookmark button again -> Close drawer, back to Pluma controls

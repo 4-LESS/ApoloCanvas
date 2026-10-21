@@ -1314,6 +1314,16 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        new Setting(containerEl)
+            .setName('Sincronizar perfiles de favoritos (Lápices y Formas)')
+            .setDesc('Al cambiar de perfil de favoritos en Lápices o Marcadores, cambia automáticamente al perfil equivalente en Formas.')
+            .addToggle(toggle => toggle
+                .setValue(Boolean(this.plugin.settings.toolState?.syncFavoriteProfiles))
+                .onChange(async value => {
+                    this.plugin.toggleSyncFavoriteProfiles(value);
+                    await this.plugin.saveSettings();
+                }));
+
         containerEl.createEl('h3', { text: 'Cajas de Dibujo (Canvas)' });
 
         new Setting(containerEl)

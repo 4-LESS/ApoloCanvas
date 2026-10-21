@@ -392,23 +392,18 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
     // =========================================================================
     // 2. FavoritesDrawer Header, Navigation & Sync Toggle
     // =========================================================================
-    describe('2. FavoritesDrawer Header & Navigation', () => {
-        test('renders profile header with active name, dots, and sync toggle', () => {
+    describe('2. FavoritesDrawer Clean UI & ToolEstuche Header Profile Integration', () => {
+        test('FavoritesDrawer does NOT render redundant sub-header bar or sync button', () => {
             const profiles = [
                 { id: 'notes', name: 'Notas' },
                 { id: 'academic', name: 'Académico' },
             ];
-
-            let synced = false;
-            let switchedProfileId = '';
 
             const drawer = new FavoritesDrawer(
                 {
                     onSelectFavorite: () => {},
                     onDeleteFavorite: () => {},
                     onReorderFavorite: () => {},
-                    onSwitchProfile: (id) => { switchedProfileId = id; },
-                    onToggleSyncProfiles: (s) => { synced = s; },
                 },
                 'pen',
                 [],
@@ -419,73 +414,72 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
                 false,
             );
 
-            const header = drawer.el.querySelector('.apolo-profile-header');
-            assert.ok(header, 'Profile header must be rendered');
+            assert.strictEqual(drawer.el.querySelector('.apolo-profile-header'), null, 'Sub-header bar must be removed');
+            assert.strictEqual(drawer.el.querySelector('.apolo-profile-sync-btn'), null, 'Sync toggle button must be removed from drawer');
+            assert.ok(drawer.el.querySelector('.apolo-favorites-empty'), 'Empty state should render directly');
+        });
 
-            const name = header.querySelector('.apolo-profile-name');
-            assert.ok(name);
-            assert.strictEqual(name.textContent, 'Notas');
+        test('ToolEstuche renders active profile name in main header title and pagination dots', () => {
+            let switchedProfileId = '';
+            const profiles = [
+                { id: 'notes', name: 'Notas', pen: [], highlighter: [] },
+                { id: 'academic', name: 'Académico', pen: [], highlighter: [] },
+            ];
 
-            const dots = header.querySelectorAll('.apolo-profile-dot:not(.is-add)');
+            const root = document.createElement('div');
+            const estuche = new ToolEstuche(
+                {
+                    tool: 'pen',
+                    slot: 'tc',
+                    color: '#000',
+                    width: 2,
+                    profileId: 'ball',
+                    smoothing: 0.5,
+                    pressureSensitivity: 0.7,
+                    showingFavorites: true,
+                    strokeFavoriteProfiles: profiles,
+                    activeStrokeProfileId: 'notes',
+                },
+                {
+                    onSelectProfile: () => {},
+                    onChangeColor: () => {},
+                    onChangeWidth: () => {},
+                    onChangeSmoothing: () => {},
+                    onChangePressure: () => {},
+                    onUseFavorite: () => {},
+                    onSaveFavorite: () => {},
+                    onSelectEraserMode: () => {},
+                    onChangeEraserRadius: () => {},
+                    onToggleScribble: () => {},
+                    onSelectLassoMode: () => {},
+                    onSelectShapeType: () => {},
+                    onToggleSnapGrid: () => {},
+                    onSwitchProfile: (id) => { switchedProfileId = id; },
+                },
+                root,
+            );
+            estuche.open();
+
+            // Header title reflects active profile name 'Notas'
+            const titleEl = root.querySelector('.popover-title');
+            assert.ok(titleEl);
+            assert.strictEqual(titleEl.textContent, 'Notas');
+
+            // Pagination dots rendered in header area
+            const dots = root.querySelectorAll('.popover-header-dot');
             assert.strictEqual(dots.length, 2);
             assert.ok(dots[0].classList.contains('is-active'));
             assert.ok(!dots[1].classList.contains('is-active'));
 
-            const addDot = header.querySelector('.apolo-profile-add-btn');
-            assert.ok(addDot, 'Add profile dot must exist');
-
-            const syncBtn = header.querySelector('.apolo-profile-sync-btn');
-            assert.ok(syncBtn, 'Sync toggle button must exist');
-            assert.ok(!syncBtn.classList.contains('is-synced'));
-
-            // Click dot 1 to switch
-            dots[1].onclick({ stopPropagation: () => {} });
+            // Click dot 1 to switch to 'academic'
+            dots[1].onclick?.({ stopPropagation: () => {} } as any);
             assert.strictEqual(switchedProfileId, 'academic');
+            assert.strictEqual(titleEl.textContent, 'Académico');
+            const updatedDots = root.querySelectorAll('.popover-header-dot');
+            assert.ok(!updatedDots[0].classList.contains('is-active'));
+            assert.ok(updatedDots[1].classList.contains('is-active'));
 
-            // Click sync button to toggle
-            syncBtn.onclick({ stopPropagation: () => {} });
-            assert.strictEqual(synced, true);
-            assert.ok(syncBtn.classList.contains('is-synced'));
-        });
-
-        test('nav buttons < and > navigate between profiles', () => {
-            const profiles = [
-                { id: 'p1', name: 'Uno' },
-                { id: 'p2', name: 'Dos' },
-                { id: 'p3', name: 'Tres' },
-            ];
-
-            let currentId = 'p2';
-            const drawer = new FavoritesDrawer(
-                {
-                    onSelectFavorite: () => {},
-                    onDeleteFavorite: () => {},
-                    onReorderFavorite: () => {},
-                    onSwitchProfile: (id) => {
-                        currentId = id;
-                        drawer.updateState({ activeProfileId: id });
-                    },
-                },
-                'pen',
-                [],
-                null,
-                undefined,
-                profiles,
-                'p2',
-            );
-
-            const prevBtn = drawer.el.querySelector('.apolo-profile-prev-btn');
-            assert.ok(prevBtn);
-
-            // Click previous from p2 -> p1
-            prevBtn.onclick({ stopPropagation: () => {} });
-            assert.strictEqual(currentId, 'p1');
-
-            // Click next from p1 -> p2 (query freshly rendered button)
-            const nextBtn = drawer.el.querySelector('.apolo-profile-next-btn');
-            assert.ok(nextBtn);
-            nextBtn.onclick({ stopPropagation: () => {} });
-            assert.strictEqual(currentId, 'p2');
+            estuche.destroy();
         });
     });
 
@@ -615,7 +609,7 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
             assert.strictEqual(drawer.el.querySelector('.apolo-profile-create-form'), null);
         });
 
-        test('tapping + dot opens create form and submitting creates new independent profile', () => {
+        test('overswiping boundary opens create form and submitting creates new independent profile', () => {
             let createdName = '';
             const profiles = [
                 { id: 'p1', name: 'Uno' },
@@ -638,9 +632,8 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
                 'p1',
             );
 
-            const addDot = drawer.el.querySelector('.apolo-profile-add-btn');
-            assert.ok(addDot);
-            addDot.onclick({ stopPropagation: () => {} });
+            // Overswipe beyond boundary to trigger create form
+            drawer.handleHorizontalSwipe(-50);
 
             const form = drawer.el.querySelector('.apolo-profile-create-form');
             assert.ok(form);

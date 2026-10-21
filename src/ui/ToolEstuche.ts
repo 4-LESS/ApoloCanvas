@@ -115,6 +115,8 @@ export class ToolEstuche implements PopoverInstance {
     private starBtn?: HTMLElement;
     private favsBtn?: HTMLElement;
     private favoritesDrawer?: FavoritesDrawer;
+    private titleEl?: HTMLElement;
+    private headerDotsContainer?: HTMLElement;
 
     private recentColors: string[] = ['#E53935', '#FFA726', '#FFEE58', '#26A69A', '#42A5F5', '#1E88E5', '#7E57C2', '#EEEEEE'];
     private maxRecentSlots = 8;
@@ -306,6 +308,7 @@ export class ToolEstuche implements PopoverInstance {
             partial.syncFavoriteProfiles !== undefined
         ) {
             this.updateFavsButtonVisual();
+            this.updateHeaderTitleVisual();
             if (this.state.showingFavorites && this.favoritesDrawer) {
                 const tool = this.state.tool as FavoritableTool;
                 const isShape = tool === 'shape';
@@ -486,7 +489,101 @@ export class ToolEstuche implements PopoverInstance {
         }
     }
 
+    private getActiveToolProfiles(): Array<{ id: string; name: string }> {
+        const isShape = this.state.tool === 'shape';
+        const profiles = isShape
+            ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
+            : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
+        return profiles.map(p => ({ id: p.id, name: p.name }));
+    }
+
+    private getActiveProfileId(): string {
+        const isShape = this.state.tool === 'shape';
+        return isShape
+            ? (this.state.activeShapeProfileId ?? 'general')
+            : (this.state.activeStrokeProfileId ?? 'notes');
+    }
+
+    private getActiveProfileName(): string {
+        const profiles = this.getActiveToolProfiles();
+        const activeId = this.getActiveProfileId();
+        const activeProfile = profiles.find(p => p.id === activeId) ?? profiles[0];
+        return activeProfile?.name || 'Favoritos';
+    }
+
+    public switchProfile(profileId: string): void {
+        const isShape = this.state.tool === 'shape';
+        if (isShape) {
+            this.state.activeShapeProfileId = profileId;
+        } else {
+            this.state.activeStrokeProfileId = profileId;
+        }
+        this.updateHeaderTitleVisual();
+        this.updateFavsButtonVisual();
+        if (this.favoritesDrawer) {
+            const tool = this.state.tool as FavoritableTool;
+            const profiles = isShape
+                ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
+                : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
+            this.favoritesDrawer.update(
+                tool,
+                this.getToolFavorites(),
+                this.getCurrentToolSlice(),
+                profiles,
+                profileId,
+                Boolean(this.state.syncFavoriteProfiles),
+            );
+        }
+        this.callbacks.onSwitchProfile?.(profileId);
+    }
+
+    private updateHeaderTitleVisual(): void {
+        if (!this.titleEl) return;
+        if (this.state.showingFavorites) {
+            const profileName = this.getActiveProfileName();
+            this.titleEl.textContent = profileName;
+
+            if (this.headerDotsContainer) {
+                this.headerDotsContainer.replaceChildren();
+                const profiles = this.getActiveToolProfiles();
+                const activeProfileId = this.getActiveProfileId();
+                profiles.forEach((p, idx) => {
+                    const dot = document.createElement('button');
+                    dot.type = 'button';
+                    const isActive = p.id === activeProfileId || (!activeProfileId && idx === 0);
+                    dot.className = `popover-header-dot${isActive ? ' is-active' : ''}`;
+                    dot.title = p.name;
+                    dot.setAttribute('aria-label', `Perfil ${p.name}`);
+                    dot.onclick = (e) => {
+                        e.stopPropagation();
+                        this.switchProfile(p.id);
+                    };
+                    this.headerDotsContainer!.appendChild(dot);
+                });
+            }
+        } else {
+            this.titleEl.textContent = this.getTitleForTool(this.state.tool);
+            if (this.headerDotsContainer) {
+                this.headerDotsContainer.replaceChildren();
+            }
+        }
+    }
+
     private getToolFavorites(): ToolFavoritePreset[] {
+        const tool = this.state.tool;
+        if (tool === 'pen' && this.state.strokeFavoriteProfiles) {
+            const activeId = this.state.activeStrokeProfileId ?? 'notes';
+            const prof = this.state.strokeFavoriteProfiles.find(p => p.id === activeId) ?? this.state.strokeFavoriteProfiles[0];
+            if (prof?.pen) return prof.pen;
+        } else if (tool === 'highlighter' && this.state.strokeFavoriteProfiles) {
+            const activeId = this.state.activeStrokeProfileId ?? 'notes';
+            const prof = this.state.strokeFavoriteProfiles.find(p => p.id === activeId) ?? this.state.strokeFavoriteProfiles[0];
+            if (prof?.highlighter) return prof.highlighter;
+        } else if (tool === 'shape' && this.state.shapeFavoriteProfiles) {
+            const activeId = this.state.activeShapeProfileId ?? 'general';
+            const prof = this.state.shapeFavoriteProfiles.find(p => p.id === activeId) ?? this.state.shapeFavoriteProfiles[0];
+            if (prof?.shape) return prof.shape;
+        }
         if (Array.isArray(this.state.favorites)) {
             return this.state.favorites.filter((f): f is ToolFavoritePreset => Boolean(f && typeof f === 'object' && 'id' in f));
         }
@@ -590,13 +687,21 @@ export class ToolEstuche implements PopoverInstance {
                     this.callbacks.onReorderFavorites?.(fromIndex, toIndex);
                 },
                 onSwitchProfile: (profileId) => {
-                    this.callbacks.onSwitchProfile?.(profileId);
+                    this.switchProfile(profileId);
                 },
                 onCreateProfile: (name) => {
                     this.callbacks.onCreateProfile?.(name);
                 },
                 onToggleSyncProfiles: (sync) => {
                     this.callbacks.onToggleSyncProfiles?.(sync);
+                },
+                onProfileModeChange: (mode) => {
+                    if (mode === 'create') {
+                        if (this.titleEl) this.titleEl.textContent = 'Nuevo perfil';
+                        if (this.headerDotsContainer) this.headerDotsContainer.replaceChildren();
+                    } else {
+                        this.updateHeaderTitleVisual();
+                    }
                 },
             },
             tool,
@@ -631,10 +736,40 @@ export class ToolEstuche implements PopoverInstance {
         this.favsBtn = favsBtn;
         this.headerEl.appendChild(favsBtn);
 
+        const titleContainer = document.createElement('div');
+        titleContainer.className = 'popover-title-container';
+
         const title = document.createElement('h3');
         title.className = 'popover-title';
-        title.textContent = this.state.showingFavorites ? 'Favoritos' : titleText;
-        this.headerEl.appendChild(title);
+        title.textContent = this.state.showingFavorites ? this.getActiveProfileName() : titleText;
+        titleContainer.appendChild(title);
+        this.titleEl = title;
+
+        if (this.state.showingFavorites) {
+            const dotsContainer = document.createElement('div');
+            dotsContainer.className = 'popover-header-profile-dots';
+            const profiles = this.getActiveToolProfiles();
+            const activeProfileId = this.getActiveProfileId();
+            profiles.forEach((p, idx) => {
+                const dot = document.createElement('button');
+                dot.type = 'button';
+                const isActive = p.id === activeProfileId || (!activeProfileId && idx === 0);
+                dot.className = `popover-header-dot${isActive ? ' is-active' : ''}`;
+                dot.title = p.name;
+                dot.setAttribute('aria-label', `Perfil ${p.name}`);
+                dot.onclick = (e) => {
+                    e.stopPropagation();
+                    this.switchProfile(p.id);
+                };
+                dotsContainer.appendChild(dot);
+            });
+            titleContainer.appendChild(dotsContainer);
+            this.headerDotsContainer = dotsContainer;
+        } else {
+            this.headerDotsContainer = undefined;
+        }
+
+        this.headerEl.appendChild(titleContainer);
 
         const rightBtns = document.createElement('div');
         rightBtns.className = 'popover-header-right';

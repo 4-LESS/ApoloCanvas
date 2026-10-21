@@ -19,6 +19,7 @@ export interface FavoritesDrawerCallbacks {
     onSwitchProfile?: (profileId: string) => void;
     onCreateProfile?: (name: string) => void;
     onToggleSyncProfiles?: (sync: boolean) => void;
+    onProfileModeChange?: (mode: 'list' | 'create') => void;
 }
 
 /**
@@ -353,11 +354,13 @@ export class FavoritesDrawer {
         } else {
             this.render();
         }
+        this.callbacks.onProfileModeChange?.('list');
     }
 
     public openCreateProfileForm(): void {
         this.isCreatingProfile = true;
         this.render();
+        this.callbacks.onProfileModeChange?.('create');
     }
 
     /**
@@ -416,10 +419,7 @@ export class FavoritesDrawer {
     private render(): void {
         this.el.replaceChildren();
 
-        // 1. Profile Carousel Header
-        this.renderProfileHeader();
-
-        // 2. Either Create Profile View or Favorites List / Empty State
+        // 1. Either Create Profile View or Favorites List / Empty State
         if (this.isCreatingProfile) {
             this.renderCreateProfileForm();
             return;
@@ -431,111 +431,6 @@ export class FavoritesDrawer {
         }
 
         this.renderFavoritesList();
-    }
-
-    /**
-     * Renders the compact profile carousel header:
-     * - Active profile name
-     * - Pagination dots + subtle < / > buttons + add dot (+)
-     * - Sync icon toggle button reflecting syncFavoriteProfiles
-     */
-    private renderProfileHeader(): void {
-        const header = document.createElement('div');
-        header.className = 'apolo-profile-header';
-
-        const navGroup = document.createElement('div');
-        navGroup.className = 'apolo-profile-nav';
-
-        const currIdx = this.profiles.findIndex(p => p.id === this.activeProfileId);
-        const currentProfile = currIdx !== -1 ? this.profiles[currIdx] : this.profiles[0];
-
-        const prevBtn = document.createElement('button');
-        prevBtn.type = 'button';
-        prevBtn.className = 'apolo-profile-nav-btn apolo-profile-prev-btn';
-        prevBtn.setAttribute('aria-label', 'Perfil anterior');
-        prevBtn.title = 'Perfil anterior';
-        prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 14, strokeWidth: 2 }));
-        prevBtn.onclick = (e) => {
-            e.stopPropagation();
-            const idx = this.profiles.findIndex(p => p.id === this.activeProfileId);
-            if (idx > 0) {
-                this.switchProfile(this.profiles[idx - 1].id);
-            } else {
-                this.openCreateProfileForm();
-            }
-        };
-
-        const nameEl = document.createElement('span');
-        nameEl.className = 'apolo-profile-name';
-        nameEl.textContent = currentProfile?.name || 'Perfil';
-
-        const nextBtn = document.createElement('button');
-        nextBtn.type = 'button';
-        nextBtn.className = 'apolo-profile-nav-btn apolo-profile-next-btn';
-        nextBtn.setAttribute('aria-label', 'Perfil siguiente');
-        nextBtn.title = 'Perfil siguiente';
-        nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 14, strokeWidth: 2 }));
-        nextBtn.onclick = (e) => {
-            e.stopPropagation();
-            const idx = this.profiles.findIndex(p => p.id === this.activeProfileId);
-            if (idx !== -1 && idx < this.profiles.length - 1) {
-                this.switchProfile(this.profiles[idx + 1].id);
-            } else {
-                this.openCreateProfileForm();
-            }
-        };
-
-        navGroup.append(prevBtn, nameEl, nextBtn);
-
-        // Pagination dots + plus button
-        const dotsContainer = document.createElement('div');
-        dotsContainer.className = 'apolo-profile-dots';
-
-        this.profiles.forEach((p, idx) => {
-            const dot = document.createElement('button');
-            dot.type = 'button';
-            const isActive = p.id === this.activeProfileId || (currIdx === -1 && idx === 0);
-            dot.className = `apolo-profile-dot${isActive ? ' is-active' : ''}`;
-            dot.setAttribute('aria-label', `Perfil ${p.name}`);
-            dot.title = p.name;
-            dot.onclick = (e) => {
-                e.stopPropagation();
-                this.switchProfile(p.id);
-            };
-            dotsContainer.appendChild(dot);
-        });
-
-        // Add dot (+)
-        const addDot = document.createElement('button');
-        addDot.type = 'button';
-        addDot.className = 'apolo-profile-dot is-add apolo-profile-add-btn';
-        addDot.setAttribute('aria-label', 'Crear nuevo perfil');
-        addDot.title = 'Crear nuevo perfil';
-        addDot.textContent = '+';
-        addDot.onclick = (e) => {
-            e.stopPropagation();
-            this.openCreateProfileForm();
-        };
-        dotsContainer.appendChild(addDot);
-
-        // Sync toggle button
-        const syncBtn = document.createElement('button');
-        syncBtn.type = 'button';
-        const isSynced = Boolean(this.syncFavoriteProfiles);
-        syncBtn.className = `apolo-profile-sync-btn${isSynced ? ' is-synced is-active' : ''}`;
-        syncBtn.setAttribute('aria-label', 'Sincronizar cambio de perfil entre Lápices y Formas');
-        syncBtn.title = 'Sincronizar cambio de perfil entre Lápices y Formas';
-        syncBtn.appendChild(createSvg(ICONS.link, { size: 14, strokeWidth: 2 }));
-        syncBtn.onclick = (e) => {
-            e.stopPropagation();
-            this.syncFavoriteProfiles = !this.syncFavoriteProfiles;
-            syncBtn.classList.toggle('is-synced', this.syncFavoriteProfiles);
-            syncBtn.classList.toggle('is-active', this.syncFavoriteProfiles);
-            this.callbacks.onToggleSyncProfiles?.(this.syncFavoriteProfiles);
-        };
-
-        header.append(navGroup, dotsContainer, syncBtn);
-        this.el.appendChild(header);
     }
 
     /**
@@ -558,14 +453,19 @@ export class FavoritesDrawer {
         const actions = document.createElement('div');
         actions.className = 'apolo-profile-create-actions';
 
+        const cancel = () => {
+            this.isCreatingProfile = false;
+            this.render();
+            this.callbacks.onProfileModeChange?.('list');
+        };
+
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
         cancelBtn.className = 'apolo-profile-cancel-btn';
         cancelBtn.textContent = 'Cancelar';
         cancelBtn.onclick = (e) => {
             e.stopPropagation();
-            this.isCreatingProfile = false;
-            this.render();
+            cancel();
         };
 
         const createBtn = document.createElement('button');
@@ -587,6 +487,7 @@ export class FavoritesDrawer {
                 this.favorites = [];
                 this.render();
             }
+            this.callbacks.onProfileModeChange?.('list');
         };
 
         createBtn.onclick = (e) => {
@@ -600,8 +501,7 @@ export class FavoritesDrawer {
                 submit();
             } else if (e.key === 'Escape') {
                 e.preventDefault();
-                this.isCreatingProfile = false;
-                this.render();
+                cancel();
             }
         };
 
