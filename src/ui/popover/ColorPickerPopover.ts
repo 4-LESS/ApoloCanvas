@@ -27,6 +27,12 @@ export class ColorPickerPopover implements PopoverInstance {
     private readonly quickPalette = ['#E53935', '#FB8C00', '#2979FF', '#FFFFFF', '#FF6D00'];
     private gridEl?: HTMLElement;
     private readoutRow?: HTMLElement;
+    private previewFillEl?: HTMLElement;
+    private inHexEl?: HTMLInputElement;
+    private inREl?: HTMLInputElement;
+    private inGEl?: HTMLInputElement;
+    private inBEl?: HTMLInputElement;
+    private recentSwatchesEl?: HTMLElement;
 
     private currentAnchor: HTMLElement | null = null;
     private currentSlot: ToolbarSlot = 'tc';
@@ -35,7 +41,8 @@ export class ColorPickerPopover implements PopoverInstance {
     constructor(parent: HTMLElement = document.body, popoverController?: PopoverController) {
         this.popoverController = popoverController;
         this.el = document.createElement('div');
-        this.el.className = 'color-picker-popover';
+        this.el.className = 'color-picker-popover panel';
+        this.el.dataset.mode = 'swatches';
         this.el.hidden = true;
         this.el.style.display = 'none';
         this.el.setAttribute('role', 'dialog');
@@ -105,7 +112,7 @@ export class ColorPickerPopover implements PopoverInstance {
         this.currentAnchor = anchorEl;
         this.currentSlot = slot;
         this.currentToolbar = toolbarEl;
-        applyPopoverGeometry(this.el, anchorEl, toolbarEl, slot, { fallbackWidth: 326, fallbackHeight: 460 });
+        applyPopoverGeometry(this.el, anchorEl, toolbarEl, slot, { fallbackWidth: 320, fallbackHeight: 440 });
     }
 
     private triggerAnimation(): void {
@@ -151,100 +158,164 @@ export class ColorPickerPopover implements PopoverInstance {
     private render(): void {
         this.el.replaceChildren();
 
-        // 1. Tabs
+        // 1. Control segmentado (Muestras / Espectro)
         const tabsRow = document.createElement('div');
-        tabsRow.className = 'color-picker-tabs';
+        tabsRow.className = 'color-picker-tabs seg-control';
+        tabsRow.setAttribute('role', 'tablist');
+        tabsRow.setAttribute('aria-label', 'Modo de selección de color');
 
         const samplesBtn = document.createElement('button');
         samplesBtn.type = 'button';
-        samplesBtn.className = `color-picker-tab-btn ${this.currentTab === 'samples' ? 'is-active' : ''}`;
+        samplesBtn.className = `color-picker-tab-btn seg-btn ${this.currentTab === 'samples' ? 'is-active' : ''}`;
         samplesBtn.textContent = 'Muestras';
+        samplesBtn.setAttribute('role', 'tab');
+        samplesBtn.setAttribute('aria-selected', this.currentTab === 'samples' ? 'true' : 'false');
         samplesBtn.onclick = () => {
             this.currentTab = 'samples';
+            this.el.dataset.mode = 'swatches';
             this.render();
         };
 
         const spectrumBtn = document.createElement('button');
         spectrumBtn.type = 'button';
-        spectrumBtn.className = `color-picker-tab-btn ${this.currentTab === 'spectrum' ? 'is-active' : ''}`;
+        spectrumBtn.className = `color-picker-tab-btn seg-btn ${this.currentTab === 'spectrum' ? 'is-active' : ''}`;
         spectrumBtn.textContent = 'Espectro';
+        spectrumBtn.setAttribute('role', 'tab');
+        spectrumBtn.setAttribute('aria-selected', this.currentTab === 'spectrum' ? 'true' : 'false');
         spectrumBtn.onclick = () => {
             this.currentTab = 'spectrum';
+            this.el.dataset.mode = 'spectrum';
             this.render();
         };
 
         tabsRow.append(samplesBtn, spectrumBtn);
         this.el.appendChild(tabsRow);
 
-        // 2. Body based on active tab
-        if (this.currentTab === 'samples') {
-            this.renderSwatchesGrid();
-        } else {
-            this.renderSpectrumCanvas();
-        }
+        // 2. Viewport (Swatches Matrix 12x10 o Espectro Continuo)
+        const viewport = document.createElement('div');
+        viewport.className = 'picker-viewport';
 
-        // 3. Readout row (Dual preview + RGB values)
+        if (this.currentTab === 'samples') {
+            this.renderSwatchesGrid(viewport);
+        } else {
+            this.renderSpectrumCanvas(viewport);
+        }
+        this.el.appendChild(viewport);
+
+        // 3. Fila de Muestra Activa + Campos Hex / Rojo / Verde / Azul
         this.readoutRow = document.createElement('div');
-        this.readoutRow.className = 'color-readout-row';
+        this.readoutRow.className = 'color-readout-row color-meta-row';
+        this.setupReadoutRow();
         this.updateReadoutVisual();
         this.el.appendChild(this.readoutRow);
 
-        // 4. Transparency / Opacity Slider
-        const opacityWrap = document.createElement('div');
-        opacityWrap.className = 'popover-slider-section color-opacity-section';
-        const opacityHeader = document.createElement('div');
-        opacityHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;';
-        const opacityLabel = document.createElement('span');
-        opacityLabel.className = 'popover-slider-label';
-        opacityLabel.textContent = 'Transparencia';
-        const opacityValue = document.createElement('span');
-        opacityValue.className = 'popover-slider-label';
-        opacityValue.textContent = `${100 - this.currentOpacity}%`;
-        opacityHeader.append(opacityLabel, opacityValue);
+        // 4. Slider de Transparencia
+        const transPct = 100 - this.currentOpacity;
+        const transGroup = document.createElement('div');
+        transGroup.className = 'transparency-group popover-slider-section color-opacity-section';
 
-        const opacityInput = document.createElement('input');
-        opacityInput.type = 'range';
-        opacityInput.min = '0';
-        opacityInput.max = '100';
-        opacityInput.step = '1';
-        opacityInput.value = String(100 - this.currentOpacity);
-        opacityInput.setAttribute('aria-label', 'Transparencia del color');
-        opacityInput.style.cssText = 'width:100%;cursor:pointer;';
-        opacityInput.oninput = () => {
-            this.currentOpacity = 100 - Number(opacityInput.value);
-            opacityValue.textContent = `${opacityInput.value}%`;
+        const transHd = document.createElement('div');
+        transHd.className = 'transparency-hd';
+
+        const transLabel = document.createElement('span');
+        transLabel.className = 'section-label popover-slider-label';
+        transLabel.textContent = 'Transparencia';
+
+        const transVal = document.createElement('span');
+        transVal.className = 'transparency-val popover-slider-label';
+        transVal.textContent = `${transPct}%`;
+        transHd.append(transLabel, transVal);
+
+        const track = document.createElement('div');
+        track.className = 'slider-track';
+        track.style.setProperty('--pos', `${transPct}%`);
+        track.setAttribute('role', 'slider');
+        track.setAttribute('aria-label', 'Transparencia');
+        track.setAttribute('aria-valuemin', '0');
+        track.setAttribute('aria-valuemax', '100');
+        track.setAttribute('aria-valuenow', String(transPct));
+
+        const fill = document.createElement('div');
+        fill.className = 'slider-fill';
+
+        const thumb = document.createElement('div');
+        thumb.className = 'slider-thumb';
+
+        track.append(fill, thumb);
+
+        const updateTransparency = (clientX: number) => {
+            const rect = track.getBoundingClientRect();
+            const pct = Math.max(0, Math.min(100, Math.round(((clientX - rect.left) / (rect.width || 1)) * 100)));
+            track.style.setProperty('--pos', `${pct}%`);
+            track.setAttribute('aria-valuenow', String(pct));
+            transVal.textContent = `${pct}%`;
+            this.currentOpacity = 100 - pct;
             this.updateReadoutVisual();
         };
-        opacityWrap.append(opacityHeader, opacityInput);
-        this.el.appendChild(opacityWrap);
 
+        track.addEventListener('pointerdown', (e: PointerEvent) => {
+            try {
+                track.setPointerCapture(e.pointerId);
+            } catch {
+                // best-effort
+            }
+            updateTransparency(e.clientX);
+            const onMove = (ev: PointerEvent) => updateTransparency(ev.clientX);
+            const onUp = (ev: PointerEvent) => {
+                track.removeEventListener('pointermove', onMove);
+                track.removeEventListener('pointerup', onUp);
+                try {
+                    track.releasePointerCapture(ev.pointerId);
+                } catch {
+                    // best-effort
+                }
+            };
+            track.addEventListener('pointermove', onMove);
+            track.addEventListener('pointerup', onUp);
+        });
+
+        transGroup.append(transHd, track);
+        this.el.appendChild(transGroup);
+
+        // Divider
         const divider = document.createElement('div');
-        divider.className = 'eraser-divider';
+        divider.className = 'divider eraser-divider';
         this.el.appendChild(divider);
 
-        // 5. Quick Palette Circles & Eyedropper
-        const quickRow = document.createElement('div');
-        quickRow.className = 'color-quick-row';
+        // 5. Colores recientes + Cuentagotas
+        const recentRow = document.createElement('div');
+        recentRow.className = 'recent-row color-quick-row';
+
+        this.recentSwatchesEl = document.createElement('div');
+        this.recentSwatchesEl.className = 'recent-swatches';
 
         this.quickPalette.forEach((col) => {
-            const cBtn = document.createElement('button');
-            cBtn.type = 'button';
-            cBtn.className = 'color-quick-circle';
-            cBtn.style.setProperty('--quick-color', col);
-            cBtn.style.backgroundColor = col;
-            cBtn.setAttribute('aria-label', `Color rápido ${col}`);
-            cBtn.onclick = () => {
-                this.currentColor = col;
+            const swatch = document.createElement('button');
+            swatch.type = 'button';
+            swatch.className =
+                'swatch color-quick-circle' +
+                (this.currentColor.toUpperCase() === col.toUpperCase() ? ' is-active' : '');
+            swatch.style.setProperty('--c', col);
+            swatch.style.backgroundColor = col;
+            swatch.dataset.hex = col.toUpperCase();
+            swatch.title = col;
+            swatch.setAttribute('aria-label', `Color ${col}`);
+            swatch.onclick = () => {
+                this.currentColor = col.toUpperCase();
                 this.updateReadoutVisual();
                 this.highlightGridSelectedCell();
+                this.highlightRecentSelectedCell();
             };
-            quickRow.appendChild(cBtn);
+            this.recentSwatchesEl!.appendChild(swatch);
         });
+
+        recentRow.appendChild(this.recentSwatchesEl);
 
         const dropperBtn = document.createElement('button');
         dropperBtn.type = 'button';
-        dropperBtn.className = 'color-eyedropper-btn';
-        dropperBtn.title = 'Selector cuentagotas';
+        dropperBtn.className = 'ibtn color-eyedropper-btn';
+        dropperBtn.title = 'Cuentagotas';
+        dropperBtn.setAttribute('aria-label', 'Seleccionar color de la pantalla');
         dropperBtn.appendChild(createSvg(ICONS.eyedropper, { size: 18 }));
         dropperBtn.onclick = async () => {
             if (typeof window !== 'undefined' && (window as any).EyeDropper) {
@@ -254,6 +325,7 @@ export class ColorPickerPopover implements PopoverInstance {
                     this.currentColor = res.sRGBHex.toUpperCase();
                     this.updateReadoutVisual();
                     this.highlightGridSelectedCell();
+                    this.highlightRecentSelectedCell();
                 } catch {
                     // Canceled by user
                 }
@@ -264,30 +336,32 @@ export class ColorPickerPopover implements PopoverInstance {
                 inp.oninput = () => {
                     this.currentColor = inp.value.toUpperCase();
                     this.updateReadoutVisual();
+                    this.highlightGridSelectedCell();
+                    this.highlightRecentSelectedCell();
                 };
                 inp.click();
             }
         };
-        quickRow.appendChild(dropperBtn);
-        this.el.appendChild(quickRow);
+        recentRow.appendChild(dropperBtn);
+        this.el.appendChild(recentRow);
 
-        // 6. Action buttons (Cancelar / Realiz.)
-        const actionsRow = document.createElement('div');
-        actionsRow.className = 'color-picker-actions';
+        // 6. Pie de Acciones (Cancelar | Listo)
+        const footer = document.createElement('footer');
+        footer.className = 'cp-footer color-picker-actions';
 
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
-        cancelBtn.className = 'color-action-btn';
+        cancelBtn.className = 'cp-action color-action-btn';
         cancelBtn.textContent = 'Cancelar';
         cancelBtn.onclick = () => this.close();
 
-        const dividerSpan = document.createElement('span');
-        dividerSpan.textContent = '|';
-        dividerSpan.style.color = 'var(--apolo-border-subtle)';
+        const sep = document.createElement('div');
+        sep.className = 'cp-sep';
+        sep.setAttribute('aria-hidden', 'true');
 
         const confirmBtn = document.createElement('button');
         confirmBtn.type = 'button';
-        confirmBtn.className = 'color-action-btn is-confirm';
+        confirmBtn.className = 'cp-action primary is-confirm color-action-btn';
         confirmBtn.textContent = 'Listo';
         confirmBtn.onclick = () => {
             if (this.onConfirmCallback) {
@@ -296,13 +370,105 @@ export class ColorPickerPopover implements PopoverInstance {
             this.close();
         };
 
-        actionsRow.append(cancelBtn, dividerSpan, confirmBtn);
-        this.el.appendChild(actionsRow);
+        footer.append(cancelBtn, sep, confirmBtn);
+        this.el.appendChild(footer);
     }
 
-    private renderSwatchesGrid(): void {
+    private setupReadoutRow(): void {
+        if (!this.readoutRow) return;
+        this.readoutRow.replaceChildren();
+
+        const well = document.createElement('div');
+        well.className = 'active-preview-well';
+        well.title = 'Color seleccionado';
+
+        this.previewFillEl = document.createElement('div');
+        this.previewFillEl.className = 'active-preview-fill';
+        well.appendChild(this.previewFillEl);
+
+        // Hex Field
+        const hexLabel = document.createElement('label');
+        hexLabel.className = 'meta-field';
+        const hexSpan = document.createElement('span');
+        hexSpan.className = 'meta-label';
+        hexSpan.textContent = 'Hex';
+        this.inHexEl = document.createElement('input');
+        this.inHexEl.className = 'meta-input';
+        this.inHexEl.type = 'text';
+        this.inHexEl.maxLength = 7;
+        this.inHexEl.setAttribute('aria-label', 'Código hexadecimal');
+        this.inHexEl.oninput = () => {
+            let val = this.inHexEl?.value.trim() ?? '';
+            if (!val.startsWith('#')) val = '#' + val;
+            if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                this.currentColor = val.toUpperCase();
+                this.updateReadoutVisual(this.inHexEl);
+                this.highlightGridSelectedCell();
+                this.highlightRecentSelectedCell();
+            }
+        };
+        hexLabel.append(hexSpan, this.inHexEl);
+
+        // Rojo Field
+        const rLabel = document.createElement('label');
+        rLabel.className = 'meta-field';
+        const rSpan = document.createElement('span');
+        rSpan.className = 'meta-label';
+        rSpan.textContent = 'Rojo';
+        this.inREl = document.createElement('input');
+        this.inREl.className = 'meta-input';
+        this.inREl.type = 'text';
+        this.inREl.maxLength = 3;
+        this.inREl.setAttribute('aria-label', 'Rojo');
+        this.inREl.oninput = () => this.handleRgbInput(this.inREl);
+        rLabel.append(rSpan, this.inREl);
+
+        // Verde Field
+        const gLabel = document.createElement('label');
+        gLabel.className = 'meta-field';
+        const gSpan = document.createElement('span');
+        gSpan.className = 'meta-label';
+        gSpan.textContent = 'Verde';
+        this.inGEl = document.createElement('input');
+        this.inGEl.className = 'meta-input';
+        this.inGEl.type = 'text';
+        this.inGEl.maxLength = 3;
+        this.inGEl.setAttribute('aria-label', 'Verde');
+        this.inGEl.oninput = () => this.handleRgbInput(this.inGEl);
+        gLabel.append(gSpan, this.inGEl);
+
+        // Azul Field
+        const bLabel = document.createElement('label');
+        bLabel.className = 'meta-field';
+        const bSpan = document.createElement('span');
+        bSpan.className = 'meta-label';
+        bSpan.textContent = 'Azul';
+        this.inBEl = document.createElement('input');
+        this.inBEl.className = 'meta-input';
+        this.inBEl.type = 'text';
+        this.inBEl.maxLength = 3;
+        this.inBEl.setAttribute('aria-label', 'Azul');
+        this.inBEl.oninput = () => this.handleRgbInput(this.inBEl);
+        bLabel.append(bSpan, this.inBEl);
+
+        this.readoutRow.append(well, hexLabel, rLabel, gLabel, bLabel);
+    }
+
+    private handleRgbInput(skipInput?: HTMLElement | null): void {
+        const r = Math.max(0, Math.min(255, parseInt(this.inREl?.value || '0', 10) || 0));
+        const g = Math.max(0, Math.min(255, parseInt(this.inGEl?.value || '0', 10) || 0));
+        const b = Math.max(0, Math.min(255, parseInt(this.inBEl?.value || '0', 10) || 0));
+        this.currentColor = this.rgbToHex(r, g, b);
+        this.updateReadoutVisual(skipInput);
+        this.highlightGridSelectedCell();
+        this.highlightRecentSelectedCell();
+    }
+
+    private renderSwatchesGrid(container: HTMLElement): void {
         this.gridEl = document.createElement('div');
-        this.gridEl.className = 'color-swatches-grid';
+        this.gridEl.className = 'color-swatches-grid swatches-grid';
+        this.gridEl.setAttribute('role', 'grid');
+        this.gridEl.setAttribute('aria-label', 'Muestras de color');
 
         const hues = [0, 25, 45, 60, 100, 150, 185, 215, 240, 275, 315];
         const lightnessSteps = [96, 88, 78, 68, 58, 48, 38, 28, 18, 8];
@@ -321,20 +487,24 @@ export class ColorPickerPopover implements PopoverInstance {
             }
         }
 
-        this.el.appendChild(this.gridEl);
+        container.appendChild(this.gridEl);
         this.highlightGridSelectedCell();
     }
 
     private createGridCell(hex: string): HTMLElement {
         const cell = document.createElement('button');
         cell.type = 'button';
-        cell.className = 'color-matrix-cell';
+        cell.className = 'color-matrix-cell cell';
+        cell.style.setProperty('--c', hex);
         cell.style.backgroundColor = hex;
         cell.dataset.color = hex.toUpperCase();
+        cell.title = hex;
+        cell.setAttribute('aria-label', hex);
         cell.onclick = () => {
             this.currentColor = hex.toUpperCase();
             this.updateReadoutVisual();
             this.highlightGridSelectedCell();
+            this.highlightRecentSelectedCell();
         };
         return cell;
     }
@@ -342,21 +512,27 @@ export class ColorPickerPopover implements PopoverInstance {
     private highlightGridSelectedCell(): void {
         if (!this.gridEl) return;
         const cur = this.currentColor.toUpperCase();
-        this.gridEl.querySelectorAll('.color-matrix-cell').forEach((cell) => {
+        this.gridEl.querySelectorAll('.color-matrix-cell, .cell').forEach((cell) => {
             cell.classList.toggle('is-selected', (cell as HTMLElement).dataset.color === cur);
         });
     }
 
-    private renderSpectrumCanvas(): void {
+    private highlightRecentSelectedCell(): void {
+        if (!this.recentSwatchesEl) return;
+        const cur = this.currentColor.toUpperCase();
+        this.recentSwatchesEl.querySelectorAll('.swatch, .color-quick-circle').forEach((s) => {
+            s.classList.toggle('is-active', (s as HTMLElement).dataset.hex === cur);
+        });
+    }
+
+    private renderSpectrumCanvas(container: HTMLElement): void {
         const wrap = document.createElement('div');
-        wrap.style.cssText =
-            'height: 200px; display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; background: var(--apolo-bg-alt); border-radius: 12px;';
+        wrap.className = 'spectrum-box';
 
         const canvas = document.createElement('canvas');
-        canvas.width = 280;
-        canvas.height = 160;
-        canvas.style.borderRadius = '8px';
-        canvas.style.cursor = 'crosshair';
+        canvas.width = 292;
+        canvas.height = 200;
+        canvas.style.cssText = 'width: 100%; height: 100%; display: block; cursor: crosshair;';
 
         const ctx = canvas.getContext('2d');
         if (ctx) {
@@ -389,13 +565,14 @@ export class ColorPickerPopover implements PopoverInstance {
                 const p = ctx.getImageData(x, y, 1, 1).data;
                 this.currentColor = this.rgbToHex(p[0], p[1], p[2]);
                 this.updateReadoutVisual();
+                this.highlightRecentSelectedCell();
             };
 
             canvas.onpointerdown = (e) => {
                 try {
                     canvas.setPointerCapture(e.pointerId);
                 } catch {
-                    // no-op: pointer capture is best-effort only
+                    // best effort
                 }
                 handlePointer(e);
             };
@@ -403,53 +580,28 @@ export class ColorPickerPopover implements PopoverInstance {
         }
 
         wrap.appendChild(canvas);
-        this.el.appendChild(wrap);
+        container.appendChild(wrap);
     }
 
-    private updateReadoutVisual(): void {
-        if (!this.readoutRow) return;
-        this.readoutRow.replaceChildren();
-
-        const dualPreview = document.createElement('div');
-        dualPreview.className = 'color-dual-preview';
-
-        const prevOrig = document.createElement('div');
-        prevOrig.className = 'color-preview-orig';
-        prevOrig.style.backgroundColor = this.originalColor;
-        prevOrig.style.opacity = String(this.originalOpacity / 100);
-
-        const prevCurr = document.createElement('div');
-        prevCurr.className = 'color-preview-curr';
-        prevCurr.style.backgroundColor = this.currentColor;
-        prevCurr.style.opacity = String(this.currentOpacity / 100);
-
-        dualPreview.append(prevOrig, prevCurr);
+    private updateReadoutVisual(skipInput?: HTMLElement | null): void {
+        if (!this.previewFillEl) return;
+        this.previewFillEl.style.backgroundColor = this.currentColor;
+        this.previewFillEl.style.opacity = String(this.currentOpacity / 100);
+        this.previewFillEl.style.setProperty('--alpha', String(this.currentOpacity / 100));
 
         const rgb = this.hexToRgb(this.currentColor);
-        const vals = document.createElement('div');
-        vals.className = 'color-readout-values';
-
-        const fields = [
-            { label: 'Hex', val: this.currentColor },
-            { label: 'Rojo', val: String(rgb.r) },
-            { label: 'Verde', val: String(rgb.g) },
-            { label: 'Azul', val: String(rgb.b) },
-        ];
-
-        fields.forEach((f) => {
-            const g = document.createElement('div');
-            g.className = 'color-val-group';
-            const lbl = document.createElement('span');
-            lbl.className = 'color-val-label';
-            lbl.textContent = f.label;
-            const num = document.createElement('span');
-            num.className = 'color-val-num';
-            num.textContent = f.val;
-            g.append(lbl, num);
-            vals.appendChild(g);
-        });
-
-        this.readoutRow.append(dualPreview, vals);
+        if (this.inHexEl && skipInput !== this.inHexEl) {
+            this.inHexEl.value = this.currentColor.toUpperCase();
+        }
+        if (this.inREl && skipInput !== this.inREl) {
+            this.inREl.value = String(rgb.r);
+        }
+        if (this.inGEl && skipInput !== this.inGEl) {
+            this.inGEl.value = String(rgb.g);
+        }
+        if (this.inBEl && skipInput !== this.inBEl) {
+            this.inBEl.value = String(rgb.b);
+        }
     }
 
     destroy(): void {

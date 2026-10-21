@@ -3803,16 +3803,17 @@ button.apolo-box-menu-swatch,
 .color-picker-popover {
   position: fixed;
   z-index: calc(var(--apolo-layer-popover, 30) + 5);
-  width: 326px;
-  background: var(--apolo-bg-elevated);
+  width: 320px;
+  background: var(--apolo-bg);
   color: var(--apolo-text);
   border: 1px solid var(--apolo-border);
-  border-radius: 26px;
-  padding: 16px;
-  box-shadow: var(--apolo-shadow-lg);
+  border-radius: 20px;
+  padding: 14px 14px 10px;
+  box-shadow: var(--apolo-shadow-md);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+  box-sizing: border-box;
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
   scrollbar-width: none;
@@ -3822,187 +3823,370 @@ button.apolo-box-menu-swatch,
   display: none;
 }
 
-.color-picker-tabs {
-  display: flex;
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--apolo-bg-alt);
-  border-radius: 14px;
-  padding: 3px;
-  gap: 4px;
-}
-
-.apolo-ui .color-picker-tab-btn,
-.color-picker-tab-btn {
-  all: unset;
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  text-align: center;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--apolo-text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.color-picker-tab-btn.is-active {
-  background: var(--apolo-bg-elevated);
-  color: var(--apolo-text);
-  font-weight: 600;
-  box-shadow: var(--apolo-shadow-sm);
-}
-
-.color-swatches-grid {
+/* 1. Control Segmentado (Muestras / Espectro) */
+.color-picker-popover .color-picker-tabs,
+.color-picker-popover .seg-control {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  grid-template-rows: repeat(10, 20px);
-  gap: 1px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--apolo-border-subtle);
-  position: relative;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--apolo-card);
+  box-sizing: border-box;
+  width: 100%;
 }
 
-.apolo-ui .color-matrix-cell,
-.color-matrix-cell {
+.apolo-ui .color-picker-popover .color-picker-tab-btn,
+.color-picker-popover .color-picker-tab-btn,
+.color-picker-popover .seg-btn {
   all: unset;
-  cursor: pointer;
-  transition: transform 0.1s ease;
-  position: relative;
-}
-
-.color-matrix-cell:hover {
-  transform: scale(1.15);
-  z-index: 2;
-  box-shadow: 0 0 4px rgba(0,0,0,0.4);
-}
-
-.color-matrix-cell.is-selected::after {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 2px rgba(0,0,0,0.8);
-  border-radius: 3px;
-  z-index: 3;
-}
-
-.color-readout-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.color-dual-preview {
-  display: flex;
-  width: 60px;
-  height: 32px;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--apolo-border-subtle);
-  flex-shrink: 0;
-}
-
-.color-preview-orig,
-.color-preview-curr {
-  flex: 1;
-  height: 100%;
-}
-
-.color-readout-values {
-  display: flex;
-  flex: 1;
-  justify-content: space-around;
-  font-family: monospace;
-  font-size: 12px;
-}
-
-.color-val-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.color-val-label {
-  font-size: 10px;
-  font-family: sans-serif;
-  color: var(--apolo-text-muted);
-}
-
-.color-val-num {
-  font-weight: 700;
-  color: var(--apolo-text);
-}
-
-.color-quick-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.apolo-ui .color-quick-circle,
-.color-quick-circle {
-  all: unset;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background-color: var(--quick-color);
-  cursor: pointer;
-  box-shadow: inset 0 0 0 1px rgba(128,128,128,0.25);
-  transition: transform 0.12s ease;
-  flex-shrink: 0;
-}
-
-.color-quick-circle:hover { transform: scale(1.12); }
-.color-quick-circle.is-active {
-  transform: scale(1.04);
-  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.28), 0 0 0 2px var(--apolo-bg), 0 0 0 3.5px var(--apolo-text-muted);
-}
-
-.apolo-ui .color-eyedropper-btn,
-.color-eyedropper-btn {
-  all: unset;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  height: 28px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--apolo-text-muted);
   cursor: pointer;
-  transition: all 0.12s ease;
+  user-select: none;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  box-sizing: border-box;
+  transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 
-.color-eyedropper-btn:hover { color: var(--apolo-text); background: var(--apolo-bg-alt); }
+.color-picker-popover .color-picker-tab-btn:hover,
+.color-picker-popover .seg-btn:hover {
+  color: var(--apolo-text);
+}
 
-.color-picker-actions {
+.color-picker-popover .color-picker-tab-btn.is-active,
+.color-picker-popover .seg-btn.is-active {
+  background: var(--apolo-bg);
+  color: var(--apolo-text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--apolo-border);
+}
+
+/* 2. Swatches Matrix 12x10 & Spectrum Viewport */
+.color-picker-popover .picker-viewport {
+  position: relative;
+  width: 100%;
+}
+
+.color-picker-popover .color-swatches-grid,
+.color-picker-popover .swatches-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(10, 20px);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--apolo-border);
+  user-select: none;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.apolo-ui .color-picker-popover .color-matrix-cell,
+.color-picker-popover .color-matrix-cell,
+.color-picker-popover .cell {
+  all: unset;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--c, transparent);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.color-picker-popover .color-matrix-cell:hover,
+.color-picker-popover .cell:hover {
+  z-index: 1;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+}
+
+.color-picker-popover .color-matrix-cell.is-selected,
+.color-picker-popover .cell.is-selected {
+  z-index: 2;
+  box-shadow: inset 0 0 0 2px #ffffff, 0 0 0 1.5px rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+}
+
+.color-picker-popover .spectrum-box {
+  position: relative;
+  height: 200px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--apolo-border);
+  cursor: crosshair;
+}
+
+/* 3. Fila de Muestra Activa + Campos Hex / Rojo / Verde / Azul */
+.color-picker-popover .color-readout-row,
+.color-picker-popover .color-meta-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1.55fr) repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+.color-picker-popover .active-preview-well {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--apolo-border);
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.18) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.18) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.18) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.18) 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+  min-height: 38px;
+}
+
+.color-picker-popover .active-preview-fill {
+  position: absolute;
+  inset: 0;
+  transition: background 0.1s;
+}
+
+.color-picker-popover .meta-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 4px 5px;
+  border-radius: 9px;
+  background: var(--apolo-card);
+  border: 1px solid transparent;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+.color-picker-popover .meta-field:focus-within {
+  border-color: var(--apolo-accent);
+  background: var(--apolo-accent-subtle);
+}
+
+.color-picker-popover .meta-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--apolo-text-muted);
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  margin-bottom: 2px;
+  user-select: none;
+}
+
+.color-picker-popover .meta-input {
+  all: unset;
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--apolo-text);
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+
+/* 4. Slider de Transparencia */
+.color-picker-popover .transparency-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.color-picker-popover .transparency-hd {
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  padding-top: 8px;
-  border-top: 1px solid var(--apolo-border-subtle);
+  justify-content: space-between;
 }
 
-.apolo-ui .color-action-btn,
-.color-action-btn {
-  all: unset;
-  font-size: 14px;
-  font-weight: 600;
+.color-picker-popover .section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--apolo-text-muted);
+  user-select: none;
+}
+
+.color-picker-popover .transparency-val {
+  font-size: 12px;
+  font-weight: 700;
   color: var(--apolo-text);
-  cursor: pointer;
-  padding: 6px 20px;
-  border-radius: 12px;
-  transition: background 0.15s ease;
+  font-variant-numeric: tabular-nums;
 }
 
-.color-action-btn:hover { background: var(--apolo-bg-alt); }
-.color-action-btn.is-confirm { color: var(--apolo-accent); }
+.color-picker-popover .slider-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--apolo-card-hover);
+  cursor: pointer;
+  margin: 4px 0;
+  touch-action: none;
+}
+
+.color-picker-popover .slider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--pos, 0%);
+  border-radius: 999px;
+  background: var(--apolo-accent);
+  pointer-events: none;
+}
+
+.color-picker-popover .slider-thumb {
+  position: absolute;
+  top: 50%;
+  left: var(--pos, 0%);
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  transition: transform 0.1s ease;
+  pointer-events: none;
+}
+
+.color-picker-popover .slider-track:hover .slider-thumb {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+/* 5. Fila de Recientes + Cuentagotas */
+.color-picker-popover .divider {
+  height: 1px;
+  background: var(--apolo-border);
+  margin: 0 -2px;
+}
+
+.color-picker-popover .recent-row,
+.color-picker-popover .color-quick-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px;
+}
+
+.color-picker-popover .recent-swatches {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.apolo-ui .color-picker-popover .color-quick-circle,
+.color-picker-popover .color-quick-circle,
+.color-picker-popover .swatch {
+  all: unset;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--c, var(--quick-color));
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  box-sizing: border-box;
+}
+
+.color-picker-popover .swatch:hover,
+.color-picker-popover .color-quick-circle:hover {
+  transform: scale(1.08);
+}
+
+.color-picker-popover .swatch.is-active,
+.color-picker-popover .color-quick-circle.is-active {
+  box-shadow: 0 0 0 2px var(--apolo-bg), 0 0 0 4px var(--apolo-accent);
+}
+
+.apolo-ui .color-picker-popover .color-eyedropper-btn,
+.color-picker-popover .color-eyedropper-btn,
+.color-picker-popover .ibtn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--apolo-text-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  box-sizing: border-box;
+}
+
+.color-picker-popover .color-eyedropper-btn:hover,
+.color-picker-popover .ibtn:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
+}
+
+.color-picker-popover .color-eyedropper-btn:focus-visible,
+.color-picker-popover .ibtn:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: 1px;
+}
+
+/* 6. Pie de Acciones (Cancelar | Listo) */
+.color-picker-popover .cp-footer,
+.color-picker-popover .color-picker-actions {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  align-items: center;
+  padding-top: 2px;
+  border-top: 1px solid var(--apolo-border);
+}
+
+.color-picker-popover .cp-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--apolo-border);
+}
+
+.apolo-ui .color-picker-popover .color-action-btn,
+.color-picker-popover .color-action-btn,
+.color-picker-popover .cp-action {
+  all: unset;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--apolo-text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.color-picker-popover .cp-action:hover,
+.color-picker-popover .color-action-btn:hover {
+  background: var(--apolo-card);
+  color: var(--apolo-text);
+}
+
+.color-picker-popover .cp-action.primary,
+.color-picker-popover .color-action-btn.is-confirm {
+  color: var(--apolo-accent);
+  font-weight: 600;
+}
+
+.color-picker-popover .cp-action.primary:hover,
+.color-picker-popover .color-action-btn.is-confirm:hover {
+  background: var(--apolo-accent-subtle);
+}
 
 /* =========================================================================
    6. Cajón de Favoritos (.apolo-favorites-drawer)
