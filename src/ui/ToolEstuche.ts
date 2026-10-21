@@ -413,10 +413,16 @@ export class ToolEstuche implements PopoverInstance {
 
         if (partial.straightenLines !== undefined && this.straightenSwitch) {
             this.straightenSwitch.classList.toggle('is-checked', partial.straightenLines);
+            this.straightenSwitch.classList.toggle('is-on', partial.straightenLines);
+            const thumb = this.straightenSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
+            if (thumb) thumb.style.transform = partial.straightenLines ? 'translateX(18px)' : 'none';
         }
 
         if (partial.onlyHighlighter !== undefined && this.onlyHighlighterSwitch) {
             this.onlyHighlighterSwitch.classList.toggle('is-checked', partial.onlyHighlighter);
+            this.onlyHighlighterSwitch.classList.toggle('is-on', partial.onlyHighlighter);
+            const thumb = this.onlyHighlighterSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
+            if (thumb) thumb.style.transform = partial.onlyHighlighter ? 'translateX(18px)' : 'none';
         }
 
         if (partial.profileId !== undefined) {
@@ -470,10 +476,16 @@ export class ToolEstuche implements PopoverInstance {
 
         if (partial.snapGrid !== undefined && this.snapGridSwitch) {
             this.snapGridSwitch.classList.toggle('is-checked', partial.snapGrid);
+            this.snapGridSwitch.classList.toggle('is-on', partial.snapGrid);
+            const thumb = this.snapGridSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
+            if (thumb) thumb.style.transform = partial.snapGrid ? 'translateX(18px)' : 'none';
         }
 
         if (partial.scribbleToErase !== undefined && this.scribbleSwitch) {
             this.scribbleSwitch.classList.toggle('is-checked', partial.scribbleToErase);
+            this.scribbleSwitch.classList.toggle('is-on', partial.scribbleToErase);
+            const thumb = this.scribbleSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
+            if (thumb) thumb.style.transform = partial.scribbleToErase ? 'translateX(18px)' : 'none';
         }
 
         if (partial.slot !== undefined) {
@@ -1538,20 +1550,39 @@ export class ToolEstuche implements PopoverInstance {
     private createToggleRow(title: string, initialChecked: boolean, onToggle?: (checked: boolean) => void): HTMLElement {
         const toggleRow = document.createElement('label');
         toggleRow.className = 'toggle-row popover-toggle-row';
+        toggleRow.style.display = 'flex';
+        toggleRow.style.alignItems = 'center';
+        toggleRow.style.justifyContent = 'space-between';
+        toggleRow.style.width = '100%';
 
         const tTitle = document.createElement('span');
         tTitle.className = 'toggle-label popover-toggle-title';
         tTitle.textContent = title;
+        tTitle.style.flex = '1';
 
         const sw = document.createElement('button');
         sw.type = 'button';
         sw.className = `switch popover-switch ${initialChecked ? 'is-on is-checked' : ''}`;
         sw.setAttribute('role', 'switch');
         sw.setAttribute('aria-checked', String(initialChecked));
+        sw.style.position = 'relative';
+        sw.style.display = 'inline-block';
+        sw.style.width = '40px';
+        sw.style.height = '22px';
+        sw.style.flexShrink = '0';
         setAccessibleTooltip(sw, title);
 
         const thumb = document.createElement('span');
         thumb.className = 'popover-switch-thumb';
+        thumb.style.position = 'absolute';
+        thumb.style.top = '2px';
+        thumb.style.left = '2px';
+        thumb.style.width = '16px';
+        thumb.style.height = '16px';
+        thumb.style.borderRadius = '50%';
+        thumb.style.background = '#ffffff';
+        thumb.style.pointerEvents = 'none';
+        thumb.style.transform = initialChecked ? 'translateX(18px)' : 'none';
         sw.appendChild(thumb);
 
         sw.onclick = (e) => {
@@ -1560,6 +1591,7 @@ export class ToolEstuche implements PopoverInstance {
             sw.classList.toggle('is-checked', next);
             sw.classList.toggle('is-on', next);
             sw.setAttribute('aria-checked', String(next));
+            thumb.style.transform = next ? 'translateX(18px)' : 'none';
             onToggle?.(next);
         };
 

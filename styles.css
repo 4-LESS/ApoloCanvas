@@ -3107,16 +3107,18 @@ button.apolo-box-menu-swatch,
 .tool-grid,
 .popover-tools-selector {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
   height: auto;
-  align-items: stretch;
+  align-items: center;
+  justify-items: center;
 }
 .tool-btn,
 .popover-tool-opt {
   all: unset;
+  width: 44px;
   height: 44px;
   border-radius: 12px;
   display: flex;
@@ -3127,11 +3129,11 @@ button.apolo-box-menu-swatch,
   border: 1.5px solid transparent;
   color: var(--muted);
   box-sizing: border-box;
-  transition: transform .18s cubic-bezier(.34, 1.56, .64, 1), background .15s, border-color .15s, color .15s, box-shadow .15s;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
-.tool-btn:hover,
-.popover-tool-opt:hover {
-  background: var(--card-hover);
+.tool-btn:hover:not(.is-active),
+.popover-tool-opt:hover:not(.is-active) {
+  background: var(--card-hover, rgba(128, 128, 128, 0.12));
   color: var(--text);
 }
 .tool-btn:focus-visible,
@@ -3141,11 +3143,25 @@ button.apolo-box-menu-swatch,
 }
 .tool-btn.is-active,
 .popover-tool-opt.is-active {
-  background: var(--accent-subtle);
-  border-color: var(--accent);
-  color: var(--accent);
-  transform: translateY(-4px);
-  box-shadow: 0 4px 12px rgba(47, 107, 255, 0.22);
+  background: var(--accent-subtle) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.theme-light .tool-btn.is-active,
+.theme-light .popover-tool-opt.is-active,
+:root .tool-btn.is-active,
+:root .popover-tool-opt.is-active {
+  background: #eef3ff !important;
+  border-color: #2f6bff !important;
+  color: #2f6bff !important;
+}
+.theme-dark .tool-btn.is-active,
+.theme-dark .popover-tool-opt.is-active {
+  background: rgba(91, 140, 255, 0.18) !important;
+  border-color: #5b8cff !important;
+  color: #5b8cff !important;
 }
 .popover-tool-opt .icon-wrap,
 .tool-btn .icon-wrap {
@@ -3156,13 +3172,12 @@ button.apolo-box-menu-swatch,
   justify-content: center;
   border-radius: 10px;
   color: inherit;
-  background: transparent;
-  transition: background .15s, color .15s;
+  background: transparent !important;
 }
 .popover-tool-opt.is-active .icon-wrap,
 .tool-btn.is-active .icon-wrap {
-  color: var(--accent);
-  background: var(--accent-light);
+  color: inherit;
+  background: transparent !important;
 }
 
 /* 2. Grupos de Control (Sliders) */
@@ -3286,7 +3301,8 @@ button.apolo-box-menu-swatch,
 
 /* 3. Patrones de Línea */
 .line-grid,
-.popover-lines-grid {
+.popover-lines-grid,
+.popover-line-styles-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
@@ -3294,31 +3310,59 @@ button.apolo-box-menu-swatch,
 .line-chip,
 .popover-line-chip {
   all: unset;
-  height: 36px;
-  border-radius: 10px;
+  height: 38px;
+  border-radius: 12px;
   padding: 0 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--card);
-  border: 1.5px solid var(--border);
-  color: var(--muted);
+  background: var(--bg-alt, rgba(128, 128, 128, 0.12));
+  border: 1.5px solid transparent;
+  color: var(--text);
   cursor: pointer;
   box-sizing: border-box;
-  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
-.line-chip:hover,
-.popover-line-chip:hover {
-  background: var(--card-hover);
-  color: var(--text);
-  border-color: var(--muted);
+.theme-light .line-chip,
+.theme-light .popover-line-chip,
+:root .line-chip,
+:root .popover-line-chip {
+  background: #f2f3f5;
+  color: #1e2330;
+}
+.theme-dark .line-chip,
+.theme-dark .popover-line-chip {
+  background: #32353e;
+  color: #f3f4f6;
+}
+.line-chip:hover:not(.is-active),
+.popover-line-chip:hover:not(.is-active) {
+  background: var(--card-hover, rgba(128, 128, 128, 0.18));
+}
+.theme-dark .line-chip:hover:not(.is-active),
+.theme-dark .popover-line-chip:hover:not(.is-active) {
+  background: #3c404b;
 }
 .line-chip.is-active,
 .popover-line-chip.is-active {
-  background: var(--accent-subtle);
-  border-color: var(--accent);
-  color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 2px 8px rgba(47, 107, 255, 0.2);
+  background: var(--accent-subtle) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  box-shadow: none !important;
+}
+.theme-light .line-chip.is-active,
+.theme-light .popover-line-chip.is-active,
+:root .line-chip.is-active,
+:root .popover-line-chip.is-active {
+  background: #eef3ff !important;
+  border-color: #2f6bff !important;
+  color: #2f6bff !important;
+}
+.theme-dark .line-chip.is-active,
+.theme-dark .popover-line-chip.is-active {
+  background: rgba(91, 140, 255, 0.18) !important;
+  border-color: #5b8cff !important;
+  color: #5b8cff !important;
 }
 .line-chip .popover-line-chip-pill,
 .popover-line-chip .popover-line-chip-pill {
@@ -3329,7 +3373,8 @@ button.apolo-box-menu-swatch,
   justify-content: center;
   pointer-events: none;
   border-radius: 8px;
-  transition: background-color .15s, color .15s;
+  color: inherit;
+  transition: color .15s;
 }
 .line-chip.is-active .popover-line-chip-pill,
 .popover-line-chip.is-active .popover-line-chip-pill {
@@ -3385,11 +3430,11 @@ button.apolo-box-menu-swatch,
 /* 4. Interruptor (Toggle) */
 .toggle-row,
 .popover-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 32px;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  min-height: 32px !important;
   cursor: pointer;
   user-select: none;
   box-sizing: border-box;
@@ -3399,46 +3444,70 @@ button.apolo-box-menu-swatch,
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text);
-  flex: 1;
+  flex: 1 1 auto;
 }
 .switch,
 .popover-switch {
   all: unset;
-  display: inline-flex;
-  position: relative;
-  width: 40px;
-  min-width: 40px;
-  height: 22px;
-  min-height: 22px;
-  border-radius: 999px;
-  background: var(--card-hover, rgba(128, 128, 128, 0.2));
-  cursor: pointer;
-  transition: background .16s;
-  box-sizing: border-box;
-  flex-shrink: 0;
+  display: inline-block !important;
+  position: relative !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  max-height: 22px !important;
+  border-radius: 999px !important;
+  background: #d1d5db !important;
+  cursor: pointer !important;
+  transition: background .16s ease !important;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  vertical-align: middle !important;
+}
+.theme-light .switch,
+.theme-light .popover-switch,
+:root .switch,
+:root .popover-switch {
+  background: #d1d5db !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+.theme-dark .switch,
+.theme-dark .popover-switch {
+  background: #3e424b !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+.switch.is-on,
+.popover-switch.is-checked {
+  background: var(--accent, #2f6bff) !important;
+  border-color: var(--accent, #2f6bff) !important;
+}
+.theme-dark .switch.is-on,
+.theme-dark .popover-switch.is-checked {
+  background: #5b8cff !important;
+  border-color: #5b8cff !important;
 }
 .switch:empty::after,
 .popover-switch-thumb {
   content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
-  transition: transform .16s cubic-bezier(.2, .8, .2, 1);
-  pointer-events: none;
-}
-.switch.is-on,
-.popover-switch.is-checked {
-  background: var(--accent, #2f6bff);
+  position: absolute !important;
+  top: 2px !important;
+  left: 2px !important;
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 50% !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .28) !important;
+  transition: transform .16s cubic-bezier(.2, .8, .2, 1) !important;
+  pointer-events: none !important;
 }
 .switch.is-on:empty::after,
 .popover-switch.is-checked .popover-switch-thumb,
 .popover-switch.is-checked:empty::after {
-  transform: translateX(18px);
+  transform: translateX(18px) !important;
 }
 
 /* 5. Paleta de Colores y Paginador Inferior */
