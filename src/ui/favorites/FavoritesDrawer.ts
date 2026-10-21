@@ -276,6 +276,7 @@ export class FavoritesDrawer {
     private activeProfileId: string = '';
     private syncFavoriteProfiles: boolean = false;
     private isCreatingProfile: boolean = false;
+    private lastValidProfileId: string = '';
     private showDotsIndicator: boolean = false;
 
     // Gesture tracking state
@@ -476,6 +477,11 @@ export class FavoritesDrawer {
     }
 
     public openCreateProfileForm(): void {
+        if (this.activeProfileId && this.profiles.some(p => p.id === this.activeProfileId)) {
+            this.lastValidProfileId = this.activeProfileId;
+        } else if (this.profiles.length > 0) {
+            this.lastValidProfileId = this.profiles[0].id;
+        }
         this.isCreatingProfile = true;
         this.render();
         this.callbacks.onProfileModeChange?.('create');
@@ -483,8 +489,13 @@ export class FavoritesDrawer {
 
     public closeCreateProfileForm(): void {
         this.isCreatingProfile = false;
-        this.render();
-        this.callbacks.onProfileModeChange?.('list');
+        const targetId = this.lastValidProfileId || this.activeProfileId || (this.profiles.length > 0 ? this.profiles[0].id : '');
+        if (targetId) {
+            this.switchProfile(targetId);
+        } else {
+            this.render();
+            this.callbacks.onProfileModeChange?.('list');
+        }
     }
 
     /**
@@ -594,6 +605,19 @@ export class FavoritesDrawer {
             this.callbacks.onProfileModeChange?.('list');
         };
 
+        const actions = document.createElement('div');
+        actions.className = 'apolo-profile-form-actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'ibtn apolo-profile-cancel-btn';
+        setAccessibleTooltip(cancelBtn, 'Cancelar');
+        cancelBtn.appendChild(createSvg(ICONS.close, { size: 14, strokeWidth: 2 }));
+        cancelBtn.onclick = (e) => {
+            e.stopPropagation();
+            cancel();
+        };
+
         const createBtn = document.createElement('button');
         createBtn.type = 'button';
         createBtn.className = 'btn-ok apolo-profile-create-btn';
@@ -604,15 +628,7 @@ export class FavoritesDrawer {
             submit();
         };
 
-        const cancelBtn = document.createElement('button');
-        cancelBtn.type = 'button';
-        cancelBtn.className = 'ibtn apolo-profile-cancel-btn';
-        cancelBtn.style.display = 'none';
-        cancelBtn.setAttribute('aria-hidden', 'true');
-        cancelBtn.onclick = (e) => {
-            e.stopPropagation();
-            cancel();
-        };
+        actions.append(cancelBtn, createBtn);
 
         input.onkeydown = (e) => {
             if (e.key === 'Enter') {
@@ -624,7 +640,7 @@ export class FavoritesDrawer {
             }
         };
 
-        form.append(input, createBtn, cancelBtn);
+        form.append(input, actions);
         this.el.appendChild(form);
 
         setTimeout(() => input.focus?.(), 0);

@@ -881,9 +881,11 @@ export class ToolEstuche implements PopoverInstance {
                         if (this.titleEl) this.titleEl.textContent = 'Nuevo perfil';
                         if (this.headerDotsContainer) this.headerDotsContainer.style.display = 'none';
                         if (this.starBtn) this.starBtn.style.display = 'none';
+                        if (this.favsBtn) setAccessibleTooltip(this.favsBtn, 'Cancelar y volver');
                     } else {
                         if (this.headerDotsContainer) this.headerDotsContainer.style.display = '';
                         if (this.starBtn) this.starBtn.style.display = '';
+                        if (this.favsBtn) setAccessibleTooltip(this.favsBtn, 'Volver al estuche');
                         this.updateHeaderTitleVisual();
                     }
                 },
@@ -1786,14 +1788,10 @@ export class ToolEstuche implements PopoverInstance {
             const dot = document.createElement('button');
             dot.type = 'button';
             const isActive = i === this.currentPageIndex;
-            dot.className = `${i === 0 ? 'ibtn ' : 'dot '}popover-pag-dot ${isActive ? 'is-active' : ''}`;
+            dot.className = `${i === 0 ? 'popover-pag-clock is-clock-dot ' : 'dot '}popover-pag-dot ${isActive ? 'is-active' : ''}`;
             setAccessibleTooltip(dot, i === 0 ? 'Colores recientes' : `Página ${i + 1}`);
             if (i === 0) {
                 dot.appendChild(createSvg(ICONS.clock, { size: 14 }));
-            } else {
-                const dotInner = document.createElement('span');
-                dotInner.className = 'popover-dot-inner';
-                dot.appendChild(dotInner);
             }
             dot.onclick = () => {
                 this.currentPageIndex = i;
