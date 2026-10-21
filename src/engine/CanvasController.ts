@@ -249,6 +249,8 @@ export class CanvasController {
     private lastBarrelCycleTime = 0;
     private isPenTipDown = false;
     private lastPenEventTime = 0;
+    private lastPointerDownTime = 0;
+    private pointerDownStartPos: { x: number; y: number } | null = null;
     private strokeStartTime = 0;
     private showSpenDebugHud = false;
     private debugInputHudEl: HTMLElement | null = null;
@@ -1219,35 +1221,36 @@ export class CanvasController {
         event.stopPropagation();
         event.stopImmediatePropagation?.();
 
-        const isPenEvent = (event as PointerEvent).pointerType === 'pen'
-            || (performance.now() - this.lastPenEventTime < 500);
+        const elapsedSinceDown = this.lastPointerDownTime > 0
+            ? performance.now() - this.lastPointerDownTime
+            : Number.POSITIVE_INFINITY;
 
-        if (isPenEvent) {
-            // Check if accidental nascent stroke was started in pointerdown right before contextmenu
-            if (this.isDrawing && this.activeStart) {
-                const elapsed = performance.now() - this.strokeStartTime;
-                let dist = 0;
-                if (this.points.size > 0) {
-                    const lastPt = this.points.get(this.points.size - 1);
-                    dist = Math.hypot(lastPt.x - this.activeStart.x, lastPt.y - this.activeStart.y) * this.zoom;
-                }
-                if (elapsed < 180 && dist < 12) {
-                    this.cancelActiveStroke();
-                }
-            }
-
-            this.isPenTipDown = false;
-
-            const now = performance.now();
-            if (now - this.lastBarrelCycleTime > 250) {
-                this.lastBarrelCycleTime = now;
-                this.penBarrelPressed = true;
-                this.cycleActiveToolFavorite();
-                this.options.eventBus?.emit('favorites:cycle');
-            }
+        // Case A — Long-Press Hold (this.isDrawing && elapsedSinceDown > 180):
+        // The user is simply holding the pen tip stationary on the canvas without pressing the barrel button.
+        // Do NOTHING (do NOT cycle favorites and do NOT cancel the active stroke).
+        if (this.isDrawing && elapsedSinceDown > 180) {
+            this.updateDebugHud(event, 'long-press-ignore');
+            return;
         }
 
-        this.updateDebugHud(event, 'contextmenu');
+        // Case B — Instant S-Pen Barrel + Tap (!this.isDrawing || elapsedSinceDown <= 180):
+        // The user held the S-Pen barrel button and tapped the screen (which fires contextmenu immediately on contact, within 0..180ms, often with pointerType === "" and button === -1, buttons === 0).
+        // If a nascent stroke just started (this.isDrawing && elapsedSinceDown <= 180), abort/discard that nascent stroke immediately so no stray dot is left on the canvas.
+        if (this.isDrawing && elapsedSinceDown <= 180) {
+            this.cancelActiveStroke();
+        }
+
+        this.isPenTipDown = false;
+
+        const now = performance.now();
+        if (now - this.lastBarrelCycleTime > 250) {
+            this.lastBarrelCycleTime = now;
+            this.penBarrelPressed = true;
+            this.cycleActiveToolFavorite();
+            this.options.eventBus?.emit('favorites:cycle');
+        }
+
+        this.updateDebugHud(event, 'barrel-contextmenu');
     };
 
     private isPenBarrelEvent(e: PointerEvent | MouseEvent): boolean {
@@ -1263,6 +1266,8 @@ export class CanvasController {
             this.lastPenEventTime = performance.now();
             this.isPenTipDown = true;
         }
+        this.lastPointerDownTime = performance.now();
+        this.pointerDownStartPos = { x: event.clientX, y: event.clientY };
         this.updateDebugHud(event);
 
         if (this.handledBoxEvents.has(event)) return;
@@ -1398,6 +1403,8 @@ export class CanvasController {
             if (!this.isPenBarrelEvent(e) || e.buttons === 0) {
                 this.penBarrelPressed = false;
             }
+        } else if (e.buttons === 0) {
+            this.penBarrelPressed = false;
         }
         this.updateDebugHud(e);
     };
@@ -1407,6 +1414,8 @@ export class CanvasController {
             this.isPenTipDown = false;
             this.penBarrelPressed = false;
             this.lastPenEventTime = performance.now();
+        } else {
+            this.penBarrelPressed = false;
         }
         this.updateDebugHud(e);
     };
@@ -1416,6 +1425,8 @@ export class CanvasController {
             this.isPenTipDown = false;
             this.penBarrelPressed = false;
             this.lastPenEventTime = performance.now();
+        } else {
+            this.penBarrelPressed = false;
         }
         this.updateDebugHud(e);
     };
@@ -3175,6 +3186,10 @@ export class CanvasController {
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
+        this.strokeStartTime = performance.now();
+        if (this.lastPointerDownTime === 0) {
+            this.lastPointerDownTime = this.strokeStartTime;
+        }
 
         const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
         this.activeContentLeft = contentLeft;
@@ -3331,6 +3346,8 @@ export class CanvasController {
         this.activeStart = null;
         this.activeAnchor = null;
         this.barrelActive = false;
+        this.lastPointerDownTime = 0;
+        this.pointerDownStartPos = null;
         this.renderDirty = true;
         this.rebuildIndex();
         this.schedulePaint();
@@ -3347,6 +3364,8 @@ export class CanvasController {
         this.activeAnchor = null;
         this.movingSelection = false;
         this.barrelActive = false;
+        this.lastPointerDownTime = 0;
+        this.pointerDownStartPos = null;
         this.schedulePaint();
     }
 

@@ -179,8 +179,15 @@ function createMockEnvironment() {
                 }
             },
             dispatchEvent: (evObj: any) => {
+                let stoppedImmediate = false;
+                const origStopImmediate = evObj.stopImmediatePropagation;
+                evObj.stopImmediatePropagation = () => {
+                    stoppedImmediate = true;
+                    if (origStopImmediate) origStopImmediate();
+                };
                 const list = elementListeners.get(evObj.type) || [];
                 for (const item of [...list]) {
+                    if (stoppedImmediate) break;
                     item.fn(evObj);
                 }
                 return !evObj.defaultPrevented;
@@ -916,7 +923,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             controller.destroy();
         });
 
-        test('Android WebView Contact contextmenu: pointerdown followed within 80ms by contextmenu cancels nascent stroke and triggers favorites:cycle', () => {
+        test('Instant S-Pen Barrel Tap on Contact (elapsed <= 180ms or no prior pointerdown) cancels nascent stroke and triggers favorites:cycle', async () => {
             const scroller = mockEnv.mockDocument.createElement('div');
             const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
             const mockFile = { path: 'test.md', basename: 'test' } as any;
@@ -961,11 +968,14 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             assert.strictEqual(controller.isDrawing, true, 'Nascent stroke is active');
 
             // Step 2: 30ms later, Android WebView delivers contextmenu due to barrel button contact
+            // (Telemetry: empty pointerType, button: -1, buttons: 0)
             let cmPrevented = false;
             let cmStopped = false;
             canvas.dispatchEvent({
                 type: 'contextmenu',
-                pointerType: 'pen',
+                pointerType: '',
+                button: -1,
+                buttons: 0,
                 clientX: 122,
                 clientY: 122,
                 preventDefault: () => { cmPrevented = true; },
@@ -979,6 +989,100 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             assert.strictEqual(controller.isDrawing, false, 'Nascent stroke must be cancelled');
             assert.strictEqual((controller as any).points.size, 0, 'No points should remain in active points');
             assert.strictEqual(docModel.elements.length, 0, 'Zero ink strokes committed to document');
+
+            // Wait > 250ms debounce
+            await new Promise((resolve) => setTimeout(resolve, 260));
+
+            // Step 3: Instant contextmenu without prior pointerdown (!isDrawing)
+            canvas.dispatchEvent({
+                type: 'contextmenu',
+                pointerType: '',
+                button: -1,
+                buttons: 0,
+                clientX: 200,
+                clientY: 200,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+                stopImmediatePropagation: () => {},
+            });
+
+            assert.strictEqual(cycleCount, 2, 'Instant contextmenu without pointerdown triggers favorites:cycle');
+
+            controller.destroy();
+        });
+
+        test('Instant S-Pen Barrel Tap vs. Long-Press Hold: contextmenu after >180ms stationary hold ignores long-press and preserves stroke', () => {
+            const scroller = mockEnv.mockDocument.createElement('div');
+            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
+            const mockFile = { path: 'test.md', basename: 'test' } as any;
+            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
+
+            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const strokeProf = getActiveStrokeProfile(toolState);
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
+            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
+            strokeProf.pen = [p1, p2];
+
+            const eventBus = new EngineEventBus();
+            let cycleCount = 0;
+            eventBus.on('favorites:cycle', () => { cycleCount++; });
+
+            const controller = new CanvasController(
+                scroller as any,
+                undefined,
+                docModel,
+                mockFile,
+                'test.md',
+                mockPersistence,
+                { toolState, eventBus },
+            );
+
+            const canvas = (controller as any).canvas;
+
+            // Step 1: Pointer down starts drawing at t0
+            canvas.dispatchEvent({
+                type: 'pointerdown',
+                pointerType: 'pen',
+                button: 0,
+                buttons: 1,
+                pressure: 0.6,
+                clientX: 150,
+                clientY: 150,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            });
+
+            assert.strictEqual(controller.isDrawing, true, 'Stroke is active');
+            const activePointsCount = (controller as any).points.size;
+            assert.ok(activePointsCount > 0, 'Points recorded for stroke');
+
+            // Simulate holding stylus stationary on screen for 500ms (>180ms)
+            const simulatedDownTime = performance.now() - 500;
+            (controller as any).lastPointerDownTime = simulatedDownTime;
+            if ((controller as any).input) {
+                ((controller as any).input as any).lastPointerDownTime = simulatedDownTime;
+            }
+
+            // Step 2: Native Android long-press fires contextmenu
+            let cmPrevented = false;
+            let cmStopped = false;
+            canvas.dispatchEvent({
+                type: 'contextmenu',
+                pointerType: '',
+                button: -1,
+                buttons: 0,
+                clientX: 150,
+                clientY: 150,
+                preventDefault: () => { cmPrevented = true; },
+                stopPropagation: () => { cmStopped = true; },
+                stopImmediatePropagation: () => { cmStopped = true; },
+            });
+
+            assert.strictEqual(cmPrevented, true, 'Native contextmenu must be prevented');
+            assert.strictEqual(cmStopped, true, 'Propagation must be stopped');
+            assert.strictEqual(cycleCount, 0, 'Long-press hold must NOT cycle favorites');
+            assert.strictEqual(controller.isDrawing, true, 'Long-press hold must NOT cancel active stroke');
+            assert.strictEqual((controller as any).points.size, activePointsCount, 'Active points must remain intact');
 
             controller.destroy();
         });

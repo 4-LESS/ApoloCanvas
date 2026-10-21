@@ -68,6 +68,8 @@ export class InputManager {
     private activeDrawingPointerId: number | null = null;
     private activeDrawingPointerType: 'pen' | 'mouse' | null = null;
     private activeBarrel = false;
+    private lastPointerDownTime = 0;
+    private pointerDownStartPos: { x: number; y: number } | null = null;
     private readonly previousTouchAction: string;
     private readonly previousUserSelect: string;
     private readonly pointPool: Point[] = [];
@@ -166,6 +168,9 @@ export class InputManager {
             this.markPenHover();
             this.options.onPenHoverOrContact?.(event);
         }
+
+        this.lastPointerDownTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        this.pointerDownStartPos = { x: event.clientX, y: event.clientY };
 
         if (this.isDrawingStart(event)) {
             if (this.options.shouldAcceptPointer && !this.options.shouldAcceptPointer(event)) {
@@ -315,6 +320,8 @@ export class InputManager {
         this.activeDrawingPointerId = null;
         this.activeDrawingPointerType = null;
         this.activeBarrel = false;
+        this.lastPointerDownTime = 0;
+        this.pointerDownStartPos = null;
         if (event.pointerType === 'pen') this.lastPenContactAt = Date.now();
     };
 
@@ -336,6 +343,8 @@ export class InputManager {
         this.activeDrawingPointerId = null;
         this.activeDrawingPointerType = null;
         this.activeBarrel = false;
+        this.lastPointerDownTime = 0;
+        this.pointerDownStartPos = null;
         if (event.pointerType === 'pen') this.lastPenContactAt = Date.now();
         this.options.onStrokeCancel?.();
     };
@@ -345,6 +354,8 @@ export class InputManager {
             this.activeDrawingPointerId = null;
             this.activeDrawingPointerType = null;
             this.activeBarrel = false;
+            this.lastPointerDownTime = 0;
+            this.pointerDownStartPos = null;
             this.options.onStrokeCancel?.();
         }
     }
@@ -352,7 +363,23 @@ export class InputManager {
     private readonly handleContextMenu = (event: MouseEvent): void => {
         event.preventDefault?.();
         event.stopPropagation?.();
-        if ((event as any).pointerType === 'pen' || Date.now() - this.lastPenContactAt < 500) {
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const elapsedSinceDown = this.lastPointerDownTime > 0
+            ? now - this.lastPointerDownTime
+            : Number.POSITIVE_INFINITY;
+
+        // Case A — Long-Press Hold: pen tip held stationary on canvas (>180ms)
+        if (this.activeDrawingPointerId !== null && elapsedSinceDown > 180) {
+            return;
+        }
+
+        // Case B — Instant S-Pen Barrel Tap: abort nascent drawing
+        if (this.activeDrawingPointerId !== null && elapsedSinceDown <= 180) {
+            this.cancelActiveDrawing();
+            return;
+        }
+
+        if ((event as any).pointerType === 'pen' || (Date.now() - this.lastPenContactAt < 500)) {
             this.cancelActiveDrawing();
         }
     };
