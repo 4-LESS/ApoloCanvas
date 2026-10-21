@@ -465,7 +465,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
     });
 
     describe('3. S-Pen Barrel Button Pointer Event Handling', () => {
-        test('pointerdown with pen and button=2 triggers quick-cycling when not mid-stroke', () => {
+        test('pointerdown with pen and button=2 on canvas prevents drawing and does NOT cycle favorites (reserved for eraser)', () => {
             const scroller = mockEnv.mockDocument.createElement('div');
             const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
             const mockFile = { path: 'test.md', basename: 'test' } as any;
@@ -512,9 +512,8 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
 
             assert.strictEqual(prevented, true, 'Default action must be prevented');
             assert.strictEqual(stopped, true, 'Propagation must be stopped to avoid drawing');
-            assert.strictEqual(cycleEventFired, true, 'favorites:cycle event must be emitted');
-            assert.strictEqual(controller.getToolState().pen.profileId, 'fountain');
-            assert.strictEqual(controller.getToolState().pen.color, '#0000ff');
+            assert.strictEqual(cycleEventFired, false, 'Canvas barrel button must NOT cycle favorites (reserved for eraser)');
+            assert.strictEqual(controller.isDrawing, false);
 
             controller.destroy();
         });
@@ -566,7 +565,89 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             controller.destroy();
         });
 
-        test('pressing the S-Pen barrel button while hovering (pointermove with buttons: 32, pressure: 0) triggers favorites:cycle once and does not re-trigger until released and pressed again', async () => {
+        test('S-Pen barrel button over toolbar pen button opens favorites drawer directly (contextmenu, pointerdown barrel, and hover barrel)', async () => {
+            const scroller = mockEnv.mockDocument.createElement('div');
+            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
+            const mockFile = { path: 'test.md', basename: 'test' } as any;
+            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
+
+            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const strokeProf = getActiveStrokeProfile(toolState);
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
+            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
+            strokeProf.pen = [p1, p2];
+
+            const controller = new CanvasController(
+                scroller as any,
+                undefined,
+                docModel,
+                mockFile,
+                'test.md',
+                mockPersistence,
+                { toolState },
+            );
+
+            const toolbar = (controller as any).toolbar as Toolbar;
+            assert.ok(toolbar, 'Toolbar must be initialized');
+            const penBtn = toolbar.getToolButton('pen');
+            assert.ok(penBtn, 'Pen button must exist');
+
+            const estuche = (controller as any).estuche as ToolEstuche;
+            assert.ok(estuche, 'ToolEstuche must exist');
+            assert.strictEqual(estuche.isOpen(), false, 'Estuche must initially be closed');
+
+            // 1. contextmenu event on pen button (S-Pen button tap on Android WebView)
+            let cmPrevented = false;
+            let cmStopped = false;
+            penBtn.dispatchEvent({
+                type: 'contextmenu',
+                pointerType: '',
+                button: -1,
+                buttons: 0,
+                clientX: 200,
+                clientY: 10,
+                preventDefault: () => { cmPrevented = true; },
+                stopPropagation: () => { cmStopped = true; },
+            });
+
+            assert.strictEqual(cmPrevented, true, 'contextmenu on pen button must be prevented');
+            assert.strictEqual(cmStopped, true, 'contextmenu on pen button must stop propagation');
+            assert.strictEqual(estuche.isOpen(), true, 'Estuche must be opened');
+            assert.strictEqual(estuche.isShowingFavorites(), true, 'Estuche must open directly showing favorites drawer');
+
+            // Toggle closed
+            toolbar.closeAllPopovers();
+            estuche.close();
+            assert.strictEqual(estuche.isOpen(), false);
+
+            // Wait for 300ms debounce
+            await new Promise((resolve) => setTimeout(resolve, 320));
+
+            // 2. pointerdown with barrel button (button: 5, buttons: 32)
+            let pdPrevented = false;
+            let pdStopped = false;
+            penBtn.dispatchEvent({
+                type: 'pointerdown',
+                pointerType: 'pen',
+                button: 5,
+                buttons: 32,
+                pressure: 0.7,
+                clientX: 200,
+                clientY: 10,
+                preventDefault: () => { pdPrevented = true; },
+                stopPropagation: () => { pdStopped = true; },
+            });
+
+            assert.strictEqual(pdPrevented, true, 'pointerdown barrel press must be prevented');
+            assert.strictEqual(pdStopped, true, 'pointerdown barrel press must stop propagation');
+            assert.strictEqual(estuche.isOpen(), true, 'Estuche must be opened via barrel pointerdown');
+            assert.strictEqual(estuche.isShowingFavorites(), true, 'Must show favorites drawer');
+
+            estuche.close();
+            controller.destroy();
+        });
+
+        test('S-Pen barrel button on canvas is reserved for eraser toggle: hover and contact do NOT cycle favorites and do NOT create strokes', () => {
             const scroller = mockEnv.mockDocument.createElement('div');
             const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
             const mockFile = { path: 'test.md', basename: 'test' } as any;
@@ -595,9 +676,10 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             const canvas = (controller as any).canvas;
             assert.ok(canvas);
 
-            let prevented1 = false;
-            let stopped1 = false;
-            const hoverBarrelDown1 = {
+            // 1. Hover move on canvas with barrel button
+            let prevented = false;
+            let stopped = false;
+            canvas.dispatchEvent({
                 type: 'pointermove',
                 pointerType: 'pen',
                 buttons: 32,
@@ -605,105 +687,19 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 pressure: 0,
                 clientX: 100,
                 clientY: 100,
-                preventDefault: () => { prevented1 = true; },
-                stopPropagation: () => { stopped1 = true; },
-                stopImmediatePropagation: () => { stopped1 = true; },
-            };
+                preventDefault: () => { prevented = true; },
+                stopPropagation: () => { stopped = true; },
+                stopImmediatePropagation: () => { stopped = true; },
+            });
 
-            canvas.dispatchEvent(hoverBarrelDown1);
+            assert.strictEqual(prevented, true, 'Hover barrel press must prevent default');
+            assert.strictEqual(stopped, true, 'Hover barrel press must stop propagation');
+            assert.strictEqual(cycleCount, 0, 'Canvas hover barrel must NOT cycle favorites (reserved for eraser)');
+            assert.strictEqual((controller as any).penBarrelPressed, true);
 
-            assert.strictEqual(prevented1, true, 'Hover barrel press must prevent default');
-            assert.strictEqual(stopped1, true, 'Hover barrel press must stop propagation');
-            assert.strictEqual(cycleCount, 1, 'First hover barrel press must trigger favorites:cycle once');
-            assert.strictEqual(controller.getToolState().pen.profileId, 'fountain');
-
-            // Second 240Hz frame with barrel button still held while hovering: MUST NOT re-trigger
-            const hoverBarrelDown2 = {
-                type: 'pointermove',
-                pointerType: 'pen',
-                buttons: 32,
-                button: -1,
-                pressure: 0,
-                clientX: 102,
-                clientY: 102,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            };
-            canvas.dispatchEvent(hoverBarrelDown2);
-            assert.strictEqual(cycleCount, 1, 'Subsequent hover move with button still held must not re-trigger');
-
-            // Release barrel button while still hovering
-            const hoverRelease = {
-                type: 'pointermove',
-                pointerType: 'pen',
-                buttons: 0,
-                button: -1,
-                pressure: 0,
-                clientX: 105,
-                clientY: 105,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            };
-            canvas.dispatchEvent(hoverRelease);
-            assert.strictEqual(cycleCount, 1, 'Releasing barrel button must not trigger cycle');
-
-            // Wait >250ms for debounce
-            await new Promise((resolve) => setTimeout(resolve, 260));
-
-            // Press barrel button again while hovering: MUST trigger second cycle (rising edge)
-            const hoverBarrelDown3 = {
-                type: 'pointermove',
-                pointerType: 'pen',
-                buttons: 32,
-                button: -1,
-                pressure: 0,
-                clientX: 110,
-                clientY: 110,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            };
-            canvas.dispatchEvent(hoverBarrelDown3);
-            assert.strictEqual(cycleCount, 2, 'Pressing barrel button again after release must trigger second cycle');
-            assert.strictEqual(controller.getToolState().pen.profileId, 'pencil');
-
-            controller.destroy();
-        });
-
-        test('touching the screen with the barrel button held (pointerdown with pointerType: pen, button: 5, buttons: 32) triggers favorites:cycle and does NOT create a stroke on the canvas', () => {
-            const scroller = mockEnv.mockDocument.createElement('div');
-            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
-            const mockFile = { path: 'test.md', basename: 'test' } as any;
-            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
-
-            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
-            const strokeProf = getActiveStrokeProfile(toolState);
-            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
-            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
-            strokeProf.pen = [p1, p2];
-
-            const eventBus = new EngineEventBus();
-            let cycleCount = 0;
-            eventBus.on('favorites:cycle', () => { cycleCount++; });
-
-            const controller = new CanvasController(
-                scroller as any,
-                undefined,
-                docModel,
-                mockFile,
-                'test.md',
-                mockPersistence,
-                { toolState, eventBus },
-            );
-
-            const canvas = (controller as any).canvas;
-            assert.ok(canvas);
-
-            let prevented = false;
-            let stopped = false;
-            const barrelTouchEvent = {
+            // 2. Touch down on canvas with barrel button
+            let touchPrevented = false;
+            canvas.dispatchEvent({
                 type: 'pointerdown',
                 pointerType: 'pen',
                 button: 5,
@@ -711,34 +707,24 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 pressure: 0.75,
                 clientX: 150,
                 clientY: 150,
-                preventDefault: () => { prevented = true; },
-                stopPropagation: () => { stopped = true; },
-                stopImmediatePropagation: () => { stopped = true; },
-            };
+                preventDefault: () => { touchPrevented = true; },
+                stopPropagation: () => {},
+                stopImmediatePropagation: () => {},
+            });
 
-            canvas.dispatchEvent(barrelTouchEvent);
-
-            assert.strictEqual(prevented, true, 'Default action must be prevented to block browser gestures');
-            assert.strictEqual(stopped, true, 'Propagation must be stopped');
-            assert.strictEqual(cycleCount, 1, 'Touching screen with button=5 must trigger favorites:cycle once');
-            assert.strictEqual(controller.isDrawing, false, 'Controller must not be drawing');
-            assert.strictEqual((controller as any).points.size, 0, 'No stroke points should be pushed');
-            assert.strictEqual(docModel.elements.length, 0, 'No ink element should be added to document model');
+            assert.strictEqual(touchPrevented, true, 'Touch with barrel button must prevent default');
+            assert.strictEqual(cycleCount, 0, 'Touching canvas with barrel button must NOT cycle favorites');
+            assert.strictEqual(controller.isDrawing, false, 'Controller must not begin drawing');
+            assert.strictEqual(docModel.elements.length, 0, 'Zero ink elements created in document');
 
             controller.destroy();
         });
 
-        test('touching the screen after hover barrel press does not cycle again and does not create a stroke', () => {
+        test('contextmenu event on canvas is prevented without cycling favorites', () => {
             const scroller = mockEnv.mockDocument.createElement('div');
             const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
             const mockFile = { path: 'test.md', basename: 'test' } as any;
             const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
-
-            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
-            const strokeProf = getActiveStrokeProfile(toolState);
-            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
-            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
-            strokeProf.pen = [p1, p2];
 
             const eventBus = new EngineEventBus();
             let cycleCount = 0;
@@ -751,60 +737,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 mockFile,
                 'test.md',
                 mockPersistence,
-                { toolState, eventBus },
-            );
-
-            const canvas = (controller as any).canvas;
-
-            // 1. Hover press
-            canvas.dispatchEvent({
-                type: 'pointermove',
-                pointerType: 'pen',
-                buttons: 32,
-                button: -1,
-                pressure: 0,
-                clientX: 100,
-                clientY: 100,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            });
-            assert.strictEqual(cycleCount, 1);
-
-            // 2. Stylus makes contact with screen while button is still pressed
-            canvas.dispatchEvent({
-                type: 'pointerdown',
-                pointerType: 'pen',
-                button: 5,
-                buttons: 33, // tip (1) + barrel (32) = 33
-                pressure: 0.8,
-                clientX: 100,
-                clientY: 100,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            });
-            assert.strictEqual(cycleCount, 1, 'Must not cycle a second time on contact if already latched');
-            assert.strictEqual(controller.isDrawing, false, 'Must not begin drawing a stroke');
-            assert.strictEqual(docModel.elements.length, 0, 'No ink dot created on canvas');
-
-            controller.destroy();
-        });
-
-        test('contextmenu event on canvas is prevented to avoid Android WebView/Windows Ink menu popup', () => {
-            const scroller = mockEnv.mockDocument.createElement('div');
-            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
-            const mockFile = { path: 'test.md', basename: 'test' } as any;
-            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
-
-            const controller = new CanvasController(
-                scroller as any,
-                undefined,
-                docModel,
-                mockFile,
-                'test.md',
-                mockPersistence,
-                {},
+                { eventBus },
             );
 
             const canvas = (controller as any).canvas;
@@ -819,11 +752,12 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
 
             assert.strictEqual(prevented, true, 'contextmenu must be prevented');
             assert.strictEqual(stopped, true, 'contextmenu must stop propagation');
+            assert.strictEqual(cycleCount, 0, 'Canvas contextmenu must not trigger favorites:cycle');
 
             controller.destroy();
         });
 
-        test('Android WebView Hover Barrel Press: pointermove with pointerType: pen, buttons: 1, pressure: 0 when isPenTipDown is false triggers favorites:cycle once on rising edge', async () => {
+        test('Android WebView Hover Barrel Press on canvas updates debug HUD but does NOT cycle favorites', async () => {
             const scroller = mockEnv.mockDocument.createElement('div');
             const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
             const mockFile = { path: 'test.md', basename: 'test' } as any;
@@ -867,25 +801,10 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 stopImmediatePropagation: () => { stopped = true; },
             });
 
-            assert.strictEqual(cycleCount, 1, 'First hover with buttons=1 must trigger cycle once');
+            assert.strictEqual(cycleCount, 0, 'Canvas hover with buttons=1 must NOT trigger cycle (reserved for eraser)');
             assert.strictEqual(prevented, true, 'Default action must be prevented');
             assert.strictEqual(stopped, true, 'Propagation must be stopped');
             assert.strictEqual((controller as any).penBarrelPressed, true, 'Latch must be set to true');
-
-            // Subsequent 240Hz frame with button still held
-            canvas.dispatchEvent({
-                type: 'pointermove',
-                pointerType: 'pen',
-                buttons: 1,
-                button: -1,
-                pressure: 0,
-                clientX: 205,
-                clientY: 205,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            });
-            assert.strictEqual(cycleCount, 1, 'Subsequent frame must not re-trigger while held');
 
             // Release button in hover
             canvas.dispatchEvent({
@@ -901,112 +820,6 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 stopImmediatePropagation: () => {},
             });
             assert.strictEqual((controller as any).penBarrelPressed, false, 'Latch must be reset when buttons=0');
-
-            // Wait > 250ms for debounce
-            await new Promise((resolve) => setTimeout(resolve, 260));
-
-            // Press again in hover
-            canvas.dispatchEvent({
-                type: 'pointermove',
-                pointerType: 'pen',
-                buttons: 1,
-                button: -1,
-                pressure: 0,
-                clientX: 215,
-                clientY: 215,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            });
-            assert.strictEqual(cycleCount, 2, 'Second press after release must cycle again');
-
-            controller.destroy();
-        });
-
-        test('Instant S-Pen Barrel Tap on Contact (elapsed <= 180ms or no prior pointerdown) cancels nascent stroke and triggers favorites:cycle', async () => {
-            const scroller = mockEnv.mockDocument.createElement('div');
-            const docModel = { id: 'test-page', elements: [], blocks: {}, version: 2 } as any;
-            const mockFile = { path: 'test.md', basename: 'test' } as any;
-            const mockPersistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
-
-            const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
-            const strokeProf = getActiveStrokeProfile(toolState);
-            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#0000ff', width: 3 }) as PenFavoritePreset;
-            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#ff0000', width: 6 }) as PenFavoritePreset;
-            strokeProf.pen = [p1, p2];
-
-            const eventBus = new EngineEventBus();
-            let cycleCount = 0;
-            eventBus.on('favorites:cycle', () => { cycleCount++; });
-
-            const controller = new CanvasController(
-                scroller as any,
-                undefined,
-                docModel,
-                mockFile,
-                'test.md',
-                mockPersistence,
-                { toolState, eventBus },
-            );
-
-            const canvas = (controller as any).canvas;
-
-            // Step 1: Android WebView fires pointerdown with normal stylus contact
-            canvas.dispatchEvent({
-                type: 'pointerdown',
-                pointerType: 'pen',
-                button: 0,
-                buttons: 1,
-                pressure: 0.6,
-                clientX: 120,
-                clientY: 120,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-            });
-
-            // Stroke has started in controller
-            assert.strictEqual(controller.isDrawing, true, 'Nascent stroke is active');
-
-            // Step 2: 30ms later, Android WebView delivers contextmenu due to barrel button contact
-            // (Telemetry: empty pointerType, button: -1, buttons: 0)
-            let cmPrevented = false;
-            let cmStopped = false;
-            canvas.dispatchEvent({
-                type: 'contextmenu',
-                pointerType: '',
-                button: -1,
-                buttons: 0,
-                clientX: 122,
-                clientY: 122,
-                preventDefault: () => { cmPrevented = true; },
-                stopPropagation: () => { cmStopped = true; },
-                stopImmediatePropagation: () => { cmStopped = true; },
-            });
-
-            assert.strictEqual(cmPrevented, true, 'Native contextmenu must be prevented');
-            assert.strictEqual(cmStopped, true, 'Propagation must be stopped');
-            assert.strictEqual(cycleCount, 1, 'Barrel contact must trigger favorites:cycle once');
-            assert.strictEqual(controller.isDrawing, false, 'Nascent stroke must be cancelled');
-            assert.strictEqual((controller as any).points.size, 0, 'No points should remain in active points');
-            assert.strictEqual(docModel.elements.length, 0, 'Zero ink strokes committed to document');
-
-            // Wait > 250ms debounce
-            await new Promise((resolve) => setTimeout(resolve, 260));
-
-            // Step 3: Instant contextmenu without prior pointerdown (!isDrawing)
-            canvas.dispatchEvent({
-                type: 'contextmenu',
-                pointerType: '',
-                button: -1,
-                buttons: 0,
-                clientX: 200,
-                clientY: 200,
-                preventDefault: () => {},
-                stopPropagation: () => {},
-                stopImmediatePropagation: () => {},
-            });
-
-            assert.strictEqual(cycleCount, 2, 'Instant contextmenu without pointerdown triggers favorites:cycle');
 
             controller.destroy();
         });
@@ -1127,8 +940,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 preventDefault: () => {},
                 stopPropagation: () => {},
             });
-            assert.strictEqual(cycleCount, 1);
-            assert.strictEqual((controller as any).penBarrelPressed, true);
+            assert.strictEqual((controller as any).penBarrelPressed, true, 'Hover button must set penBarrelPressed latch');
 
             // 2. S-Pen pulled out of hover range while button is still pressed
             canvas.dispatchEvent({
@@ -1143,7 +955,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             // Wait > 250ms debounce
             await new Promise((resolve) => setTimeout(resolve, 260));
 
-            // 3. S-Pen re-enters hover range with button pressed: must trigger next cycle cleanly
+            // 3. S-Pen re-enters hover range with button pressed: latch reactivates
             canvas.dispatchEvent({
                 type: 'pointermove',
                 pointerType: 'pen',
@@ -1155,7 +967,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 preventDefault: () => {},
                 stopPropagation: () => {},
             });
-            assert.strictEqual(cycleCount, 2, 'Re-entering hover with button pressed must trigger cycle');
+            assert.strictEqual((controller as any).penBarrelPressed, true, 'Re-entering hover with button pressed must set latch');
 
             controller.destroy();
         });

@@ -628,6 +628,9 @@ export class CanvasController {
             onCycleFavorite: (_tool) => {
                 this.cycleActiveToolFavorite();
             },
+            onToggleEstucheFavorites: (tool) => {
+                this.toggleEstucheFavorites(tool);
+            },
             onSlotChange: (slot) => {
                 this.toolbarSlot = slot;
                 this.estuche?.updateState({ slot });
@@ -1241,15 +1244,7 @@ export class CanvasController {
         }
 
         this.isPenTipDown = false;
-
-        const now = performance.now();
-        if (now - this.lastBarrelCycleTime > 250) {
-            this.lastBarrelCycleTime = now;
-            this.penBarrelPressed = true;
-            this.cycleActiveToolFavorite();
-            this.options.eventBus?.emit('favorites:cycle');
-        }
-
+        this.penBarrelPressed = true;
         this.updateDebugHud(event, 'barrel-contextmenu');
     };
 
@@ -1272,22 +1267,13 @@ export class CanvasController {
 
         if (this.handledBoxEvents.has(event)) return;
 
-        // S-Pen barrel button: single-action cycle favorites when not mid-stroke
+        // S-Pen barrel button: prevent context menu / box interference on canvas
         if (event.pointerType === 'pen' && this.isPenBarrelEvent(event)) {
             this.handledBoxEvents.add(event);
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation?.();
-
-            if (!this.penBarrelPressed && !this.isDrawing) {
-                const now = performance.now();
-                if (now - this.lastBarrelCycleTime > 250) {
-                    this.lastBarrelCycleTime = now;
-                    this.cycleActiveToolFavorite();
-                    this.options.eventBus?.emit('favorites:cycle');
-                }
-                this.penBarrelPressed = true;
-            }
+            this.penBarrelPressed = true;
             return;
         }
 
@@ -1368,12 +1354,6 @@ export class CanvasController {
             if (barrelHoverActive) {
                 if (!this.penBarrelPressed) {
                     this.penBarrelPressed = true;
-                    const now = performance.now();
-                    if (now - this.lastBarrelCycleTime > 250) {
-                        this.lastBarrelCycleTime = now;
-                        this.cycleActiveToolFavorite();
-                        this.options.eventBus?.emit('favorites:cycle');
-                    }
                 }
                 this.updateDebugHud(e, 'hover-barrel');
                 e.preventDefault();
@@ -2302,9 +2282,12 @@ export class CanvasController {
         return 0;
     }
 
-    public toggleEstucheFavorites(): void {
-        const tool = this.tool;
+    public toggleEstucheFavorites(targetTool?: ToolType): void {
+        const tool = targetTool || this.tool;
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
+        if (tool !== this.tool) {
+            this.setTool(tool);
+        }
         if (this.estuche?.isOpen()) {
             this.estuche.close();
         } else {

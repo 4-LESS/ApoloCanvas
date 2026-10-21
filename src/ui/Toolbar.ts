@@ -23,6 +23,7 @@ export interface ToolbarOptions {
     onSelectTool: (tool: ToolType) => void;
     onToggleEraserMode?: () => void;
     onCycleFavorite?: (tool: ToolType) => void;
+    onToggleEstucheFavorites?: (tool: ToolType) => void;
     onToggleEstuche: (tool: ToolType) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -117,6 +118,7 @@ export class Toolbar {
     private unlockTransitionUntil = 0;
     private resizeObserver: ResizeObserver | null = null;
     private lastToolTapTime = new Map<ToolType, number>();
+    private lastBarrelDrawerOpenTime = 0;
     private pendingEstucheTimeout: number | null = null;
 
     // Set of currently overflowed items (hidden from toolbar, delegated to MoreMenu)
@@ -547,8 +549,50 @@ export class Toolbar {
 
 
             btn.setAttribute('data-apolo-popover-trigger', 'true');
+
+            const handleBarrelOpenFavorites = (e: Event): void => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.pendingEstucheTimeout !== null) {
+                    clearTimeout(this.pendingEstucheTimeout);
+                    this.pendingEstucheTimeout = null;
+                }
+                const now = Date.now();
+                if (now - this.lastBarrelDrawerOpenTime > 300) {
+                    this.lastBarrelDrawerOpenTime = now;
+                    if (this.options.onToggleEstucheFavorites && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                        this.options.onToggleEstucheFavorites(def.tool);
+                    } else {
+                        this.options.onToggleEstuche(def.tool);
+                    }
+                }
+            };
+
+            btn.addEventListener('contextmenu', (e) => {
+                handleBarrelOpenFavorites(e);
+            });
+
+            btn.addEventListener('pointerdown', (e: PointerEvent) => {
+                const button = typeof e.button === 'number' ? e.button : -1;
+                const buttons = typeof e.buttons === 'number' ? e.buttons : 0;
+                const isBarrel = button === 2 || button === 5 || (buttons & 2) !== 0 || (buttons & 32) !== 0;
+                if (isBarrel && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                    handleBarrelOpenFavorites(e);
+                }
+            });
+
+            btn.addEventListener('pointermove', (e: PointerEvent) => {
+                const isHoverBarrel = e.pointerType === 'pen' && e.buttons === 1 && (e.pressure === 0 || e.pressure === undefined);
+                if (isHoverBarrel && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                    handleBarrelOpenFavorites(e);
+                }
+            });
+
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (Date.now() - this.lastBarrelDrawerOpenTime < 300) {
+                    return;
+                }
                 this.closeAllPopovers();
                 // Second tap on the active tool toggles its estuche (including eraser!)
                 if (this.options.activeTool === def.tool && this.options.penEnabled) {
@@ -556,7 +600,7 @@ export class Toolbar {
                         const now = Date.now();
                         const lastTime = this.lastToolTapTime.get(def.tool) ?? 0;
                         const delta = now - lastTime;
-                        if (lastTime > 0 && delta < 280) {
+                        if (lastTime > 0 && delta < 300) {
                             if (this.pendingEstucheTimeout !== null) {
                                 clearTimeout(this.pendingEstucheTimeout);
                                 this.pendingEstucheTimeout = null;
