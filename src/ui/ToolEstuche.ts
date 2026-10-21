@@ -879,8 +879,11 @@ export class ToolEstuche implements PopoverInstance {
                 onProfileModeChange: (mode) => {
                     if (mode === 'create') {
                         if (this.titleEl) this.titleEl.textContent = 'Nuevo perfil';
-                        this.renderCreateProfileHeaderDots();
+                        if (this.headerDotsContainer) this.headerDotsContainer.style.display = 'none';
+                        if (this.starBtn) this.starBtn.style.display = 'none';
                     } else {
+                        if (this.headerDotsContainer) this.headerDotsContainer.style.display = '';
+                        if (this.starBtn) this.starBtn.style.display = '';
                         this.updateHeaderTitleVisual();
                     }
                 },
@@ -908,7 +911,11 @@ export class ToolEstuche implements PopoverInstance {
             setAccessibleTooltip(backBtn, 'Volver al estuche');
             backBtn.appendChild(createSvg(ICONS.arrowLeft, { size: 18, strokeWidth: 2 }));
             backBtn.onclick = () => {
-                this.setShowingFavorites(false);
+                if (this.favoritesDrawer?.getIsCreatingProfile?.()) {
+                    this.favoritesDrawer.closeCreateProfileForm();
+                } else {
+                    this.setShowingFavorites(false);
+                }
             };
             this.favsBtn = backBtn;
             hdLeft.appendChild(backBtn);
@@ -937,9 +944,10 @@ export class ToolEstuche implements PopoverInstance {
         const titleContainer = document.createElement('div');
         titleContainer.className = 'hd-center popover-title-container popover-title-wrap';
 
+        const isCreating = isShowingFavs && Boolean(this.favoritesDrawer?.getIsCreatingProfile?.());
         const title = document.createElement('h2');
         title.className = 'title popover-title';
-        title.textContent = isShowingFavs ? this.getActiveProfileName() : titleText;
+        title.textContent = isCreating ? 'Nuevo perfil' : isShowingFavs ? this.getActiveProfileName() : titleText;
         titleContainer.appendChild(title);
         this.titleEl = title;
 
@@ -947,9 +955,14 @@ export class ToolEstuche implements PopoverInstance {
             const dotsContainer = document.createElement('nav');
             dotsContainer.className = 'pager popover-header-profile-dots apolo-kit-dots-indicator';
             dotsContainer.setAttribute('aria-label', 'Perfiles');
+            if (isCreating) {
+                dotsContainer.style.display = 'none';
+            }
             titleContainer.appendChild(dotsContainer);
             this.headerDotsContainer = dotsContainer;
-            this.updateHeaderTitleVisual();
+            if (!isCreating) {
+                this.updateHeaderTitleVisual();
+            }
         } else {
             this.headerDotsContainer = undefined;
         }
@@ -964,6 +977,9 @@ export class ToolEstuche implements PopoverInstance {
         setAccessibleTooltip(starBtn, isFav ? 'Quitar de favoritos' : 'Guardar en favoritos');
         starBtn.setAttribute('aria-pressed', String(isFav));
         starBtn.appendChild(createSvg(isFav ? ICONS.starOff : ICONS.star, { size: 18 }));
+        if (isCreating) {
+            starBtn.style.display = 'none';
+        }
 
         starBtn.onclick = () => {
             if (this.callbacks.onToggleFavorite) {
