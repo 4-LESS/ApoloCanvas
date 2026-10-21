@@ -2867,33 +2867,66 @@ button.apolo-box-menu-swatch,
   margin: 0;
 }
 
-.popover-header-profile-dots {
+.popover-header-profile-dots,
+.apolo-estuche-popover .apolo-kit-dots-indicator,
+.apolo-favorites-drawer .apolo-kit-dots-indicator {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 8px;
+  padding: 4px 0 2px;
+  user-select: none;
 }
 
-.popover-header-dot {
+.popover-header-dot,
+.apolo-estuche-popover .apolo-kit-dot,
+.apolo-favorites-drawer .apolo-kit-dot {
+  appearance: none;
+  -webkit-appearance: none;
   all: unset;
-  width: 4px;
-  height: 4px;
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  min-width: 7px;
+  min-height: 7px;
+  padding: 0;
   border-radius: 50%;
-  background: var(--apolo-text-muted, #94a3b8);
-  opacity: 0.35;
+  border: none;
+  box-shadow: none;
+  background-color: rgba(148, 163, 184, 0.38);
   cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+  transition: background-color 0.18s ease, transform 0.18s ease;
 }
 
-.popover-header-dot:hover {
-  opacity: 0.8;
-  transform: scale(1.3);
+.theme-dark .popover-header-dot,
+.theme-dark .apolo-estuche-popover .apolo-kit-dot,
+.theme-dark .apolo-favorites-drawer .apolo-kit-dot {
+  background-color: rgba(255, 255, 255, 0.28);
 }
 
-.popover-header-dot.is-active {
-  background: var(--interactive-accent, var(--apolo-accent, #3b82f6));
-  opacity: 1;
-  transform: scale(1.35);
+.popover-header-dot:hover,
+.apolo-estuche-popover .apolo-kit-dot:hover,
+.apolo-favorites-drawer .apolo-kit-dot:hover {
+  background-color: rgba(148, 163, 184, 0.65);
+}
+
+.theme-dark .popover-header-dot:hover,
+.theme-dark .apolo-estuche-popover .apolo-kit-dot:hover,
+.theme-dark .apolo-favorites-drawer .apolo-kit-dot:hover {
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+.popover-header-dot.is-active,
+.apolo-estuche-popover .apolo-kit-dot.is-active,
+.apolo-favorites-drawer .apolo-kit-dot.is-active {
+  background-color: var(--text-normal, #e2e8f0);
+  transform: scale(1.18);
+}
+
+.theme-dark .popover-header-dot.is-active,
+.theme-dark .apolo-estuche-popover .apolo-kit-dot.is-active,
+.theme-dark .apolo-favorites-drawer .apolo-kit-dot.is-active {
+  background-color: #f1f5f9;
 }
 
 .popover-header-right {

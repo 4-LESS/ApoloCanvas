@@ -543,6 +543,13 @@ export class ToolEstuche implements PopoverInstance {
             const profileName = this.getActiveProfileName();
             this.titleEl.textContent = profileName;
 
+            if (!this.headerDotsContainer && this.titleEl.parentElement) {
+                const dotsContainer = document.createElement('div');
+                dotsContainer.className = 'popover-header-profile-dots apolo-kit-dots-indicator';
+                this.titleEl.parentElement.appendChild(dotsContainer);
+                this.headerDotsContainer = dotsContainer;
+            }
+
             if (this.headerDotsContainer) {
                 this.headerDotsContainer.replaceChildren();
                 const profiles = this.getActiveToolProfiles();
@@ -551,7 +558,7 @@ export class ToolEstuche implements PopoverInstance {
                     const dot = document.createElement('button');
                     dot.type = 'button';
                     const isActive = p.id === activeProfileId || (!activeProfileId && idx === 0);
-                    dot.className = `popover-header-dot${isActive ? ' is-active' : ''}`;
+                    dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
                     dot.title = p.name;
                     dot.setAttribute('aria-label', `Perfil ${p.name}`);
                     dot.onclick = (e) => {
@@ -737,7 +744,7 @@ export class ToolEstuche implements PopoverInstance {
         this.headerEl.appendChild(favsBtn);
 
         const titleContainer = document.createElement('div');
-        titleContainer.className = 'popover-title-container';
+        titleContainer.className = 'popover-title-container popover-title-wrap';
 
         const title = document.createElement('h3');
         title.className = 'popover-title';
@@ -747,14 +754,14 @@ export class ToolEstuche implements PopoverInstance {
 
         if (this.state.showingFavorites) {
             const dotsContainer = document.createElement('div');
-            dotsContainer.className = 'popover-header-profile-dots';
+            dotsContainer.className = 'popover-header-profile-dots apolo-kit-dots-indicator';
             const profiles = this.getActiveToolProfiles();
             const activeProfileId = this.getActiveProfileId();
             profiles.forEach((p, idx) => {
                 const dot = document.createElement('button');
                 dot.type = 'button';
                 const isActive = p.id === activeProfileId || (!activeProfileId && idx === 0);
-                dot.className = `popover-header-dot${isActive ? ' is-active' : ''}`;
+                dot.className = `popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
                 dot.title = p.name;
                 dot.setAttribute('aria-label', `Perfil ${p.name}`);
                 dot.onclick = (e) => {

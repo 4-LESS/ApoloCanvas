@@ -465,11 +465,21 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
             assert.ok(titleEl);
             assert.strictEqual(titleEl.textContent, 'Notas');
 
+            // Minimalist dots indicator in header (.apolo-kit-dots-indicator inside .popover-title-wrap)
+            const titleWrap = root.querySelector('.popover-title-wrap');
+            assert.ok(titleWrap, '.popover-title-wrap container must exist');
+            const dotsIndicator = root.querySelector('.apolo-kit-dots-indicator');
+            assert.ok(dotsIndicator, '.apolo-kit-dots-indicator must be rendered under title');
+
             // Pagination dots rendered in header area
             const dots = root.querySelectorAll('.popover-header-dot');
             assert.strictEqual(dots.length, 2);
             assert.ok(dots[0].classList.contains('is-active'));
+            assert.ok(dots[0].classList.contains('apolo-kit-dot'));
+            assert.strictEqual((dots[0] as HTMLElement).title, 'Notas');
             assert.ok(!dots[1].classList.contains('is-active'));
+            assert.ok(dots[1].classList.contains('apolo-kit-dot'));
+            assert.strictEqual((dots[1] as HTMLElement).title, 'Académico');
 
             // Click dot 1 to switch to 'academic'
             dots[1].onclick?.({ stopPropagation: () => {} } as any);
@@ -480,6 +490,46 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
             assert.ok(updatedDots[1].classList.contains('is-active'));
 
             estuche.destroy();
+        });
+
+        test('FavoritesDrawer can render .apolo-kit-dots-indicator with onSelectProfile callback', () => {
+            let selectedProfile = '';
+            const profiles = [
+                { id: 'p1', name: 'Kit 1' },
+                { id: 'p2', name: 'Kit 2' },
+                { id: 'p3', name: 'Kit 3' },
+            ];
+
+            const drawer = new FavoritesDrawer(
+                {
+                    onSelectFavorite: () => {},
+                    onDeleteFavorite: () => {},
+                    onReorderFavorite: () => {},
+                    onSelectProfile: (id) => { selectedProfile = id; },
+                },
+                'pen',
+                [],
+                null,
+                undefined,
+                profiles,
+                'p1',
+                false,
+                true, // showDotsIndicator
+            );
+
+            const indicator = drawer.el.querySelector('.apolo-kit-dots-indicator');
+            assert.ok(indicator, 'FavoritesDrawer with showDotsIndicator must render .apolo-kit-dots-indicator');
+            const dots = indicator.querySelectorAll('.apolo-kit-dot');
+            assert.strictEqual(dots.length, 3);
+            assert.ok(dots[0].classList.contains('is-active'));
+            assert.strictEqual((dots[0] as HTMLElement).title, 'Kit 1');
+            assert.strictEqual((dots[1] as HTMLElement).title, 'Kit 2');
+
+            // Click dot 2 switches to 'p2'
+            (dots[1] as HTMLElement).onclick?.({ stopPropagation: () => {} } as any);
+            assert.strictEqual(selectedProfile, 'p2');
+
+            drawer.destroy();
         });
     });
 

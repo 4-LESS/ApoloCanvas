@@ -17,6 +17,7 @@ export interface FavoritesDrawerCallbacks {
     onDeleteFavorite: (presetId: string) => void;
     onReorderFavorite: (fromIndex: number, toIndex: number) => void;
     onSwitchProfile?: (profileId: string) => void;
+    onSelectProfile?: (profileId: string) => void;
     onCreateProfile?: (name: string) => void;
     onToggleSyncProfiles?: (sync: boolean) => void;
     onProfileModeChange?: (mode: 'list' | 'create') => void;
@@ -244,6 +245,7 @@ export class FavoritesDrawer {
     private activeProfileId: string = '';
     private syncFavoriteProfiles: boolean = false;
     private isCreatingProfile: boolean = false;
+    private showDotsIndicator: boolean = false;
 
     // Gesture tracking state
     private pointerStartX = 0;
@@ -259,12 +261,14 @@ export class FavoritesDrawer {
         initialProfiles?: readonly { id: string; name: string }[],
         initialActiveProfileId?: string,
         initialSyncProfiles?: boolean,
+        showDotsIndicator?: boolean,
     ) {
         this.callbacks = callbacks;
         this.tool = initialTool;
         this.favorites = [...initialFavorites];
         this.currentSlice = initialSlice ?? null;
         this.syncFavoriteProfiles = Boolean(initialSyncProfiles);
+        this.showDotsIndicator = Boolean(showDotsIndicator);
 
         if (initialProfiles && initialProfiles.length > 0) {
             this.profiles = initialProfiles.map(p => ({ id: p.id, name: p.name }));
@@ -349,12 +353,37 @@ export class FavoritesDrawer {
     public switchProfile(profileId: string): void {
         this.activeProfileId = profileId;
         this.isCreatingProfile = false;
+        if (this.callbacks.onSelectProfile) {
+            this.callbacks.onSelectProfile(profileId);
+        }
         if (this.callbacks.onSwitchProfile) {
             this.callbacks.onSwitchProfile(profileId);
-        } else {
+        } else if (!this.callbacks.onSelectProfile) {
             this.render();
         }
         this.callbacks.onProfileModeChange?.('list');
+    }
+
+    public renderDotsIndicator(container?: HTMLElement): HTMLElement {
+        const dotsContainer = document.createElement('div');
+        dotsContainer.className = 'apolo-kit-dots-indicator';
+        this.profiles.forEach((p, idx) => {
+            const dot = document.createElement('button');
+            dot.type = 'button';
+            const isActive = p.id === this.activeProfileId || (!this.activeProfileId && idx === 0);
+            dot.className = `apolo-kit-dot${isActive ? ' is-active' : ''}`;
+            dot.title = p.name;
+            dot.setAttribute('aria-label', `Perfil ${p.name}`);
+            dot.onclick = (e) => {
+                e.stopPropagation();
+                this.switchProfile(p.id);
+            };
+            dotsContainer.appendChild(dot);
+        });
+        if (container) {
+            container.appendChild(dotsContainer);
+        }
+        return dotsContainer;
     }
 
     public openCreateProfileForm(): void {
@@ -427,10 +456,13 @@ export class FavoritesDrawer {
 
         if (this.favorites.length === 0) {
             this.renderEmptyState();
-            return;
+        } else {
+            this.renderFavoritesList();
         }
 
-        this.renderFavoritesList();
+        if (this.showDotsIndicator && this.profiles.length > 0) {
+            this.renderDotsIndicator(this.el);
+        }
     }
 
     /**
