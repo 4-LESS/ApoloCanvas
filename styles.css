@@ -3106,30 +3106,32 @@ button.apolo-box-menu-swatch,
 /* 1. Selector de Puntas (4 columnas) */
 .tool-grid,
 .popover-tools-selector {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  display: grid !important;
+  grid-template-columns: repeat(4, 1fr) !important;
+  gap: 8px !important;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
   height: auto;
   align-items: center;
-  justify-items: center;
+  box-sizing: border-box;
 }
 .tool-btn,
 .popover-tool-opt {
   all: unset;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  width: 100% !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  border-radius: 14px !important;
+  padding: 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
   background: #32353e !important;
   border: 1.5px solid transparent !important;
   color: #f3f4f6 !important;
-  box-sizing: border-box;
-  transition: background .15s ease, border-color .15s ease, color .15s ease;
+  box-sizing: border-box !important;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease;
 }
 .theme-light .tool-btn,
 .theme-light .popover-tool-opt,
@@ -3145,18 +3147,6 @@ button.apolo-box-menu-swatch,
 }
 .tool-btn:hover:not(.is-active),
 .popover-tool-opt:hover:not(.is-active) {
-  background: #424652 !important;
-  color: #ffffff !important;
-}
-.theme-light .tool-btn:hover:not(.is-active),
-.theme-light .popover-tool-opt:hover:not(.is-active),
-:root .tool-btn:hover:not(.is-active),
-:root .popover-tool-opt:hover:not(.is-active) {
-  background: #424652 !important;
-  color: #ffffff !important;
-}
-.theme-dark .tool-btn:hover:not(.is-active),
-.theme-dark .popover-tool-opt:hover:not(.is-active) {
   background: #424652 !important;
   color: #ffffff !important;
 }
@@ -3178,13 +3168,13 @@ button.apolo-box-menu-swatch,
 :root .tool-btn.is-active,
 :root .popover-tool-opt.is-active {
   background: #eef3ff !important;
-  border-color: #2f6bff !important;
+  border: 1.5px solid #2f6bff !important;
   color: #2f6bff !important;
 }
 .theme-dark .tool-btn.is-active,
 .theme-dark .popover-tool-opt.is-active {
   background: rgba(91, 140, 255, 0.18) !important;
-  border-color: #5b8cff !important;
+  border: 1.5px solid #5b8cff !important;
   color: #5b8cff !important;
 }
 .popover-tool-opt .icon-wrap,
@@ -3197,6 +3187,7 @@ button.apolo-box-menu-swatch,
   border-radius: 10px;
   color: inherit;
   background: transparent !important;
+  pointer-events: none;
 }
 .popover-tool-opt.is-active .icon-wrap,
 .tool-btn.is-active .icon-wrap {
@@ -3327,25 +3318,30 @@ button.apolo-box-menu-swatch,
 .line-grid,
 .popover-lines-grid,
 .popover-line-styles-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 8px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
 }
 .line-chip,
 .popover-line-chip {
   all: unset;
-  height: 38px;
-  border-radius: 12px;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  border-radius: 12px !important;
+  padding: 0 12px !important;
   background: #32353e !important;
-  border: 1.5px solid transparent;
+  border: 1.5px solid transparent !important;
   color: #f3f4f6 !important;
-  cursor: pointer;
-  box-sizing: border-box;
-  transition: background .15s ease, border-color .15s ease, color .15s ease;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  transition: background .15s ease, border-color .15s ease, color .15s ease !important;
 }
 .theme-light .line-chip,
 .theme-light .popover-line-chip,
@@ -3371,9 +3367,9 @@ button.apolo-box-menu-swatch,
 }
 .line-chip.is-active,
 .popover-line-chip.is-active {
-  background: var(--accent-subtle) !important;
-  border-color: var(--accent) !important;
-  color: var(--accent) !important;
+  background: #eef3ff !important;
+  border: 1.5px solid #2f6bff !important;
+  color: #2f6bff !important;
   box-shadow: none !important;
 }
 .theme-light .line-chip.is-active,
@@ -3381,13 +3377,13 @@ button.apolo-box-menu-swatch,
 :root .line-chip.is-active,
 :root .popover-line-chip.is-active {
   background: #eef3ff !important;
-  border-color: #2f6bff !important;
+  border: 1.5px solid #2f6bff !important;
   color: #2f6bff !important;
 }
 .theme-dark .line-chip.is-active,
 .theme-dark .popover-line-chip.is-active {
   background: rgba(91, 140, 255, 0.18) !important;
-  border-color: #5b8cff !important;
+  border: 1.5px solid #5b8cff !important;
   color: #5b8cff !important;
 }
 .line-chip .popover-line-chip-pill,

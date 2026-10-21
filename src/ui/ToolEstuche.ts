@@ -1020,12 +1020,21 @@ export class ToolEstuche implements PopoverInstance {
             btn.type = 'button';
             const isActive = this.state.profileId === t.id;
             btn.className = `tool-btn popover-tool-opt ${isActive ? 'is-active' : ''}`;
+            btn.style.display = 'flex';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            btn.style.width = '100%';
+            btn.style.height = '44px';
+            btn.style.minHeight = '44px';
+            btn.style.borderRadius = '14px';
+            btn.style.boxSizing = 'border-box';
+            btn.style.padding = '8px';
             setAccessibleTooltip(btn, t.label);
             btn.setAttribute('aria-pressed', String(isActive));
 
             const wrap = document.createElement('div');
             wrap.className = 'icon-wrap';
-            wrap.appendChild(createSvg(t.iconD, { size: 22 }));
+            wrap.appendChild(createSvg(t.iconD, { size: 19, strokeWidth: 1.9 }));
             btn.appendChild(wrap);
 
             btn.onclick = () => {
@@ -1121,12 +1130,21 @@ export class ToolEstuche implements PopoverInstance {
             btn.type = 'button';
             const isActive = activeTip === t.id;
             btn.className = `tool-btn popover-tool-opt ${isActive ? 'is-active' : ''}`;
+            btn.style.display = 'flex';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            btn.style.width = '100%';
+            btn.style.height = '44px';
+            btn.style.minHeight = '44px';
+            btn.style.borderRadius = '14px';
+            btn.style.boxSizing = 'border-box';
+            btn.style.padding = '8px';
             setAccessibleTooltip(btn, t.label);
             btn.setAttribute('aria-pressed', String(isActive));
 
             const wrap = document.createElement('div');
             wrap.className = 'icon-wrap';
-            wrap.appendChild(createSvg(t.iconD, { size: 22 }));
+            wrap.appendChild(createSvg(t.iconD, { size: 19, strokeWidth: 1.9 }));
             btn.appendChild(wrap);
 
             btn.onclick = () => {
@@ -1518,11 +1536,25 @@ export class ToolEstuche implements PopoverInstance {
             const isActive = s.id === activePattern;
             btn.className = `line-chip popover-line-chip ${isActive ? 'is-active' : ''}`;
             btn.setAttribute('aria-pressed', String(isActive));
+            btn.style.display = 'flex';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            btn.style.width = '100%';
+            btn.style.height = '38px';
+            btn.style.minHeight = '38px';
+            btn.style.borderRadius = '12px';
+            btn.style.boxSizing = 'border-box';
+            btn.style.padding = '0 12px';
             setAccessibleTooltip(btn, s.label);
 
             const pill = document.createElement('span');
             pill.className = 'popover-line-chip-pill';
             pill.setAttribute('aria-hidden', 'true');
+            pill.style.display = 'flex';
+            pill.style.alignItems = 'center';
+            pill.style.justifyContent = 'center';
+            pill.style.width = '100%';
+            pill.style.height = '100%';
 
             const bar = document.createElement('div');
             bar.className = `popover-line-bar ${s.cls}`;
