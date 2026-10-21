@@ -3125,16 +3125,37 @@ button.apolo-box-menu-swatch,
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: transparent;
+  background: var(--bg-alt, rgba(128, 128, 128, 0.12));
   border: 1.5px solid transparent;
-  color: var(--muted);
+  color: var(--text);
   box-sizing: border-box;
   transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
+.theme-light .tool-btn,
+.theme-light .popover-tool-opt,
+:root .tool-btn,
+:root .popover-tool-opt {
+  background: #eceef2;
+  color: #1e2330;
+}
+.theme-dark .tool-btn,
+.theme-dark .popover-tool-opt {
+  background: #32353e;
+  color: #f3f4f6;
+}
 .tool-btn:hover:not(.is-active),
 .popover-tool-opt:hover:not(.is-active) {
-  background: var(--card-hover, rgba(128, 128, 128, 0.12));
-  color: var(--text);
+  background: var(--card-hover, rgba(128, 128, 128, 0.18));
+}
+.theme-light .tool-btn:hover:not(.is-active),
+.theme-light .popover-tool-opt:hover:not(.is-active),
+:root .tool-btn:hover:not(.is-active),
+:root .popover-tool-opt:hover:not(.is-active) {
+  background: #e2e5eb;
+}
+.theme-dark .tool-btn:hover:not(.is-active),
+.theme-dark .popover-tool-opt:hover:not(.is-active) {
+  background: #3c404b;
 }
 .tool-btn:focus-visible,
 .popover-tool-opt:focus-visible {
@@ -3327,7 +3348,7 @@ button.apolo-box-menu-swatch,
 .theme-light .popover-line-chip,
 :root .line-chip,
 :root .popover-line-chip {
-  background: #f2f3f5;
+  background: #eceef2;
   color: #1e2330;
 }
 .theme-dark .line-chip,
