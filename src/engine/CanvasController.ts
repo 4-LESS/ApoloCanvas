@@ -244,6 +244,8 @@ export class CanvasController {
     private penEnabled: boolean;
     private shapeRecognition: boolean;
     private barrelActive = false;
+    private penBarrelPressed = false;
+    private lastBarrelCycleTime = 0;
     private eraserMode: EraserMode = 'whole';
     private eraserRadius = 18;
     private scribbleToErase = true;
@@ -266,6 +268,10 @@ export class CanvasController {
     // Selection & Manipulation
     private selection: CanvasElement[] = [];
     private activeStart: Point | null = null;
+
+    public get isDrawing(): boolean {
+        return this.activeStart !== null;
+    }
     private activeAnchor: Anchor | null = null;
     private activeContentLeft = 0;
     private activeContentWidth = 1;
@@ -441,6 +447,12 @@ export class CanvasController {
             this.scroller.addEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true, passive: false });
             this.canvas.addEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true, passive: false });
             this.canvas.addEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true, passive: false });
+            this.scroller.addEventListener('pointermove', this.onPointerMove, { capture: true, passive: false });
+            this.canvas.addEventListener('pointermove', this.onPointerMove, { capture: true, passive: false });
+            this.scroller.addEventListener('pointerup', this.onPointerUp, { capture: true, passive: false });
+            this.canvas.addEventListener('pointerup', this.onPointerUp, { capture: true, passive: false });
+            this.scroller.addEventListener('pointercancel', this.onPointerUp, { capture: true, passive: false });
+            this.canvas.addEventListener('pointercancel', this.onPointerUp, { capture: true, passive: false });
             this.scroller.addEventListener('contextmenu', this.onCanvasContextMenu);
             this.canvas.addEventListener('contextmenu', this.onCanvasContextMenu);
 
@@ -468,6 +480,8 @@ export class CanvasController {
             window.addEventListener('pointermove', this.onWindowPointerMoveHandleDrag, { passive: false });
             window.addEventListener('pointerup', this.onWindowPointerUpHandleDrag, { passive: false });
             window.addEventListener('pointercancel', this.onWindowPointerUpHandleDrag, { passive: false });
+            window.addEventListener('pointerup', this.onPointerUp, { passive: false });
+            window.addEventListener('pointercancel', this.onPointerUp, { passive: false });
 
             this.canvas.addEventListener('pointerdown', this.onTouchDown, { passive: false });
             this.canvas.addEventListener('pointermove', this.onTouchMove, { passive: false });
@@ -1185,28 +1199,39 @@ export class CanvasController {
         }
     }
 
-    private readonly onCanvasContextMenu = (event: MouseEvent): void => {
+    private readonly onCanvasContextMenu = (event: MouseEvent | PointerEvent): void => {
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation?.();
     };
+
+    private isPenBarrelEvent(e: PointerEvent | MouseEvent): boolean {
+        const button = typeof e.button === 'number' ? e.button : -1;
+        const buttons = typeof e.buttons === 'number' ? e.buttons : 0;
+        // W3C barrel button is button === 5 or buttons bitmask 32 (0x20),
+        // while Samsung DeX / some Android WebViews map it to button === 2 or buttons bitmask 2.
+        return button === 5 || button === 2 || (buttons & 32) !== 0 || (buttons & 2) !== 0;
+    }
 
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
         if (this.handledBoxEvents.has(event)) return;
 
         // S-Pen barrel button: single-action cycle favorites when not mid-stroke
-        const isBarrel = event.pointerType === 'pen' && (
-            event.button === 2 ||
-            event.buttons === 32 ||
-            (event.buttons & 32) !== 0 ||
-            (event.buttons & 2) !== 0
-        );
-        if (isBarrel && !this.activeStart) {
+        if (event.pointerType === 'pen' && this.isPenBarrelEvent(event)) {
             this.handledBoxEvents.add(event);
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation?.();
-            this.cycleActiveToolFavorite();
-            this.options.eventBus?.emit('favorites:cycle');
+
+            if (!this.penBarrelPressed && !this.isDrawing) {
+                const now = performance.now();
+                if (now - this.lastBarrelCycleTime > 250) {
+                    this.lastBarrelCycleTime = now;
+                    this.cycleActiveToolFavorite();
+                    this.options.eventBus?.emit('favorites:cycle');
+                }
+                this.penBarrelPressed = true;
+            }
             return;
         }
 
@@ -1268,6 +1293,40 @@ export class CanvasController {
             event.stopPropagation();
         }
     };
+
+    private readonly onPointerMove = (e: PointerEvent): void => {
+        if (e.pointerType === 'pen') {
+            const barrelActive = this.isPenBarrelEvent(e);
+            if (barrelActive && !this.penBarrelPressed && !this.isDrawing) {
+                this.penBarrelPressed = true;
+                const now = performance.now();
+                if (now - this.lastBarrelCycleTime > 250) {
+                    this.lastBarrelCycleTime = now;
+                    this.cycleActiveToolFavorite();
+                    this.options.eventBus?.emit('favorites:cycle');
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation?.();
+                return;
+            }
+            if (!barrelActive && this.penBarrelPressed) {
+                this.penBarrelPressed = false;
+            }
+        }
+
+        if (!this.isDrawing) {
+            return;
+        }
+    };
+
+    private readonly onPointerUp = (e: PointerEvent): void => {
+        if (!this.isPenBarrelEvent(e)) {
+            this.penBarrelPressed = false;
+        }
+    };
+
+    private readonly onPointerDown = this.onCanvasPointerDownHandleCheck;
 
     private startHandleDrag(event: PointerEvent, handleEl: HTMLElement): void {
         const boxId = handleEl.dataset.apoloHandleId
@@ -2572,11 +2631,19 @@ export class CanvasController {
         this.scroller.removeEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true });
         this.canvas.removeEventListener('pointerdown', this.onCanvasPointerDownHandleCheck, { capture: true });
         this.canvas.removeEventListener('touchstart', this.onCanvasTouchStartHandleCheck, { capture: true });
+        this.scroller.removeEventListener('pointermove', this.onPointerMove, { capture: true });
+        this.canvas.removeEventListener('pointermove', this.onPointerMove, { capture: true });
+        this.scroller.removeEventListener('pointerup', this.onPointerUp, { capture: true });
+        this.canvas.removeEventListener('pointerup', this.onPointerUp, { capture: true });
+        this.scroller.removeEventListener('pointercancel', this.onPointerUp, { capture: true });
+        this.canvas.removeEventListener('pointercancel', this.onPointerUp, { capture: true });
         this.scroller.removeEventListener('contextmenu', this.onCanvasContextMenu);
         this.canvas.removeEventListener('contextmenu', this.onCanvasContextMenu);
         window.removeEventListener('pointermove', this.onWindowPointerMoveHandleDrag);
         window.removeEventListener('pointerup', this.onWindowPointerUpHandleDrag);
         window.removeEventListener('pointercancel', this.onWindowPointerUpHandleDrag);
+        window.removeEventListener('pointerup', this.onPointerUp);
+        window.removeEventListener('pointercancel', this.onPointerUp);
         this.canvas.removeEventListener('pointerdown', this.onTouchDown);
         this.canvas.removeEventListener('pointermove', this.onTouchMove);
         this.canvas.removeEventListener('pointerup', this.onTouchEnd);
@@ -2780,6 +2847,10 @@ export class CanvasController {
     private shouldAcceptDrawingPointer(event: PointerEvent): boolean {
         if (!this.penEnabled) return false;
 
+        if (event.pointerType === 'pen' && this.isPenBarrelEvent(event)) {
+            return false;
+        }
+
         if (this.findBoxOptionsButtonAt(event.clientX, event.clientY) || this.findBoxHandleAt(event.clientX, event.clientY)) {
             return false;
         }
@@ -2821,6 +2892,9 @@ export class CanvasController {
     // Drawing input lifecycle (normalized to content column width & anchor block)
     private begin(rawPoint: Point, barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.penEnabled) return;
+        if (rawEvent && rawEvent.pointerType === 'pen' && this.isPenBarrelEvent(rawEvent)) {
+            return;
+        }
         const screenX = rawEvent ? rawEvent.clientX : rawPoint.x;
         const screenY = rawEvent ? rawEvent.clientY : rawPoint.y;
         if (this.findBoxOptionsButtonAt(screenX, screenY) || this.findBoxHandleAt(screenX, screenY)) {
