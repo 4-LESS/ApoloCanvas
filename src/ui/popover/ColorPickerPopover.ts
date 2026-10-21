@@ -1,6 +1,7 @@
 import type { ToolbarSlot } from '../../core/types.ts';
 import { ICONS, createSvg } from '../theme.ts';
 import { applyPopoverGeometry } from './PopoverGeometry.ts';
+import type { PopoverController, PopoverInstance } from '../kit/index.ts';
 
 export type ColorPickerConfirmCallback = (
     color: string,
@@ -8,9 +9,13 @@ export type ColorPickerConfirmCallback = (
     slotIndex: number | null
 ) => void;
 
-export class ColorPickerPopover {
+export class ColorPickerPopover implements PopoverInstance {
     readonly el: HTMLElement;
+    get container(): HTMLElement {
+        return this.el;
+    }
     private openState = false;
+    private popoverController?: PopoverController;
     private currentSlotIndex: number | null = null;
     private originalColor = '#FCFCFC';
     private currentColor = '#FCFCFC';
@@ -27,7 +32,8 @@ export class ColorPickerPopover {
     private currentSlot: ToolbarSlot = 'tc';
     private currentToolbar: HTMLElement | null = null;
 
-    constructor(parent: HTMLElement = document.body) {
+    constructor(parent: HTMLElement = document.body, popoverController?: PopoverController) {
+        this.popoverController = popoverController;
         this.el = document.createElement('div');
         this.el.className = 'color-picker-popover';
         this.el.hidden = true;
@@ -35,12 +41,17 @@ export class ColorPickerPopover {
         this.el.setAttribute('role', 'dialog');
         this.el.setAttribute('aria-label', 'Selector de color');
         this.el.addEventListener('pointerdown', (e) => e.stopPropagation());
+        this.el.addEventListener('touchstart', (e) => e.stopPropagation());
 
         parent.appendChild(this.el);
     }
 
     isOpen(): boolean {
         return this.openState;
+    }
+
+    hide(): void {
+        this.close();
     }
 
     getCurrentSlotIndex(): number | null {
@@ -72,6 +83,10 @@ export class ColorPickerPopover {
         this.render();
         this.reposition(anchorEl, slot, toolbarEl);
         this.triggerAnimation();
+
+        if (this.popoverController) {
+            this.popoverController.open(this, anchorEl);
+        }
     }
 
     close(): void {
@@ -80,6 +95,9 @@ export class ColorPickerPopover {
         this.el.hidden = true;
         this.el.style.display = 'none';
         this.el.classList.remove('apolo-popover-animated');
+        if (this.popoverController) {
+            this.popoverController.close(this);
+        }
     }
 
     reposition(anchorEl = this.currentAnchor, slot = this.currentSlot, toolbarEl = this.currentToolbar): void {

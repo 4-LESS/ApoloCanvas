@@ -153,7 +153,7 @@ export class ToolEstuche implements PopoverInstance {
         this.container.append(this.headerEl, this.bodyEl);
         parent.appendChild(this.container);
 
-        this.colorPicker = new ColorPickerPopover(parent);
+        this.colorPicker = new ColorPickerPopover(parent, this.popoverController);
     }
 
     private initColorPages(): void {
@@ -255,6 +255,10 @@ export class ToolEstuche implements PopoverInstance {
 
     isOpen(): boolean {
         return this.openState;
+    }
+
+    containsTarget(target: Node): boolean {
+        return Boolean(this.colorPicker?.isOpen() && this.colorPicker.el.contains(target));
     }
 
     private triggerAnimation(): void {

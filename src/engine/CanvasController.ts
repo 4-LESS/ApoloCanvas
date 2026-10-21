@@ -3030,9 +3030,11 @@ export class CanvasController {
                     if (
                         this.toolbar?.container.contains(el) ||
                         this.estuche?.container.contains(el) ||
+                        this.estuche?.containsTarget(el) ||
                         this.lassoMenu?.container.contains(el) ||
                         this.zoomPill?.container.contains(el) ||
-                        this.boxMenu?.container.contains(el)
+                        this.boxMenu?.container.contains(el) ||
+                        Boolean((el as Element).closest?.('.color-picker-popover, .apolo-thickness-popover, .apolo-popover-shell, .apolo-estuche-popover'))
                     ) {
                         return true;
                     }
