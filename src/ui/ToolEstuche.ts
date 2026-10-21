@@ -184,6 +184,7 @@ export class ToolEstuche implements PopoverInstance {
             this.recentColors.pop();
         }
         this.colorPages[0] = this.recentColors;
+        ColorPickerPopover.pushRecentColor(clean);
     }
 
     private getTitleForTool(tool: ToolType): string {

@@ -144,18 +144,18 @@
    Scoped Button Reset (Zero !important, High Specificity against Obsidian)
    Neutralizes Obsidian button:not(.clickable-icon) and .is-tablet styles.
    ========================================================================== */
-.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn),
-.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn) {
+.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
+.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn) {
   all: unset;
   box-sizing: border-box;
   display: inline-flex;
@@ -3862,12 +3862,23 @@ button.apolo-box-menu-swatch,
   color: var(--apolo-text);
 }
 
+.apolo-ui .color-picker-popover .color-picker-tab-btn.is-active,
 .color-picker-popover .color-picker-tab-btn.is-active,
+.apolo-ui .color-picker-popover .seg-btn.is-active,
 .color-picker-popover .seg-btn.is-active {
-  background: var(--apolo-bg);
-  color: var(--apolo-text);
+  background: #ffffff;
+  color: var(--apolo-text, #1e2330);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--apolo-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--apolo-border, rgba(0, 0, 0, 0.08));
+}
+
+.theme-dark .apolo-ui .color-picker-popover .color-picker-tab-btn.is-active,
+.theme-dark .color-picker-popover .color-picker-tab-btn.is-active,
+.theme-dark .apolo-ui .color-picker-popover .seg-btn.is-active,
+.theme-dark .color-picker-popover .seg-btn.is-active {
+  background: var(--apolo-bg, #25272d);
+  color: var(--apolo-text, #f3f4f6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--apolo-border, rgba(255, 255, 255, 0.09));
 }
 
 /* 2. Swatches Matrix 12x10 & Spectrum Viewport */
@@ -3907,7 +3918,9 @@ button.apolo-box-menu-swatch,
   box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
 }
 
+.apolo-ui .color-picker-popover .color-matrix-cell.is-selected,
 .color-picker-popover .color-matrix-cell.is-selected,
+.apolo-ui .color-picker-popover .cell.is-selected,
 .color-picker-popover .cell.is-selected {
   z-index: 2;
   box-shadow: inset 0 0 0 2px #ffffff, 0 0 0 1.5px rgba(0, 0, 0, 0.45);
@@ -4103,9 +4116,18 @@ button.apolo-box-menu-swatch,
   transform: scale(1.08);
 }
 
+.apolo-ui .color-picker-popover .swatch.is-active,
 .color-picker-popover .swatch.is-active,
+.apolo-ui .color-picker-popover .color-quick-circle.is-active,
 .color-picker-popover .color-quick-circle.is-active {
-  box-shadow: 0 0 0 2px var(--apolo-bg), 0 0 0 4px var(--apolo-accent);
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px var(--apolo-accent, #2f6bff);
+}
+
+.theme-dark .apolo-ui .color-picker-popover .swatch.is-active,
+.theme-dark .color-picker-popover .swatch.is-active,
+.theme-dark .apolo-ui .color-picker-popover .color-quick-circle.is-active,
+.theme-dark .color-picker-popover .color-quick-circle.is-active {
+  box-shadow: 0 0 0 2px var(--apolo-bg, #25272d), 0 0 0 4px var(--apolo-accent, #5b8cff);
 }
 
 .apolo-ui .color-picker-popover .color-eyedropper-btn,
@@ -4177,13 +4199,17 @@ button.apolo-box-menu-swatch,
   color: var(--apolo-text);
 }
 
+.apolo-ui .color-picker-popover .cp-action.primary,
 .color-picker-popover .cp-action.primary,
+.apolo-ui .color-picker-popover .color-action-btn.is-confirm,
 .color-picker-popover .color-action-btn.is-confirm {
-  color: var(--apolo-accent);
+  color: var(--apolo-accent, #2f6bff);
   font-weight: 600;
 }
 
+.apolo-ui .color-picker-popover .cp-action.primary:hover,
 .color-picker-popover .cp-action.primary:hover,
+.apolo-ui .color-picker-popover .color-action-btn.is-confirm:hover,
 .color-picker-popover .color-action-btn.is-confirm:hover {
   background: var(--apolo-accent-subtle);
 }

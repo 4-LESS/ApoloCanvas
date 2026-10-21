@@ -9,6 +9,19 @@ export type ColorPickerConfirmCallback = (
     slotIndex: number | null
 ) => void;
 
+const SWATCHES_MATRIX: string[][] = [
+    ['#FFFFFF', '#FBE5E5', '#FCECDD', '#FEF9E1', '#EFF9E3', '#E3F7E9', '#E0F7FA', '#E2F0FC', '#E5E8FC', '#EFE5FC', '#FCE5F7', '#FCE5EC'],
+    ['#E0E0E0', '#F6B8B8', '#F8CEA3', '#FDF0A6', '#D6F1B4', '#B5EAC5', '#ACEBF2', '#B3D8F8', '#BBC3F8', '#D6B8F8', '#F7B8E8', '#F7B8CB'],
+    ['#C2C2C2', '#F08686', '#F4AE64', '#FBE565', '#BBE882', '#84DD9E', '#74DFEC', '#80BFF3', '#8E9BF3', '#BB86F4', '#F186D8', '#F186A8'],
+    ['#A3A3A3', '#EA5454', '#F08E26', '#F9DA24', '#A0DF50', '#53D078', '#3CD3E6', '#4DA6EE', '#6173EE', '#A054F0', '#EB54C8', '#EB5485'],
+    ['#858585', '#E52222', '#DC730B', '#ECC406', '#85C92A', '#2BB656', '#18B8CC', '#1E88E5', '#3449E5', '#8522E5', '#E522B7', '#E52262'],
+    ['#666666', '#C40D0D', '#B85D00', '#C8A500', '#6BA619', '#1A9940', '#0097A7', '#0D6ECD', '#1A2ECC', '#6B0DC4', '#C40D99', '#C40D49'],
+    ['#4D4D4D', '#990606', '#8F4700', '#9C8000', '#528011', '#117730', '#007685', '#0855A0', '#11229F', '#530699', '#990677', '#990638'],
+    ['#333333', '#6E0202', '#663200', '#705C00', '#3A5B0A', '#0A5521', '#00545C', '#043C73', '#0A1772', '#3B026E', '#6E0255', '#6E0227'],
+    ['#1A1A1A', '#470000', '#422000', '#473A00', '#243A04', '#053614', '#00363B', '#02264A', '#050E4A', '#260047', '#470037', '#470019'],
+    ['#000000', '#260000', '#241100', '#261F00', '#131F01', '#021C0A', '#001D20', '#011428', '#020728', '#140026', '#26001D', '#26000D'],
+];
+
 export class ColorPickerPopover implements PopoverInstance {
     readonly el: HTMLElement;
     get container(): HTMLElement {
@@ -24,7 +37,56 @@ export class ColorPickerPopover implements PopoverInstance {
     private currentTab: 'samples' | 'spectrum' = 'samples';
     private onConfirmCallback: ColorPickerConfirmCallback | null = null;
 
-    private readonly quickPalette = ['#E53935', '#FB8C00', '#2979FF', '#FFFFFF', '#FF6D00'];
+    private static recentColors: string[] = ColorPickerPopover.loadStoredRecentColors();
+
+    private static loadStoredRecentColors(): string[] {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                const stored = localStorage.getItem('apolo_recent_colors');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        return parsed.slice(0, 5).map((c) => String(c).toUpperCase());
+                    }
+                }
+            }
+        } catch {
+            // fallback
+        }
+        return ['#E53935', '#F58700', '#2F6BFF', '#FFFFFF', '#FF6D00'];
+    }
+
+    private static saveStoredRecentColors(): void {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem('apolo_recent_colors', JSON.stringify(ColorPickerPopover.recentColors));
+            }
+        } catch {
+            // fallback
+        }
+    }
+
+    static pushRecentColor(hex: string): void {
+        if (!hex || typeof hex !== 'string') return;
+        const clean = hex.trim().toUpperCase();
+        if (!/^#[0-9A-F]{3,8}$/.test(clean)) return;
+        ColorPickerPopover.recentColors = [
+            clean,
+            ...ColorPickerPopover.recentColors.filter((c) => c.toUpperCase() !== clean),
+        ].slice(0, 5);
+        ColorPickerPopover.saveStoredRecentColors();
+    }
+
+    static getRecentColors(): string[] {
+        return [...ColorPickerPopover.recentColors];
+    }
+
+    pushRecentColor(hex: string): void {
+        ColorPickerPopover.pushRecentColor(hex);
+        this.renderRecentSwatches();
+        this.highlightRecentSelectedCell();
+    }
+
     private gridEl?: HTMLElement;
     private readoutRow?: HTMLElement;
     private previewFillEl?: HTMLElement;
@@ -86,6 +148,10 @@ export class ColorPickerPopover implements PopoverInstance {
         this.originalOpacity = Math.max(0, Math.min(100, Number(initialOpacity) || 0));
         this.currentOpacity = this.originalOpacity;
         this.onConfirmCallback = onConfirm;
+
+        if (this.currentColor && this.currentColor.startsWith('#')) {
+            ColorPickerPopover.pushRecentColor(this.currentColor);
+        }
 
         this.render();
         this.reposition(anchorEl, slot, toolbarEl);
@@ -288,27 +354,7 @@ export class ColorPickerPopover implements PopoverInstance {
 
         this.recentSwatchesEl = document.createElement('div');
         this.recentSwatchesEl.className = 'recent-swatches';
-
-        this.quickPalette.forEach((col) => {
-            const swatch = document.createElement('button');
-            swatch.type = 'button';
-            swatch.className =
-                'swatch color-quick-circle' +
-                (this.currentColor.toUpperCase() === col.toUpperCase() ? ' is-active' : '');
-            swatch.style.setProperty('--c', col);
-            swatch.style.backgroundColor = col;
-            swatch.dataset.hex = col.toUpperCase();
-            swatch.title = col;
-            swatch.setAttribute('aria-label', `Color ${col}`);
-            swatch.onclick = () => {
-                this.currentColor = col.toUpperCase();
-                this.updateReadoutVisual();
-                this.highlightGridSelectedCell();
-                this.highlightRecentSelectedCell();
-            };
-            this.recentSwatchesEl!.appendChild(swatch);
-        });
-
+        this.renderRecentSwatches();
         recentRow.appendChild(this.recentSwatchesEl);
 
         const dropperBtn = document.createElement('button');
@@ -323,9 +369,9 @@ export class ColorPickerPopover implements PopoverInstance {
                     const dropper = new (window as any).EyeDropper();
                     const res = await dropper.open();
                     this.currentColor = res.sRGBHex.toUpperCase();
+                    this.pushRecentColor(this.currentColor);
                     this.updateReadoutVisual();
                     this.highlightGridSelectedCell();
-                    this.highlightRecentSelectedCell();
                 } catch {
                     // Canceled by user
                 }
@@ -335,9 +381,9 @@ export class ColorPickerPopover implements PopoverInstance {
                 inp.value = this.currentColor;
                 inp.oninput = () => {
                     this.currentColor = inp.value.toUpperCase();
+                    this.pushRecentColor(this.currentColor);
                     this.updateReadoutVisual();
                     this.highlightGridSelectedCell();
-                    this.highlightRecentSelectedCell();
                 };
                 inp.click();
             }
@@ -364,6 +410,7 @@ export class ColorPickerPopover implements PopoverInstance {
         confirmBtn.className = 'cp-action primary is-confirm color-action-btn';
         confirmBtn.textContent = 'Listo';
         confirmBtn.onclick = () => {
+            this.pushRecentColor(this.currentColor);
             if (this.onConfirmCallback) {
                 this.onConfirmCallback(this.currentColor, this.currentOpacity, this.currentSlotIndex);
             }
@@ -470,25 +517,40 @@ export class ColorPickerPopover implements PopoverInstance {
         this.gridEl.setAttribute('role', 'grid');
         this.gridEl.setAttribute('aria-label', 'Muestras de color');
 
-        const hues = [0, 25, 45, 60, 100, 150, 185, 215, 240, 275, 315];
-        const lightnessSteps = [96, 88, 78, 68, 58, 48, 38, 28, 18, 8];
-
-        for (let row = 0; row < 10; row++) {
-            const grayVal = Math.round(255 * (1 - row / 9));
-            const grayHex = this.rgbToHex(grayVal, grayVal, grayVal);
-            this.gridEl.appendChild(this.createGridCell(grayHex));
-
-            for (let col = 0; col < 11; col++) {
-                const h = hues[col];
-                const l = lightnessSteps[row];
-                const s = row < 2 ? 80 : 100;
-                const hex = this.hslToHex(h, s, l);
-                this.gridEl.appendChild(this.createGridCell(hex));
-            }
-        }
+        SWATCHES_MATRIX.forEach((row) => {
+            row.forEach((hex) => {
+                this.gridEl!.appendChild(this.createGridCell(hex));
+            });
+        });
 
         container.appendChild(this.gridEl);
         this.highlightGridSelectedCell();
+    }
+
+    private renderRecentSwatches(): void {
+        if (!this.recentSwatchesEl) return;
+        this.recentSwatchesEl.replaceChildren();
+
+        const recents = ColorPickerPopover.recentColors.slice(0, 5);
+        recents.forEach((col) => {
+            const swatch = document.createElement('button');
+            swatch.type = 'button';
+            swatch.className =
+                'swatch color-quick-circle' +
+                (this.currentColor.toUpperCase() === col.toUpperCase() ? ' is-active' : '');
+            swatch.style.setProperty('--c', col);
+            swatch.style.backgroundColor = col;
+            swatch.dataset.hex = col.toUpperCase();
+            swatch.title = col;
+            swatch.setAttribute('aria-label', `Color ${col}`);
+            swatch.onclick = () => {
+                this.currentColor = col.toUpperCase();
+                this.updateReadoutVisual();
+                this.highlightGridSelectedCell();
+                this.highlightRecentSelectedCell();
+            };
+            this.recentSwatchesEl!.appendChild(swatch);
+        });
     }
 
     private createGridCell(hex: string): HTMLElement {

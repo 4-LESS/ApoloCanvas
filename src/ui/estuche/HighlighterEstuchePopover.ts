@@ -2,6 +2,7 @@ import type { ToolbarSlot } from '../../core/types.ts';
 import { ICONS, createSvg } from '../theme.ts';
 import { applyPopoverGeometry } from '../popover/PopoverGeometry.ts';
 import type { OpenColorPickerFn } from './PenEstuchePopover.ts';
+import { ColorPickerPopover } from '../popover/ColorPickerPopover.ts';
 
 export interface HighlighterEstucheState {
     tipId: 'chisel' | 'round';
@@ -78,6 +79,7 @@ export class HighlighterEstuchePopover {
             this.recentColors.pop();
         }
         this.colorPages[0] = this.recentColors;
+        ColorPickerPopover.pushRecentColor(clean);
     }
 
     open(

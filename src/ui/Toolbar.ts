@@ -751,6 +751,7 @@ export class Toolbar {
                     const color = this.toolPalettes[paletteKey].colors[i] || '#E53935';
                     const opacity = this.toolPalettes[paletteKey].opacities[i] ?? 100;
                     this.options.activeColor = color;
+                    ColorPickerPopover.pushRecentColor(color);
                     this.updateFavoritesVisual();
                     this.options.onChangeColor?.(color);
                     this.options.onSelectFavorite?.(i);
