@@ -3125,9 +3125,9 @@ button.apolo-box-menu-swatch,
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: var(--bg-alt, rgba(128, 128, 128, 0.12));
-  border: 1.5px solid transparent;
-  color: var(--text);
+  background: #32353e !important;
+  border: 1.5px solid transparent !important;
+  color: #f3f4f6 !important;
   box-sizing: border-box;
   transition: background .15s ease, border-color .15s ease, color .15s ease;
 }
@@ -3135,27 +3135,30 @@ button.apolo-box-menu-swatch,
 .theme-light .popover-tool-opt,
 :root .tool-btn,
 :root .popover-tool-opt {
-  background: #eceef2;
-  color: #1e2330;
+  background: #32353e !important;
+  color: #f3f4f6 !important;
 }
 .theme-dark .tool-btn,
 .theme-dark .popover-tool-opt {
-  background: #32353e;
-  color: #f3f4f6;
+  background: #32353e !important;
+  color: #f3f4f6 !important;
 }
 .tool-btn:hover:not(.is-active),
 .popover-tool-opt:hover:not(.is-active) {
-  background: var(--card-hover, rgba(128, 128, 128, 0.18));
+  background: #424652 !important;
+  color: #ffffff !important;
 }
 .theme-light .tool-btn:hover:not(.is-active),
 .theme-light .popover-tool-opt:hover:not(.is-active),
 :root .tool-btn:hover:not(.is-active),
 :root .popover-tool-opt:hover:not(.is-active) {
-  background: #e2e5eb;
+  background: #424652 !important;
+  color: #ffffff !important;
 }
 .theme-dark .tool-btn:hover:not(.is-active),
 .theme-dark .popover-tool-opt:hover:not(.is-active) {
-  background: #3c404b;
+  background: #424652 !important;
+  color: #ffffff !important;
 }
 .tool-btn:focus-visible,
 .popover-tool-opt:focus-visible {
@@ -3337,9 +3340,9 @@ button.apolo-box-menu-swatch,
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-alt, rgba(128, 128, 128, 0.12));
+  background: #32353e !important;
   border: 1.5px solid transparent;
-  color: var(--text);
+  color: #f3f4f6 !important;
   cursor: pointer;
   box-sizing: border-box;
   transition: background .15s ease, border-color .15s ease, color .15s ease;
@@ -3348,21 +3351,23 @@ button.apolo-box-menu-swatch,
 .theme-light .popover-line-chip,
 :root .line-chip,
 :root .popover-line-chip {
-  background: #eceef2;
-  color: #1e2330;
+  background: #32353e !important;
+  color: #f3f4f6 !important;
 }
 .theme-dark .line-chip,
 .theme-dark .popover-line-chip {
-  background: #32353e;
-  color: #f3f4f6;
+  background: #32353e !important;
+  color: #f3f4f6 !important;
 }
 .line-chip:hover:not(.is-active),
 .popover-line-chip:hover:not(.is-active) {
-  background: var(--card-hover, rgba(128, 128, 128, 0.18));
+  background: #424652 !important;
+  color: #ffffff !important;
 }
 .theme-dark .line-chip:hover:not(.is-active),
 .theme-dark .popover-line-chip:hover:not(.is-active) {
-  background: #3c404b;
+  background: #424652 !important;
+  color: #ffffff !important;
 }
 .line-chip.is-active,
 .popover-line-chip.is-active {
