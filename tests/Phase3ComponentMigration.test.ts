@@ -82,7 +82,7 @@ function createMockEnvironment() {
                     return next;
                 },
             },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); },
+            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); if (k === 'class') el.className = String(v); },
             getAttribute: (k: string) => attributes.get(k) ?? null,
             hasAttribute: (k: string) => attributes.has(k),
             removeAttribute: (k: string) => { attributes.delete(k); },
@@ -117,6 +117,23 @@ function createMockEnvironment() {
                     return el;
                 }
                 return null;
+            },
+            querySelector: (sel: string) => {
+                let found: any = null;
+                const check = (node: any) => {
+                    if (found) return;
+                    if (sel.startsWith('.') && (node.className?.split(/\s+/).includes(sel.slice(1)) || node.getAttribute?.('class')?.split(/\s+/).includes(sel.slice(1)))) {
+                        found = node;
+                        return;
+                    }
+                    if (node.tagName?.toLowerCase() === sel.toLowerCase()) {
+                        found = node;
+                        return;
+                    }
+                    for (const c of node.children || []) check(c);
+                };
+                for (const c of children) check(c);
+                return found;
             },
             getBoundingClientRect: () => ({ left: 200, top: 100, right: 244, bottom: 144, width: 44, height: 44 }),
             querySelectorAll: (sel: string) => {
@@ -242,9 +259,40 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             assert.strictEqual(initialFirstChild, afterFirstChild, 'DOM nodes must NOT be recreated during width slider update');
 
             estuche.updateState({ tool: 'highlighter' });
-            const highlighterTips = body.children[0].children;
+            const tipsGrid = body.children[0];
+            assert.ok(tipsGrid.classList.contains('hl-tip-grid'), 'Highlighter uses symmetric 2-column hl-tip-grid');
+            const highlighterTips = tipsGrid.children;
+            assert.strictEqual(highlighterTips.length, 2, 'Exactly 2 tips in highlighter estuche');
             assert.ok(highlighterTips[0].classList.contains('is-active'), 'Chisel is selected when entering highlighter mode from a pen profile');
             assert.ok(!highlighterTips[1].classList.contains('is-active'), 'Only one highlighter tip is active');
+            assert.strictEqual((highlighterTips[0] as HTMLElement).dataset.tip, 'hlf');
+            assert.strictEqual((highlighterTips[1] as HTMLElement).dataset.tip, 'hlr');
+
+            // Verify stroke sample SVGs
+            const hlfSample = (highlighterTips[0] as HTMLElement).querySelector('.hl-stroke-sample');
+            assert.ok(hlfSample, 'Biselado tip has stroke sample SVG');
+            assert.ok(hlfSample.querySelector('polygon'), 'Biselado sample has polygon element');
+
+            const hlrSample = (highlighterTips[1] as HTMLElement).querySelector('.hl-stroke-sample');
+            assert.ok(hlrSample, 'Redondo tip has stroke sample SVG');
+            assert.ok(hlrSample.querySelector('circle'), 'Redondo sample has circle element');
+
+            // Verify Opacity slider has .opacity-track and .opacity-gradient-layer
+            const opacityTrack = body.querySelector('.opacity-track') as HTMLElement;
+            assert.ok(opacityTrack, 'Opacity slider track has .opacity-track class');
+            const gradLayer = opacityTrack.querySelector('.opacity-gradient-layer');
+            assert.ok(gradLayer, 'Opacity track has .opacity-gradient-layer');
+
+            // Verify Opacity thumb is solid (no backgroundColor or opacity style set)
+            const opacityThumb = opacityTrack.querySelector('.slider-thumb') as HTMLElement;
+            assert.ok(opacityThumb, 'Opacity slider has thumb');
+            assert.ok(!opacityThumb.style.opacity, 'Opacity thumb style.opacity must be empty (100% solid via CSS)');
+            assert.ok(!opacityThumb.style.backgroundColor, 'Opacity thumb style.backgroundColor must be empty');
+
+            // Verify --hl-color reactivity
+            assert.ok(estuche.container.style.getPropertyValue('--hl-color'), 'Container has --hl-color set');
+            estuche.updateState({ color: '#c11574' });
+            assert.strictEqual(estuche.container.style.getPropertyValue('--hl-color'), '#c11574', '--hl-color updates on state change');
 
             // 4. Close estuche
             estuche.close();

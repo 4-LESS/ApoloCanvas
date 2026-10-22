@@ -380,8 +380,6 @@ export class ToolEstuche implements PopoverInstance {
             const ratio = Math.max(0, Math.min(1, val / 100));
             const pct = `${(ratio * 100).toFixed(1)}%`;
             this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-            this.opacityBubble.style.backgroundColor = this.state.color;
-            this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
             const track = this.opacityInput.parentElement;
             if (track) {
                 track.style.setProperty('--val', pct);
@@ -395,8 +393,6 @@ export class ToolEstuche implements PopoverInstance {
             const ratio = Math.max(0, Math.min(1, val / 100));
             const pct = `${(ratio * 100).toFixed(1)}%`;
             this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-            this.opacityBubble.style.backgroundColor = this.state.color;
-            this.opacityBubble.style.opacity = String(Math.max(0.35, val / 100));
             const track = this.opacityInput.parentElement;
             if (track) {
                 track.style.setProperty('--val', pct);
@@ -442,8 +438,9 @@ export class ToolEstuche implements PopoverInstance {
             for (const [col, btn] of this.swatchButtons) {
                 btn.classList.toggle('is-active', col.toUpperCase() === clean);
             }
-            if (this.opacityBubble) {
-                this.opacityBubble.style.backgroundColor = partial.color;
+            this.container.style.setProperty('--hl-color', partial.color);
+            if (this.opacityInput?.parentElement) {
+                this.opacityInput.parentElement.style.setProperty('--hl-color', partial.color);
             }
         }
 
@@ -1156,49 +1153,102 @@ export class ToolEstuche implements PopoverInstance {
     // =========================================================================
     // Highlighter Content
     // =========================================================================
+    private createHighlighterStrokeSample(tipId: 'hlf' | 'hlr'): SVGSVGElement {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'hl-stroke-sample');
+        svg.classList.add('hl-stroke-sample');
+        svg.setAttribute('viewBox', '0 0 36 14');
+        svg.setAttribute('aria-hidden', 'true');
+
+        if (tipId === 'hlf') {
+            const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            poly.setAttribute('points', '6,2 34,2 30,12 2,12');
+            poly.setAttribute('fill', 'currentColor');
+            poly.setAttribute('opacity', '0.32');
+
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', '6');
+            line.setAttribute('y1', '2');
+            line.setAttribute('x2', '2');
+            line.setAttribute('y2', '12');
+            line.setAttribute('stroke', 'currentColor');
+            line.setAttribute('stroke-width', '1.6');
+
+            svg.append(poly, line);
+        } else {
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', '6');
+            line.setAttribute('y1', '7');
+            line.setAttribute('x2', '30');
+            line.setAttribute('y2', '7');
+            line.setAttribute('stroke', 'currentColor');
+            line.setAttribute('stroke-width', '9');
+            line.setAttribute('stroke-linecap', 'round');
+            line.setAttribute('opacity', '0.32');
+
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', '6');
+            circle.setAttribute('cy', '7');
+            circle.setAttribute('r', '4.5');
+            circle.setAttribute('fill', 'none');
+            circle.setAttribute('stroke', 'currentColor');
+            circle.setAttribute('stroke-width', '1.3');
+
+            svg.append(line, circle);
+        }
+
+        return svg;
+    }
+
     private renderHighlighterContent(): void {
-        // 1. Selector de Puntas (Chisel & Round)
+        this.container.style.setProperty('--hl-color', this.state.color);
+
+        // 1. Selector de 2 Puntas simétrico (1fr 1fr) con muestra de trazo
         const toolsRow = document.createElement('div');
-        toolsRow.className = 'popover-tools-selector';
+        toolsRow.className = 'hl-tip-grid';
         toolsRow.setAttribute('role', 'radiogroup');
-        toolsRow.setAttribute('aria-label', 'Punta de resaltador');
+        toolsRow.setAttribute('aria-label', 'Tipo de punta de marcador');
         const activeTip: PenProfileId =
             this.state.profileId === 'hlf' || this.state.profileId === 'hlr' ? this.state.profileId : 'hlf';
 
-        const tips: Array<{ id: PenProfileId; label: string; iconD: string }> = [
-            { id: 'hlf', label: 'Marcador Biselado', iconD: ICONS.highlighterChisel },
-            { id: 'hlr', label: 'Marcador Redondo', iconD: ICONS.highlighterRound },
+        const tips: Array<{ id: PenProfileId; label: string; fullLabel: string; iconD: string }> = [
+            { id: 'hlf', label: 'Biselado', fullLabel: 'Marcador Biselado', iconD: ICONS.highlighterChisel },
+            { id: 'hlr', label: 'Redondo', fullLabel: 'Marcador Redondo', iconD: ICONS.highlighterRound },
         ];
 
         for (const t of tips) {
             const btn = document.createElement('button');
             btn.type = 'button';
+            btn.setAttribute('role', 'radio');
             const isActive = activeTip === t.id;
-            btn.className = `tool-btn popover-tool-opt ${isActive ? 'is-active' : ''}`;
-            btn.style.display = 'flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            btn.style.width = '100%';
-            btn.style.height = '44px';
-            btn.style.minHeight = '44px';
-            btn.style.borderRadius = '14px';
-            btn.style.boxSizing = 'border-box';
-            btn.style.padding = '8px';
-            setAccessibleTooltip(btn, t.label);
+            btn.className = `hl-tip-btn ${isActive ? 'is-active' : ''}`;
+            btn.dataset.tip = t.id;
+            btn.setAttribute('aria-checked', String(isActive));
             btn.setAttribute('aria-pressed', String(isActive));
+            setAccessibleTooltip(btn, t.fullLabel);
 
-            const wrap = document.createElement('div');
-            wrap.className = 'icon-wrap';
-            wrap.appendChild(createSvg(t.iconD, { size: 19, strokeWidth: 1.9 }));
-            btn.appendChild(wrap);
+            // Left side: icon + label
+            const left = document.createElement('span');
+            left.className = 'hl-tip-left';
+            left.appendChild(createSvg(t.iconD, { size: 18, strokeWidth: 1.8 }));
+            const lbl = document.createElement('span');
+            lbl.textContent = t.label;
+            left.appendChild(lbl);
+
+            // Right side: stroke sample
+            const sampleSvg = this.createHighlighterStrokeSample(t.id as 'hlf' | 'hlr');
+
+            btn.append(left, sampleSvg);
 
             btn.onclick = () => {
                 this.state.profileId = t.id;
                 for (const [, b] of this.toolButtons) {
                     b.classList.remove('is-active');
+                    b.setAttribute('aria-checked', 'false');
                     b.setAttribute('aria-pressed', 'false');
                 }
                 btn.classList.add('is-active');
+                btn.setAttribute('aria-checked', 'true');
                 btn.setAttribute('aria-pressed', 'true');
                 this.callbacks.onSelectProfile(t.id);
             };
@@ -1492,22 +1542,27 @@ export class ToolEstuche implements PopoverInstance {
         minusBtn.appendChild(createSvg(ICONS.minus, { size: 14 }));
 
         const track = document.createElement('div');
-        track.className = 'slider-track popover-track-wrap';
+        track.className = `slider-track popover-track-wrap${isOpacity ? ' opacity-track' : ''}`;
 
         const fill = document.createElement('div');
         fill.className = 'slider-fill';
 
+        if (isOpacity) {
+            track.style.setProperty('--hl-color', this.state.color);
+            const gradLayer = document.createElement('div');
+            gradLayer.className = 'opacity-gradient-layer';
+            track.appendChild(gradLayer);
+        } else {
+            track.appendChild(fill);
+        }
+
         const bubble = document.createElement('div');
         bubble.className = 'slider-thumb popover-bubble-val';
         bubble.textContent = String(currentVal);
-        if (isOpacity) {
-            bubble.style.backgroundColor = this.state.color;
-            bubble.style.opacity = String(Math.max(0.35, currentVal / 100));
-        }
 
         const input = document.createElement('input');
         input.type = 'range';
-        input.className = `popover-range-native ${isOpacity ? 'popover-track-checkerboard' : ''}`;
+        input.className = 'popover-range-native';
         input.min = String(min);
         input.max = String(max);
         input.step = String(step);
@@ -1517,7 +1572,7 @@ export class ToolEstuche implements PopoverInstance {
         input.style.minWidth = '0';
         input.style.maxWidth = 'none';
         input.style.flex = '1 1 100%';
-        track.append(fill, input, bubble);
+        track.append(input, bubble);
 
         const plusBtn = document.createElement('button');
         plusBtn.type = 'button';
@@ -1537,10 +1592,8 @@ export class ToolEstuche implements PopoverInstance {
             const pct = `${(ratio * 100).toFixed(1)}%`;
             track.style.setProperty('--val', pct);
             bubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-            fill.style.width = pct;
-            if (isOpacity) {
-                bubble.style.backgroundColor = this.state.color;
-                bubble.style.opacity = String(Math.max(0.35, val / 100));
+            if (!isOpacity) {
+                fill.style.width = pct;
             }
             if (notify) onChange(val);
         };
@@ -1734,8 +1787,9 @@ export class ToolEstuche implements PopoverInstance {
                 this.pushRecentColor(col);
                 for (const [, s] of this.swatchButtons) s.classList.remove('is-active');
                 sw.classList.add('is-active');
-                if (this.opacityBubble) {
-                    this.opacityBubble.style.backgroundColor = col;
+                this.container.style.setProperty('--hl-color', col);
+                if (this.opacityInput?.parentElement) {
+                    this.opacityInput.parentElement.style.setProperty('--hl-color', col);
                 }
                 this.callbacks.onChangeColor(col);
             };
@@ -1767,14 +1821,21 @@ export class ToolEstuche implements PopoverInstance {
                     this.pushRecentColor(newColor);
                     this.currentPageIndex = 0;
 
+                    this.container.style.setProperty('--hl-color', newColor);
+                    if (this.opacityInput?.parentElement) {
+                        this.opacityInput.parentElement.style.setProperty('--hl-color', newColor);
+                    }
+
                     const nextOpacity = this.getOpacityPercent();
                     if (this.opacityInput && this.opacityBubble) {
                         this.opacityInput.value = String(nextOpacity);
                         this.opacityBubble.textContent = String(nextOpacity);
                         const ratio = Math.max(0, Math.min(1, nextOpacity / 100));
                         this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-                        this.opacityBubble.style.backgroundColor = newColor;
-                        this.opacityBubble.style.opacity = String(Math.max(0.35, nextOpacity / 100));
+                        const track = this.opacityInput.parentElement;
+                        if (track) {
+                            track.style.setProperty('--val', `${(ratio * 100).toFixed(1)}%`);
+                        }
                     }
 
                     this.updateColorsUI();

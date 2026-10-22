@@ -144,18 +144,18 @@
    Scoped Button Reset (Zero !important, High Specificity against Obsidian)
    Neutralizes Obsidian button:not(.clickable-icon) and .is-tablet styles.
    ========================================================================== */
-.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn),
-.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn) {
+.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.apolo-favorite-drag-handle):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn) {
   all: unset;
   box-sizing: border-box;
   display: inline-flex;
@@ -3219,6 +3219,97 @@ button.apolo-box-menu-swatch,
   background: transparent !important;
 }
 
+/* 1B. Selector Simétrico de 2 Puntas de Marcador (.hl-tip-grid) */
+.apolo-estuche-popover .hl-tip-grid,
+.hl-tip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.apolo-estuche-popover button.hl-tip-btn,
+.apolo-estuche-popover .hl-tip-btn,
+.hl-tip-btn {
+  all: unset;
+  height: 46px;
+  padding: 0 12px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+
+.is-tablet .apolo-estuche-popover button.hl-tip-btn,
+.is-mobile .apolo-estuche-popover button.hl-tip-btn {
+  padding: 0 12px;
+  min-height: 46px;
+  box-sizing: border-box;
+}
+
+.apolo-estuche-popover button.hl-tip-btn:hover,
+.apolo-estuche-popover .hl-tip-btn:hover,
+.hl-tip-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.apolo-estuche-popover button.hl-tip-btn:focus-visible,
+.apolo-estuche-popover .hl-tip-btn:focus-visible,
+.hl-tip-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.apolo-estuche-popover button.hl-tip-btn.is-active,
+.apolo-estuche-popover .hl-tip-btn.is-active,
+.hl-tip-btn.is-active {
+  background: var(--accent-subtle);
+  border-color: var(--accent-light);
+  color: var(--accent);
+}
+
+.theme-light .apolo-estuche-popover button.hl-tip-btn.is-active,
+.theme-light .apolo-estuche-popover .hl-tip-btn.is-active,
+:root .apolo-estuche-popover button.hl-tip-btn.is-active,
+:root .apolo-estuche-popover .hl-tip-btn.is-active {
+  background: rgba(47, 107, 255, .08);
+  border-color: rgba(47, 107, 255, .24);
+  color: #2f6bff;
+}
+
+.theme-dark .apolo-estuche-popover button.hl-tip-btn.is-active,
+.theme-dark .apolo-estuche-popover .hl-tip-btn.is-active {
+  background: rgba(91, 140, 255, .12);
+  border-color: rgba(91, 140, 255, .30);
+  color: #5b8cff;
+}
+
+.hl-tip-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.hl-stroke-sample {
+  width: 34px;
+  height: 14px;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
 /* 2. Grupos de Control (Sliders) */
 .control-group,
 .popover-slider-section {
@@ -3294,6 +3385,38 @@ button.apolo-box-menu-swatch,
   background: var(--accent-light);
   pointer-events: none;
 }
+
+/* Pista de Opacidad con damero + gradiente del color activo (¡La burbuja NUNCA se vuelve transparente!) */
+.slider-track.opacity-track::before,
+.popover-track-wrap.opacity-track::before {
+  height: 8px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  background-color: var(--bg-alt, rgba(128, 128, 128, 0.08));
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+.opacity-track .opacity-gradient-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, var(--hl-color, var(--accent, #2f6bff)) 100%);
+  pointer-events: none;
+}
+
+.opacity-track .slider-fill {
+  display: none;
+}
 .popover-track-wrap input[type="range"].popover-range-native {
   all: unset;
   box-sizing: border-box;
@@ -3349,7 +3472,7 @@ button.apolo-box-menu-swatch,
   font-variant-numeric: tabular-nums;
   display: grid;
   place-items: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, .22);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .25), 0 0 0 1.5px var(--bg);
   user-select: none;
   pointer-events: none;
   z-index: 1;
