@@ -2933,6 +2933,189 @@ button.apolo-box-menu-swatch,
   line-height: 1;
 }
 
+/* ==========================================================================
+   Header & Icon Buttons Resets & Explicit SVG Dimensions (Strictly NO !important)
+   Neutralizes Obsidian Mobile button padding and forces explicit SVG sizes.
+   ========================================================================== */
+.apolo-estuche-popover button.ibtn,
+.apolo-estuche-popover button.popover-hdr-btn,
+.apolo-estuche-popover button.popover-icon-btn,
+.apolo-estuche-popover button.popover-close-btn,
+.apolo-estuche-popover button.popover-close,
+.apolo-estuche-popover button.arrow,
+.apolo-estuche-popover button.dot-add,
+.apolo-estuche-popover button.slider-step,
+.apolo-color-picker-popover button.ibtn,
+.is-mobile .apolo-estuche-popover button.ibtn,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn,
+.is-mobile .apolo-estuche-popover button.popover-icon-btn,
+.is-mobile .apolo-estuche-popover button.popover-close-btn,
+.is-mobile .apolo-estuche-popover button.popover-close,
+.is-mobile .apolo-estuche-popover button.arrow,
+.is-mobile .apolo-estuche-popover button.dot-add,
+.is-mobile .apolo-estuche-popover button.slider-step,
+.is-mobile .apolo-color-picker-popover button.ibtn,
+.is-tablet .apolo-estuche-popover button.ibtn,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn,
+.is-tablet .apolo-estuche-popover button.popover-icon-btn,
+.is-tablet .apolo-estuche-popover button.popover-close-btn,
+.is-tablet .apolo-estuche-popover button.popover-close,
+.is-tablet .apolo-estuche-popover button.arrow,
+.is-tablet .apolo-estuche-popover button.dot-add,
+.is-tablet .apolo-estuche-popover button.slider-step,
+.is-tablet .apolo-color-picker-popover button.ibtn {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: var(--apolo-text-muted, var(--muted));
+  cursor: pointer;
+}
+
+.apolo-estuche-popover button.ibtn,
+.apolo-estuche-popover button.popover-hdr-btn,
+.apolo-estuche-popover button.popover-icon-btn,
+.apolo-estuche-popover button.popover-close-btn,
+.apolo-estuche-popover button.popover-close,
+.is-mobile .apolo-estuche-popover button.ibtn,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn,
+.is-mobile .apolo-estuche-popover button.popover-icon-btn,
+.is-mobile .apolo-estuche-popover button.popover-close-btn,
+.is-mobile .apolo-estuche-popover button.popover-close,
+.is-tablet .apolo-estuche-popover button.ibtn,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn,
+.is-tablet .apolo-estuche-popover button.popover-icon-btn,
+.is-tablet .apolo-estuche-popover button.popover-close-btn,
+.is-tablet .apolo-estuche-popover button.popover-close {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 8px;
+}
+
+.apolo-estuche-popover button.hd-bookmark-btn,
+.is-mobile .apolo-estuche-popover button.hd-bookmark-btn,
+.is-tablet .apolo-estuche-popover button.hd-bookmark-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0 7px 0 5px;
+  margin: 0;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--apolo-text-muted, var(--muted));
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.apolo-estuche-popover button.ibtn:hover,
+.apolo-estuche-popover button.popover-hdr-btn:hover,
+.apolo-estuche-popover button.hd-bookmark-btn:hover,
+.is-mobile .apolo-estuche-popover button.ibtn:hover,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn:hover,
+.is-mobile .apolo-estuche-popover button.hd-bookmark-btn:hover,
+.is-tablet .apolo-estuche-popover button.ibtn:hover,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn:hover,
+.is-tablet .apolo-estuche-popover button.hd-bookmark-btn:hover {
+  background: var(--apolo-card-hover, var(--card-hover));
+  color: var(--apolo-text, var(--text));
+}
+
+.apolo-estuche-popover button.ibtn.is-active,
+.apolo-estuche-popover button.popover-hdr-btn.is-active,
+.apolo-estuche-popover button.hd-bookmark-btn.is-active,
+.is-mobile .apolo-estuche-popover button.ibtn.is-active,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn.is-active,
+.is-mobile .apolo-estuche-popover button.hd-bookmark-btn.is-active,
+.is-tablet .apolo-estuche-popover button.ibtn.is-active,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn.is-active,
+.is-tablet .apolo-estuche-popover button.hd-bookmark-btn.is-active {
+  background: var(--apolo-accent-subtle, var(--accent-subtle));
+  color: var(--apolo-accent, var(--accent));
+}
+
+.apolo-estuche-popover button.popover-star-btn.is-fav-saved,
+.is-mobile .apolo-estuche-popover button.popover-star-btn.is-fav-saved,
+.is-tablet .apolo-estuche-popover button.popover-star-btn.is-fav-saved {
+  color: #f59e0b;
+}
+
+/* Prevent inner SVGs from ever collapsing to 0x0 on mobile */
+.apolo-estuche-popover button svg,
+.apolo-color-picker-popover button svg,
+.is-mobile .apolo-estuche-popover button svg,
+.is-mobile .apolo-color-picker-popover button svg,
+.is-tablet .apolo-estuche-popover button svg,
+.is-tablet .apolo-color-picker-popover button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.apolo-estuche-popover button svg.sm,
+.apolo-estuche-popover .pager button svg,
+.apolo-estuche-popover button.slider-step svg,
+.apolo-estuche-popover button.swatch-add svg,
+.is-mobile .apolo-estuche-popover button svg.sm,
+.is-mobile .apolo-estuche-popover .pager button svg,
+.is-mobile .apolo-estuche-popover button.slider-step svg,
+.is-mobile .apolo-estuche-popover button.swatch-add svg,
+.is-tablet .apolo-estuche-popover button svg.sm,
+.is-tablet .apolo-estuche-popover .pager button svg,
+.is-tablet .apolo-estuche-popover button.slider-step svg,
+.is-tablet .apolo-estuche-popover button.swatch-add svg {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  flex: 0 0 14px;
+}
+
+.apolo-estuche-popover button.apolo-favorite-drag-handle svg,
+.apolo-estuche-popover button.grip svg,
+.is-mobile .apolo-estuche-popover button.apolo-favorite-drag-handle svg,
+.is-mobile .apolo-estuche-popover button.grip svg,
+.is-tablet .apolo-estuche-popover button.apolo-favorite-drag-handle svg,
+.is-tablet .apolo-estuche-popover button.grip svg {
+  width: 14px;
+  height: 18px;
+  min-width: 14px;
+  min-height: 18px;
+  flex: 0 0 14px;
+  fill: currentColor;
+  stroke: none;
+}
+
 /* Cabecera Unificada (3 columnas: 1fr auto 1fr) */
 .hd,
 .popover-header {
@@ -2945,6 +3128,7 @@ button.apolo-box-menu-swatch,
   display: flex;
   align-items: center;
   height: 28px;
+  min-width: 28px;
 }
 .hd-right,
 .popover-header-right {
@@ -2953,6 +3137,7 @@ button.apolo-box-menu-swatch,
   justify-content: flex-end;
   gap: 2px;
   height: 28px;
+  min-width: 58px;
 }
 .hd-center,
 .popover-title-container,

@@ -59,6 +59,14 @@ function createMockEnvironment() {
 
         const matchesSelector = (node: any, sel: string): boolean => {
             if (!node || typeof node !== 'object') return false;
+            if (sel.includes(',')) {
+                return sel.split(',').some(s => matchesSelector(node, s.trim()));
+            }
+            if (/^[a-zA-Z0-9]+(\.[a-zA-Z0-9_-]+)+$/.test(sel)) {
+                const [tagPart, ...classParts] = sel.split('.');
+                if (tagPart.toLowerCase() !== node.tagName?.toLowerCase()) return false;
+                return classParts.every(cls => Boolean(node.classList?.contains(cls) || node.className?.split(/\s+/).includes(cls)));
+            }
             if (sel.startsWith('.')) {
                 const targetClasses = sel.slice(1).split('.');
                 return targetClasses.every(cls => Boolean(node.classList?.contains(cls) || node.className?.split(/\s+/).includes(cls)));
@@ -553,6 +561,70 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             const backBtn = (root.querySelector('.popover-back-btn') ?? root.querySelector('.popover-favs-btn')) as HTMLElement;
             backBtn.onclick();
             assert.strictEqual(root.querySelector('.apolo-favorites-drawer'), null);
+        });
+
+        test('header persists .hd-bookmark-btn, starBtn, and closeBtn with non-empty SVG children in tool view and favorites view', () => {
+            const penFav = createFavoritePreset({
+                tool: 'pen',
+                profileId: 'fountain',
+                color: '#1F4FD8',
+                width: 3,
+            });
+
+            const { estuche, root } = createEstucheHelper({
+                favorites: [penFav],
+                showingFavorites: false,
+            });
+            estuche.open();
+
+            // 1. Tool view (showingFavorites === false)
+            const bookmarkBtnTool = root.querySelector('button.hd-bookmark-btn') as HTMLButtonElement | null;
+            assert.ok(bookmarkBtnTool, '.hd-bookmark-btn must exist in tool view');
+            const bookmarkSvgTool = bookmarkBtnTool.querySelector('svg');
+            assert.ok(bookmarkSvgTool, 'Bookmark button must have an <svg> child in tool view');
+            assert.ok(bookmarkSvgTool.children.length > 0, 'Bookmark <svg> must have child elements in tool view');
+
+            const starBtnTool = root.querySelector('button.popover-star-btn') as HTMLButtonElement | null;
+            assert.ok(starBtnTool, '.popover-star-btn must exist in tool view');
+            const starSvgTool = starBtnTool.querySelector('svg');
+            assert.ok(starSvgTool, 'Star button must have an <svg> child in tool view');
+            assert.ok(starSvgTool.children.length > 0, 'Star <svg> must have child elements in tool view');
+
+            const closeBtnTool = root.querySelector('button.popover-close-btn, button.popover-close') as HTMLButtonElement | null;
+            assert.ok(closeBtnTool, '.popover-close-btn must exist in tool view');
+            const closeSvgTool = closeBtnTool.querySelector('svg');
+            assert.ok(closeSvgTool, 'Close button must have an <svg> child in tool view');
+            assert.ok(closeSvgTool.children.length > 0, 'Close <svg> must have child elements in tool view');
+
+            // 2. Switch to Favorites view (showingFavorites === true)
+            bookmarkBtnTool.onclick?.({} as any);
+            assert.strictEqual(estuche.isShowingFavorites(), true, 'Must transition to favorites view');
+
+            const bookmarkBtnFav = root.querySelector('button.hd-bookmark-btn') as HTMLButtonElement | null;
+            assert.ok(bookmarkBtnFav, '.hd-bookmark-btn must persist in favorites view');
+            assert.ok(bookmarkBtnFav.classList.contains('is-active'), '.hd-bookmark-btn must have .is-active in favorites view');
+            const bookmarkSvgFav = bookmarkBtnFav.querySelector('svg');
+            assert.ok(bookmarkSvgFav, 'Bookmark button must have an <svg> child in favorites view');
+            assert.ok(bookmarkSvgFav.children.length > 0, 'Bookmark <svg> must have child elements in favorites view');
+
+            const starBtnFav = root.querySelector('button.popover-star-btn') as HTMLButtonElement | null;
+            assert.ok(starBtnFav, '.popover-star-btn must persist in favorites view');
+            const starSvgFav = starBtnFav.querySelector('svg');
+            assert.ok(starSvgFav, 'Star button must have an <svg> child in favorites view');
+            assert.ok(starSvgFav.children.length > 0, 'Star <svg> must have child elements in favorites view');
+
+            const closeBtnFav = root.querySelector('button.popover-close-btn, button.popover-close') as HTMLButtonElement | null;
+            assert.ok(closeBtnFav, '.popover-close-btn must persist in favorites view');
+            const closeSvgFav = closeBtnFav.querySelector('svg');
+            assert.ok(closeSvgFav, 'Close button must have an <svg> child in favorites view');
+            assert.ok(closeSvgFav.children.length > 0, 'Close <svg> must have child elements in favorites view');
+
+            // 3. Header layout retains 3 columns
+            const hd = root.querySelector('.hd') as HTMLElement | null;
+            assert.ok(hd, '.hd header must exist');
+            assert.ok(hd.querySelector('.hd-left'), '.hd-left column must exist');
+            assert.ok(hd.querySelector('.hd-center'), '.hd-center column must exist');
+            assert.ok(hd.querySelector('.hd-right'), '.hd-right column must exist');
         });
 
         test('clicking card invokes onApplyFavorite and restores exact preset parameters', () => {
