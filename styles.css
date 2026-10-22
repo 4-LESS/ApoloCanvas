@@ -3331,8 +3331,16 @@ button.apolo-box-menu-swatch,
   top: 50%;
   left: 0;
   transform: translateY(-50%);
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
   width: 24px;
   height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   background: var(--text);
   color: var(--bg);
@@ -3564,8 +3572,16 @@ button.apolo-box-menu-swatch,
   position: absolute !important;
   top: 2px !important;
   left: 2px !important;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
   width: 16px !important;
   height: 16px !important;
+  min-width: 16px;
+  max-width: 16px;
+  min-height: 16px;
+  max-height: 16px;
+  aspect-ratio: 1 / 1;
   border-radius: 50% !important;
   background: #ffffff !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .28) !important;
@@ -3586,37 +3602,84 @@ button.apolo-box-menu-swatch,
   gap: 10px;
   padding-top: 2px;
 }
+.apolo-estuche-popover .swatch-row,
+.apolo-estuche-popover .popover-swatches-row,
 .swatch-row,
 .popover-swatches-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
+
+.apolo-estuche-popover button.swatch,
+.apolo-estuche-popover button.popover-swatch-circle,
+.apolo-color-picker-popover button.swatch,
+.apolo-color-picker-popover button.color-picker-recent-swatch,
+.apolo-estuche-popover .swatch,
+.apolo-estuche-popover .popover-swatch-circle,
 .swatch,
 .popover-swatch-circle {
   all: unset;
+  appearance: none;
+  -webkit-appearance: none;
   position: relative;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
   width: 26px;
   height: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
+  flex: 0 0 26px;
+  flex-shrink: 0;
   background: var(--c, var(--swatch-color, #2f6bff));
   background-color: var(--c, var(--swatch-color, #2f6bff));
   cursor: pointer;
-  flex-shrink: 0;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
   transition: transform .12s, box-shadow .12s;
-  box-sizing: border-box;
 }
+
+.is-tablet .apolo-estuche-popover button.swatch,
+.is-tablet .apolo-estuche-popover button.popover-swatch-circle,
+.is-mobile .apolo-estuche-popover button.swatch,
+.is-mobile .apolo-estuche-popover button.popover-swatch-circle {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 26px;
+}
+
+.apolo-estuche-popover button.swatch:hover,
+.apolo-estuche-popover button.popover-swatch-circle:hover,
 .swatch:hover,
 .popover-swatch-circle:hover {
   transform: scale(1.08);
 }
+
+.apolo-estuche-popover button.swatch.is-active,
+.apolo-estuche-popover button.popover-swatch-circle.is-active,
 .swatch.is-active,
 .popover-swatch-circle.is-active {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--muted);
   transform: none;
 }
+
 .popover-swatch-inner {
   display: block;
   width: 100%;
@@ -3626,26 +3689,99 @@ button.apolo-box-menu-swatch,
   background-color: inherit;
   pointer-events: none;
 }
+
+.apolo-estuche-popover button.swatch-add,
+.apolo-estuche-popover button.popover-color-add,
+.apolo-estuche-popover .swatch-add,
+.apolo-estuche-popover .popover-color-add,
 .swatch-add,
 .popover-color-add {
   all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
   width: 24px;
   height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
+  flex: 0 0 24px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--muted);
   border: 1.5px solid var(--muted);
   cursor: pointer;
   transition: color .12s, border-color .12s, background .12s;
-  box-sizing: border-box;
 }
+
+.is-tablet .apolo-estuche-popover button.swatch-add,
+.is-tablet .apolo-estuche-popover button.popover-color-add,
+.is-mobile .apolo-estuche-popover button.swatch-add,
+.is-mobile .apolo-estuche-popover button.popover-color-add {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 24px;
+}
+
+.apolo-estuche-popover button.swatch-add:hover,
+.apolo-estuche-popover button.popover-color-add:hover,
 .swatch-add:hover,
 .popover-color-add:hover {
   color: var(--text);
   border-color: var(--text);
   background: var(--card-hover);
+}
+
+.apolo-estuche-popover button.dot,
+.apolo-estuche-popover button.dot-add,
+.apolo-estuche-popover button.apolo-kit-dot,
+.apolo-estuche-popover button.popover-pag-dot,
+.apolo-estuche-popover button.popover-header-dot,
+.is-tablet .apolo-estuche-popover button.dot,
+.is-tablet .apolo-estuche-popover button.dot-add,
+.is-mobile .apolo-estuche-popover button.dot,
+.is-mobile .apolo-estuche-popover button.dot-add,
+.is-tablet .apolo-estuche-popover button.popover-pag-dot,
+.is-mobile .apolo-estuche-popover button.popover-pag-dot {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+.apolo-estuche-popover button.popover-pag-clock,
+.apolo-estuche-popover button.is-clock-dot,
+.is-tablet .apolo-estuche-popover button.popover-pag-clock,
+.is-mobile .apolo-estuche-popover button.popover-pag-clock {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  max-width: 18px;
+  min-height: 18px;
+  max-height: 18px;
+  aspect-ratio: 1 / 1;
 }
 .palette-footer,
 .popover-pagination {
@@ -3881,6 +4017,19 @@ button.apolo-box-menu-swatch,
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--apolo-border, rgba(255, 255, 255, 0.09));
 }
 
+.color-picker-popover button.color-picker-tab-btn,
+.color-picker-popover button.seg-btn,
+.is-tablet .color-picker-popover button.color-picker-tab-btn,
+.is-tablet .color-picker-popover button.seg-btn,
+.is-mobile .color-picker-popover button.color-picker-tab-btn,
+.is-mobile .color-picker-popover button.seg-btn {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 28px;
+}
+
 /* 2. Swatches Matrix 12x10 & Spectrum Viewport */
 .color-picker-popover .picker-viewport {
   position: relative;
@@ -4096,19 +4245,57 @@ button.apolo-box-menu-swatch,
   gap: 12px;
 }
 
+.color-picker-popover button.swatch,
+.color-picker-popover button.color-quick-circle,
+.color-picker-popover button.color-picker-recent-swatch,
+.apolo-color-picker-popover button.swatch,
+.apolo-color-picker-popover button.color-quick-circle,
+.apolo-color-picker-popover button.color-picker-recent-swatch,
 .apolo-ui .color-picker-popover .color-quick-circle,
 .color-picker-popover .color-quick-circle,
 .color-picker-popover .swatch {
   all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
   width: 28px;
   height: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
+  flex: 0 0 28px;
+  flex-shrink: 0;
   background: var(--c, var(--quick-color));
   cursor: pointer;
-  flex-shrink: 0;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.is-tablet .color-picker-popover button.swatch,
+.is-tablet .color-picker-popover button.color-quick-circle,
+.is-mobile .color-picker-popover button.swatch,
+.is-mobile .color-picker-popover button.color-quick-circle,
+.is-tablet .apolo-color-picker-popover button.swatch,
+.is-tablet .apolo-color-picker-popover button.color-quick-circle,
+.is-mobile .apolo-color-picker-popover button.swatch,
+.is-mobile .apolo-color-picker-popover button.color-quick-circle {
   box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 28px;
 }
 
 .color-picker-popover .swatch:hover,
@@ -4156,6 +4343,19 @@ button.apolo-box-menu-swatch,
 .color-picker-popover .ibtn:focus-visible {
   outline: 2px solid var(--apolo-accent);
   outline-offset: 1px;
+}
+
+.color-picker-popover button.color-eyedropper-btn,
+.color-picker-popover button.ibtn,
+.is-tablet .color-picker-popover button.color-eyedropper-btn,
+.is-tablet .color-picker-popover button.ibtn,
+.is-mobile .color-picker-popover button.color-eyedropper-btn,
+.is-mobile .color-picker-popover button.ibtn {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 30px;
+  min-height: 30px;
 }
 
 /* 6. Pie de Acciones (Cancelar | Listo) */
@@ -4212,6 +4412,19 @@ button.apolo-box-menu-swatch,
 .apolo-ui .color-picker-popover .color-action-btn.is-confirm:hover,
 .color-picker-popover .color-action-btn.is-confirm:hover {
   background: var(--apolo-accent-subtle);
+}
+
+.color-picker-popover button.cp-action,
+.color-picker-popover button.color-action-btn,
+.is-tablet .color-picker-popover button.cp-action,
+.is-tablet .color-picker-popover button.color-action-btn,
+.is-mobile .color-picker-popover button.cp-action,
+.is-mobile .color-picker-popover button.color-action-btn {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 34px;
 }
 
 /* =========================================================================
@@ -4498,6 +4711,27 @@ input[type="text"].apolo-profile-name-input,
 }
 .apolo-profile-cancel-btn:active {
   transform: scale(0.96) !important;
+}
+
+button.btn-ok,
+button.apolo-profile-create-btn,
+button.apolo-profile-cancel-btn,
+.is-tablet button.btn-ok,
+.is-tablet button.apolo-profile-create-btn,
+.is-tablet button.apolo-profile-cancel-btn,
+.is-mobile button.btn-ok,
+.is-mobile button.apolo-profile-create-btn,
+.is-mobile button.apolo-profile-cancel-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 32px;
+  max-width: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  aspect-ratio: 1 / 1;
 }
 
 /* Fila de renombrado inline en la tarjeta */

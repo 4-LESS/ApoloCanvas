@@ -103,7 +103,7 @@ export class ColorPickerPopover implements PopoverInstance {
     constructor(parent: HTMLElement = document.body, popoverController?: PopoverController) {
         this.popoverController = popoverController;
         this.el = document.createElement('div');
-        this.el.className = 'color-picker-popover panel';
+        this.el.className = 'color-picker-popover apolo-color-picker-popover panel';
         this.el.dataset.mode = 'swatches';
         this.el.hidden = true;
         this.el.style.display = 'none';
