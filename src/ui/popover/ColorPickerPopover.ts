@@ -306,6 +306,8 @@ export class ColorPickerPopover implements PopoverInstance {
 
         const thumb = document.createElement('div');
         thumb.className = 'slider-thumb';
+        thumb.textContent = String(transPct);
+        thumb.style.left = `calc(${transPct}% - ${transPct * 0.24}px)`;
 
         track.append(fill, thumb);
 
@@ -315,6 +317,8 @@ export class ColorPickerPopover implements PopoverInstance {
             track.style.setProperty('--pos', `${pct}%`);
             track.setAttribute('aria-valuenow', String(pct));
             transVal.textContent = `${pct}%`;
+            thumb.textContent = String(pct);
+            thumb.style.left = `calc(${pct}% - ${pct * 0.24}px)`;
             this.currentOpacity = 100 - pct;
             this.updateReadoutVisual();
         };

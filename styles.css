@@ -3555,20 +3555,17 @@ button.apolo-box-menu-swatch,
   position: absolute;
   left: 0;
   right: 0;
-  height: 6px;
+  height: 8px;
   border-radius: 999px;
-  background: var(--card-hover);
+  background-color: var(--apolo-card-hover, var(--card-hover));
+  background-image: radial-gradient(circle, var(--apolo-text-faint, var(--faint)) 1.25px, transparent 1.5px);
+  background-size: 14px 100%;
+  background-position: 7px center;
+  background-repeat: repeat-x;
   pointer-events: none;
 }
 .slider-fill {
-  position: absolute;
-  left: 0;
-  top: 11px;
-  height: 6px;
-  width: var(--val, 35%);
-  border-radius: 999px;
-  background: var(--accent-light);
-  pointer-events: none;
+  display: none;
 }
 
 /* Pista de Opacidad con damero + gradiente del color activo (¡La burbuja NUNCA se vuelve transparente!) */
@@ -3650,14 +3647,14 @@ button.apolo-box-menu-swatch,
   max-height: 24px;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  background: var(--text);
-  color: var(--bg);
+  background: var(--apolo-text, var(--text));
+  color: var(--apolo-bg, var(--bg));
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   display: grid;
   place-items: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, .25), 0 0 0 1.5px var(--bg);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .25), 0 0 0 1.5px var(--apolo-bg, var(--bg));
   user-select: none;
   pointer-events: none;
   z-index: 1;
@@ -4495,41 +4492,69 @@ button.apolo-box-menu-swatch,
 
 .color-picker-popover .slider-track {
   position: relative;
-  height: 6px;
+  height: 28px;
+  display: flex;
+  align-items: center;
   border-radius: 999px;
-  background: var(--apolo-card-hover);
+  background: transparent;
   cursor: pointer;
-  margin: 4px 0;
+  margin: 0;
   touch-action: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.color-picker-popover .slider-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  border-radius: 999px;
+  background-color: var(--apolo-card-hover);
+  background-image: radial-gradient(circle, var(--apolo-text-faint) 1.25px, transparent 1.5px);
+  background-size: 14px 100%;
+  background-position: 7px center;
+  background-repeat: repeat-x;
+  pointer-events: none;
 }
 
 .color-picker-popover .slider-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--pos, 0%);
-  border-radius: 999px;
-  background: var(--apolo-accent);
-  pointer-events: none;
+  display: none;
 }
 
 .color-picker-popover .slider-thumb {
   position: absolute;
   top: 50%;
-  left: var(--pos, 0%);
-  transform: translate(-50%, -50%);
-  width: 18px;
-  height: 18px;
+  left: 0;
+  transform: translateY(-50%);
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.08);
-  transition: transform 0.1s ease;
+  background: var(--apolo-text);
+  color: var(--apolo-bg);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 0 1.5px var(--apolo-bg);
+  user-select: none;
   pointer-events: none;
+  z-index: 1;
+  transition: transform 0.1s ease;
 }
 
 .color-picker-popover .slider-track:hover .slider-thumb {
-  transform: translate(-50%, -50%) scale(1.1);
+  transform: translateY(-50%) scale(1.06);
 }
 
 /* 5. Fila de Recientes + Cuentagotas */

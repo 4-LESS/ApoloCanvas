@@ -4,6 +4,7 @@ import { ToolEstuche, type ToolEstucheState } from '../src/ui/ToolEstuche.ts';
 import { BoxMenu } from '../src/ui/BoxMenu.ts';
 import { LassoMenu } from '../src/ui/LassoMenu.ts';
 import { ZoomPill } from '../src/ui/ZoomPill.ts';
+import { ColorPickerPopover } from '../src/ui/popover/ColorPickerPopover.ts';
 import { PopoverController } from '../src/ui/kit/index.ts';
 import { applyPopoverGeometry } from '../src/ui/popover/PopoverGeometry.ts';
 
@@ -532,6 +533,39 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             assert.strictEqual(zoomOutCount, 1);
 
             pill.destroy();
+        } finally {
+            (globalThis as any).window = prevWin;
+            (globalThis as any).document = prevDoc;
+        }
+    });
+
+    test('ColorPickerPopover: transparency slider uses neutral track and high-contrast thumb matching toolbar slider', () => {
+        const { mockWindow, mockDocument } = createMockEnvironment();
+        const prevWin = (globalThis as any).window;
+        const prevDoc = (globalThis as any).document;
+        (globalThis as any).window = mockWindow;
+        (globalThis as any).document = mockDocument;
+
+        try {
+            const popover = new ColorPickerPopover(mockDocument.body as any);
+            const anchor = mockDocument.createElement('button');
+            popover.open(anchor as any, 'tc', mockDocument.body as any, '#1F4FD8', () => {}, null, 80);
+
+            const transGroup = popover.el.querySelector('.transparency-group');
+            assert.ok(transGroup, 'transparency group must exist');
+
+            const track = transGroup.querySelector('.slider-track');
+            assert.ok(track, 'slider track must exist');
+
+            const fill = track.querySelector('.slider-fill');
+            assert.ok(fill, 'slider-fill element exists for fallback');
+
+            const thumb = track.querySelector('.slider-thumb');
+            assert.ok(thumb, 'slider thumb must exist');
+            assert.strictEqual(thumb.textContent, '20', 'thumb displays opacity complement (transparency 20%)');
+            assert.strictEqual(thumb.style.left, 'calc(20% - 4.8px)', 'thumb is positioned via calc offset');
+
+            popover.destroy();
         } finally {
             (globalThis as any).window = prevWin;
             (globalThis as any).document = prevDoc;
