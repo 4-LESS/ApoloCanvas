@@ -5101,8 +5101,9 @@ button.apolo-box-menu-swatch,
 .is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle,
 .is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip,
 .is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle {
-  width: 28px;
-  height: 40px;
+  width: 32px;
+  height: 44px;
+  touch-action: none;
 }
 
 .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip svg,
@@ -5130,12 +5131,13 @@ button.apolo-box-menu-swatch,
 .is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
 .is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
   position: absolute;
-  right: 6px;
-  top: 6px;
-  width: 24px;
-  height: 28px;
+  right: 4px;
+  top: 4px;
+  width: 34px;
+  height: 34px;
   color: var(--apolo-text-faint, var(--faint, #9ca3af));
   opacity: 0.7;
+  touch-action: none;
 }
 
 .apolo-estuche-popover .shape-card button.grip svg,

@@ -839,6 +839,9 @@ export class FavoritesDrawer {
         let dropTimeout: ReturnType<typeof setTimeout> | null = null;
 
         handleBtn.onpointerdown = (e: PointerEvent) => {
+            if (typeof e.preventDefault === 'function') {
+                e.preventDefault();
+            }
             e.stopPropagation();
             try {
                 handleBtn.setPointerCapture(e.pointerId);
@@ -907,12 +910,18 @@ export class FavoritesDrawer {
                     c.style.transition = '';
                     c.style.zIndex = '';
                 });
+                if (listEl) {
+                    listEl.style.touchAction = '';
+                }
                 dragState = 'idle';
                 this.activeDragAbort = null;
             };
 
             const onPointerMove = (moveEv: PointerEvent) => {
                 if (dragState === 'dropping' || dragState === 'cancelled') return;
+                if (typeof moveEv.preventDefault === 'function') {
+                    moveEv.preventDefault();
+                }
 
                 const dx = moveEv.clientX - startX;
                 const dy = moveEv.clientY - startY;
@@ -922,6 +931,9 @@ export class FavoritesDrawer {
                     card.classList.add('is-dragging');
                     card.style.zIndex = '30';
                     card.style.transition = 'none';
+                    if (listEl) {
+                        listEl.style.touchAction = 'none';
+                    }
                 }
 
                 if (dragState !== 'dragging' && dragState !== 'drag-out') return;
@@ -950,16 +962,43 @@ export class FavoritesDrawer {
                     card.classList.remove('is-drag-out');
                     card.style.transform = `translate(${dx}px, ${dy}px) scale(1.02)`;
 
-                    // Find closest slot by Euclidean distance to dragged card center
+                    // Determine closest target slot:
+                    // In 2D shape grid (2 columns), map directly by grid row and column
+                    // In 1D stroke list, map primarily by vertical row progression
                     const draggedCenterX = originX + dx;
                     const draggedCenterY = originY + dy;
                     let bestIdx = index;
-                    let minDist = Infinity;
-                    for (let j = 0; j < slotCenters.length; j++) {
-                        const dist = Math.hypot(draggedCenterX - slotCenters[j].x, draggedCenterY - slotCenters[j].y);
-                        if (dist < minDist) {
-                            minDist = dist;
-                            bestIdx = j;
+
+                    if (isShape && slotCenters.length > 1) {
+                        const col0X = slotCenters[0]?.x ?? originX;
+                        const col1X = slotCenters[1]?.x ?? (col0X + cardWidth);
+                        const midX = (col0X + col1X) / 2;
+                        const targetCol = draggedCenterX >= midX ? 1 : 0;
+
+                        const row0Y = slotCenters[0]?.y ?? originY;
+                        const row1Y = slotCenters.length > 2 ? slotCenters[2].y : (row0Y + cardHeight);
+                        const rowStep = Math.max(30, row1Y - row0Y);
+
+                        const rawRow = Math.round((draggedCenterY - row0Y) / rowStep);
+                        const maxRow = Math.floor((allCards.length - 1) / 2);
+                        const targetRow = Math.max(0, Math.min(maxRow, rawRow));
+
+                        bestIdx = Math.max(0, Math.min(allCards.length - 1, targetRow * 2 + targetCol));
+                    } else if (!isShape && slotCenters.length > 1) {
+                        const row0Y = slotCenters[0]?.y ?? originY;
+                        const row1Y = slotCenters.length > 1 ? slotCenters[1].y : (row0Y + cardHeight);
+                        const rowStep = Math.max(24, row1Y - row0Y);
+
+                        const rawRow = Math.round((draggedCenterY - row0Y) / rowStep);
+                        bestIdx = Math.max(0, Math.min(allCards.length - 1, rawRow));
+                    } else {
+                        let minDist = Infinity;
+                        for (let j = 0; j < slotCenters.length; j++) {
+                            const dist = Math.hypot(draggedCenterX - slotCenters[j].x, draggedCenterY - slotCenters[j].y);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                bestIdx = j;
+                            }
                         }
                     }
                     currentTargetIdx = bestIdx;

@@ -1184,6 +1184,52 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             assert.strictEqual(deletedId, null, 'Must NOT trigger deletion during horizontal reordering');
         });
 
+        test('shape favorites drawer supports direct vertical reordering without requiring horizontal displacement', async () => {
+            const s1 = createFavoritePreset({ tool: 'shape', shapeType: 'rectangle', strokeColor: '#2f6bff' });
+            const s2 = createFavoritePreset({ tool: 'shape', shapeType: 'ellipse', strokeColor: '#10b981' });
+            const s3 = createFavoritePreset({ tool: 'shape', shapeType: 'line', strokeColor: '#f59e0b' });
+
+            let reordered: [number, number] | null = null;
+            const callbacks: FavoritesDrawerCallbacks = {
+                onSelectFavorite: () => {},
+                onDeleteFavorite: () => {},
+                onReorderFavorite: (from, to) => { reordered = [from, to]; },
+            };
+
+            const drawer = new FavoritesDrawer(callbacks, 'shape', [s1, s2, s3]);
+            const cards = drawer.el.querySelectorAll('.shape-card');
+            assert.strictEqual(cards.length, 3);
+
+            drawer.el.getBoundingClientRect = () => ({
+                left: 100, right: 420, top: 50, bottom: 400, width: 320, height: 350,
+            } as any);
+
+            cards[0].getBoundingClientRect = () => ({ left: 114, right: 252, top: 60, bottom: 156, width: 138, height: 96 } as any);
+            cards[1].getBoundingClientRect = () => ({ left: 268, right: 406, top: 60, bottom: 156, width: 138, height: 96 } as any);
+            cards[2].getBoundingClientRect = () => ({ left: 114, right: 252, top: 164, bottom: 260, width: 138, height: 96 } as any);
+
+            const handle0 = cards[0].querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+            handle0.onpointerdown?.({ clientX: 240, clientY: 70, stopPropagation: () => {}, pointerId: 1 } as any);
+
+            // Drag pure vertical down (dx = 0, dy = 110px) directly towards row 1
+            const moveEv = new Event('pointermove') as any;
+            moveEv.clientX = 240;
+            moveEv.clientY = 180;
+            window.dispatchEvent(moveEv);
+
+            assert.strictEqual(cards[0].classList.contains('is-dragging'), true);
+            assert.strictEqual(cards[0].classList.contains('is-drag-out'), false);
+
+            const upEv = new Event('pointerup') as any;
+            upEv.clientX = 240;
+            upEv.clientY = 180;
+            upEv.pointerId = 1;
+            window.dispatchEvent(upEv);
+
+            await new Promise((r) => setTimeout(r, 200));
+            assert.deepStrictEqual(reordered, [0, 2], 'Pure vertical drag directly reorders card from slot 0 to slot 2 without C-curve');
+        });
+
         test('shape favorites drawer triggers deletion when deliberately dragged outside popover bounds', async () => {
             const s1 = createFavoritePreset({
                 tool: 'shape',
