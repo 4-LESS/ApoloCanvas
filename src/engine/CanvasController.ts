@@ -226,6 +226,8 @@ export class CanvasController {
     private singleTouchPanned = false;
     private palmRejectedSingleTouch = false;
     private lastGestureCenter = { x: 0, y: 0 };
+    private lastTouchEndTime = 0;
+    private lastTouchEndPos = { x: 0, y: 0 };
 
     // Scroller properties
     private readonly originalScrollerPosition: string;
@@ -491,6 +493,7 @@ export class CanvasController {
                 onStrokeEnd: (point, barrel, rawEvent) => this.end(point, barrel, rawEvent.timeStamp),
                 onStrokeCancel: () => this.cancel(),
                 onNonDrawingPointerDown: (event) => {
+                    if (this.penEnabled) return;
                     if (this.activeHandleDrag) return;
                     if (this.input?.shouldRejectTouch() || this.input?.isPalmRejected()) return;
                     if (this.input?.isPointerRejected(event.pointerId)) return;
@@ -2617,10 +2620,16 @@ export class CanvasController {
     }
 
     private readonly onCanvasDblClick = (event: MouseEvent): void => {
+        if (this.penEnabled) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
         this.focusEditorAt(event.clientX, event.clientY);
     };
 
     private focusEditorAt(clientX: number, clientY: number): void {
+        if (this.penEnabled) return;
         if (!this.editor) return;
         if (this.activeHandleDrag) return;
         if (this.input?.shouldRejectTouch() || this.input?.isPalmRejected()) return;
@@ -5490,6 +5499,17 @@ export class CanvasController {
         this.touches.set(event.pointerId, this.localTouch(event));
 
         if (this.touches.size === 1) {
+            const timeSinceLast = Date.now() - this.lastTouchEndTime;
+            const distSinceLast = Math.hypot(
+                event.clientX - this.lastTouchEndPos.x,
+                event.clientY - this.lastTouchEndPos.y
+            );
+            if (this.penEnabled && timeSinceLast < 350 && distSinceLast < 32) {
+                // Double tap in drawing mode: suppress browser double-tap zoom/selection/focus
+                event.preventDefault();
+                event.stopPropagation();
+            }
+
             if (isPenGated) {
                 // S-Pen is hovering or active: cancel single-finger touch immediately to prevent accidental screen jumping or ghost taps
                 event.preventDefault();
@@ -5562,6 +5582,9 @@ export class CanvasController {
 
     private readonly onTouchEnd = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch') return;
+        this.lastTouchEndTime = Date.now();
+        this.lastTouchEndPos = { x: event.clientX, y: event.clientY };
+
         const start = this.singleTouchStartCoords;
         const wasPanned = this.singleTouchPanned;
         const wasPalmRejected = this.palmRejectedSingleTouch || (this.input ? this.input.shouldRejectTouch() : false);
@@ -5593,6 +5616,21 @@ export class CanvasController {
             const dy = Math.abs(event.clientY - start.y);
             const dt = Date.now() - start.time;
             if (dx < 12 && dy < 12 && dt < 400) {
+                if (this.penEnabled) {
+                    // In drawing mode, tapping clears floating menus/selections but NEVER focuses editor or invokes virtual keyboard
+                    if (this.lassoMenu?.isOpen()) {
+                        this.selection = [];
+                        this.lassoMenu.hide();
+                        this.emitSelection();
+                        this.schedulePaint();
+                    }
+                    if (this.boxMenu?.isOpen()) {
+                        this.boxMenu.hide();
+                    }
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
                 const hits = typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function'
                     ? document.elementsFromPoint(event.clientX, event.clientY)
                     : [];
