@@ -74,8 +74,8 @@ export function getPresetIcon(preset: ToolFavoritePreset): string {
     }
     const profileId = (preset as PenFavoritePreset | HighlighterFavoritePreset).profileId;
     switch (profileId) {
-        case 'fountain': return ICONS.feather;
-        case 'calli': return ICONS.pen;
+        case 'fountain': return ICONS.pen;
+        case 'calli': return ICONS.feather;
         case 'ball': return ICONS.ballpoint;
         case 'pencil': return ICONS.pencil;
         case 'hlf': return ICONS.highlighterChisel;

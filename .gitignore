@@ -2,3 +2,7 @@ node_modules/
 *.log
 data.json
 ui_bundle.txt
+.stfolder/
+.stfolder*/
+.stignore
+

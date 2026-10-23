@@ -749,6 +749,18 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             assert.strictEqual(reorderedList[1].id, fav1.id);
         });
 
+        test('getPresetIcon aligns fountain with ICONS.pen and calli with ICONS.feather', () => {
+            const fountainPreset = createFavoritePreset({ tool: 'pen', profileId: 'fountain' });
+            const calliPreset = createFavoritePreset({ tool: 'pen', profileId: 'calli' });
+            const ballPreset = createFavoritePreset({ tool: 'pen', profileId: 'ball' });
+            const pencilPreset = createFavoritePreset({ tool: 'pen', profileId: 'pencil' });
+
+            assert.strictEqual(getPresetIcon(fountainPreset), ICONS.pen, 'fountain must map to ICONS.pen');
+            assert.strictEqual(getPresetIcon(calliPreset), ICONS.feather, 'calli must map to ICONS.feather');
+            assert.strictEqual(getPresetIcon(ballPreset), ICONS.ballpoint, 'ball must map to ICONS.ballpoint');
+            assert.strictEqual(getPresetIcon(pencilPreset), ICONS.pencil, 'pencil must map to ICONS.pencil');
+        });
+
         test('drawer cards do not render rename menu, dragging handle reorders or deletes', () => {
             const fav1 = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#111', width: 2 });
             let deletedId: string | null = null;
