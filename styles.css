@@ -4273,7 +4273,7 @@ button.apolo-box-menu-swatch,
   min-width: 26px;
   min-height: 26px;
   stroke: currentColor;
-  stroke-width: 2.2;
+  stroke-width: 1.6;
 }
 
 .shape-btn.is-active svg,
@@ -4996,13 +4996,7 @@ button.apolo-box-menu-swatch,
   vector-effect: non-scaling-stroke;
 }
 
-/* Asa de arrastre en esquina superior derecha para shape-card */
-.apolo-estuche-popover .shape-card button.grip,
-.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-}
+
 
 
 
@@ -5041,7 +5035,7 @@ button.apolo-box-menu-swatch,
   vector-effect: non-scaling-stroke;
 }
 
-/* Minimalist Unified Drag Handle across all favorite cards */
+/* Minimalist Unified Drag Handle (base rules for all favorite cards) */
 .grip,
 .apolo-favorite-handle-wrap,
 .apolo-favorite-drag-handle,
@@ -5062,20 +5056,17 @@ button.apolo-box-menu-swatch,
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 24px;
   min-width: 0;
   min-height: 0;
   padding: 0;
   margin: 0;
   background: transparent;
   border: none;
-  border-radius: 4px;
   box-shadow: none;
-  color: var(--apolo-text-faint, #9ca3af);
+  color: var(--apolo-text-faint, var(--faint, #9ca3af));
   cursor: grab;
   touch-action: none;
-  opacity: 0.65;
+  opacity: 0.7;
   transition: opacity .12s, color .12s;
 }
 
@@ -5103,21 +5094,63 @@ button.apolo-box-menu-swatch,
   color: var(--text);
 }
 
-.grip svg,
-.apolo-favorite-drag-handle svg,
-.apolo-estuche-popover button.apolo-favorite-drag-handle svg,
-.apolo-estuche-popover button.grip svg,
-.apolo-estuche-popover .apolo-favorite-card button.grip svg,
-.apolo-estuche-popover .apolo-favorite-card button.apolo-favorite-drag-handle svg,
-.is-mobile .apolo-estuche-popover button.apolo-favorite-drag-handle svg,
-.is-mobile .apolo-estuche-popover button.grip svg,
-.is-tablet .apolo-estuche-popover button.apolo-favorite-drag-handle svg,
-.is-tablet .apolo-estuche-popover button.grip svg {
-  width: 11px;
-  height: 15px;
-  min-width: 11px;
-  min-height: 15px;
-  flex: 0 0 11px;
+/* 1. Drag Handle en tarjetas de lápices / marcadores (aprovecha mejor la altura de 48px) */
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip,
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle {
+  width: 28px;
+  height: 40px;
+}
+
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip svg,
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle svg {
+  width: 16px;
+  height: 24px;
+  min-width: 16px;
+  min-height: 24px;
+  flex: 0 0 16px;
+  fill: currentColor;
+  stroke: none;
+}
+
+/* 2. Drag Handle en tarjetas de formas (mantiene posición esquina superior derecha, color gris y tamaño original) */
+.apolo-estuche-popover .shape-card button.grip,
+.apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 20px;
+  height: 24px;
+  color: var(--apolo-text-faint, var(--faint, #9ca3af));
+  opacity: 0.7;
+}
+
+.apolo-estuche-popover .shape-card button.grip svg,
+.apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle svg,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.grip svg,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle svg {
+  width: 13px;
+  height: 17px;
+  min-width: 13px;
+  min-height: 17px;
+  flex: 0 0 13px;
   fill: currentColor;
   stroke: none;
 }
