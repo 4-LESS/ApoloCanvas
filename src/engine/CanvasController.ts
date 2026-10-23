@@ -43,6 +43,7 @@ import {
     snapLineAngle,
 } from './PatternedStrokeRenderer.ts';
 import { getPenPlugin } from './pens/index.ts';
+import { getShapePlugin, type ShapeRenderGeometry, type ShapeStyleConfig } from './shapes/index.ts';
 import { SpatialGrid } from './spatial/SpatialGrid.ts';
 import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
@@ -263,6 +264,7 @@ export class CanvasController {
     private lastPointerDownTime = 0;
     private pointerDownStartPos: { x: number; y: number } | null = null;
     private strokeStartTime = 0;
+    private isShiftDown = false;
     private showSpenDebugHud = false;
     private debugInputHudEl: HTMLElement | null = null;
     private readonly debugHudLogs: string[] = [];
@@ -490,7 +492,7 @@ export class CanvasController {
                 shouldAcceptPointer: (event) => this.shouldAcceptDrawingPointer(event),
                 onStrokeStart: (point, barrel, rawEvent) => this.begin(point, barrel, rawEvent),
                 onStrokeMove: (points, barrel, rawEvent) => this.move(points, barrel, rawEvent),
-                onStrokeEnd: (point, barrel, rawEvent) => this.end(point, barrel, rawEvent.timeStamp),
+                onStrokeEnd: (point, barrel, rawEvent) => this.end(point, barrel, rawEvent.timeStamp, rawEvent),
                 onStrokeCancel: () => this.cancel(),
                 onNonDrawingPointerDown: (event) => {
                     if (this.penEnabled) return;
@@ -521,6 +523,7 @@ export class CanvasController {
             window.addEventListener('pointerdown', this.onDocumentPointerDown, { capture: true });
             window.addEventListener('touchstart', this.onDocumentTouchStart, { capture: true });
             window.addEventListener('keydown', this.onDocumentKeyDown);
+            window.addEventListener('keyup', this.onDocumentKeyUp);
         }
 
         this.scrollHandler = (event?: Event) => {
@@ -2714,6 +2717,7 @@ export class CanvasController {
         window.removeEventListener('pointerdown', this.onDocumentPointerDown, { capture: true });
         window.removeEventListener('touchstart', this.onDocumentTouchStart, { capture: true });
         window.removeEventListener('keydown', this.onDocumentKeyDown);
+        window.removeEventListener('keyup', this.onDocumentKeyUp);
 
         if (this.frame) cancelAnimationFrame(this.frame);
 
@@ -2825,10 +2829,25 @@ export class CanvasController {
     };
 
     private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Shift') {
+            this.isShiftDown = true;
+            if (this.tool === 'shape' && this.activeStart) {
+                this.schedulePaint();
+            }
+        }
         if (event.key === 'Escape') {
             this.estuche?.close();
             this.boxMenu?.hide();
             this.lassoMenu?.hide();
+        }
+    };
+
+    private readonly onDocumentKeyUp = (event: KeyboardEvent): void => {
+        if (event.key === 'Shift') {
+            this.isShiftDown = false;
+            if (this.tool === 'shape' && this.activeStart) {
+                this.schedulePaint();
+            }
         }
     };
 
@@ -2959,6 +2978,7 @@ export class CanvasController {
     // Drawing input lifecycle (normalized to content column width & anchor block)
     private begin(rawPoint: Point, barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.penEnabled) return;
+        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
         if (rawEvent && rawEvent.pointerType === 'pen' && this.isPenBarrelEvent(rawEvent)) {
             return;
         }
@@ -3028,6 +3048,7 @@ export class CanvasController {
 
     private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
+        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
         this.barrelActive = barrel;
         if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const lastRaw = rawPoints[rawPoints.length - 1];
@@ -3079,8 +3100,9 @@ export class CanvasController {
         this.schedulePaint();
     }
 
-    private end(rawPoint: Point, barrel: boolean, releasedAt: number): void {
+    private end(rawPoint: Point, barrel: boolean, releasedAt: number, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
+        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
         const lastMotionAt = this.points.size > 0 ? this.points.getTime(this.points.size - 1) : releasedAt;
         if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const currentDocPt: Point = {
@@ -3152,6 +3174,7 @@ export class CanvasController {
         this.activeStart = null;
         this.activeAnchor = null;
         this.barrelActive = false;
+        this.isShiftDown = false;
         this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
         this.renderDirty = true;
@@ -3170,6 +3193,7 @@ export class CanvasController {
         this.activeAnchor = null;
         this.movingSelection = false;
         this.barrelActive = false;
+        this.isShiftDown = false;
         this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
         this.schedulePaint();
@@ -3320,10 +3344,20 @@ export class CanvasController {
         const isBoxSnap = spaceId ? (BoxRegistry.isSnapActive(spaceId) || !!this.document.boxes?.[spaceId]?.snapToGrid) : false;
         const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
 
-        const rawStartU = (start.x - geom.originX) / geom.scaleWidth;
-        const rawStartV = (start.y - geom.originY) / geom.scaleWidth;
-        const rawEndU = (end.x - geom.originX) / geom.scaleWidth;
-        const rawEndV = (end.y - geom.originY) / geom.scaleWidth;
+        const regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+        const plugin = getShapePlugin(shapeType);
+        const normalizedGeom = plugin.normalizeGeometry({
+            x0: start.x,
+            y0: start.y,
+            x1: end.x,
+            y1: end.y,
+            regularize,
+        });
+
+        const rawStartU = (normalizedGeom.x0 - geom.originX) / geom.scaleWidth;
+        const rawStartV = (normalizedGeom.y0 - geom.originY) / geom.scaleWidth;
+        const rawEndU = (normalizedGeom.x1 - geom.originX) / geom.scaleWidth;
+        const rawEndV = (normalizedGeom.y1 - geom.originY) / geom.scaleWidth;
 
         let { u: startU, v: startV } = sanitizeNormalizedPoint(rawStartU, rawStartV, { isBoxStroke });
         let { u: endU, v: endV } = sanitizeNormalizedPoint(rawEndU, rawEndV, { isBoxStroke });
@@ -3352,7 +3386,18 @@ export class CanvasController {
             startY: startV,
             endX: endU,
             endY: endV,
-            style: { ...this.style },
+            style: {
+                ...this.style,
+                color: this.toolState.shape.color || this.style.color,
+                width: this.toolState.shape.width || this.style.width,
+                pattern: this.toolState.shape.pattern || this.style.pattern,
+                opacity: this.toolState.shape.opacity !== undefined ? this.toolState.shape.opacity : this.style.opacity,
+            },
+            regularize,
+            fillEnabled: this.toolState.shape.fillEnabled,
+            fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
+            fillOpacity: this.toolState.shape.fillOpacity,
+            fillPattern: this.toolState.shape.fillPattern,
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
         this.document.elements.push(element);
@@ -3576,6 +3621,17 @@ export class CanvasController {
     private getElementDocBounds(element: CanvasElement): BoundingBox {
         const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
         const halfWidth = (element.style.width || 2) / 2;
+        if (element.type === 'shape') {
+            const plugin = getShapePlugin(element.shapeType);
+            const startX = geom.originX + element.startX * geom.scaleWidth;
+            const startY = geom.originY + element.startY * geom.scaleWidth;
+            const endX = geom.originX + element.endX * geom.scaleWidth;
+            const endY = geom.originY + element.endY * geom.scaleWidth;
+            return plugin.computeBounds(
+                { x0: startX, y0: startY, x1: endX, y1: endY, regularize: element.regularize },
+                element.style.width || 2,
+            );
+        }
         return {
             minX: geom.originX + element.bounds.minX * geom.scaleWidth - halfWidth,
             maxX: geom.originX + element.bounds.maxX * geom.scaleWidth + halfWidth,
@@ -3746,9 +3802,22 @@ export class CanvasController {
     }
 
     private selectAt(point: Point): void {
-        const hit = [...this.document.elements].reverse().find(element =>
-            contains(this.getElementDocBounds(element), point.x, point.y, 14),
-        );
+        const hit = [...this.document.elements].reverse().find(element => {
+            if (element.type === 'shape') {
+                const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
+                const plugin = getShapePlugin(element.shapeType);
+                const startX = geom.originX + element.startX * geom.scaleWidth;
+                const startY = geom.originY + element.startY * geom.scaleWidth;
+                const endX = geom.originX + element.endX * geom.scaleWidth;
+                const endY = geom.originY + element.endY * geom.scaleWidth;
+                return plugin.hitTest(
+                    { x0: startX, y0: startY, x1: endX, y1: endY, regularize: element.regularize },
+                    point,
+                    14,
+                );
+            }
+            return contains(this.getElementDocBounds(element), point.x, point.y, 14);
+        });
         if (hit) {
             // Select all strokes sharing the same link if linked
             if (hit.url) {
@@ -4801,7 +4870,12 @@ export class CanvasController {
                     context.stroke();
                 }
             } else {
-                this.paintShape(element, context, contentLeft, contentWidth, blockTop);
+                this.paintShape(element, context, contentLeft, contentWidth, blockTop, {
+                    strokeColor: '#6C3FD1',
+                    strokeWidth: element.style.width + 8,
+                    strokeOpacity: 0.25,
+                    fillEnabled: false,
+                });
             }
             context.restore();
         }
@@ -4960,51 +5034,33 @@ export class CanvasController {
         contentLeft: number,
         contentWidth: number,
         blockTop: number,
+        styleOverride?: Partial<ShapeStyleConfig>,
     ): void {
         const startX = contentLeft + shape.startX * contentWidth;
         const startY = blockTop + shape.startY * contentWidth;
         const endX = contentLeft + shape.endX * contentWidth;
         const endY = blockTop + shape.endY * contentWidth;
 
-        const x = Math.min(startX, endX);
-        const y = Math.min(startY, endY);
-        const width = Math.abs(endX - startX);
-        const height = Math.abs(endY - startY);
-
-        context.beginPath();
-        switch (shape.shapeType) {
-            case 'line':
-                context.moveTo(startX, startY);
-                context.lineTo(endX, endY);
-                break;
-            case 'arrow':
-                context.moveTo(startX, startY);
-                context.lineTo(endX, endY);
-                context.lineTo(endX - 10, endY - 5);
-                context.moveTo(endX, endY);
-                context.lineTo(endX - 5, endY - 10);
-                break;
-            case 'ellipse':
-                context.ellipse(x + width / 2, y + height / 2, Math.max(1, width / 2), Math.max(1, height / 2), 0, 0, Math.PI * 2);
-                break;
-            case 'triangle':
-                context.moveTo(x + width / 2, y);
-                context.lineTo(x + width, y + height);
-                context.lineTo(x, y + height);
-                context.closePath();
-                break;
-            case 'rounded-rect':
-                context.roundRect(x, y, width, height, 8);
-                break;
-            default:
-                context.rect(x, y, width, height);
-                break;
-        }
-        if (shape.fillColor) {
-            context.fillStyle = shape.fillColor;
-            context.fill();
-        }
-        context.stroke();
+        const plugin = getShapePlugin(shape.shapeType);
+        const geom: ShapeRenderGeometry = {
+            x0: startX,
+            y0: startY,
+            x1: endX,
+            y1: endY,
+            regularize: shape.regularize,
+        };
+        const styleConfig: ShapeStyleConfig = {
+            strokeColor: shape.style.color,
+            strokeWidth: shape.style.width,
+            strokePattern: shape.style.pattern,
+            strokeOpacity: shape.style.opacity,
+            fillEnabled: shape.fillEnabled,
+            fillColor: shape.fillColor,
+            fillOpacity: shape.fillOpacity,
+            fillPattern: shape.fillPattern,
+            ...styleOverride,
+        };
+        plugin.renderCanvas(context, geom, styleConfig);
     }
 
     private paintActive(): void {
@@ -5025,6 +5081,42 @@ export class CanvasController {
             context.beginPath();
             context.rect(geom.originX, geom.originY, geom.scaleWidth, geom.boxHeight);
             context.clip();
+        }
+
+        if (this.tool === 'shape') {
+            if (this.activeStart && this.points.size > 0) {
+                const shapeType = this.toolState.shape.shapeType || this.shapeType || 'rectangle';
+                const shapePlugin = getShapePlugin(shapeType);
+
+                const lastDocPt = {
+                    x: this.points.getX(this.points.size - 1),
+                    y: this.points.getY(this.points.size - 1),
+                };
+
+                const regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+                const geom = shapePlugin.normalizeGeometry({
+                    x0: this.activeStart.x,
+                    y0: this.activeStart.y,
+                    x1: lastDocPt.x,
+                    y1: lastDocPt.y,
+                    regularize,
+                });
+
+                const styleConfig: ShapeStyleConfig = {
+                    strokeColor: this.toolState.shape.color || this.style.color,
+                    strokeWidth: this.toolState.shape.width || this.style.width,
+                    strokePattern: this.toolState.shape.pattern || this.style.pattern,
+                    strokeOpacity: this.toolState.shape.opacity !== undefined ? this.toolState.shape.opacity : this.style.opacity,
+                    fillEnabled: this.toolState.shape.fillEnabled,
+                    fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
+                    fillOpacity: this.toolState.shape.fillOpacity,
+                    fillPattern: this.toolState.shape.fillPattern,
+                };
+
+                shapePlugin.renderCanvas(context, geom, styleConfig);
+            }
+            context.restore();
+            return;
         }
 
         if (this.tool === 'highlighter') {

@@ -1,4 +1,5 @@
 import type { BoundingBox, CanvasElement, Point, ShapeElement, StrokeElement } from '../../core/types.ts';
+import { getShapePlugin, type ShapeRenderGeometry } from '../shapes/index.ts';
 
 /**
  * Calculates squared distance from a point to a 2D line segment.
@@ -174,37 +175,26 @@ export function shapeHitDoc(
     const endX = contentLeft + shape.endX * contentWidth;
     const endY = blockTop + shape.endY * contentWidth;
 
+    const plugin = getShapePlugin(shape.shapeType);
+    const geom: ShapeRenderGeometry = {
+        x0: startX,
+        y0: startY,
+        x1: endX,
+        y1: endY,
+        regularize: shape.regularize,
+    };
     const effectiveRadius = radius + (shape.style.width || 2) / 2;
     const effectiveRadiusSq = effectiveRadius * effectiveRadius;
 
-    // Line and arrow: test against the central line segment
-    if (shape.shapeType === 'line' || shape.shapeType === 'arrow') {
-        for (let j = 0; j < eraser.length; j++) {
-            const ep = eraser[j];
-            if (distToSegmentSquared(ep.x, ep.y, startX, startY, endX, endY) <= effectiveRadiusSq) {
+    for (let j = 0; j < eraser.length; j++) {
+        if (plugin.hitTest(geom, eraser[j], effectiveRadius)) {
+            return true;
+        }
+        if (j > 0 && (plugin.id === 'line' || plugin.id === 'arrow')) {
+            const prev = eraser[j - 1];
+            if (minDistanceBetweenSegmentsSquared(startX, startY, endX, endY, prev.x, prev.y, eraser[j].x, eraser[j].y) <= effectiveRadiusSq) {
                 return true;
             }
-            if (j > 0) {
-                const prev = eraser[j - 1];
-                if (minDistanceBetweenSegmentsSquared(startX, startY, endX, endY, prev.x, prev.y, ep.x, ep.y) <= effectiveRadiusSq) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    // Rect, Ellipse, Triangle: test perimeter segments and inside bounds
-    const rxMin = Math.min(startX, endX);
-    const rxMax = Math.max(startX, endX);
-    const ryMin = Math.min(startY, endY);
-    const ryMax = Math.max(startY, endY);
-
-    for (let j = 0; j < eraser.length; j++) {
-        const ep = eraser[j];
-        if (ep.x >= rxMin - effectiveRadius && ep.x <= rxMax + effectiveRadius &&
-            ep.y >= ryMin - effectiveRadius && ep.y <= ryMax + effectiveRadius) {
-            return true;
         }
     }
 

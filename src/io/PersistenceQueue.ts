@@ -3,6 +3,7 @@ import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasEleme
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
 import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
+import { getShapePlugin, type ShapeRenderGeometry, type ShapeStyleConfig } from '../engine/shapes/index.ts';
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -756,18 +757,27 @@ function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffset
     const startY = element.startY * scale + anchorOffsetY;
     const endX = element.endX * scale;
     const endY = element.endY * scale + anchorOffsetY;
-    const x = Math.min(startX, endX); const y = Math.min(startY, endY);
-    const width = Math.abs(endX - startX); const height = Math.abs(endY - startY);
-    const fill = element.fillColor ? ` fill="${escapeXml(element.fillColor)}"` : '';
-    const shape: ShapeElement = element;
-    switch (shape.shapeType) {
-        case 'line': return { defs: {}, body: `<path d="M ${startX} ${startY} L ${endX} ${endY}" ${style}/>` };
-        case 'arrow': return { defs: {}, body: `<path d="M ${startX} ${startY} L ${endX} ${endY} M ${endX - 10} ${endY - 5} L ${endX} ${endY} L ${endX - 5} ${endY - 10}" ${style}/>` };
-        case 'ellipse': return { defs: {}, body: `<ellipse cx="${x + width / 2}" cy="${y + height / 2}" rx="${width / 2}" ry="${height / 2}" ${style}${fill}/>` };
-        case 'triangle': return { defs: {}, body: `<path d="M ${x + width / 2} ${y} L ${x + width} ${y + height} L ${x} ${y + height} Z" ${style}${fill}/>` };
-        case 'rounded-rect': return { defs: {}, body: `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" ${style}${fill}/>` };
-        default: return { defs: {}, body: `<rect x="${x}" y="${y}" width="${width}" height="${height}" ${style}${fill}/>` };
-    }
+
+    const plugin = getShapePlugin(element.shapeType);
+    const geom: ShapeRenderGeometry = {
+        x0: startX,
+        y0: startY,
+        x1: endX,
+        y1: endY,
+        regularize: element.regularize,
+    };
+    const styleConfig: ShapeStyleConfig = {
+        strokeColor: element.style.color,
+        strokeWidth: element.style.width,
+        strokePattern: element.style.pattern,
+        strokeOpacity: element.style.opacity,
+        fillEnabled: element.fillEnabled,
+        fillColor: element.fillColor,
+        fillOpacity: element.fillOpacity,
+        fillPattern: element.fillPattern,
+    };
+
+    return plugin.renderSvg(geom, styleConfig);
 }
 
 export function renderElement(element: CanvasElement, scale = 800): string {
