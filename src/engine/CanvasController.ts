@@ -47,7 +47,7 @@ import { SpatialGrid } from './spatial/SpatialGrid.ts';
 import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
 import { Predictor } from './input/Predictor.ts';
-import { isStylusBarrelButton, isStylusHoverBarrel, hasDeliberateStylusMovement } from './input/StylusCapabilities.ts';
+import { isConfirmedBarrelPress, isStylusBarrelButton, isStylusHoverBarrel, hasDeliberateStylusMovement } from './input/StylusCapabilities.ts';
 import { EngineEventBus } from '../core/events.ts';
 import { Toolbar } from '../ui/Toolbar.ts';
 import { ToolEstuche } from '../ui/ToolEstuche.ts';
@@ -1248,7 +1248,7 @@ export class CanvasController {
         }
 
         // Only confirmed physical barrel button signals are allowed to cancel strokes or latch barrel state
-        const isConfirmedBarrel = this.penBarrelPressed || isStylusBarrelButton(event);
+        const isConfirmedBarrel = this.penBarrelPressed || isConfirmedBarrelPress(event as any) || isStylusBarrelButton(event);
         if (!isConfirmedBarrel) {
             this.updateDebugHud(event, 'contextmenu-unconfirmed-ignored');
             return;
@@ -1277,14 +1277,22 @@ export class CanvasController {
     };
 
     private isPenBarrelEvent(e: PointerEvent | MouseEvent): boolean {
-        return isStylusBarrelButton(e);
+        return isConfirmedBarrelPress(e as PointerEvent) || isStylusBarrelButton(e);
     }
 
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
             this.lastPenEventTime = performance.now();
             this.isPenTipDown = true;
-            if (!this.isPenBarrelEvent(event)) {
+            if (isConfirmedBarrelPress(event) || this.isPenBarrelEvent(event)) {
+                this.penBarrelPressed = true;
+                this.handledBoxEvents.add(event);
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation?.();
+                this.toggleEstucheFavorites();
+                return;
+            } else {
                 this.penBarrelPressed = false;
             }
         }
@@ -1293,16 +1301,6 @@ export class CanvasController {
         this.updateDebugHud(event);
 
         if (this.handledBoxEvents.has(event)) return;
-
-        // S-Pen barrel button: prevent context menu / box interference on canvas
-        if (event.pointerType === 'pen' && this.isPenBarrelEvent(event)) {
-            this.handledBoxEvents.add(event);
-            event.preventDefault();
-            event.stopPropagation();
-            event.stopImmediatePropagation?.();
-            this.penBarrelPressed = true;
-            return;
-        }
 
         const elements = (typeof document !== 'undefined' && typeof document.elementsFromPoint === 'function')
             ? document.elementsFromPoint(event.clientX, event.clientY)

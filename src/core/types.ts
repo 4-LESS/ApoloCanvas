@@ -167,6 +167,25 @@ export interface WorkspaceToolState {
     syncFavoriteProfiles: boolean;
 }
 
+export type FavoriteTool = 'pen' | 'highlighter' | 'shape';
+
+export interface FavoriteState {
+    stroke: {
+        activeProfileId: string;
+        profiles: StrokeFavoriteProfile[];
+    };
+    shape: {
+        activeProfileId: string;
+        profiles: ShapeFavoriteProfile[];
+    };
+}
+
+export interface LegacyFavoriteSnapshot {
+    pen: PenFavoritePreset[];
+    highlighter: HighlighterFavoritePreset[];
+    shape: ShapeFavoritePreset[];
+}
+
 export const DEFAULT_STROKE_FAVORITE_PROFILES: StrokeFavoriteProfile[] = [
     { id: 'notes', name: 'Notas', pen: [], highlighter: [] },
     { id: 'academic', name: 'Académico', pen: [], highlighter: [] },
@@ -179,69 +198,48 @@ export const DEFAULT_SHAPE_FAVORITE_PROFILES: ShapeFavoriteProfile[] = [
     { id: 'engineering', name: 'Ingeniería', shape: [] },
 ];
 
+export function getActiveStrokeList(state: { strokeFavoriteProfiles?: StrokeFavoriteProfile[]; activeStrokeProfileId?: string }): StrokeFavoriteProfile {
+    const profiles = state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES;
+    const found = profiles.find(p => p.id === state.activeStrokeProfileId);
+    return found ?? profiles[0] ?? DEFAULT_STROKE_FAVORITE_PROFILES[0];
+}
+
+export function getActiveShapeList(state: { shapeFavoriteProfiles?: ShapeFavoriteProfile[]; activeShapeProfileId?: string }): ShapeFavoriteProfile {
+    const profiles = state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES;
+    const found = profiles.find(p => p.id === state.activeShapeProfileId);
+    return found ?? profiles[0] ?? DEFAULT_SHAPE_FAVORITE_PROFILES[0];
+}
+
 /**
- * Attaches a dynamic read/write compatibility projection for `state.favorites`.
- * The single source of truth is always `state.strokeFavoriteProfiles` and
- * `state.shapeFavoriteProfiles`. This projection binds `state.favorites`
- * directly to the currently active profile in real time without duplicating state.
+ * Builds a derived snapshot-only projection of favorites from the canonical active profiles.
+ */
+export function getLegacySnapshot(state: {
+    strokeFavoriteProfiles?: StrokeFavoriteProfile[];
+    activeStrokeProfileId?: string;
+    shapeFavoriteProfiles?: ShapeFavoriteProfile[];
+    activeShapeProfileId?: string;
+}): LegacyFavoriteSnapshot {
+    const stroke = getActiveStrokeList(state);
+    const shape = getActiveShapeList(state);
+    return {
+        pen: stroke.pen,
+        highlighter: stroke.highlighter,
+        shape: shape.shape,
+    };
+}
+
+/**
+ * Synchronizes the legacy `state.favorites` snapshot projection from the canonical profile trees.
+ */
+export function syncLegacyFavoritesSlice(state: WorkspaceToolState): void {
+    state.favorites = getLegacySnapshot(state);
+}
+
+/**
+ * Compatibility projection helper kept for backward compatibility with existing tests.
  */
 export function attachFavoritesProjection(state: WorkspaceToolState): WorkspaceToolState {
-    const resolveStroke = (): StrokeFavoriteProfile | undefined => {
-        if (!Array.isArray(state.strokeFavoriteProfiles) || state.strokeFavoriteProfiles.length === 0) {
-            return undefined;
-        }
-        return state.strokeFavoriteProfiles.find(p => p.id === state.activeStrokeProfileId) || state.strokeFavoriteProfiles[0];
-    };
-
-    const resolveShape = (): ShapeFavoriteProfile | undefined => {
-        if (!Array.isArray(state.shapeFavoriteProfiles) || state.shapeFavoriteProfiles.length === 0) {
-            return undefined;
-        }
-        return state.shapeFavoriteProfiles.find(p => p.id === state.activeShapeProfileId) || state.shapeFavoriteProfiles[0];
-    };
-
-    const projection = {
-        get pen(): PenFavoritePreset[] {
-            const stroke = resolveStroke();
-            return stroke?.pen ?? [];
-        },
-        set pen(val: PenFavoritePreset[]) {
-            const stroke = resolveStroke();
-            if (stroke) stroke.pen = Array.isArray(val) ? val : [];
-        },
-        get highlighter(): HighlighterFavoritePreset[] {
-            const stroke = resolveStroke();
-            return stroke?.highlighter ?? [];
-        },
-        set highlighter(val: HighlighterFavoritePreset[]) {
-            const stroke = resolveStroke();
-            if (stroke) stroke.highlighter = Array.isArray(val) ? val : [];
-        },
-        get shape(): ShapeFavoritePreset[] {
-            const shape = resolveShape();
-            return shape?.shape ?? [];
-        },
-        set shape(val: ShapeFavoritePreset[]) {
-            const shape = resolveShape();
-            if (shape) shape.shape = Array.isArray(val) ? val : [];
-        },
-    };
-
-    Object.defineProperty(state, 'favorites', {
-        configurable: true,
-        enumerable: true,
-        get() {
-            return projection;
-        },
-        set(val: { pen?: PenFavoritePreset[]; highlighter?: HighlighterFavoritePreset[]; shape?: ShapeFavoritePreset[] }) {
-            const stroke = resolveStroke();
-            const shape = resolveShape();
-            if (stroke && val && Array.isArray(val.pen)) stroke.pen = val.pen;
-            if (stroke && val && Array.isArray(val.highlighter)) stroke.highlighter = val.highlighter;
-            if (shape && val && Array.isArray(val.shape)) shape.shape = val.shape;
-        },
-    });
-
+    syncLegacyFavoritesSlice(state);
     return state;
 }
 
@@ -300,7 +298,11 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
     lasso: {
         mode: 'free',
     },
-    favorites: null as any,
+    favorites: {
+        pen: [],
+        highlighter: [],
+        shape: [],
+    },
     strokeFavoriteProfiles: [
         { id: 'notes', name: 'Notas', pen: [], highlighter: [] },
         { id: 'academic', name: 'Académico', pen: [], highlighter: [] },
@@ -315,133 +317,23 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
     activeShapeProfileId: 'general',
     syncFavoriteProfiles: false,
 };
-attachFavoritesProjection(DEFAULT_WORKSPACE_TOOL_STATE);
+syncLegacyFavoritesSlice(DEFAULT_WORKSPACE_TOOL_STATE);
 
-export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToolState {
-    const hasExistingStrokeProfiles = Array.isArray(state.strokeFavoriteProfiles) && state.strokeFavoriteProfiles.length > 0;
-    const strokeProfiles: StrokeFavoriteProfile[] = hasExistingStrokeProfiles
-        ? state.strokeFavoriteProfiles.map(sp => ({
-            id: sp.id,
-            name: sp.name,
-            pen: Array.isArray(sp.pen) ? sp.pen.map(p => ({ ...p })) : [],
-            highlighter: Array.isArray(sp.highlighter) ? sp.highlighter.map(h => ({ ...h })) : [],
-        }))
-        : DEFAULT_STROKE_FAVORITE_PROFILES.map(sp => ({ ...sp, pen: [], highlighter: [] }));
-
-    const activeStrokeId = state.activeStrokeProfileId && strokeProfiles.some(p => p.id === state.activeStrokeProfileId)
-        ? state.activeStrokeProfileId
-        : strokeProfiles[0].id;
-
-    const hasExistingShapeProfiles = Array.isArray(state.shapeFavoriteProfiles) && state.shapeFavoriteProfiles.length > 0;
-    const shapeProfiles: ShapeFavoriteProfile[] = hasExistingShapeProfiles
-        ? state.shapeFavoriteProfiles.map(shp => ({
-            id: shp.id,
-            name: shp.name,
-            shape: Array.isArray(shp.shape) ? shp.shape.map(s => ({ ...s })) : [],
-        }))
-        : DEFAULT_SHAPE_FAVORITE_PROFILES.map(shp => ({ ...shp, shape: [] }));
-
-    const activeShapeId = state.activeShapeProfileId && shapeProfiles.some(p => p.id === state.activeShapeProfileId)
-        ? state.activeShapeProfileId
-        : shapeProfiles[0].id;
-
-    const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) || strokeProfiles[0];
-    const activeShape = shapeProfiles.find(p => p.id === activeShapeId) || shapeProfiles[0];
-
-    // Compatibility migration: if state.favorites has presets while all profile trees are completely empty,
-    // populate the active profile from state.favorites so legacy code/tests continue working seamlessly.
-    const allStrokeProfilesEmpty = strokeProfiles.every(p => p.pen.length === 0 && p.highlighter.length === 0);
-    if (!hasExistingStrokeProfiles || allStrokeProfilesEmpty) {
-        if (Array.isArray(state.favorites?.pen) && state.favorites.pen.length > 0) {
-            activeStroke.pen = state.favorites.pen.map(p => ({ ...p }));
-        }
-        if (Array.isArray(state.favorites?.highlighter) && state.favorites.highlighter.length > 0) {
-            activeStroke.highlighter = state.favorites.highlighter.map(h => ({ ...h }));
-        }
-    }
-    const allShapeProfilesEmpty = shapeProfiles.every(shp => shp.shape.length === 0);
-    if (!hasExistingShapeProfiles || allShapeProfilesEmpty) {
-        if (Array.isArray(state.favorites?.shape) && state.favorites.shape.length > 0) {
-            activeShape.shape = state.favorites.shape.map(s => ({ ...s }));
-        }
-    }
-
-    const cloned: WorkspaceToolState = {
-        penEnabled: state.penEnabled,
-        activeTool: state.activeTool,
-        snapGrid: state.snapGrid,
-        pen: {
-            profileId: state.pen.profileId,
-            color: state.pen.color,
-            width: state.pen.width,
-            opacity: state.pen.opacity,
-            smoothing: state.pen.smoothing,
-            pattern: state.pen.pattern,
-            straightenLines: state.pen.straightenLines,
-            activeSlotIndex: state.pen.activeSlotIndex,
-            palette: {
-                colors: [...state.pen.palette.colors],
-                opacities: [...state.pen.palette.opacities],
-            },
-        },
-        highlighter: {
-            profileId: state.highlighter.profileId,
-            color: state.highlighter.color,
-            width: state.highlighter.width,
-            opacity: state.highlighter.opacity,
-            pattern: state.highlighter.pattern,
-            straightenLines: state.highlighter.straightenLines,
-            activeSlotIndex: state.highlighter.activeSlotIndex,
-            palette: {
-                colors: [...state.highlighter.palette.colors],
-                opacities: [...state.highlighter.palette.opacities],
-            },
-        },
-        shape: {
-            shapeType: state.shape.shapeType,
-            color: state.shape.color,
-            width: state.shape.width,
-            opacity: state.shape.opacity,
-            pattern: state.shape.pattern,
-            fillEnabled: state.shape.fillEnabled,
-            fillColor: state.shape.fillColor,
-            fillOpacity: state.shape.fillOpacity,
-            activeSlotIndex: state.shape.activeSlotIndex,
-            palette: {
-                colors: [...state.shape.palette.colors],
-                opacities: [...state.shape.palette.opacities],
-            },
-        },
-        eraser: {
-            mode: state.eraser.mode,
-            radius: state.eraser.radius,
-            onlyHighlighter: state.eraser.onlyHighlighter,
-            scribbleToErase: state.eraser.scribbleToErase,
-        },
-        lasso: {
-            mode: state.lasso.mode,
-        },
-        favorites: null as any,
-        strokeFavoriteProfiles: strokeProfiles,
-        activeStrokeProfileId: activeStrokeId,
-        shapeFavoriteProfiles: shapeProfiles,
-        activeShapeProfileId: activeShapeId,
-        syncFavoriteProfiles: Boolean(state.syncFavoriteProfiles),
-    };
-
-    return attachFavoritesProjection(cloned);
-}
-
-export function mergeWorkspaceToolState(
+/**
+ * Normalizes and clones stroke and shape profiles from a saved payload or fallback.
+ */
+export function normalizeProfiles(
     saved?: Partial<WorkspaceToolState> | null,
     fallback: WorkspaceToolState = DEFAULT_WORKSPACE_TOOL_STATE,
-): WorkspaceToolState {
-    if (!saved) return cloneWorkspaceToolState(fallback);
-
-    // Hydrate stroke profiles
-    const hasSavedStrokeProfiles = Array.isArray(saved.strokeFavoriteProfiles) && saved.strokeFavoriteProfiles.length > 0;
-    const strokeProfiles: StrokeFavoriteProfile[] = hasSavedStrokeProfiles
-        ? saved.strokeFavoriteProfiles!.map(sp => ({
+): {
+    strokeProfiles: StrokeFavoriteProfile[];
+    activeStrokeId: string;
+    shapeProfiles: ShapeFavoriteProfile[];
+    activeShapeId: string;
+} {
+    const hasSavedStroke = Array.isArray(saved?.strokeFavoriteProfiles) && saved!.strokeFavoriteProfiles.length > 0;
+    const strokeProfiles: StrokeFavoriteProfile[] = hasSavedStroke
+        ? saved!.strokeFavoriteProfiles!.map(sp => ({
             id: sp.id,
             name: sp.name,
             pen: Array.isArray(sp.pen) ? sp.pen.map(p => ({ ...p })) : [],
@@ -456,16 +348,15 @@ export function mergeWorkspaceToolState(
             }))
             : DEFAULT_STROKE_FAVORITE_PROFILES.map(sp => ({ ...sp, pen: [], highlighter: [] })));
 
-    const activeStrokeId = saved.activeStrokeProfileId && strokeProfiles.some(p => p.id === saved.activeStrokeProfileId)
+    const activeStrokeId = saved?.activeStrokeProfileId && strokeProfiles.some(p => p.id === saved.activeStrokeProfileId)
         ? saved.activeStrokeProfileId
         : (fallback.activeStrokeProfileId && strokeProfiles.some(p => p.id === fallback.activeStrokeProfileId)
             ? fallback.activeStrokeProfileId
             : strokeProfiles[0].id);
 
-    // Hydrate shape profiles
-    const hasSavedShapeProfiles = Array.isArray(saved.shapeFavoriteProfiles) && saved.shapeFavoriteProfiles.length > 0;
-    const shapeProfiles: ShapeFavoriteProfile[] = hasSavedShapeProfiles
-        ? saved.shapeFavoriteProfiles!.map(shp => ({
+    const hasSavedShape = Array.isArray(saved?.shapeFavoriteProfiles) && saved!.shapeFavoriteProfiles.length > 0;
+    const shapeProfiles: ShapeFavoriteProfile[] = hasSavedShape
+        ? saved!.shapeFavoriteProfiles!.map(shp => ({
             id: shp.id,
             name: shp.name,
             shape: Array.isArray(shp.shape) ? shp.shape.map(s => ({ ...s })) : [],
@@ -478,34 +369,59 @@ export function mergeWorkspaceToolState(
             }))
             : DEFAULT_SHAPE_FAVORITE_PROFILES.map(shp => ({ ...shp, shape: [] })));
 
-    const activeShapeId = saved.activeShapeProfileId && shapeProfiles.some(p => p.id === saved.activeShapeProfileId)
+    const activeShapeId = saved?.activeShapeProfileId && shapeProfiles.some(p => p.id === saved.activeShapeProfileId)
         ? saved.activeShapeProfileId
         : (fallback.activeShapeProfileId && shapeProfiles.some(p => p.id === fallback.activeShapeProfileId)
             ? fallback.activeShapeProfileId
             : shapeProfiles[0].id);
 
-    const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) || strokeProfiles[0];
-    const activeShape = shapeProfiles.find(p => p.id === activeShapeId) || shapeProfiles[0];
+    return { strokeProfiles, activeStrokeId, shapeProfiles, activeShapeId };
+}
 
-    // Compatibility migration: only populate from saved.favorites if NO saved profiles were provided,
-    // or all provided profile trees are completely empty while saved.favorites had legacy presets.
-    const allSavedStrokeProfilesEmpty = strokeProfiles.every(p => p.pen.length === 0 && p.highlighter.length === 0);
-    if (!hasSavedStrokeProfiles || allSavedStrokeProfilesEmpty) {
-        if (Array.isArray(saved.favorites?.pen) && saved.favorites.pen.length > 0) {
-            activeStroke.pen = saved.favorites.pen.map(p => ({ ...p }));
-        }
-        if (Array.isArray(saved.favorites?.highlighter) && saved.favorites.highlighter.length > 0) {
-            activeStroke.highlighter = saved.favorites.highlighter.map(h => ({ ...h }));
-        }
-    }
-    const allSavedShapeProfilesEmpty = shapeProfiles.every(shp => shp.shape.length === 0);
-    if (!hasSavedShapeProfiles || allSavedShapeProfilesEmpty) {
-        if (Array.isArray(saved.favorites?.shape) && saved.favorites.shape.length > 0) {
-            activeShape.shape = saved.favorites.shape.map(s => ({ ...s }));
-        }
+/**
+ * One-way migration: if canonical profile trees are empty and legacy flat favorites exist,
+ * populates the active profile from the legacy favorites once, then re-derives the snapshot.
+ */
+export function migrateLegacyFavorites(state: WorkspaceToolState): WorkspaceToolState {
+    const stroke = state.strokeFavoriteProfiles ?? [];
+    const shape = state.shapeFavoriteProfiles ?? [];
+
+    const strokeEmpty = stroke.every(p => p.pen.length === 0 && p.highlighter.length === 0);
+    const shapeEmpty = shape.every(p => p.shape.length === 0);
+
+    const activeStroke = stroke.find(p => p.id === state.activeStrokeProfileId) ?? stroke[0];
+    const activeShape = shape.find(p => p.id === state.activeShapeProfileId) ?? shape[0];
+
+    if (strokeEmpty && activeStroke && Array.isArray(state.favorites?.pen) && state.favorites.pen.length > 0) {
+        activeStroke.pen = state.favorites.pen.map(p => ({ ...p }));
     }
 
-    const merged: WorkspaceToolState = {
+    if (strokeEmpty && activeStroke && Array.isArray(state.favorites?.highlighter) && state.favorites.highlighter.length > 0) {
+        activeStroke.highlighter = state.favorites.highlighter.map(h => ({ ...h }));
+    }
+
+    if (shapeEmpty && activeShape && Array.isArray(state.favorites?.shape) && state.favorites.shape.length > 0) {
+        activeShape.shape = state.favorites.shape.map(s => ({ ...s }));
+    }
+
+    // Only after migration, re-derive legacy snapshot from canonical profiles
+    syncLegacyFavoritesSlice(state);
+
+    return state;
+}
+
+/**
+ * Hydrates WorkspaceToolState from a saved persistence snapshot.
+ */
+export function hydrateFromSavedState(
+    saved?: Partial<WorkspaceToolState> | null,
+    fallback: WorkspaceToolState = DEFAULT_WORKSPACE_TOOL_STATE,
+): WorkspaceToolState {
+    if (!saved) return cloneWorkspaceToolState(fallback);
+
+    const { strokeProfiles, activeStrokeId, shapeProfiles, activeShapeId } = normalizeProfiles(saved, fallback);
+
+    const hydrated: WorkspaceToolState = {
         penEnabled: saved.penEnabled ?? fallback.penEnabled,
         activeTool: saved.activeTool ?? fallback.activeTool,
         snapGrid: saved.snapGrid ?? fallback.snapGrid,
@@ -572,7 +488,7 @@ export function mergeWorkspaceToolState(
         lasso: {
             mode: saved.lasso?.mode ?? fallback.lasso.mode,
         },
-        favorites: null as any,
+        favorites: saved.favorites ?? { pen: [], highlighter: [], shape: [] },
         strokeFavoriteProfiles: strokeProfiles,
         activeStrokeProfileId: activeStrokeId,
         shapeFavoriteProfiles: shapeProfiles,
@@ -580,7 +496,96 @@ export function mergeWorkspaceToolState(
         syncFavoriteProfiles: Boolean(saved.syncFavoriteProfiles ?? fallback.syncFavoriteProfiles ?? false),
     };
 
-    return attachFavoritesProjection(merged);
+    // Run explicit one-way migration if legacy flat favorites exist and profiles are empty
+    migrateLegacyFavorites(hydrated);
+
+    return hydrated;
+}
+
+export function mergeWorkspaceToolState(
+    saved?: Partial<WorkspaceToolState> | null,
+    fallback: WorkspaceToolState = DEFAULT_WORKSPACE_TOOL_STATE,
+): WorkspaceToolState {
+    return hydrateFromSavedState(saved, fallback);
+}
+
+export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToolState {
+    const { strokeProfiles, activeStrokeId, shapeProfiles, activeShapeId } = normalizeProfiles(state);
+
+    const cloned: WorkspaceToolState = {
+        penEnabled: state.penEnabled,
+        activeTool: state.activeTool,
+        snapGrid: state.snapGrid,
+        pen: {
+            profileId: state.pen.profileId,
+            color: state.pen.color,
+            width: state.pen.width,
+            opacity: state.pen.opacity,
+            smoothing: state.pen.smoothing,
+            pattern: state.pen.pattern,
+            straightenLines: state.pen.straightenLines,
+            activeSlotIndex: state.pen.activeSlotIndex,
+            palette: {
+                colors: [...state.pen.palette.colors],
+                opacities: [...state.pen.palette.opacities],
+            },
+        },
+        highlighter: {
+            profileId: state.highlighter.profileId,
+            color: state.highlighter.color,
+            width: state.highlighter.width,
+            opacity: state.highlighter.opacity,
+            pattern: state.highlighter.pattern,
+            straightenLines: state.highlighter.straightenLines,
+            activeSlotIndex: state.highlighter.activeSlotIndex,
+            palette: {
+                colors: [...state.highlighter.palette.colors],
+                opacities: [...state.highlighter.palette.opacities],
+            },
+        },
+        shape: {
+            shapeType: state.shape.shapeType,
+            color: state.shape.color,
+            width: state.shape.width,
+            opacity: state.shape.opacity,
+            pattern: state.shape.pattern,
+            fillEnabled: state.shape.fillEnabled,
+            fillColor: state.shape.fillColor,
+            fillOpacity: state.shape.fillOpacity,
+            activeSlotIndex: state.shape.activeSlotIndex,
+            palette: {
+                colors: [...state.shape.palette.colors],
+                opacities: [...state.shape.palette.opacities],
+            },
+        },
+        eraser: {
+            mode: state.eraser.mode,
+            radius: state.eraser.radius,
+            onlyHighlighter: state.eraser.onlyHighlighter,
+            scribbleToErase: state.eraser.scribbleToErase,
+        },
+        lasso: {
+            mode: state.lasso.mode,
+        },
+        favorites: state.favorites ? {
+            pen: Array.isArray(state.favorites.pen) ? state.favorites.pen.map(p => ({ ...p })) : [],
+            highlighter: Array.isArray(state.favorites.highlighter) ? state.favorites.highlighter.map(h => ({ ...h })) : [],
+            shape: Array.isArray(state.favorites.shape) ? state.favorites.shape.map(s => ({ ...s })) : [],
+        } : { pen: [], highlighter: [], shape: [] },
+        strokeFavoriteProfiles: strokeProfiles,
+        activeStrokeProfileId: activeStrokeId,
+        shapeFavoriteProfiles: shapeProfiles,
+        activeShapeProfileId: activeShapeId,
+        syncFavoriteProfiles: Boolean(state.syncFavoriteProfiles),
+    };
+
+    // If cloned state has legacy favorites but empty profiles, migrate once
+    migrateLegacyFavorites(cloned);
+
+    // Re-derive legacy snapshot from the cloned profiles
+    syncLegacyFavoritesSlice(cloned);
+
+    return cloned;
 }
 
 export interface InkElementBase {

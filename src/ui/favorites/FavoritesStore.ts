@@ -15,8 +15,20 @@ import type {
 import {
     DEFAULT_STROKE_FAVORITE_PROFILES,
     DEFAULT_SHAPE_FAVORITE_PROFILES,
+    getLegacySnapshot,
+    syncLegacyFavoritesSlice,
+    normalizeProfiles,
+    migrateLegacyFavorites,
     attachFavoritesProjection,
 } from '../../core/types.ts';
+
+export {
+    getLegacySnapshot,
+    syncLegacyFavoritesSlice,
+    normalizeProfiles,
+    migrateLegacyFavorites,
+    attachFavoritesProjection,
+};
 
 export type {
     FavoritableTool,
@@ -333,16 +345,6 @@ export function getActiveShapeProfile(state: WorkspaceToolState): ShapeFavoriteP
 }
 
 /**
- * Ensures the dynamic read/write projection `state.favorites` is attached
- * to the canonical profiles.
- */
-export function syncLegacyFavoritesSlice(state: WorkspaceToolState): void {
-    if (!state.favorites || Object.getOwnPropertyDescriptor(state, 'favorites')?.get === undefined) {
-        attachFavoritesProjection(state);
-    }
-}
-
-/**
  * Returns the canonical list of favorites for a tool from the currently active profile.
  */
 export function getCanonicalFavorites(state: WorkspaceToolState, tool: FavoritableTool): ToolFavoritePreset[] {
@@ -401,10 +403,10 @@ export function findMatchingProfile<T extends { id: string; name: string }>(
 }
 
 /**
- * Switches the active stroke profile (pen + highlighter).
+ * Sets the active stroke profile (pen + highlighter) and synchronizes the legacy snapshot.
  * If `syncFavoriteProfiles === true`, also updates `activeShapeProfileId`.
  */
-export function switchStrokeProfile(state: WorkspaceToolState, profileId: string): void {
+export function setActiveStrokeProfile(state: WorkspaceToolState, profileId: string): void {
     if (!Array.isArray(state.strokeFavoriteProfiles)) return;
     const strokeIdx = state.strokeFavoriteProfiles.findIndex(p => p.id === profileId);
     if (strokeIdx === -1) return;
@@ -426,10 +428,17 @@ export function switchStrokeProfile(state: WorkspaceToolState, profileId: string
 }
 
 /**
- * Switches the active shape profile (shapes).
+ * Switches the active stroke profile (pen + highlighter).
+ */
+export function switchStrokeProfile(state: WorkspaceToolState, profileId: string): void {
+    setActiveStrokeProfile(state, profileId);
+}
+
+/**
+ * Sets the active shape profile (shapes) and synchronizes the legacy snapshot.
  * If `syncFavoriteProfiles === true`, also updates `activeStrokeProfileId`.
  */
-export function switchShapeProfile(state: WorkspaceToolState, profileId: string): void {
+export function setActiveShapeProfile(state: WorkspaceToolState, profileId: string): void {
     if (!Array.isArray(state.shapeFavoriteProfiles)) return;
     const shapeIdx = state.shapeFavoriteProfiles.findIndex(p => p.id === profileId);
     if (shapeIdx === -1) return;
@@ -448,6 +457,13 @@ export function switchShapeProfile(state: WorkspaceToolState, profileId: string)
         }
     }
     syncLegacyFavoritesSlice(state);
+}
+
+/**
+ * Switches the active shape profile (shapes).
+ */
+export function switchShapeProfile(state: WorkspaceToolState, profileId: string): void {
+    setActiveShapeProfile(state, profileId);
 }
 
 /**

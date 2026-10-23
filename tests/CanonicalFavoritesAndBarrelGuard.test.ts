@@ -4,6 +4,11 @@ import {
     DEFAULT_WORKSPACE_TOOL_STATE,
     cloneWorkspaceToolState,
     mergeWorkspaceToolState,
+    hydrateFromSavedState,
+    normalizeProfiles,
+    migrateLegacyFavorites,
+    syncLegacyFavoritesSlice,
+    getLegacySnapshot,
     attachFavoritesProjection,
     type WorkspaceToolState,
     type PenFavoritePreset,
@@ -14,9 +19,16 @@ import {
     createFavoritePreset,
     getActiveStrokeProfile,
     getActiveShapeProfile,
+    setActiveStrokeProfile,
+    setActiveShapeProfile,
     switchStrokeProfile,
     setCanonicalFavorites,
+    getCanonicalFavorites,
+    createStrokeProfile,
+    deleteStrokeProfile,
+    renameStrokeProfile,
 } from '../src/ui/favorites/FavoritesStore.ts';
+import { isConfirmedBarrelPress, isStylusBarrelButton } from '../src/engine/input/StylusCapabilities.ts';
 import { CanvasController } from '../src/engine/CanvasController.ts';
 import { EngineEventBus } from '../src/core/events.ts';
 
@@ -335,8 +347,8 @@ describe('Canonical Profile Store & Stylus Barrel Guard Narrowing', () => {
             assert.strictEqual(activeProfile.pen.length, 1);
             assert.strictEqual(activeProfile.pen[0].id, preset.id);
 
-            // Mutate via legacy projection assignment
-            state.favorites.pen = [];
+            // Update canonical favorites and sync snapshot
+            setCanonicalFavorites(state, 'pen', []);
             assert.strictEqual(activeProfile.pen.length, 0);
             assert.strictEqual(state.favorites.pen.length, 0);
         });
@@ -380,6 +392,128 @@ describe('Canonical Profile Store & Stylus Barrel Guard Narrowing', () => {
             assert.strictEqual(merged.strokeFavoriteProfiles[0].pen.length, 1);
             assert.strictEqual(merged.strokeFavoriteProfiles[0].pen[0].color, '#123456');
             assert.strictEqual(merged.favorites.pen[0].color, '#123456');
+        });
+        test('prefers profile arrays as source of truth after hydration', () => {
+            const p1 = createFavoritePreset({ tool: 'pen', profileId: 'ball', color: '#111', width: 2 }) as PenFavoritePreset;
+            const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#222', width: 4 }) as PenFavoritePreset;
+            const legacyFav = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#999', width: 3 }) as PenFavoritePreset;
+
+            const state = mergeWorkspaceToolState({
+                strokeFavoriteProfiles: [
+                    { id: 'a', name: 'A', pen: [p1], highlighter: [] },
+                    { id: 'b', name: 'B', pen: [p2], highlighter: [] },
+                ],
+                activeStrokeProfileId: 'b',
+                favorites: {
+                    pen: [legacyFav],
+                    highlighter: [],
+                    shape: [],
+                },
+            });
+
+            assert.strictEqual(getCanonicalFavorites(state, 'pen').length, 1);
+            assert.strictEqual(getCanonicalFavorites(state, 'pen')[0].id, p2.id);
+            assert.strictEqual(state.favorites.pen.length, 1);
+            assert.strictEqual(state.favorites.pen[0].id, p2.id);
+        });
+
+        test('syncFavoriteProfiles synchronizes profile switching between stroke and shape', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            state.syncFavoriteProfiles = true;
+
+            // Create a matching profile in stroke
+            const newStroke = createStrokeProfile(state, 'Synced Test');
+            assert.strictEqual(state.activeStrokeProfileId, newStroke.id);
+            assert.strictEqual(state.activeShapeProfileId, newStroke.id);
+
+            // Switch to notes
+            setActiveStrokeProfile(state, 'notes');
+            assert.strictEqual(state.activeStrokeProfileId, 'notes');
+            assert.strictEqual(state.activeShapeProfileId, 'general');
+
+            // Switch to Synced Test via shape
+            setActiveShapeProfile(state, newStroke.id);
+            assert.strictEqual(state.activeShapeProfileId, newStroke.id);
+            assert.strictEqual(state.activeStrokeProfileId, newStroke.id);
+        });
+
+        test('deleting active profile cleanly shifts to remaining profile and updates snapshot', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const extra = createStrokeProfile(state, 'Extra');
+            const extraPreset = createFavoritePreset({ tool: 'pen', profileId: 'calli', color: '#888', width: 4 }) as PenFavoritePreset;
+            setCanonicalFavorites(state, 'pen', [extraPreset]);
+
+            assert.strictEqual(state.activeStrokeProfileId, extra.id);
+            assert.strictEqual(state.favorites.pen.length, 1);
+
+            // Delete the active profile
+            const deleted = deleteStrokeProfile(state, extra.id);
+            assert.strictEqual(deleted, true);
+            // Must have shifted to first remaining profile
+            assert.strictEqual(state.activeStrokeProfileId, 'notes');
+            assert.strictEqual(state.favorites.pen.length, 0);
+        });
+
+        test('isConfirmedBarrelPress strictly validates live stylus barrel input and rejects ordinary moves', () => {
+            // 1. Ordinary pen move: pressure 0.5, buttons 1, button 0 -> false
+            const ordinaryMove = {
+                pointerType: 'pen',
+                pressure: 0.5,
+                buttons: 1,
+                button: 0,
+                isPrimary: true,
+            } as PointerEvent;
+            assert.strictEqual(isConfirmedBarrelPress(ordinaryMove), false, 'Ordinary pen move must NOT be barrel press');
+
+            // 2. Explicit barrel button: pressure 0.5, buttons 4, button 2 -> true
+            const explicitBarrel4 = {
+                pointerType: 'pen',
+                pressure: 0.5,
+                buttons: 4,
+                button: 2,
+                isPrimary: true,
+            } as PointerEvent;
+            assert.strictEqual(isConfirmedBarrelPress(explicitBarrel4), true, 'buttons: 4, button: 2 must be barrel press');
+
+            // 3. Android barrel button: pressure 0.6, buttons 2, button 2 -> true
+            const explicitBarrel2 = {
+                pointerType: 'pen',
+                pressure: 0.6,
+                buttons: 2,
+                button: 2,
+                isPrimary: true,
+            } as PointerEvent;
+            assert.strictEqual(isConfirmedBarrelPress(explicitBarrel2), true, 'buttons: 2, button: 2 must be barrel press');
+
+            // 4. W3C barrel button: pressure 0.5, buttons 32, button 5 -> true
+            const explicitBarrelW3C = {
+                pointerType: 'pen',
+                pressure: 0.5,
+                buttons: 32,
+                button: 5,
+                isPrimary: true,
+            } as PointerEvent;
+            assert.strictEqual(isConfirmedBarrelPress(explicitBarrelW3C), true, 'buttons: 32, button: 5 must be barrel press');
+
+            // 5. Mouse right-click must NEVER be barrel press
+            const mouseRight = {
+                pointerType: 'mouse',
+                pressure: 0.5,
+                buttons: 2,
+                button: 2,
+                isPrimary: true,
+            } as PointerEvent;
+            assert.strictEqual(isConfirmedBarrelPress(mouseRight), false, 'Mouse right-click must NOT be barrel press');
+
+            // 6. Touch must NEVER be barrel press
+            const touch = {
+                pointerType: 'touch',
+                pressure: 1.0,
+                buttons: 1,
+                button: 0,
+                isPrimary: true,
+            } as PointerEvent;
+            assert.strictEqual(isConfirmedBarrelPress(touch), false, 'Touch must NOT be barrel press');
         });
     });
 

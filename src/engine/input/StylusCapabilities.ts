@@ -17,32 +17,45 @@ export function isStylusPointer(event: UIEvent | PointerEvent | MouseEvent): boo
 }
 
 /**
+ * Explicit stylus barrel detection predicate with strict event gating.
+ *
+ * Rules:
+ * 1. Strictly requires pointerType to be 'pen'. Mouse and touch are 100% rejected.
+ * 2. Matches confirmed hardware barrel signals:
+ *    - Android / Samsung DeX: button === 2 or buttons & 2 (0x02) / buttons & 4 (0x04)
+ *    - W3C Standard: button === 5 or buttons & 32 (0x20)
+ * 3. Confirms live contact interaction (pressure > 0 and isPrimary !== false),
+ *    preventing accidental hover or uncontacted movement from being treated as barrel press.
+ */
+export function isConfirmedBarrelPress(event: PointerEvent): boolean {
+    if (event.pointerType !== 'pen') return false;
+
+    const button = typeof event.button === 'number' ? event.button : -1;
+    const buttons = typeof event.buttons === 'number' ? event.buttons : 0;
+
+    const isExplicitBarrel = button === 2 || button === 5 || (buttons & 2) !== 0 || (buttons & 4) !== 0 || (buttons & 32) !== 0;
+    const isLiveInteraction = (typeof event.pressure === 'number' ? event.pressure > 0 : true) && (event.isPrimary !== false);
+
+    return isExplicitBarrel && isLiveInteraction;
+}
+
+/**
  * Robustly checks if an event represents an intentional stylus barrel button press.
  *
  * Rules:
  * 1. Strictly rejects non-pen pointers (mouse, touch). Mouse right-clicks (button 2) NEVER count.
  * 2. W3C Standard stylus barrel: button === 5 or buttons bitmask 32 (0x20).
- * 3. Android / Samsung WebView / DeX barrel: button === 2 or buttons bitmask 2 (0x02).
+ * 3. Android / Samsung WebView / DeX barrel: button === 2 or buttons bitmask 2 (0x02) / bitmask 4 (0x04).
  */
 export function isStylusBarrelButton(event: PointerEvent | MouseEvent): boolean {
-    // 1. Strictly require pointerType to be 'pen' if pointerType property is present.
-    // Mouse right-clicks and touch taps must NEVER be recognized as a stylus barrel button.
-    if ('pointerType' in event) {
-        if ((event as PointerEvent).pointerType !== 'pen') {
-            return false;
-        }
-    } else {
-        // Plain MouseEvent without pointerType is a standard mouse event, never a stylus barrel
+    if (!('pointerType' in event) || (event as PointerEvent).pointerType !== 'pen') {
         return false;
     }
 
     const button = typeof event.button === 'number' ? event.button : -1;
-    const buttons = typeof event.buttons === 'number' ? event.buttons : 0;
+    const buttons = typeof (event as any).buttons === 'number' ? (event as any).buttons : 0;
 
-    const isW3C = button === 5 || (buttons & 32) !== 0;
-    const isAndroid = button === 2 || (buttons & 2) !== 0;
-
-    return isW3C || isAndroid;
+    return button === 2 || button === 5 || (buttons & 2) !== 0 || (buttons & 4) !== 0 || (buttons & 32) !== 0;
 }
 
 /**

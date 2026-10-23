@@ -1,5 +1,5 @@
 import type { Point } from '../../core/types.ts';
-import { isStylusBarrelButton, hasDeliberateStylusMovement } from './StylusCapabilities.ts';
+import { isConfirmedBarrelPress, isStylusBarrelButton, hasDeliberateStylusMovement } from './StylusCapabilities.ts';
 
 export interface InputManagerOptions {
     palmRejectionCooldownMs?: number;
@@ -371,7 +371,7 @@ export class InputManager {
         }
 
         // Only confirmed physical barrel button signals are allowed to cancel active drawing
-        const isConfirmedBarrel = this.activeBarrel || isStylusBarrelButton(event as any);
+        const isConfirmedBarrel = this.activeBarrel || isConfirmedBarrelPress(event as any) || isStylusBarrelButton(event as any);
         if (!isConfirmedBarrel) {
             return;
         }
@@ -418,7 +418,7 @@ export class InputManager {
     }
 
     private isBarrel(event: PointerEvent): boolean {
-        return isStylusBarrelButton(event);
+        return isConfirmedBarrelPress(event) || isStylusBarrelButton(event);
     }
 
     private fillPoint(event: PointerEvent, bounds: DOMRect, point: Point): void {
