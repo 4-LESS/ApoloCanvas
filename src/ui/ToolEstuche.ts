@@ -1433,7 +1433,7 @@ export class ToolEstuche implements PopoverInstance {
             btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
             btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
             setAccessibleTooltip(btn, def.label);
-            btn.appendChild(createSvg(def.iconD, { size: 20 }));
+            btn.appendChild(createSvg(def.iconD, { size: 26, strokeWidth: 2.2 }));
 
             btn.onclick = () => {
                 this.state.shapeType = def.type;

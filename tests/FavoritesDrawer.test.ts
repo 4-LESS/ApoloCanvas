@@ -1034,11 +1034,14 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             const handle = card.querySelector('.apolo-favorite-drag-handle');
             assert.ok(handle, 'Drag handle must exist');
 
-            // Delete action button exists and fires onDeleteFavorite
-            const actions = card.querySelector('.apolo-favorite-actions');
-            assert.ok(actions, 'Actions container must exist');
-            const deleteBtn = actions.querySelector('.apolo-favorite-delete-btn') as HTMLButtonElement | null;
-            assert.ok(deleteBtn, 'Delete button must exist in actions container');
+            // Trash action container is removed (redundant per design requirement)
+            assert.strictEqual(card.querySelector('.apolo-favorite-actions'), null, 'Actions container must be removed');
+            assert.strictEqual(card.querySelector('.actions'), null, 'Actions container must be removed');
+
+            // Delete button exists as hidden programmatic helper
+            const deleteBtn = card.querySelector('.apolo-favorite-delete-btn') as HTMLButtonElement | null;
+            assert.ok(deleteBtn, 'Delete button must exist');
+            assert.strictEqual(deleteBtn.style.display, 'none');
 
             let stopped = false;
             deleteBtn.onclick({

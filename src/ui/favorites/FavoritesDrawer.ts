@@ -990,34 +990,19 @@ export class FavoritesDrawer {
             card.removeAttribute('draggable');
         };
 
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'apolo-favorite-delete-btn';
+        deleteBtn.style.display = 'none';
+        deleteBtn.setAttribute('aria-hidden', 'true');
+        deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.callbacks.onDeleteFavorite(preset.id);
+        };
+
         if (isShape) {
-            const actionsEl = document.createElement('div');
-            actionsEl.className = 'actions apolo-favorite-actions';
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.type = 'button';
-            deleteBtn.className = 'ibtn danger apolo-favorite-delete-btn';
-            deleteBtn.setAttribute('aria-label', 'Eliminar');
-            setAccessibleTooltip(deleteBtn, 'Eliminar');
-            deleteBtn.appendChild(createSvg(ICONS.trash, { size: 14 }));
-            deleteBtn.onclick = (e) => {
-                e.stopPropagation();
-                this.callbacks.onDeleteFavorite(preset.id);
-            };
-            actionsEl.appendChild(deleteBtn);
-
-            card.append(previewEl, handleBtn, actionsEl);
+            card.append(previewEl, handleBtn, deleteBtn);
         } else {
-            const deleteBtn = document.createElement('button');
-            deleteBtn.type = 'button';
-            deleteBtn.className = 'apolo-favorite-delete-btn';
-            deleteBtn.style.display = 'none';
-            deleteBtn.setAttribute('aria-hidden', 'true');
-            deleteBtn.onclick = (e) => {
-                e.stopPropagation();
-                this.callbacks.onDeleteFavorite(preset.id);
-            };
-
             if (glyph) {
                 card.append(glyph, previewEl, handleBtn, deleteBtn);
             } else {
