@@ -2,6 +2,7 @@ import type { EraserMode, PenFavorite, PenProfileId, ShapeType, ThicknessPreset,
 import { ICONS, createSvg } from './theme.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { ThicknessPopover } from './popover/ThicknessPopover.ts';
+import { isStylusBarrelButton, isStylusHoverBarrel } from '../engine/input/StylusCapabilities.ts';
 
 export interface ToolbarOptions {
     slot: ToolbarSlot;
@@ -22,6 +23,8 @@ export interface ToolbarOptions {
     onToggleKeyboardMode: () => void;
     onSelectTool: (tool: ToolType) => void;
     onToggleEraserMode?: () => void;
+    onCycleFavorite?: (tool: ToolType) => void;
+    onToggleEstucheFavorites?: (tool: ToolType) => void;
     onToggleEstuche: (tool: ToolType) => void;
     onUndo: () => void;
     onRedo: () => void;
@@ -115,6 +118,10 @@ export class Toolbar {
     private currentDragPos: { x: number; y: number } | null = null;
     private unlockTransitionUntil = 0;
     private resizeObserver: ResizeObserver | null = null;
+    private lastToolTapTime = new Map<ToolType, number>();
+    private lastBarrelDrawerOpenTime = 0;
+    private isStylusBarrelLatched = false;
+    private pendingEstucheTimeout: number | null = null;
 
     // Set of currently overflowed items (hidden from toolbar, delegated to MoreMenu)
     private overflowedItemIds = new Set<string>();
@@ -544,13 +551,114 @@ export class Toolbar {
 
 
             btn.setAttribute('data-apolo-popover-trigger', 'true');
+
+            const handleBarrelOpenFavorites = (e: Event): void => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (this.pendingEstucheTimeout !== null) {
+                    clearTimeout(this.pendingEstucheTimeout);
+                    this.pendingEstucheTimeout = null;
+                }
+                const now = Date.now();
+                if (this.isStylusBarrelLatched || (now - this.lastBarrelDrawerOpenTime < 300)) {
+                    return;
+                }
+                this.isStylusBarrelLatched = true;
+                this.lastBarrelDrawerOpenTime = now;
+                if (this.options.onToggleEstucheFavorites && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                    this.options.onToggleEstucheFavorites(def.tool);
+                } else {
+                    this.options.onToggleEstuche(def.tool);
+                }
+            };
+
+            btn.addEventListener('contextmenu', (e) => {
+                if ('pointerType' in e && (e as any).pointerType && (e as any).pointerType !== 'pen') return;
+                const now = Date.now();
+                if (this.isStylusBarrelLatched || (now - this.lastBarrelDrawerOpenTime < 300)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                handleBarrelOpenFavorites(e);
+                this.isStylusBarrelLatched = false;
+            });
+
+            btn.addEventListener('pointerdown', (e: PointerEvent) => {
+                if (isStylusBarrelButton(e) && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                    handleBarrelOpenFavorites(e);
+                }
+            });
+
+            btn.addEventListener('pointermove', (e: PointerEvent) => {
+                if (e.pointerType !== 'pen') return;
+                const isHover = isStylusHoverBarrel(e);
+                const isBarrel = isStylusBarrelButton(e);
+                if (isHover || isBarrel) {
+                    if (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape') {
+                        handleBarrelOpenFavorites(e);
+                    }
+                } else if (this.isStylusBarrelLatched) {
+                    // Barrel button was released during hover movement
+                    this.isStylusBarrelLatched = false;
+                }
+            });
+
+            btn.addEventListener('pointerup', (e: PointerEvent) => {
+                if (e.pointerType === 'pen') {
+                    this.isStylusBarrelLatched = false;
+                }
+            });
+
+            btn.addEventListener('pointerleave', (e: PointerEvent) => {
+                if (e.pointerType === 'pen') {
+                    this.isStylusBarrelLatched = false;
+                }
+            });
+
+            btn.addEventListener('pointercancel', (e: PointerEvent) => {
+                if (e.pointerType === 'pen') {
+                    this.isStylusBarrelLatched = false;
+                }
+            });
+
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                if (Date.now() - this.lastBarrelDrawerOpenTime < 300) {
+                    return;
+                }
                 this.closeAllPopovers();
                 // Second tap on the active tool toggles its estuche (including eraser!)
                 if (this.options.activeTool === def.tool && this.options.penEnabled) {
-                    this.options.onToggleEstuche(def.tool);
+                    if (this.options.onCycleFavorite && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                        const now = Date.now();
+                        const lastTime = this.lastToolTapTime.get(def.tool) ?? 0;
+                        const delta = now - lastTime;
+                        if (lastTime > 0 && delta < 300) {
+                            if (this.pendingEstucheTimeout !== null) {
+                                clearTimeout(this.pendingEstucheTimeout);
+                                this.pendingEstucheTimeout = null;
+                            }
+                            this.lastToolTapTime.set(def.tool, now);
+                            this.options.onCycleFavorite(def.tool);
+                            return;
+                        }
+                        this.lastToolTapTime.set(def.tool, now);
+                        if (this.pendingEstucheTimeout !== null) {
+                            clearTimeout(this.pendingEstucheTimeout);
+                        }
+                        this.pendingEstucheTimeout = window.setTimeout(() => {
+                            this.pendingEstucheTimeout = null;
+                            this.options.onToggleEstuche(def.tool);
+                        }, 280);
+                    } else {
+                        this.options.onToggleEstuche(def.tool);
+                    }
                 } else {
+                    if (this.pendingEstucheTimeout !== null) {
+                        clearTimeout(this.pendingEstucheTimeout);
+                        this.pendingEstucheTimeout = null;
+                    }
                     this.options.penEnabled = true;
                     this.setTool(def.tool);
                     this.options.onSelectTool(def.tool);
@@ -677,6 +785,7 @@ export class Toolbar {
                     const color = this.toolPalettes[paletteKey].colors[i] || '#E53935';
                     const opacity = this.toolPalettes[paletteKey].opacities[i] ?? 100;
                     this.options.activeColor = color;
+                    ColorPickerPopover.pushRecentColor(color);
                     this.updateFavoritesVisual();
                     this.options.onChangeColor?.(color);
                     this.options.onSelectFavorite?.(i);
@@ -1244,6 +1353,10 @@ export class Toolbar {
     }
 
     setTool(tool: ToolType, shapeType?: ShapeType): void {
+        if (this.pendingEstucheTimeout !== null) {
+            clearTimeout(this.pendingEstucheTimeout);
+            this.pendingEstucheTimeout = null;
+        }
         this.options.activeTool = tool;
         if (shapeType) {
             this.setShape(shapeType);
@@ -1348,6 +1461,7 @@ export class Toolbar {
     }
 
     closeAllPopovers(): void {
+        this.isStylusBarrelLatched = false;
         if (this.thicknessPopover?.isOpen()) {
             this.thicknessPopover.close();
             this.thicknessTriggerBtn?.classList.remove('is-open');
@@ -1362,6 +1476,10 @@ export class Toolbar {
     }
 
     destroy(): void {
+        if (this.pendingEstucheTimeout !== null) {
+            clearTimeout(this.pendingEstucheTimeout);
+            this.pendingEstucheTimeout = null;
+        }
         this.closeAllPopovers();
         this.resizeObserver?.disconnect();
         if (typeof window !== 'undefined') {

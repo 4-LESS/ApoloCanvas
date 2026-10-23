@@ -7,6 +7,12 @@ import {
     cloneWorkspaceToolState,
     mergeWorkspaceToolState,
 } from '../src/core/types.ts';
+import {
+    setCanonicalFavorites,
+    getCanonicalFavorites,
+    switchStrokeProfile,
+    createFavoritePreset,
+} from '../src/ui/favorites/FavoritesStore.ts';
 
 function createMockContext() {
     return {
@@ -502,5 +508,59 @@ describe('Absolute Tool State Persistence & Per-Tool Memory Across Mode Switches
         assert.strictEqual(merged.highlighter.profileId, 'hlr');
         assert.strictEqual(merged.eraser.mode, 'whole');
         assert.strictEqual(merged.lasso.mode, 'free');
+    });
+
+    test('4. Persistence Round-Trip: Profile trees and derived legacy favorites projection serialize and deserialize identically', () => {
+        const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+        const p1 = createFavoritePreset({ tool: 'pen', profileId: 'ball', color: '#1F4FD8', width: 3 });
+        const p2 = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#10B981', width: 5 });
+        setCanonicalFavorites(state, 'pen', [p1, p2]);
+
+        // Verify canonical and legacy projection match before persistence
+        assert.strictEqual(state.favorites.pen.length, 2);
+        assert.strictEqual(state.strokeFavoriteProfiles[0].pen.length, 2);
+        assert.strictEqual(state.favorites.pen[0].color, '#1F4FD8');
+
+        // Simulate Obsidian settings persistence roundtrip (JSON stringify -> parse)
+        const serialized = JSON.stringify(state);
+        const parsed = JSON.parse(serialized);
+        const hydrated = mergeWorkspaceToolState(parsed);
+
+        // Verify hydrated state restores profiles and projection
+        assert.strictEqual(hydrated.activeStrokeProfileId, 'notes');
+        assert.strictEqual(hydrated.strokeFavoriteProfiles[0].pen.length, 2);
+        assert.strictEqual(hydrated.strokeFavoriteProfiles[0].pen[0].color, '#1F4FD8');
+        assert.strictEqual(hydrated.favorites.pen.length, 2);
+        assert.strictEqual(hydrated.favorites.pen[0].color, '#1F4FD8');
+    });
+
+    test('5. Profile Switch & Mutation: Switching profiles updates legacy favorites projection without dropping data', () => {
+        const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+        const notePreset = createFavoritePreset({ tool: 'pen', profileId: 'ball', color: '#000000', width: 2 });
+        setCanonicalFavorites(state, 'pen', [notePreset]);
+
+        // Switch to 'academic' profile
+        switchStrokeProfile(state, 'academic');
+        assert.strictEqual(state.activeStrokeProfileId, 'academic');
+        // 'academic' starts empty
+        assert.strictEqual(state.favorites.pen.length, 0);
+
+        // Add academic preset
+        const academicPreset = createFavoritePreset({ tool: 'pen', profileId: 'fountain', color: '#FF0000', width: 4 });
+        setCanonicalFavorites(state, 'pen', [academicPreset]);
+        assert.strictEqual(state.favorites.pen.length, 1);
+        assert.strictEqual(state.favorites.pen[0].color, '#FF0000');
+
+        // Switch back to 'notes': original notePreset is preserved, and projection reflects notes
+        switchStrokeProfile(state, 'notes');
+        assert.strictEqual(state.activeStrokeProfileId, 'notes');
+        assert.strictEqual(state.favorites.pen.length, 1);
+        assert.strictEqual(state.favorites.pen[0].color, '#000000');
+
+        // Switch back to 'academic': academicPreset is preserved
+        switchStrokeProfile(state, 'academic');
+        assert.strictEqual(state.activeStrokeProfileId, 'academic');
+        assert.strictEqual(state.favorites.pen.length, 1);
+        assert.strictEqual(state.favorites.pen[0].color, '#FF0000');
     });
 });

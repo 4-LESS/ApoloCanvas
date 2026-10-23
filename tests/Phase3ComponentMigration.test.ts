@@ -4,6 +4,7 @@ import { ToolEstuche, type ToolEstucheState } from '../src/ui/ToolEstuche.ts';
 import { BoxMenu } from '../src/ui/BoxMenu.ts';
 import { LassoMenu } from '../src/ui/LassoMenu.ts';
 import { ZoomPill } from '../src/ui/ZoomPill.ts';
+import { ColorPickerPopover } from '../src/ui/popover/ColorPickerPopover.ts';
 import { PopoverController } from '../src/ui/kit/index.ts';
 import { applyPopoverGeometry } from '../src/ui/popover/PopoverGeometry.ts';
 
@@ -82,7 +83,7 @@ function createMockEnvironment() {
                     return next;
                 },
             },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); },
+            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); if (k === 'class') el.className = String(v); },
             getAttribute: (k: string) => attributes.get(k) ?? null,
             hasAttribute: (k: string) => attributes.has(k),
             removeAttribute: (k: string) => { attributes.delete(k); },
@@ -117,6 +118,23 @@ function createMockEnvironment() {
                     return el;
                 }
                 return null;
+            },
+            querySelector: (sel: string) => {
+                let found: any = null;
+                const check = (node: any) => {
+                    if (found) return;
+                    if (sel.startsWith('.') && (node.className?.split(/\s+/).includes(sel.slice(1)) || node.getAttribute?.('class')?.split(/\s+/).includes(sel.slice(1)))) {
+                        found = node;
+                        return;
+                    }
+                    if (node.tagName?.toLowerCase() === sel.toLowerCase()) {
+                        found = node;
+                        return;
+                    }
+                    for (const c of node.children || []) check(c);
+                };
+                for (const c of children) check(c);
+                return found;
             },
             getBoundingClientRect: () => ({ left: 200, top: 100, right: 244, bottom: 144, width: 44, height: 44 }),
             querySelectorAll: (sel: string) => {
@@ -242,9 +260,40 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             assert.strictEqual(initialFirstChild, afterFirstChild, 'DOM nodes must NOT be recreated during width slider update');
 
             estuche.updateState({ tool: 'highlighter' });
-            const highlighterTips = body.children[0].children;
+            const tipsGrid = body.children[0];
+            assert.ok(tipsGrid.classList.contains('hl-tip-grid'), 'Highlighter uses symmetric 2-column hl-tip-grid');
+            const highlighterTips = tipsGrid.children;
+            assert.strictEqual(highlighterTips.length, 2, 'Exactly 2 tips in highlighter estuche');
             assert.ok(highlighterTips[0].classList.contains('is-active'), 'Chisel is selected when entering highlighter mode from a pen profile');
             assert.ok(!highlighterTips[1].classList.contains('is-active'), 'Only one highlighter tip is active');
+            assert.strictEqual((highlighterTips[0] as HTMLElement).dataset.tip, 'hlf');
+            assert.strictEqual((highlighterTips[1] as HTMLElement).dataset.tip, 'hlr');
+
+            // Verify stroke sample SVGs
+            const hlfSample = (highlighterTips[0] as HTMLElement).querySelector('.hl-stroke-sample');
+            assert.ok(hlfSample, 'Biselado tip has stroke sample SVG');
+            assert.ok(hlfSample.querySelector('polygon'), 'Biselado sample has polygon element');
+
+            const hlrSample = (highlighterTips[1] as HTMLElement).querySelector('.hl-stroke-sample');
+            assert.ok(hlrSample, 'Redondo tip has stroke sample SVG');
+            assert.ok(hlrSample.querySelector('circle'), 'Redondo sample has circle element');
+
+            // Verify Opacity slider has .opacity-track and .opacity-gradient-layer
+            const opacityTrack = body.querySelector('.opacity-track') as HTMLElement;
+            assert.ok(opacityTrack, 'Opacity slider track has .opacity-track class');
+            const gradLayer = opacityTrack.querySelector('.opacity-gradient-layer');
+            assert.ok(gradLayer, 'Opacity track has .opacity-gradient-layer');
+
+            // Verify Opacity thumb is solid (no backgroundColor or opacity style set)
+            const opacityThumb = opacityTrack.querySelector('.slider-thumb') as HTMLElement;
+            assert.ok(opacityThumb, 'Opacity slider has thumb');
+            assert.ok(!opacityThumb.style.opacity, 'Opacity thumb style.opacity must be empty (100% solid via CSS)');
+            assert.ok(!opacityThumb.style.backgroundColor, 'Opacity thumb style.backgroundColor must be empty');
+
+            // Verify --hl-color reactivity
+            assert.ok(estuche.container.style.getPropertyValue('--hl-color'), 'Container has --hl-color set');
+            estuche.updateState({ color: '#c11574' });
+            assert.strictEqual(estuche.container.style.getPropertyValue('--hl-color'), '#c11574', '--hl-color updates on state change');
 
             // 4. Close estuche
             estuche.close();
@@ -484,6 +533,39 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             assert.strictEqual(zoomOutCount, 1);
 
             pill.destroy();
+        } finally {
+            (globalThis as any).window = prevWin;
+            (globalThis as any).document = prevDoc;
+        }
+    });
+
+    test('ColorPickerPopover: transparency slider uses neutral track and high-contrast thumb matching toolbar slider', () => {
+        const { mockWindow, mockDocument } = createMockEnvironment();
+        const prevWin = (globalThis as any).window;
+        const prevDoc = (globalThis as any).document;
+        (globalThis as any).window = mockWindow;
+        (globalThis as any).document = mockDocument;
+
+        try {
+            const popover = new ColorPickerPopover(mockDocument.body as any);
+            const anchor = mockDocument.createElement('button');
+            popover.open(anchor as any, 'tc', mockDocument.body as any, '#1F4FD8', () => {}, null, 80);
+
+            const transGroup = popover.el.querySelector('.transparency-group');
+            assert.ok(transGroup, 'transparency group must exist');
+
+            const track = transGroup.querySelector('.slider-track');
+            assert.ok(track, 'slider track must exist');
+
+            const fill = track.querySelector('.slider-fill');
+            assert.ok(fill, 'slider-fill element exists for fallback');
+
+            const thumb = track.querySelector('.slider-thumb');
+            assert.ok(thumb, 'slider thumb must exist');
+            assert.strictEqual(thumb.textContent, '20', 'thumb displays opacity complement (transparency 20%)');
+            assert.strictEqual(thumb.style.left, 'calc(20% - 4.8px)', 'thumb is positioned via calc offset');
+
+            popover.destroy();
         } finally {
             (globalThis as any).window = prevWin;
             (globalThis as any).document = prevDoc;

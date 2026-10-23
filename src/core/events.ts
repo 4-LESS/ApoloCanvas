@@ -10,6 +10,7 @@ export interface EngineEvents {
     'canvas:dirty': (pageId: string) => void;
     'zoom:changed': (zoom: number) => void;
     'history:changed': (canUndo: boolean, canRedo: boolean) => void;
+    'favorites:cycle': () => void;
     'save:status': (isSaving: boolean, lastSavedAt: number) => void;
     'toast': (message: string) => void;
 }

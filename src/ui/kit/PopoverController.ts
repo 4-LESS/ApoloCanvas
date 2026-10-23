@@ -2,6 +2,7 @@ export interface PopoverInstance {
     readonly container: HTMLElement;
     hide: () => void;
     isOpen: () => boolean;
+    containsTarget?: (target: Node) => boolean;
 }
 
 interface ActivePopoverEntry {
@@ -64,8 +65,8 @@ export class PopoverController {
                 continue;
             }
 
-            // If click is inside popover container, don't dismiss it
-            if (entry.popover.container.contains(target)) {
+            // If click is inside popover container or a declared child target, don't dismiss it
+            if (entry.popover.container.contains(target) || entry.popover.containsTarget?.(target)) {
                 return;
             }
 

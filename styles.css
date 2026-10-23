@@ -11,7 +11,7 @@
   --apolo-bg-floating: rgba(255, 255, 255, 0.88);
 
   /* Tier 1 & 2: Borders & Dividers */
-  --apolo-border: var(--background-modifier-border, #dde0e6);
+  --apolo-border: var(--background-modifier-border, rgba(0, 0, 0, 0.08));
   --apolo-border-subtle: rgba(0, 0, 0, 0.08);
 
   /* Tier 1 & 2: Text Semantics */
@@ -22,8 +22,12 @@
   /* Tier 1 & 2: Interactive Accents */
   --apolo-accent: var(--interactive-accent, #2f6bff);
   --apolo-accent-hover: var(--interactive-accent-hover, #1f4fd8);
-  --apolo-accent-light: rgba(47, 107, 255, 0.12);
-  --apolo-accent-subtle: rgba(47, 107, 255, 0.06);
+  --apolo-accent-light: rgba(47, 107, 255, 0.24);
+  --apolo-accent-subtle: rgba(47, 107, 255, 0.08);
+
+  /* Unified Mockup Card Tokens */
+  --apolo-card: rgba(128, 128, 128, 0.08);
+  --apolo-card-hover: rgba(128, 128, 128, 0.14);
 
   /* Active Tool Indicator: neutral circular disk (customizable) */
   --apolo-tool-active-bg: rgba(0, 0, 0, 0.08);
@@ -34,8 +38,8 @@
   --apolo-purple: #6c3fd1;
   --apolo-purple-text: #5b2fc0;
   --apolo-purple-light: rgba(108, 63, 209, 0.14);
-  --apolo-danger: #c92a2a;
-  --apolo-danger-light: rgba(201, 42, 42, 0.12);
+  --apolo-danger: #ef4444;
+  --apolo-danger-light: rgba(239, 68, 68, 0.12);
   --apolo-amber: #d97706;
   --apolo-amber-bg: #fff1cc;
 
@@ -88,19 +92,23 @@
 }
 
 .theme-dark {
-  --apolo-bg: var(--background-primary, #1e2330);
-  --apolo-bg-alt: var(--background-secondary, #161922);
-  --apolo-bg-elevated: var(--background-primary-alt, #242938);
-  --apolo-bg-floating: rgba(30, 35, 48, 0.88);
-  --apolo-border: var(--background-modifier-border, #2d3446);
-  --apolo-border-subtle: rgba(255, 255, 255, 0.08);
+  --apolo-bg: var(--background-primary, #25272d);
+  --apolo-bg-alt: var(--background-secondary, #1b1d22);
+  --apolo-bg-elevated: var(--background-primary-alt, #25272d);
+  --apolo-bg-floating: rgba(37, 39, 45, 0.88);
+  --apolo-border: var(--background-modifier-border, rgba(255, 255, 255, 0.09));
+  --apolo-border-subtle: rgba(255, 255, 255, 0.09);
   --apolo-text: var(--text-normal, #f3f4f6);
-  --apolo-text-muted: var(--text-muted, #9ca3af);
-  --apolo-text-faint: var(--text-faint, #6b7280);
-  --apolo-accent: var(--interactive-accent, #3b82f6);
+  --apolo-text-muted: var(--text-muted, #a1a8b5);
+  --apolo-text-faint: var(--text-faint, #6f7684);
+  --apolo-accent: var(--interactive-accent, #5b8cff);
   --apolo-accent-hover: var(--interactive-accent-hover, #60a5fa);
-  --apolo-accent-light: rgba(59, 130, 246, 0.2);
-  --apolo-accent-subtle: rgba(59, 130, 246, 0.12);
+  --apolo-accent-light: rgba(91, 140, 255, 0.30);
+  --apolo-accent-subtle: rgba(91, 140, 255, 0.12);
+
+  /* Unified Mockup Card Tokens */
+  --apolo-card: rgba(255, 255, 255, 0.05);
+  --apolo-card-hover: rgba(255, 255, 255, 0.10);
 
   /* Active Tool Indicator: neutral circular disk (customizable) */
   --apolo-tool-active-bg: rgba(255, 255, 255, 0.16);
@@ -109,13 +117,13 @@
   --apolo-purple: #a98bff;
   --apolo-purple-text: #c4b5fd;
   --apolo-purple-light: rgba(169, 139, 255, 0.22);
-  --apolo-danger: #ff7a7a;
-  --apolo-danger-light: rgba(255, 122, 122, 0.2);
+  --apolo-danger: #ef4444;
+  --apolo-danger-light: rgba(239, 68, 68, 0.2);
   --apolo-amber: #ffd15c;
   --apolo-amber-bg: #4a3a12;
   --apolo-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --apolo-shadow-md: 0 8px 28px rgba(0, 0, 0, 0.5);
-  --apolo-shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.65);
+  --apolo-shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
 
 /* ==========================================================================
@@ -136,18 +144,18 @@
    Scoped Button Reset (Zero !important, High Specificity against Obsidian)
    Neutralizes Obsidian button:not(.clickable-icon) and .is-tablet styles.
    ========================================================================== */
-.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn),
-.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.popover-pag-dot):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn) {
+.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn) {
   all: unset;
   box-sizing: border-box;
   display: inline-flex;
@@ -411,7 +419,7 @@
 /* Tool icon wrapper */
 .apolo-tool-icon-wrap {
   position: relative;
-  z-index: 1;
+  z-1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2187,7 +2195,7 @@
 .apolo-space-widget[data-apolo-grid-style="none"],
 .apolo-space-block[data-apolo-grid-style="none"],
 .apolo-space[data-apolo-grid="false"],
-.apolo-space-widget[data-apolo-grid="false"],
+.apolo-space-widget[data-apolo-grid-style="none"],
 .apolo-space-block[data-apolo-grid="false"],
 [data-apolo-space][data-apolo-grid="false"],
 [data-apolo-space-id][data-apolo-grid="false"],
@@ -2810,32 +2818,51 @@ button.apolo-box-menu-swatch,
   transition: transform 0.05s ease;
 }
 
-/* 5. Popovers de estuche (.apolo-estuche-popover) */
+/* 5. Popovers de estuche (.apolo-estuche-popover) y Panel Base (.panel) */
+.apolo-ui .panel,
 .apolo-ui .apolo-estuche-popover,
+.panel,
 .apolo-estuche-popover {
+  --bg: var(--apolo-bg);
+  --bg-alt: var(--apolo-bg-alt);
+  --text: var(--apolo-text);
+  --muted: var(--apolo-text-muted);
+  --faint: var(--apolo-text-faint);
+  --accent: var(--apolo-accent);
+  --accent-subtle: var(--apolo-accent-subtle);
+  --accent-light: var(--apolo-accent-light);
+  --border: var(--apolo-border);
+  --card: var(--apolo-card);
+  --card-hover: var(--apolo-card-hover);
+  --shadow: var(--apolo-shadow-lg);
+  --danger: var(--apolo-danger);
+
   position: fixed;
   z-index: var(--apolo-layer-popover, 30);
   width: 320px;
-  background: var(--apolo-bg-elevated);
-  color: var(--apolo-text);
-  border: 1px solid var(--apolo-border);
-  border-radius: 24px;
-  padding: 16px;
-  box-shadow: var(--apolo-shadow-lg);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 14px 14px 12px;
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   gap: 14px;
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
   scrollbar-width: none;
+  box-sizing: border-box;
 }
 
-.apolo-estuche-popover::-webkit-scrollbar {
+.apolo-estuche-popover::-webkit-scrollbar,
+.panel::-webkit-scrollbar {
   display: none;
 }
 
 .apolo-ui .apolo-estuche-popover .apolo-popover-body,
-.apolo-estuche-popover .apolo-popover-body {
+.apolo-estuche-popover .apolo-popover-body,
+.estuche-body {
   padding: 0;
   overflow-y: visible;
   display: flex;
@@ -2843,396 +2870,1119 @@ button.apolo-box-menu-swatch,
   gap: 14px;
 }
 
-.popover-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.popover-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--apolo-text);
-  margin: 0;
-}
-
-.popover-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.apolo-ui .popover-hdr-btn,
-.popover-hdr-btn {
+/* Botón de ícono estándar */
+.ibtn {
   all: unset;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--apolo-text-muted);
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.popover-hdr-btn:hover { background: var(--apolo-bg-alt); color: var(--apolo-text); }
-.popover-hdr-btn.is-fav-saved { color: #f59e0b; }
-.popover-hdr-btn.popover-close { background: var(--apolo-bg-alt); }
-
-.popover-tools-selector {
-  display: flex;
-  justify-content: space-around;
-  align-items: flex-end;
-  height: 66px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--apolo-border-subtle);
-}
-
-.apolo-ui .popover-tool-opt,
-.popover-tool-opt {
-  all: unset;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  cursor: pointer;
-  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.popover-tool-opt .icon-wrap {
-  width: 46px;
-  height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  color: var(--apolo-text-muted);
-}
-
-.popover-tool-opt:hover .icon-wrap { color: var(--apolo-text); }
-.popover-tool-opt.is-active { transform: translateY(-6px); }
-.popover-tool-opt.is-active .icon-wrap {
-  color: var(--apolo-accent);
-  background: var(--apolo-accent-light);
-}
-
-.popover-slider-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.popover-slider-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--apolo-text-muted);
-  margin-left: 4px;
-}
-
-.popover-slider-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.apolo-ui .popover-step-btn,
-.popover-step-btn {
-  all: unset;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--apolo-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.popover-step-btn:hover { background: var(--apolo-bg-alt); color: var(--apolo-text); }
-
-.popover-track-wrap {
-  position: relative;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  height: 32px;
-  width: 100%;
-  min-width: 0;
-}
-
-.apolo-ui .popover-track-wrap input[type="range"].popover-range-native,
-.theme-dark .apolo-ui .popover-track-wrap input[type="range"].popover-range-native,
-.theme-light .apolo-ui .popover-track-wrap input[type="range"].popover-range-native,
-.popover-track-wrap input[type="range"].popover-range-native,
-.popover-track-wrap .popover-range-native,
-.popover-range-native {
-  all: unset;
-  box-sizing: border-box;
-  width: 100% !important;
-  min-width: 0 !important;
-  max-width: none !important;
-  flex: 1 1 100% !important;
-  appearance: none !important;
-  -webkit-appearance: none !important;
-  background: var(--apolo-border) !important;
-  background-color: var(--apolo-border) !important;
-  height: 8px !important;
-  border-radius: 4px !important;
-  outline: none !important;
-  cursor: pointer;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: none !important;
-  display: block;
-}
-
-.apolo-ui .popover-track-wrap input[type="range"].popover-range-native::-webkit-slider-runnable-track,
-.popover-track-wrap .popover-range-native::-webkit-slider-runnable-track,
-.popover-range-native::-webkit-slider-runnable-track {
-  width: 100% !important;
-  height: 8px !important;
-  background: transparent !important;
-  border: none !important;
-  border-radius: 4px !important;
-  box-shadow: none !important;
-}
-
-.apolo-ui .popover-track-wrap .popover-range-native::-webkit-slider-thumb,
-.popover-track-wrap .popover-range-native::-webkit-slider-thumb,
-.popover-range-native::-webkit-slider-thumb {
-  -webkit-appearance: none !important;
-  appearance: none !important;
-  width: 26px !important;
-  height: 26px !important;
-  border-radius: 50% !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  cursor: grab !important;
-  margin-top: -9px;
-}
-
-.apolo-ui .popover-track-wrap .popover-range-native::-moz-range-track,
-.popover-track-wrap .popover-range-native::-moz-range-track,
-.popover-range-native::-moz-range-track {
-  width: 100% !important;
-  height: 8px !important;
-  background: transparent !important;
-  border: none !important;
-  border-radius: 4px !important;
-  box-shadow: none !important;
-}
-
-.apolo-ui .popover-track-wrap .popover-range-native::-moz-range-thumb,
-.popover-track-wrap .popover-range-native::-moz-range-thumb,
-.popover-range-native::-moz-range-thumb {
-  width: 26px !important;
-  height: 26px !important;
-  border-radius: 50% !important;
-  background: transparent !important;
-  background-color: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  cursor: grab !important;
-}
-
-.popover-bubble-val {
-  position: absolute;
-  top: 3px;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background-color: var(--apolo-text);
-  color: var(--apolo-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  pointer-events: none;
-  box-shadow: var(--apolo-shadow-sm);
-  transition: transform 0.05s ease;
-}
-
-.apolo-ui .popover-track-wrap input[type="range"].popover-range-native.popover-track-checkerboard,
-.popover-track-wrap .popover-range-native.popover-track-checkerboard,
-.popover-range-native.popover-track-checkerboard {
-  background-color: var(--apolo-border) !important;
-  background-image: 
-    linear-gradient(45deg, rgba(128,128,128,0.25) 25%, transparent 25%), 
-    linear-gradient(-45deg, rgba(128,128,128,0.25) 25%, transparent 25%), 
-    linear-gradient(45deg, transparent 75%, rgba(128,128,128,0.25) 75%), 
-    linear-gradient(-45deg, transparent 75%, rgba(128,128,128,0.25) 75%) !important;
-  background-size: 8px 8px !important;
-  background-position: 0 0, 0 4px, 4px -4px, -4px 0px !important;
-}
-
-.apolo-estuche-popover .popover-lines-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  align-items: center;
-}
-
-.apolo-estuche-popover .popover-lines-grid button.popover-line-chip {
-  appearance: none;
-  -webkit-appearance: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  border-radius: 10px;
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
-  box-sizing: border-box;
-  color: var(--apolo-text, #1e293b);
-  cursor: pointer;
-}
-
-.apolo-estuche-popover .popover-lines-grid button.popover-line-chip .popover-line-chip-pill {
-  position: static;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 8px;
-  pointer-events: none;
-  box-sizing: border-box;
-  background-color: transparent;
-  border: 1.5px solid transparent;
-  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active .popover-line-chip-pill {
-  background-color: rgba(47, 107, 255, 0.14);
-  border-color: rgba(47, 107, 255, 0.45);
-  color: #2f6bff;
-}
-
-.apolo-estuche-popover .popover-lines-grid button.popover-line-chip:hover {
-  color: var(--apolo-text);
-}
-
-.apolo-estuche-popover .popover-lines-grid button.popover-line-chip.is-active {
-  color: #2f6bff;
-}
-
-.apolo-estuche-popover .popover-lines-grid .popover-line-bar {
-  width: 100%;
-  flex: 1 1 auto;
-  height: 3px;
-  box-sizing: border-box;
-  border-radius: 2px;
-  background-color: currentColor;
-}
-
-.apolo-estuche-popover .popover-lines-grid .popover-line-bar.is-dashed {
-  background: none;
-  border-top: 3px dashed currentColor;
-}
-
-.apolo-estuche-popover .popover-lines-grid .popover-line-bar.is-dotted {
-  background: radial-gradient(circle, currentColor 1px, transparent 1.5px) left center / 5px 3px repeat-x;
-}
-
-.popover-toggle-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 2px;
-}
-
-.popover-toggle-title {
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.popover-switch {
-  position: relative;
-  width: 42px;
-  height: 24px;
-  border-radius: 12px;
-  background: var(--apolo-border);
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.popover-switch.is-checked { background: var(--apolo-accent); }
-
-.popover-switch-thumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
-  background: #ffffff;
-  border-radius: 50%;
-  transition: transform 0.2s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-}
-
-.popover-switch.is-checked .popover-switch-thumb {
-  transform: translateX(18px);
-}
-
-.popover-palette-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.popover-swatches-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  overflow: visible;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 4px 2px;
-}
-
-.apolo-ui .popover-swatches-row .popover-swatch-circle,
-.apolo-ui .popover-swatch-circle,
-.popover-swatches-row .popover-swatch-circle,
-.popover-swatch-circle {
-  all: unset;
-  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
   height: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  border-radius: 50%;
-  background: var(--swatch-color);
-  background-color: var(--swatch-color);
+  border-radius: 8px;
+  color: var(--muted);
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
-  position: relative;
+  transition: background .12s, color .12s;
+}
+.ibtn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.ibtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.ibtn.is-active {
+  background: var(--accent-subtle);
+  color: var(--accent);
 }
 
-.popover-swatch-circle:hover { transform: scale(1.15); }
+/* Botón contador de favoritos (izquierda de cabecera) */
+.hd-bookmark-btn,
+.popover-favs-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 7px 0 5px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  box-sizing: border-box;
+}
+.hd-bookmark-btn:hover,
+.popover-favs-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.hd-bookmark-btn.is-active,
+.popover-favs-btn.is-active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
 
-.apolo-ui .popover-swatches-row .popover-swatch-circle.is-active,
-.apolo-ui .popover-swatch-circle.is-active,
-.popover-swatches-row .popover-swatch-circle.is-active,
+.popover-favs-badge {
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  line-height: 1;
+}
+
+/* ==========================================================================
+   Header & Icon Buttons Resets & Explicit SVG Dimensions (Strictly NO !important)
+   Neutralizes Obsidian Mobile button padding and forces explicit SVG sizes.
+   ========================================================================== */
+.apolo-estuche-popover button.ibtn,
+.apolo-estuche-popover button.popover-hdr-btn,
+.apolo-estuche-popover button.popover-icon-btn,
+.apolo-estuche-popover button.popover-close-btn,
+.apolo-estuche-popover button.popover-close,
+.apolo-estuche-popover button.arrow,
+.apolo-estuche-popover button.dot-add,
+.apolo-estuche-popover button.slider-step,
+.apolo-color-picker-popover button.ibtn,
+.is-mobile .apolo-estuche-popover button.ibtn,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn,
+.is-mobile .apolo-estuche-popover button.popover-icon-btn,
+.is-mobile .apolo-estuche-popover button.popover-close-btn,
+.is-mobile .apolo-estuche-popover button.popover-close,
+.is-mobile .apolo-estuche-popover button.arrow,
+.is-mobile .apolo-estuche-popover button.dot-add,
+.is-mobile .apolo-estuche-popover button.slider-step,
+.is-mobile .apolo-color-picker-popover button.ibtn,
+.is-tablet .apolo-estuche-popover button.ibtn,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn,
+.is-tablet .apolo-estuche-popover button.popover-icon-btn,
+.is-tablet .apolo-estuche-popover button.popover-close-btn,
+.is-tablet .apolo-estuche-popover button.popover-close,
+.is-tablet .apolo-estuche-popover button.arrow,
+.is-tablet .apolo-estuche-popover button.dot-add,
+.is-tablet .apolo-estuche-popover button.slider-step,
+.is-tablet .apolo-color-picker-popover button.ibtn {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: var(--apolo-text-muted, var(--muted));
+  cursor: pointer;
+}
+
+.apolo-estuche-popover button.ibtn,
+.apolo-estuche-popover button.popover-hdr-btn,
+.apolo-estuche-popover button.popover-icon-btn,
+.apolo-estuche-popover button.popover-close-btn,
+.apolo-estuche-popover button.popover-close,
+.is-mobile .apolo-estuche-popover button.ibtn,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn,
+.is-mobile .apolo-estuche-popover button.popover-icon-btn,
+.is-mobile .apolo-estuche-popover button.popover-close-btn,
+.is-mobile .apolo-estuche-popover button.popover-close,
+.is-tablet .apolo-estuche-popover button.ibtn,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn,
+.is-tablet .apolo-estuche-popover button.popover-icon-btn,
+.is-tablet .apolo-estuche-popover button.popover-close-btn,
+.is-tablet .apolo-estuche-popover button.popover-close {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 8px;
+}
+
+.apolo-estuche-popover button.hd-bookmark-btn,
+.is-mobile .apolo-estuche-popover button.hd-bookmark-btn,
+.is-tablet .apolo-estuche-popover button.hd-bookmark-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0 7px 0 5px;
+  margin: 0;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--apolo-text-muted, var(--muted));
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.apolo-estuche-popover button.ibtn:hover,
+.apolo-estuche-popover button.popover-hdr-btn:hover,
+.apolo-estuche-popover button.hd-bookmark-btn:hover,
+.is-mobile .apolo-estuche-popover button.ibtn:hover,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn:hover,
+.is-mobile .apolo-estuche-popover button.hd-bookmark-btn:hover,
+.is-tablet .apolo-estuche-popover button.ibtn:hover,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn:hover,
+.is-tablet .apolo-estuche-popover button.hd-bookmark-btn:hover {
+  background: var(--apolo-card-hover, var(--card-hover));
+  color: var(--apolo-text, var(--text));
+}
+
+.apolo-estuche-popover button.ibtn.is-active,
+.apolo-estuche-popover button.popover-hdr-btn.is-active,
+.apolo-estuche-popover button.hd-bookmark-btn.is-active,
+.is-mobile .apolo-estuche-popover button.ibtn.is-active,
+.is-mobile .apolo-estuche-popover button.popover-hdr-btn.is-active,
+.is-mobile .apolo-estuche-popover button.hd-bookmark-btn.is-active,
+.is-tablet .apolo-estuche-popover button.ibtn.is-active,
+.is-tablet .apolo-estuche-popover button.popover-hdr-btn.is-active,
+.is-tablet .apolo-estuche-popover button.hd-bookmark-btn.is-active {
+  background: var(--apolo-accent-subtle, var(--accent-subtle));
+  color: var(--apolo-accent, var(--accent));
+}
+
+.apolo-estuche-popover button.popover-star-btn.is-fav-saved,
+.is-mobile .apolo-estuche-popover button.popover-star-btn.is-fav-saved,
+.is-tablet .apolo-estuche-popover button.popover-star-btn.is-fav-saved {
+  color: #f59e0b;
+}
+
+/* Prevent inner SVGs from ever collapsing to 0x0 on mobile */
+.apolo-estuche-popover button svg,
+.apolo-color-picker-popover button svg,
+.is-mobile .apolo-estuche-popover button svg,
+.is-mobile .apolo-color-picker-popover button svg,
+.is-tablet .apolo-estuche-popover button svg,
+.is-tablet .apolo-color-picker-popover button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.apolo-estuche-popover button svg.sm,
+.apolo-estuche-popover .pager button svg,
+.apolo-estuche-popover button.slider-step svg,
+.apolo-estuche-popover button.swatch-add svg,
+.is-mobile .apolo-estuche-popover button svg.sm,
+.is-mobile .apolo-estuche-popover .pager button svg,
+.is-mobile .apolo-estuche-popover button.slider-step svg,
+.is-mobile .apolo-estuche-popover button.swatch-add svg,
+.is-tablet .apolo-estuche-popover button svg.sm,
+.is-tablet .apolo-estuche-popover .pager button svg,
+.is-tablet .apolo-estuche-popover button.slider-step svg,
+.is-tablet .apolo-estuche-popover button.swatch-add svg {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  flex: 0 0 14px;
+}
+
+.apolo-estuche-popover button.apolo-favorite-drag-handle svg,
+.apolo-estuche-popover button.grip svg,
+.is-mobile .apolo-estuche-popover button.apolo-favorite-drag-handle svg,
+.is-mobile .apolo-estuche-popover button.grip svg,
+.is-tablet .apolo-estuche-popover button.apolo-favorite-drag-handle svg,
+.is-tablet .apolo-estuche-popover button.grip svg {
+  width: 14px;
+  height: 18px;
+  min-width: 14px;
+  min-height: 18px;
+  flex: 0 0 14px;
+  fill: currentColor;
+  stroke: none;
+}
+
+/* Cabecera Unificada (3 columnas: 1fr auto 1fr) */
+.hd,
+.popover-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  margin-bottom: 12px;
+}
+.hd-left {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-width: 28px;
+}
+.hd-right,
+.popover-header-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 28px;
+  min-width: 58px;
+}
+.hd-center,
+.popover-title-container,
+.popover-title-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
+}
+.title,
+.popover-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 28px;
+  letter-spacing: -.01em;
+  color: var(--text);
+}
+
+/* Botones de cabecera estándar */
+.apolo-ui .popover-hdr-btn,
+.popover-hdr-btn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  box-sizing: border-box;
+}
+.popover-hdr-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.popover-hdr-btn.is-active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.popover-hdr-btn.is-fav-saved {
+  color: #f59e0b;
+}
+
+/* Paginador (Perfiles y Paleta) */
+.pager,
+.popover-header-profile-dots,
+.apolo-kit-dots-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  user-select: none;
+}
+.pager .arrow,
+.apolo-kit-nav-btn {
+  all: unset;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  box-sizing: border-box;
+}
+.pager .arrow:hover,
+.apolo-kit-nav-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.pager .arrow[disabled],
+.apolo-kit-nav-btn[disabled],
+.apolo-kit-nav-btn.is-disabled {
+  opacity: .35;
+  pointer-events: none;
+}
+
+.apolo-kit-dots-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot,
+.popover-header-dot,
+.apolo-kit-dot,
+.popover-pag-dot:not(.is-clock-dot):not(.popover-pag-clock):not(:first-child) {
+  all: unset !important;
+  box-sizing: border-box !important;
+  width: 7px !important;
+  height: 7px !important;
+  min-width: 7px !important;
+  min-height: 7px !important;
+  border-radius: 50% !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: var(--muted) !important;
+  opacity: 0.55 !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+  transition: width .15s ease, opacity .15s ease, background .15s ease, border-radius .15s ease !important;
+}
+.dot:hover,
+.popover-header-dot:hover,
+.apolo-kit-dot:hover,
+.popover-pag-dot:not(.is-clock-dot):not(.popover-pag-clock):not(:first-child):hover {
+  background: var(--text) !important;
+  opacity: 0.85 !important;
+}
+.dot.is-active,
+.popover-header-dot.is-active,
+.apolo-kit-dot.is-active,
+.popover-pag-dot:not(.is-clock-dot):not(.popover-pag-clock):not(:first-child).is-active {
+  width: 16px !important;
+  min-width: 16px !important;
+  height: 7px !important;
+  min-height: 7px !important;
+  border-radius: 4px !important;
+  background: var(--text) !important;
+  opacity: 1 !important;
+}
+.dot-add,
+.popover-header-dot.is-add-dot,
+.apolo-kit-dot.is-add-dot {
+  all: unset !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  min-height: 18px !important;
+  border-radius: 50% !important;
+  display: grid !important;
+  place-items: center !important;
+  color: var(--muted) !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  transition: background .12s ease, color .12s ease !important;
+}
+.dot-add:hover,
+.dot-add.is-active,
+.popover-header-dot.is-add-dot:hover,
+.popover-header-dot.is-add-dot.is-active,
+.apolo-kit-dot.is-add-dot:hover,
+.apolo-kit-dot.is-add-dot.is-active,
+.apolo-kit-dot.is-add-dot.is-next-hint {
+  color: var(--accent) !important;
+  background: var(--accent-subtle) !important;
+}
+
+/* 1. Selector de Puntas (4 columnas) */
+.tool-grid,
+.popover-tools-selector {
+  display: grid !important;
+  grid-template-columns: repeat(4, 1fr) !important;
+  gap: 8px !important;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  height: auto;
+  align-items: center;
+  box-sizing: border-box;
+}
+.tool-btn,
+.popover-tool-opt {
+  all: unset;
+  width: 100% !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  border-radius: 14px !important;
+  padding: 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  background: var(--card) !important;
+  border: 1.5px solid transparent !important;
+  color: var(--muted) !important;
+  box-sizing: border-box !important;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease;
+}
+.theme-light .tool-btn,
+.theme-light .popover-tool-opt,
+:root .tool-btn,
+:root .popover-tool-opt {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: var(--muted) !important;
+}
+.theme-dark .tool-btn,
+.theme-dark .popover-tool-opt {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--muted) !important;
+}
+.tool-btn:hover:not(.is-active),
+.popover-tool-opt:hover:not(.is-active) {
+  background: var(--card-hover) !important;
+  color: var(--text) !important;
+}
+.theme-light .tool-btn:hover:not(.is-active),
+.theme-light .popover-tool-opt:hover:not(.is-active),
+:root .tool-btn:hover:not(.is-active),
+:root .popover-tool-opt:hover:not(.is-active) {
+  background: rgba(0, 0, 0, 0.08) !important;
+  color: var(--text) !important;
+}
+.theme-dark .tool-btn:hover:not(.is-active),
+.theme-dark .popover-tool-opt:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.10) !important;
+  color: var(--text) !important;
+}
+.tool-btn:focus-visible,
+.popover-tool-opt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.tool-btn.is-active,
+.popover-tool-opt.is-active {
+  background: var(--accent-subtle) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+.theme-light .tool-btn.is-active,
+.theme-light .popover-tool-opt.is-active,
+:root .tool-btn.is-active,
+:root .popover-tool-opt.is-active {
+  background: #eef3ff !important;
+  border: 1.5px solid #2f6bff !important;
+  color: #2f6bff !important;
+}
+.theme-dark .tool-btn.is-active,
+.theme-dark .popover-tool-opt.is-active {
+  background: rgba(91, 140, 255, 0.18) !important;
+  border: 1.5px solid #5b8cff !important;
+  color: #5b8cff !important;
+}
+.popover-tool-opt .icon-wrap,
+.tool-btn .icon-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: inherit;
+  background: transparent !important;
+  pointer-events: none;
+}
+.popover-tool-opt.is-active .icon-wrap,
+.tool-btn.is-active .icon-wrap {
+  color: inherit;
+  background: transparent !important;
+}
+
+/* 1B. Selector Simétrico de 2 Puntas de Marcador (.hl-tip-grid) */
+.apolo-estuche-popover .hl-tip-grid,
+.hl-tip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.apolo-estuche-popover button.hl-tip-btn,
+.apolo-estuche-popover .hl-tip-btn,
+.hl-tip-btn {
+  all: unset;
+  height: 46px;
+  padding: 0 12px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+
+.is-tablet .apolo-estuche-popover button.hl-tip-btn,
+.is-mobile .apolo-estuche-popover button.hl-tip-btn {
+  padding: 0 12px;
+  min-height: 46px;
+  box-sizing: border-box;
+}
+
+.apolo-estuche-popover button.hl-tip-btn:hover,
+.apolo-estuche-popover .hl-tip-btn:hover,
+.hl-tip-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.apolo-estuche-popover button.hl-tip-btn:focus-visible,
+.apolo-estuche-popover .hl-tip-btn:focus-visible,
+.hl-tip-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.apolo-estuche-popover button.hl-tip-btn.is-active,
+.apolo-estuche-popover .hl-tip-btn.is-active,
+.hl-tip-btn.is-active {
+  background: var(--accent-subtle);
+  border-color: var(--accent-light);
+  color: var(--accent);
+}
+
+.theme-light .apolo-estuche-popover button.hl-tip-btn.is-active,
+.theme-light .apolo-estuche-popover .hl-tip-btn.is-active,
+:root .apolo-estuche-popover button.hl-tip-btn.is-active,
+:root .apolo-estuche-popover .hl-tip-btn.is-active {
+  background: rgba(47, 107, 255, .08);
+  border-color: rgba(47, 107, 255, .24);
+  color: #2f6bff;
+}
+
+.theme-dark .apolo-estuche-popover button.hl-tip-btn.is-active,
+.theme-dark .apolo-estuche-popover .hl-tip-btn.is-active {
+  background: rgba(91, 140, 255, .12);
+  border-color: rgba(91, 140, 255, .30);
+  color: #5b8cff;
+}
+
+.hl-tip-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.hl-stroke-sample {
+  width: 34px;
+  height: 14px;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+/* 2. Grupos de Control (Sliders) */
+.control-group,
+.popover-slider-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.section-label,
+.popover-slider-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  user-select: none;
+  margin-left: 2px;
+}
+.slider-row,
+.popover-slider-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+}
+.slider-step,
+.popover-step-btn {
+  all: unset;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background .12s, color .12s;
+}
+.slider-step:hover,
+.popover-step-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.slider-track,
+.popover-track-wrap {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  width: 100%;
+  min-width: 0;
+}
+.slider-track::before,
+.popover-track-wrap::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  border-radius: 999px;
+  background-color: var(--apolo-card-hover, var(--card-hover));
+  background-image: radial-gradient(circle, var(--apolo-text-faint, var(--faint)) 1.25px, transparent 1.5px);
+  background-size: 14px 100%;
+  background-position: 7px center;
+  background-repeat: repeat-x;
+  pointer-events: none;
+}
+.slider-fill {
+  display: none;
+}
+
+/* Pista de Opacidad con damero + gradiente del color activo (¡La burbuja NUNCA se vuelve transparente!) */
+.slider-track.opacity-track::before,
+.popover-track-wrap.opacity-track::before {
+  height: 8px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  background-color: var(--bg-alt, rgba(128, 128, 128, 0.08));
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.22) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.22) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+}
+
+.opacity-track .opacity-gradient-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, var(--hl-color, var(--accent, #2f6bff)) 100%);
+  pointer-events: none;
+}
+
+.opacity-track .slider-fill {
+  display: none;
+}
+.popover-track-wrap input[type="range"].popover-range-native {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 0 !important;
+  cursor: pointer;
+  margin: 0 !important;
+  padding: 0 !important;
+  z-index: 2;
+}
+.popover-track-wrap input[type="range"].popover-range-native::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  cursor: pointer;
+}
+.popover-track-wrap input[type="range"].popover-range-native::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+}
+.slider-thumb,
+.popover-bubble-val {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: var(--apolo-text, var(--text));
+  color: var(--apolo-bg, var(--bg));
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .25), 0 0 0 1.5px var(--apolo-bg, var(--bg));
+  user-select: none;
+  pointer-events: none;
+  z-index: 1;
+  transition: transform .1s, background .12s;
+}
+.slider-track:hover .slider-thumb,
+.popover-track-wrap:hover .slider-thumb,
+.popover-track-wrap:hover .popover-bubble-val {
+  transform: translateY(-50%) scale(1.06);
+}
+
+/* 3. Patrones de Línea */
+.line-grid,
+.popover-lines-grid,
+.popover-line-styles-row {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 8px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+.line-chip,
+.popover-line-chip {
+  all: unset;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  border-radius: 12px !important;
+  padding: 0 12px !important;
+  background: var(--card) !important;
+  border: 1.5px solid transparent !important;
+  color: var(--muted) !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  transition: background .15s ease, border-color .15s ease, color .15s ease !important;
+}
+.theme-light .line-chip,
+.theme-light .popover-line-chip,
+:root .line-chip,
+:root .popover-line-chip {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: var(--muted) !important;
+}
+.theme-dark .line-chip,
+.theme-dark .popover-line-chip {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: var(--muted) !important;
+}
+.line-chip:hover:not(.is-active),
+.popover-line-chip:hover:not(.is-active) {
+  background: var(--card-hover) !important;
+  color: var(--text) !important;
+}
+.theme-light .line-chip:hover:not(.is-active),
+.theme-light .popover-line-chip:hover:not(.is-active),
+:root .line-chip:hover:not(.is-active),
+:root .popover-line-chip:hover:not(.is-active) {
+  background: rgba(0, 0, 0, 0.08) !important;
+  color: var(--text) !important;
+}
+.theme-dark .line-chip:hover:not(.is-active),
+.theme-dark .popover-line-chip:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.10) !important;
+  color: var(--text) !important;
+}
+.line-chip.is-active,
+.popover-line-chip.is-active {
+  background: #eef3ff !important;
+  border: 1.5px solid #2f6bff !important;
+  color: #2f6bff !important;
+  box-shadow: none !important;
+}
+.theme-light .line-chip.is-active,
+.theme-light .popover-line-chip.is-active,
+:root .line-chip.is-active,
+:root .popover-line-chip.is-active {
+  background: #eef3ff !important;
+  border: 1.5px solid #2f6bff !important;
+  color: #2f6bff !important;
+}
+.theme-dark .line-chip.is-active,
+.theme-dark .popover-line-chip.is-active {
+  background: rgba(91, 140, 255, 0.18) !important;
+  border: 1.5px solid #5b8cff !important;
+  color: #5b8cff !important;
+}
+.line-chip .popover-line-chip-pill,
+.popover-line-chip .popover-line-chip-pill {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border-radius: 8px;
+  color: inherit;
+  transition: color .15s;
+}
+.line-chip.is-active .popover-line-chip-pill,
+.popover-line-chip.is-active .popover-line-chip-pill {
+  color: var(--accent);
+}
+.line-chip .popover-line-bar,
+.popover-line-chip .popover-line-bar {
+  width: 100%;
+  height: 2.6px;
+  border-radius: 999px;
+  background-color: currentColor;
+  transition: background-color .15s, border-color .15s;
+}
+.line-chip.is-active .popover-line-bar,
+.popover-line-chip.is-active .popover-line-bar {
+  background-color: var(--accent);
+  color: var(--accent);
+}
+.line-chip .popover-line-bar.is-dashed,
+.popover-line-chip .popover-line-bar.is-dashed {
+  background: none;
+  border-top: 2.6px dashed currentColor;
+}
+.line-chip.is-active .popover-line-bar.is-dashed,
+.popover-line-chip.is-active .popover-line-bar.is-dashed {
+  border-top-color: var(--accent);
+}
+.line-chip .popover-line-bar.is-dotted,
+.popover-line-chip .popover-line-bar.is-dotted {
+  background: radial-gradient(circle, currentColor 1.3px, transparent 1.7px) left center / 6px 2.6px repeat-x;
+}
+.line-chip.is-active .popover-line-bar.is-dotted,
+.popover-line-chip.is-active .popover-line-bar.is-dotted {
+  background: radial-gradient(circle, var(--accent) 1.3px, transparent 1.7px) left center / 6px 2.6px repeat-x;
+}
+.line-chip svg,
+.popover-line-chip svg {
+  width: 100%;
+  height: 10px;
+  overflow: visible;
+}
+.line-chip line,
+.popover-line-chip line {
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+.line-chip.is-active line,
+.popover-line-chip.is-active line {
+  stroke: var(--accent);
+}
+
+/* 4. Interruptor (Toggle) */
+.toggle-row,
+.popover-toggle-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  min-height: 32px !important;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+}
+.toggle-label,
+.popover-toggle-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1 1 auto;
+}
+.switch,
+.popover-switch {
+  all: unset;
+  display: inline-block !important;
+  position: relative !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  max-height: 22px !important;
+  border-radius: 999px !important;
+  background: #d1d5db !important;
+  cursor: pointer !important;
+  transition: background .16s ease !important;
+  box-sizing: border-box !important;
+  flex-shrink: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  vertical-align: middle !important;
+}
+.theme-light .switch,
+.theme-light .popover-switch,
+:root .switch,
+:root .popover-switch {
+  background: #d1d5db !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+.theme-dark .switch,
+.theme-dark .popover-switch {
+  background: #3e424b !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+.switch.is-on,
+.popover-switch.is-checked {
+  background: var(--accent, #2f6bff) !important;
+  border-color: var(--accent, #2f6bff) !important;
+}
+.theme-dark .switch.is-on,
+.theme-dark .popover-switch.is-checked {
+  background: #5b8cff !important;
+  border-color: #5b8cff !important;
+}
+.switch:empty::after,
+.popover-switch-thumb {
+  content: "";
+  position: absolute !important;
+  top: 2px !important;
+  left: 2px !important;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px;
+  max-width: 16px;
+  min-height: 16px;
+  max-height: 16px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50% !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .28) !important;
+  transition: transform .16s cubic-bezier(.2, .8, .2, 1) !important;
+  pointer-events: none !important;
+}
+.switch.is-on:empty::after,
+.popover-switch.is-checked .popover-switch-thumb,
+.popover-switch.is-checked:empty::after {
+  transform: translateX(18px) !important;
+}
+
+/* 5. Paleta de Colores y Paginador Inferior */
+.palette-block,
+.popover-palette-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+.apolo-estuche-popover .swatch-row,
+.apolo-estuche-popover .popover-swatches-row,
+.swatch-row,
+.popover-swatches-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.apolo-estuche-popover button.swatch,
+.apolo-estuche-popover button.popover-swatch-circle,
+.apolo-color-picker-popover button.swatch,
+.apolo-color-picker-popover button.color-picker-recent-swatch,
+.apolo-estuche-popover .swatch,
+.apolo-estuche-popover .popover-swatch-circle,
+.swatch,
+.popover-swatch-circle {
+  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 26px;
+  flex-shrink: 0;
+  background: var(--c, var(--swatch-color, #2f6bff));
+  background-color: var(--c, var(--swatch-color, #2f6bff));
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
+  transition: transform .12s, box-shadow .12s;
+}
+
+.is-tablet .apolo-estuche-popover button.swatch,
+.is-tablet .apolo-estuche-popover button.popover-swatch-circle,
+.is-mobile .apolo-estuche-popover button.swatch,
+.is-mobile .apolo-estuche-popover button.popover-swatch-circle {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 26px;
+}
+
+.apolo-estuche-popover button.swatch:hover,
+.apolo-estuche-popover button.popover-swatch-circle:hover,
+.swatch:hover,
+.popover-swatch-circle:hover {
+  transform: scale(1.08);
+}
+
+.apolo-estuche-popover button.swatch.is-active,
+.apolo-estuche-popover button.popover-swatch-circle.is-active,
+.swatch.is-active,
 .popover-swatch-circle.is-active {
-  transform: scale(1.04);
-  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.28), 0 0 0 2px var(--apolo-bg), 0 0 0 3.5px var(--apolo-text-muted);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--muted);
+  transform: none;
 }
 
 .popover-swatch-inner {
@@ -3243,97 +3993,149 @@ button.apolo-box-menu-swatch,
   background: inherit;
   background-color: inherit;
   pointer-events: none;
-  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.25);
 }
 
-.apolo-ui .popover-color-add,
+.apolo-estuche-popover button.swatch-add,
+.apolo-estuche-popover button.popover-color-add,
+.apolo-estuche-popover .swatch-add,
+.apolo-estuche-popover .popover-color-add,
+.swatch-add,
 .popover-color-add {
   all: unset;
+  appearance: none;
+  -webkit-appearance: none;
   box-sizing: border-box;
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
+  flex: 0 0 24px;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--apolo-text-muted);
+  color: var(--muted);
+  border: 1.5px solid var(--muted);
   cursor: pointer;
-  flex-shrink: 0;
+  transition: color .12s, border-color .12s, background .12s;
 }
 
-.popover-color-add:hover { color: var(--apolo-text); }
+.is-tablet .apolo-estuche-popover button.swatch-add,
+.is-tablet .apolo-estuche-popover button.popover-color-add,
+.is-mobile .apolo-estuche-popover button.swatch-add,
+.is-mobile .apolo-estuche-popover button.popover-color-add {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 24px;
+}
 
+.apolo-estuche-popover button.swatch-add:hover,
+.apolo-estuche-popover button.popover-color-add:hover,
+.swatch-add:hover,
+.popover-color-add:hover {
+  color: var(--text);
+  border-color: var(--text);
+  background: var(--card-hover);
+}
+
+.apolo-estuche-popover button.dot,
+.apolo-estuche-popover button.dot-add,
+.apolo-estuche-popover button.apolo-kit-dot,
+.apolo-estuche-popover button.popover-pag-dot,
+.apolo-estuche-popover button.popover-header-dot,
+.is-tablet .apolo-estuche-popover button.dot,
+.is-tablet .apolo-estuche-popover button.dot-add,
+.is-mobile .apolo-estuche-popover button.dot,
+.is-mobile .apolo-estuche-popover button.dot-add,
+.is-tablet .apolo-estuche-popover button.popover-pag-dot,
+.is-mobile .apolo-estuche-popover button.popover-pag-dot {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+.apolo-estuche-popover button.popover-pag-clock,
+.apolo-estuche-popover button.is-clock-dot,
+.is-tablet .apolo-estuche-popover button.popover-pag-clock,
+.is-mobile .apolo-estuche-popover button.popover-pag-clock {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  max-width: 18px;
+  min-height: 18px;
+  max-height: 18px;
+  aspect-ratio: 1 / 1;
+}
+.palette-footer,
 .popover-pagination {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
-
-.apolo-ui .popover-pagination .popover-pag-dot,
-.apolo-ui .popover-pag-dot,
-.popover-pagination .popover-pag-dot,
-.popover-pag-dot {
-  all: unset;
-  box-sizing: border-box;
-  width: 7px;
-  height: 7px;
-  min-width: 7px;
-  min-height: 7px;
-  border-radius: 50%;
-  background: var(--apolo-text-faint);
-  background-color: var(--apolo-text-faint);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.popover-dot-inner {
-  display: block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--apolo-text-faint);
-  background-color: var(--apolo-text-faint);
-  pointer-events: none;
-}
-
-.apolo-ui .popover-pag-dot.is-active .popover-dot-inner,
-.popover-pag-dot.is-active .popover-dot-inner {
-  background: var(--apolo-text);
-  background-color: var(--apolo-text);
-}
-
-.apolo-ui .popover-pag-dot:first-child,
-.popover-pagination .popover-pag-dot:first-child,
+.popover-pag-dot.is-clock-dot,
+.popover-pag-dot.popover-pag-clock,
 .popover-pag-dot:first-child {
-  width: 14px;
-  height: 14px;
-  min-width: 14px;
-  min-height: 14px;
-  background: transparent;
-  background-color: transparent;
-  color: var(--apolo-text-faint);
+  all: unset !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  color: var(--muted) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  transition: color .12s ease !important;
 }
-
-.apolo-ui .popover-pag-dot.is-active,
-.popover-pagination .popover-pag-dot.is-active,
-.popover-pag-dot.is-active {
-  background: var(--apolo-text);
-  background-color: var(--apolo-text);
+.popover-pag-dot.is-clock-dot:hover,
+.popover-pag-dot.popover-pag-clock:hover,
+.popover-pag-dot:first-child:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+  border: none !important;
 }
-
-.apolo-ui .popover-pag-dot:first-child.is-active,
-.popover-pagination .popover-pag-dot:first-child.is-active,
+.popover-pag-dot.is-clock-dot.is-active,
+.popover-pag-dot.popover-pag-clock.is-active,
 .popover-pag-dot:first-child.is-active {
-  color: var(--apolo-text);
-  background: transparent;
-  background-color: transparent;
+  background: transparent !important;
+  background-color: transparent !important;
+  color: var(--accent) !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+.popover-dot-inner {
+  display: none !important;
 }
 
 /* 6. Borrador */
@@ -3388,40 +4190,104 @@ button.apolo-box-menu-swatch,
 .eraser-divider { height: 1px; background-color: var(--apolo-border-subtle); margin: 4px 0; }
 
 /* 7. Formas */
+.shape-grid,
 .shape-grid-selector {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
-  background: var(--apolo-bg-alt);
-  padding: 6px;
-  border-radius: 16px;
+  padding: 0 0 12px;
+  background: transparent;
+  border-radius: 0;
+  border-bottom: 1px solid var(--apolo-border);
 }
 
+.apolo-ui .shape-btn,
 .apolo-ui .shape-grid-btn,
-.shape-grid-btn {
+.shape-btn,
+.shape-grid-btn,
+.apolo-estuche-popover button.shape-btn,
+.apolo-estuche-popover button.shape-grid-btn {
   all: unset;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
   height: 44px;
+  min-width: 0;
+  padding: 0;
   border-radius: 12px;
+  background: var(--apolo-card);
+  border: 1.5px solid transparent;
   color: var(--apolo-text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background .12s, border-color .12s, color .12s;
 }
 
-.shape-grid-btn:hover { color: var(--apolo-text); background: rgba(128,128,128,0.1); }
-.shape-grid-btn.is-active {
-  color: var(--apolo-accent);
-  background: var(--apolo-accent-light);
-  border-radius: 12px;
-  box-shadow: inset 0 0 0 1px var(--apolo-accent), var(--apolo-shadow-sm);
+.shape-btn:hover,
+.shape-grid-btn:hover,
+.apolo-estuche-popover button.shape-btn:hover,
+.apolo-estuche-popover button.shape-grid-btn:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
 }
 
-.apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active {
+.shape-btn:focus-visible,
+.shape-grid-btn:focus-visible,
+.apolo-estuche-popover button.shape-btn:focus-visible,
+.apolo-estuche-popover button.shape-grid-btn:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: -2px;
+}
+
+.shape-btn.is-active,
+.shape-grid-btn.is-active,
+.apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active,
+.apolo-estuche-popover .shape-grid button.shape-btn.is-active,
+.theme-light .apolo-estuche-popover button.shape-btn.is-active,
+.theme-light .apolo-estuche-popover button.shape-grid-btn.is-active,
+:root .apolo-estuche-popover button.shape-btn.is-active,
+:root .apolo-estuche-popover button.shape-grid-btn.is-active {
+  background: #eef3ff;
+  border: 1.5px solid #2f6bff;
   color: #2f6bff;
-  background-color: rgba(47, 107, 255, 0.22);
-  box-shadow: inset 0 0 0 1px #2f6bff, 0 0 0 2px rgba(47, 107, 255, 0.16);
+  box-shadow: none;
+}
+
+.theme-dark .shape-btn.is-active,
+.theme-dark .shape-grid-btn.is-active,
+.theme-dark .apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active,
+.theme-dark .apolo-estuche-popover .shape-grid button.shape-btn.is-active,
+.theme-dark .apolo-estuche-popover button.shape-btn.is-active,
+.theme-dark .apolo-estuche-popover button.shape-grid-btn.is-active {
+  background: rgba(91, 140, 255, 0.18);
+  border: 1.5px solid #5b8cff;
+  color: #5b8cff;
+  box-shadow: none;
+}
+
+.shape-btn svg,
+.shape-grid-btn svg,
+.apolo-estuche-popover button.shape-btn svg,
+.apolo-estuche-popover button.shape-grid-btn svg {
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+
+.shape-btn.is-active svg,
+.shape-grid-btn.is-active svg,
+.apolo-estuche-popover button.shape-btn.is-active svg,
+.apolo-estuche-popover button.shape-grid-btn.is-active svg {
+  stroke: #2f6bff;
+}
+
+.theme-dark .shape-btn.is-active svg,
+.theme-dark .shape-grid-btn.is-active svg,
+.theme-dark .apolo-estuche-popover button.shape-btn.is-active svg,
+.theme-dark .apolo-estuche-popover button.shape-grid-btn.is-active svg {
+  stroke: #5b8cff;
 }
 
 .shape-fill-subpanel {
@@ -3442,16 +4308,17 @@ button.apolo-box-menu-swatch,
 .color-picker-popover {
   position: fixed;
   z-index: calc(var(--apolo-layer-popover, 30) + 5);
-  width: 326px;
-  background: var(--apolo-bg-elevated);
+  width: 320px;
+  background: var(--apolo-bg);
   color: var(--apolo-text);
   border: 1px solid var(--apolo-border);
-  border-radius: 26px;
-  padding: 16px;
-  box-shadow: var(--apolo-shadow-lg);
+  border-radius: 20px;
+  padding: 14px 14px 10px;
+  box-shadow: var(--apolo-shadow-md);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+  box-sizing: border-box;
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
   scrollbar-width: none;
@@ -3461,187 +4328,1101 @@ button.apolo-box-menu-swatch,
   display: none;
 }
 
-.color-picker-tabs {
-  display: flex;
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--apolo-bg-alt);
-  border-radius: 14px;
-  padding: 3px;
-  gap: 4px;
-}
-
-.apolo-ui .color-picker-tab-btn,
-.color-picker-tab-btn {
-  all: unset;
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  text-align: center;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--apolo-text-muted);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.color-picker-tab-btn.is-active {
-  background: var(--apolo-bg-elevated);
-  color: var(--apolo-text);
-  font-weight: 600;
-  box-shadow: var(--apolo-shadow-sm);
-}
-
-.color-swatches-grid {
+/* 1. Control Segmentado (Muestras / Espectro) */
+.color-picker-popover .color-picker-tabs,
+.color-picker-popover .seg-control {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  grid-template-rows: repeat(10, 20px);
-  gap: 1px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--apolo-border-subtle);
-  position: relative;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--apolo-card);
+  box-sizing: border-box;
+  width: 100%;
 }
 
-.apolo-ui .color-matrix-cell,
-.color-matrix-cell {
+.apolo-ui .color-picker-popover .color-picker-tab-btn,
+.color-picker-popover .color-picker-tab-btn,
+.color-picker-popover .seg-btn {
   all: unset;
-  cursor: pointer;
-  transition: transform 0.1s ease;
-  position: relative;
-}
-
-.color-matrix-cell:hover {
-  transform: scale(1.15);
-  z-index: 2;
-  box-shadow: 0 0 4px rgba(0,0,0,0.4);
-}
-
-.color-matrix-cell.is-selected::after {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 2px rgba(0,0,0,0.8);
-  border-radius: 3px;
-  z-index: 3;
-}
-
-.color-readout-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.color-dual-preview {
-  display: flex;
-  width: 60px;
-  height: 32px;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--apolo-border-subtle);
-  flex-shrink: 0;
-}
-
-.color-preview-orig,
-.color-preview-curr {
-  flex: 1;
-  height: 100%;
-}
-
-.color-readout-values {
-  display: flex;
-  flex: 1;
-  justify-content: space-around;
-  font-family: monospace;
-  font-size: 12px;
-}
-
-.color-val-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.color-val-label {
-  font-size: 10px;
-  font-family: sans-serif;
-  color: var(--apolo-text-muted);
-}
-
-.color-val-num {
-  font-weight: 700;
-  color: var(--apolo-text);
-}
-
-.color-quick-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.apolo-ui .color-quick-circle,
-.color-quick-circle {
-  all: unset;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background-color: var(--quick-color);
-  cursor: pointer;
-  box-shadow: inset 0 0 0 1px rgba(128,128,128,0.25);
-  transition: transform 0.12s ease;
-  flex-shrink: 0;
-}
-
-.color-quick-circle:hover { transform: scale(1.12); }
-.color-quick-circle.is-active {
-  transform: scale(1.04);
-  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.28), 0 0 0 2px var(--apolo-bg), 0 0 0 3.5px var(--apolo-text-muted);
-}
-
-.apolo-ui .color-eyedropper-btn,
-.color-eyedropper-btn {
-  all: unset;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  height: 28px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--apolo-text-muted);
   cursor: pointer;
-  transition: all 0.12s ease;
+  user-select: none;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  box-sizing: border-box;
+  transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
 }
 
-.color-eyedropper-btn:hover { color: var(--apolo-text); background: var(--apolo-bg-alt); }
+.color-picker-popover .color-picker-tab-btn:hover,
+.color-picker-popover .seg-btn:hover {
+  color: var(--apolo-text);
+}
 
-.color-picker-actions {
+.apolo-ui .color-picker-popover .color-picker-tab-btn.is-active,
+.color-picker-popover .color-picker-tab-btn.is-active,
+.apolo-ui .color-picker-popover .seg-btn.is-active,
+.color-picker-popover .seg-btn.is-active {
+  background: #ffffff;
+  color: var(--apolo-text, #1e2330);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--apolo-border, rgba(0, 0, 0, 0.08));
+}
+
+.theme-dark .apolo-ui .color-picker-popover .color-picker-tab-btn.is-active,
+.theme-dark .color-picker-popover .color-picker-tab-btn.is-active,
+.theme-dark .apolo-ui .color-picker-popover .seg-btn.is-active,
+.theme-dark .color-picker-popover .seg-btn.is-active {
+  background: var(--apolo-bg, #25272d);
+  color: var(--apolo-text, #f3f4f6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--apolo-border, rgba(255, 255, 255, 0.09));
+}
+
+.color-picker-popover button.color-picker-tab-btn,
+.color-picker-popover button.seg-btn,
+.is-tablet .color-picker-popover button.color-picker-tab-btn,
+.is-tablet .color-picker-popover button.seg-btn,
+.is-mobile .color-picker-popover button.color-picker-tab-btn,
+.is-mobile .color-picker-popover button.seg-btn {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 28px;
+}
+
+/* 2. Swatches Matrix 12x10 & Spectrum Viewport */
+.color-picker-popover .picker-viewport {
+  position: relative;
+  width: 100%;
+}
+
+.color-picker-popover .color-swatches-grid,
+.color-picker-popover .swatches-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(10, 20px);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--apolo-border);
+  user-select: none;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.apolo-ui .color-picker-popover .color-matrix-cell,
+.color-picker-popover .color-matrix-cell,
+.color-picker-popover .cell {
+  all: unset;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--c, transparent);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.color-picker-popover .color-matrix-cell:hover,
+.color-picker-popover .cell:hover {
+  z-index: 1;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+}
+
+.apolo-ui .color-picker-popover .color-matrix-cell.is-selected,
+.color-picker-popover .color-matrix-cell.is-selected,
+.apolo-ui .color-picker-popover .cell.is-selected,
+.color-picker-popover .cell.is-selected {
+  z-index: 2;
+  box-shadow: inset 0 0 0 2px #ffffff, 0 0 0 1.5px rgba(0, 0, 0, 0.45);
+  border-radius: 2px;
+}
+
+.color-picker-popover .spectrum-box {
+  position: relative;
+  height: 200px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--apolo-border);
+  cursor: crosshair;
+}
+
+/* 3. Fila de Muestra Activa + Campos Hex / Rojo / Verde / Azul */
+.color-picker-popover .color-readout-row,
+.color-picker-popover .color-meta-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1.55fr) repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+.color-picker-popover .active-preview-well {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--apolo-border);
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.18) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.18) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.18) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.18) 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+  min-height: 38px;
+}
+
+.color-picker-popover .active-preview-fill {
+  position: absolute;
+  inset: 0;
+  transition: background 0.1s;
+}
+
+.color-picker-popover .meta-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 4px 5px;
+  border-radius: 9px;
+  background: var(--apolo-card);
+  border: 1px solid transparent;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+.color-picker-popover .meta-field:focus-within {
+  border-color: var(--apolo-accent);
+  background: var(--apolo-accent-subtle);
+}
+
+.color-picker-popover .meta-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--apolo-text-muted);
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  margin-bottom: 2px;
+  user-select: none;
+}
+
+.color-picker-popover .meta-input {
+  all: unset;
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--apolo-text);
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+}
+
+/* 4. Slider de Transparencia */
+.color-picker-popover .transparency-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.color-picker-popover .transparency-hd {
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  padding-top: 8px;
-  border-top: 1px solid var(--apolo-border-subtle);
+  justify-content: space-between;
 }
 
-.apolo-ui .color-action-btn,
-.color-action-btn {
-  all: unset;
-  font-size: 14px;
-  font-weight: 600;
+.color-picker-popover .section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--apolo-text-muted);
+  user-select: none;
+}
+
+.color-picker-popover .transparency-val {
+  font-size: 12px;
+  font-weight: 700;
   color: var(--apolo-text);
-  cursor: pointer;
-  padding: 6px 20px;
-  border-radius: 12px;
-  transition: background 0.15s ease;
+  font-variant-numeric: tabular-nums;
 }
 
-.color-action-btn:hover { background: var(--apolo-bg-alt); }
-.color-action-btn.is-confirm { color: var(--apolo-accent); }
+.color-picker-popover .slider-track {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+  touch-action: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.color-picker-popover .slider-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  border-radius: 999px;
+  background-color: var(--apolo-card-hover);
+  background-image: radial-gradient(circle, var(--apolo-text-faint) 1.25px, transparent 1.5px);
+  background-size: 14px 100%;
+  background-position: 7px center;
+  background-repeat: repeat-x;
+  pointer-events: none;
+}
+
+.color-picker-popover .slider-fill {
+  display: none;
+}
+
+.color-picker-popover .slider-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: var(--apolo-text);
+  color: var(--apolo-bg);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 0 1.5px var(--apolo-bg);
+  user-select: none;
+  pointer-events: none;
+  z-index: 1;
+  transition: transform 0.1s ease;
+}
+
+.color-picker-popover .slider-track:hover .slider-thumb {
+  transform: translateY(-50%) scale(1.06);
+}
+
+/* 5. Fila de Recientes + Cuentagotas */
+.color-picker-popover .divider {
+  height: 1px;
+  background: var(--apolo-border);
+  margin: 0 -2px;
+}
+
+.color-picker-popover .recent-row,
+.color-picker-popover .color-quick-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px;
+}
+
+.color-picker-popover .recent-swatches {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.color-picker-popover button.swatch,
+.color-picker-popover button.color-quick-circle,
+.color-picker-popover button.color-picker-recent-swatch,
+.apolo-color-picker-popover button.swatch,
+.apolo-color-picker-popover button.color-quick-circle,
+.apolo-color-picker-popover button.color-picker-recent-swatch,
+.apolo-ui .color-picker-popover .color-quick-circle,
+.color-picker-popover .color-quick-circle,
+.color-picker-popover .swatch {
+  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 28px;
+  flex-shrink: 0;
+  background: var(--c, var(--quick-color));
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.is-tablet .color-picker-popover button.swatch,
+.is-tablet .color-picker-popover button.color-quick-circle,
+.is-mobile .color-picker-popover button.swatch,
+.is-mobile .color-picker-popover button.color-quick-circle,
+.is-tablet .apolo-color-picker-popover button.swatch,
+.is-tablet .apolo-color-picker-popover button.color-quick-circle,
+.is-mobile .apolo-color-picker-popover button.swatch,
+.is-mobile .apolo-color-picker-popover button.color-quick-circle {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 28px;
+}
+
+.color-picker-popover .swatch:hover,
+.color-picker-popover .color-quick-circle:hover {
+  transform: scale(1.08);
+}
+
+.apolo-ui .color-picker-popover .swatch.is-active,
+.color-picker-popover .swatch.is-active,
+.apolo-ui .color-picker-popover .color-quick-circle.is-active,
+.color-picker-popover .color-quick-circle.is-active {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px var(--apolo-accent, #2f6bff);
+}
+
+.theme-dark .apolo-ui .color-picker-popover .swatch.is-active,
+.theme-dark .color-picker-popover .swatch.is-active,
+.theme-dark .apolo-ui .color-picker-popover .color-quick-circle.is-active,
+.theme-dark .color-picker-popover .color-quick-circle.is-active {
+  box-shadow: 0 0 0 2px var(--apolo-bg, #25272d), 0 0 0 4px var(--apolo-accent, #5b8cff);
+}
+
+.apolo-ui .color-picker-popover .color-eyedropper-btn,
+.color-picker-popover .color-eyedropper-btn,
+.color-picker-popover .ibtn {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--apolo-text-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  box-sizing: border-box;
+}
+
+.color-picker-popover .color-eyedropper-btn:hover,
+.color-picker-popover .ibtn:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
+}
+
+.color-picker-popover .color-eyedropper-btn:focus-visible,
+.color-picker-popover .ibtn:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: 1px;
+}
+
+.color-picker-popover button.color-eyedropper-btn,
+.color-picker-popover button.ibtn,
+.is-tablet .color-picker-popover button.color-eyedropper-btn,
+.is-tablet .color-picker-popover button.ibtn,
+.is-mobile .color-picker-popover button.color-eyedropper-btn,
+.is-mobile .color-picker-popover button.ibtn {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 30px;
+  min-height: 30px;
+}
+
+/* 6. Pie de Acciones (Cancelar | Listo) */
+.color-picker-popover .cp-footer,
+.color-picker-popover .color-picker-actions {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  align-items: center;
+  padding-top: 2px;
+  border-top: 1px solid var(--apolo-border);
+}
+
+.color-picker-popover .cp-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--apolo-border);
+}
+
+.apolo-ui .color-picker-popover .color-action-btn,
+.color-picker-popover .color-action-btn,
+.color-picker-popover .cp-action {
+  all: unset;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--apolo-text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.color-picker-popover .cp-action:hover,
+.color-picker-popover .color-action-btn:hover {
+  background: var(--apolo-card);
+  color: var(--apolo-text);
+}
+
+.apolo-ui .color-picker-popover .cp-action.primary,
+.color-picker-popover .cp-action.primary,
+.apolo-ui .color-picker-popover .color-action-btn.is-confirm,
+.color-picker-popover .color-action-btn.is-confirm {
+  color: var(--apolo-accent, #2f6bff);
+  font-weight: 600;
+}
+
+.apolo-ui .color-picker-popover .cp-action.primary:hover,
+.color-picker-popover .cp-action.primary:hover,
+.apolo-ui .color-picker-popover .color-action-btn.is-confirm:hover,
+.color-picker-popover .color-action-btn.is-confirm:hover {
+  background: var(--apolo-accent-subtle);
+}
+
+.color-picker-popover button.cp-action,
+.color-picker-popover button.color-action-btn,
+.is-tablet .color-picker-popover button.cp-action,
+.is-tablet .color-picker-popover button.color-action-btn,
+.is-mobile .color-picker-popover button.cp-action,
+.is-mobile .color-picker-popover button.color-action-btn {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 34px;
+}
+
+/* =========================================================================
+   6. Cajón de Favoritos (.apolo-favorites-drawer)
+   Grid 4 columnas: [glyph 20px] [preview 1fr] [size 16px] [grip 16px]
+   ========================================================================= */
+
+.apolo-favorites-drawer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.list,
+.apolo-favorites-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-y;
+  padding-right: 2px;
+}
+.list.is-dragging-active,
+.apolo-favorites-list.is-dragging-active {
+  touch-action: none;
+  overflow: hidden;
+}
+.list::-webkit-scrollbar,
+.apolo-favorites-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.list::-webkit-scrollbar-thumb,
+.apolo-favorites-list::-webkit-scrollbar-thumb {
+  display: none;
+}
+
+/* Cuadrícula 2-columnas para favoritos de formas */
+.apolo-estuche-popover .list.is-shape-grid,
+.apolo-estuche-popover .apolo-favorites-list.is-shape-grid,
+.apolo-estuche-popover .shape-fav-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-y;
+  padding-right: 0;
+}
+.apolo-estuche-popover .list.is-shape-grid::-webkit-scrollbar,
+.apolo-estuche-popover .apolo-favorites-list.is-shape-grid::-webkit-scrollbar,
+.apolo-estuche-popover .shape-fav-grid::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.card,
+.apolo-favorite-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 28px;
+  align-items: center;
+  column-gap: 12px;
+  height: 48px;
+  padding: 0 12px 0 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--card);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
+  box-sizing: border-box;
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease, background .12s, border-color .12s, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
+}
+.card:hover,
+.card.is-hover,
+.apolo-favorite-card:hover {
+  background: var(--card-hover);
+}
+.card:focus-visible,
+.apolo-favorite-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.card.is-active,
+.apolo-favorite-card.is-active {
+  background: var(--accent-subtle);
+  border-color: var(--accent-light);
+}
+.theme-light .card.is-active,
+.theme-light .apolo-favorite-card.is-active,
+:root .card.is-active,
+:root .apolo-favorite-card.is-active {
+  background: #eef3ff;
+  border-color: rgba(47, 107, 255, 0.24);
+}
+.theme-dark .card.is-active,
+.theme-dark .apolo-favorite-card.is-active {
+  background: rgba(91, 140, 255, 0.18);
+  border-color: rgba(91, 140, 255, 0.30);
+}
+
+/* Favoritos de formas (Cuadrícula 2xN minimalista y cuadrada 1:1) */
+.apolo-estuche-popover .shape-card,
+.apolo-estuche-popover .apolo-favorite-card.shape-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--apolo-card);
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  grid-template-columns: none;
+  column-gap: 0;
+  box-sizing: border-box;
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease, background .12s, border-color .12s, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
+}
+
+.apolo-estuche-popover .shape-card:hover,
+.apolo-estuche-popover .shape-card.is-hover,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:hover {
+  background: var(--apolo-card-hover);
+}
+
+.apolo-estuche-popover .shape-card:focus-visible,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: -2px;
+}
+
+.apolo-estuche-popover .shape-card.is-active,
+.apolo-estuche-popover .apolo-favorite-card.shape-card.is-active,
+.theme-light .apolo-estuche-popover .apolo-favorite-card.shape-card.is-active,
+.theme-dark .apolo-estuche-popover .apolo-favorite-card.shape-card.is-active,
+:root .apolo-estuche-popover .apolo-favorite-card.shape-card.is-active {
+  background: var(--apolo-accent-subtle);
+  border-color: var(--apolo-accent-light);
+}
+
+/* Lienzo cuadrado 1:1 central */
+.apolo-estuche-popover .shape-stage,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .shape-stage {
+  width: 68px;
+  height: 68px;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.apolo-estuche-popover .shape-stage svg,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .shape-stage svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.apolo-estuche-popover .shape-stage path,
+.apolo-estuche-popover .shape-stage rect,
+.apolo-estuche-popover .shape-stage circle,
+.apolo-estuche-popover .shape-stage ellipse,
+.apolo-estuche-popover .shape-stage polygon,
+.apolo-estuche-popover .shape-stage line {
+  vector-effect: non-scaling-stroke;
+}
 
 
 
+
+
+.glyph,
+.apolo-favorite-glyph {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.card.is-active .glyph,
+.apolo-favorite-card.is-active .apolo-favorite-glyph {
+  color: var(--accent);
+}
+
+.preview,
+.apolo-favorite-preview {
+  height: 32px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.preview svg,
+.apolo-favorite-preview svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.preview path,
+.preview rect,
+.preview line,
+.apolo-favorite-preview path,
+.apolo-favorite-preview rect,
+.apolo-favorite-preview line {
+  vector-effect: non-scaling-stroke;
+}
+
+/* Minimalist Unified Drag Handle (base rules for all favorite cards) */
+.grip,
+.apolo-favorite-handle-wrap,
+.apolo-favorite-drag-handle,
+.apolo-estuche-popover button.apolo-favorite-drag-handle,
+.apolo-estuche-popover button.grip,
+.apolo-estuche-popover .apolo-favorite-card button.grip,
+.apolo-estuche-popover .apolo-favorite-card button.apolo-favorite-drag-handle,
+.is-mobile .apolo-estuche-popover button.apolo-favorite-drag-handle,
+.is-mobile .apolo-estuche-popover button.grip,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card button.grip,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover button.grip,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card button.grip,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card button.apolo-favorite-drag-handle {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: var(--apolo-text-faint, var(--faint, #9ca3af));
+  cursor: grab;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  opacity: 0.7;
+  transition: opacity .12s, color .12s;
+}
+
+.apolo-favorite-drag-handle svg,
+.apolo-favorite-drag-handle svg *,
+.grip svg,
+.grip svg * {
+  touch-action: none;
+  pointer-events: none;
+}
+
+.grip:hover,
+.apolo-favorite-drag-handle:hover,
+.apolo-estuche-popover button.apolo-favorite-drag-handle:hover,
+.apolo-estuche-popover button.grip:hover,
+.apolo-estuche-popover .apolo-favorite-card button.grip:hover,
+.apolo-estuche-popover .apolo-favorite-card button.apolo-favorite-drag-handle:hover,
+.is-mobile .apolo-estuche-popover button.apolo-favorite-drag-handle:hover,
+.is-mobile .apolo-estuche-popover button.grip:hover,
+.is-tablet .apolo-estuche-popover button.apolo-favorite-drag-handle:hover,
+.is-tablet .apolo-estuche-popover button.grip:hover {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  opacity: 1;
+  color: var(--apolo-text);
+}
+
+.grip:active,
+.apolo-favorite-drag-handle:active,
+.card.is-dragging .grip {
+  cursor: grabbing;
+  color: var(--text);
+}
+
+/* 1. Drag Handle en tarjetas de lápices / marcadores (aprovecha mejor la altura de 48px) */
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip,
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle {
+  width: 32px;
+  height: 44px;
+  touch-action: none;
+}
+
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip svg,
+.apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.grip svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card:not(.shape-card) button.apolo-favorite-drag-handle svg {
+  width: 16px;
+  height: 24px;
+  min-width: 16px;
+  min-height: 24px;
+  flex: 0 0 16px;
+  fill: currentColor;
+  stroke: none;
+}
+
+/* 2. Drag Handle en tarjetas de formas (mantiene posición esquina superior derecha, color gris y tamaño original) */
+.apolo-estuche-popover .shape-card button.grip,
+.apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 34px;
+  height: 34px;
+  color: var(--apolo-text-faint, var(--faint, #9ca3af));
+  opacity: 0.7;
+  touch-action: none;
+}
+
+.is-mobile .apolo-estuche-popover .shape-card button.grip,
+.is-mobile .apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover .shape-card button.grip,
+.is-tablet .apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  color: var(--apolo-text-faint, var(--faint, #9ca3af));
+  opacity: 0.7;
+  touch-action: none;
+}
+
+.apolo-estuche-popover .shape-card button.grip svg,
+.apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle svg,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.grip svg,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip svg,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip svg,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle svg {
+  width: 13px;
+  height: 17px;
+  min-width: 13px;
+  min-height: 17px;
+  flex: 0 0 13px;
+  fill: currentColor;
+  stroke: none;
+}
+
+.card.is-dragging,
+.apolo-favorite-card.is-dragging {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  cursor: grabbing;
+  z-index: 30;
+}
+.card.is-drag-out,
+.apolo-favorite-card.is-drag-out {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.5);
+  opacity: 0.65;
+  transform: scale(0.96);
+}
+
+/* Estado Vacío */
+.empty,
+.apolo-favorites-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 16px 26px;
+  color: var(--faint);
+  text-align: center;
+}
+.empty .icon,
+.apolo-favorites-empty svg {
+  width: 26px;
+  height: 26px;
+}
+.empty p,
+.apolo-favorites-empty p,
+.apolo-favorites-empty-text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.empty p .icon,
+.apolo-favorites-empty p svg,
+.apolo-favorites-empty-text svg {
+  width: 13px;
+  height: 13px;
+  vertical-align: -2px;
+}
+
+/* Formulario Nuevo Perfil */
+.apolo-estuche-popover .field,
+.apolo-estuche-popover .apolo-profile-create-form,
+.apolo-favorites-drawer .field,
+.apolo-favorites-drawer .apolo-profile-create-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 6px 0 14px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.apolo-estuche-popover .field:focus-within,
+.apolo-estuche-popover .apolo-profile-create-form:focus-within,
+.apolo-favorites-drawer .field:focus-within,
+.apolo-favorites-drawer .apolo-profile-create-form:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.apolo-estuche-popover .field input.apolo-profile-name-input,
+.apolo-estuche-popover input[type="text"].apolo-profile-name-input,
+.apolo-estuche-popover .apolo-profile-name-input,
+.apolo-favorites-drawer .field input.apolo-profile-name-input,
+.apolo-favorites-drawer input[type="text"].apolo-profile-name-input,
+.apolo-favorites-drawer .apolo-profile-name-input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  padding: 0;
+}
+.apolo-estuche-popover .apolo-profile-name-input::placeholder,
+.apolo-favorites-drawer .apolo-profile-name-input::placeholder {
+  color: var(--faint);
+}
+.apolo-estuche-popover .btn-ok,
+.apolo-estuche-popover .apolo-profile-create-btn,
+.apolo-favorites-drawer .btn-ok,
+.apolo-favorites-drawer .apolo-profile-create-btn {
+  all: unset;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  flex-shrink: 0;
+  border: none;
+  box-shadow: none;
+  transition: opacity .15s ease, transform .1s ease;
+}
+.apolo-estuche-popover .btn-ok:hover,
+.apolo-estuche-popover .apolo-profile-create-btn:hover,
+.apolo-favorites-drawer .btn-ok:hover,
+.apolo-favorites-drawer .apolo-profile-create-btn:hover {
+  opacity: 0.9;
+  transform: scale(1.04);
+}
+.apolo-estuche-popover .btn-ok:active,
+.apolo-estuche-popover .apolo-profile-create-btn:active,
+.apolo-favorites-drawer .btn-ok:active,
+.apolo-favorites-drawer .apolo-profile-create-btn:active {
+  transform: scale(0.96);
+}
+.apolo-estuche-popover .apolo-profile-form-actions,
+.apolo-favorites-drawer .apolo-profile-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.apolo-estuche-popover .apolo-profile-cancel-btn,
+.apolo-favorites-drawer .apolo-profile-cancel-btn {
+  all: unset;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  transition: background .12s ease, color .12s ease, transform .1s ease;
+}
+.apolo-estuche-popover .apolo-profile-cancel-btn:hover,
+.apolo-favorites-drawer .apolo-profile-cancel-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.apolo-estuche-popover .apolo-profile-cancel-btn:active,
+.apolo-favorites-drawer .apolo-profile-cancel-btn:active {
+  transform: scale(0.96);
+}
+
+button.btn-ok,
+button.apolo-profile-create-btn,
+button.apolo-profile-cancel-btn,
+.is-tablet button.btn-ok,
+.is-tablet button.apolo-profile-create-btn,
+.is-tablet button.apolo-profile-cancel-btn,
+.is-mobile button.btn-ok,
+.is-mobile button.apolo-profile-create-btn,
+.is-mobile button.apolo-profile-cancel-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  min-width: 32px;
+  max-width: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  aspect-ratio: 1 / 1;
+}
+
+/* Fila de renombrado inline en la tarjeta */
+.apolo-card-rename-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+.apolo-card-rename-input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.apolo-card-rename-btn {
+  all: unset;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+.apolo-card-rename-btn:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.apolo-card-rename-save:hover {
+  color: var(--accent);
+}
+
+/* Estado al arrastrar tarjetas */
+.apolo-favorite-card.is-dragging {
+  opacity: 0.4;
+  transform: scale(0.98);
+}
+
+.apolo-favorite-card.is-drag-over {
+  border-top: 2px solid var(--accent);
+}
+
+/* ---- Compatibilidad con botones heredados en tests ---- */
+.apolo-ui .apolo-favorite-reorder-btn,
+.apolo-favorite-reorder-btn {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--apolo-text-muted, #888);
+  cursor: pointer;
+}

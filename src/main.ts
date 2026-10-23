@@ -1,7 +1,32 @@
 import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { EngineEventBus } from './core/events.ts';
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
-import { DEFAULT_WORKSPACE_TOOL_STATE, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, StrokeFavoriteProfile, ShapeFavoriteProfile, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
+import { DEFAULT_WORKSPACE_TOOL_STATE, DEFAULT_STROKE_FAVORITE_PROFILES, DEFAULT_SHAPE_FAVORITE_PROFILES, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
+import {
+    computeFavoriteFingerprint,
+    findMatchingFavorite,
+    getNextFavoritePreset,
+    toggleFavoritePreset,
+    removeFavoriteById,
+    reorderFavorites,
+    getActiveStrokeProfile,
+    getActiveShapeProfile,
+    switchStrokeProfile,
+    switchShapeProfile,
+    createStrokeProfile,
+    createShapeProfile,
+    renameStrokeProfile,
+    deleteStrokeProfile,
+    renameShapeProfile,
+    deleteShapeProfile,
+    renameFavoritePreset,
+    setCanonicalFavorites,
+    getCanonicalFavorites,
+    type ToolFavoritePreset,
+    type PenFavoritePreset,
+    type HighlighterFavoritePreset,
+    type ShapeFavoritePreset,
+} from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
 import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue.ts';
 import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
@@ -31,6 +56,7 @@ export interface ApoloCanvasSettings {
     defaultBoxBgTheme: BoxBgTheme;
     defaultBoxCustomBgColor: string;
     defaultBoxAccentColor: BoxAccentColor;
+    showSpenDebugHud?: boolean;
 }
 
 export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
@@ -43,6 +69,7 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     enableMouseDrawing: false,
     shapeRecognition: true,
     straightenLines: false,
+    showSpenDebugHud: false,
     toolState: DEFAULT_WORKSPACE_TOOL_STATE,
     toolbarSlot: 'tc',
     favorites: [
@@ -338,6 +365,25 @@ export default class ApoloCanvasPlugin extends Plugin {
             }
         });
 
+        this.eventBus.on('favorites:cycle', () => {
+            const tool = this.controller ? this.controller.getTool() : this.settings.toolState.activeTool;
+            if (tool === 'eraser' || tool === 'lasso') {
+                if (this.controller) {
+                    this.controller.setTool('pen');
+                } else {
+                    this.settings.toolState.activeTool = 'pen';
+                }
+                new Notice('Apolo: Pluma');
+                return;
+            }
+            const count = this.controller ? this.controller.getActiveToolFavoritesCount() : this.getActiveToolFavoritesCount();
+            if (count < 2) {
+                if (this.controller) {
+                    this.controller.toggleEstucheFavorites();
+                }
+            }
+        });
+
         this.addSettingTab(new ApoloCanvasSettingsTab(this.app, this));
         this.registerCommands();
 
@@ -515,6 +561,200 @@ export default class ApoloCanvasPlugin extends Plugin {
         void this.remountActiveEditor();
     }
 
+    toggleActiveToolFavorite(): void {
+        if (this.controller) {
+            this.controller.toggleFavorite();
+            return;
+        }
+        const tool = this.settings.toolState.activeTool;
+        if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
+        const list = getCanonicalFavorites(this.settings.toolState, tool);
+        const result = toggleFavoritePreset(list, { tool, ...this.settings.toolState[tool] } as any);
+        setCanonicalFavorites(this.settings.toolState, tool, result.updatedList);
+        this.debouncedSaveSettings();
+    }
+
+    applyToolFavorite(preset: ToolFavoritePreset): void {
+        if (this.controller) {
+            this.controller.applyToolFavoritePreset(preset);
+            return;
+        }
+        const st = this.settings.toolState;
+        st.activeTool = preset.tool;
+        if (preset.tool === 'pen' || preset.tool === 'highlighter') {
+            const target = st[preset.tool];
+            target.profileId = preset.profileId;
+            target.color = preset.color;
+            target.width = preset.width;
+            target.opacity = preset.opacity;
+            target.pattern = preset.pattern;
+            if (preset.straightenLines !== undefined) target.straightenLines = preset.straightenLines;
+            if (preset.tool === 'pen' && preset.smoothing !== undefined) st.pen.smoothing = preset.smoothing;
+        } else if (preset.tool === 'shape') {
+            st.shape.shapeType = preset.shapeType;
+            st.shape.color = preset.color;
+            st.shape.width = preset.width;
+            st.shape.opacity = preset.opacity;
+            st.shape.pattern = preset.pattern;
+            if (preset.fillEnabled !== undefined) st.shape.fillEnabled = preset.fillEnabled;
+            if (preset.fillColor !== undefined) st.shape.fillColor = preset.fillColor;
+            if (preset.fillOpacity !== undefined) st.shape.fillOpacity = preset.fillOpacity;
+        }
+        this.debouncedSaveSettings();
+    }
+
+    deleteToolFavorite(presetId: string): void {
+        if (this.controller) {
+            this.controller.deleteToolFavoritePreset(presetId);
+            return;
+        }
+        const tool = this.settings.toolState.activeTool;
+        if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
+        setCanonicalFavorites(this.settings.toolState, tool, removeFavoriteById(getCanonicalFavorites(this.settings.toolState, tool), presetId));
+        this.debouncedSaveSettings();
+    }
+
+    reorderToolFavorites(fromIndex: number, toIndex: number): void {
+        if (this.controller) {
+            this.controller.reorderToolFavorites(fromIndex, toIndex);
+            return;
+        }
+        const tool = this.settings.toolState.activeTool;
+        if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
+        setCanonicalFavorites(this.settings.toolState, tool, reorderFavorites(getCanonicalFavorites(this.settings.toolState, tool), fromIndex, toIndex));
+        this.debouncedSaveSettings();
+    }
+
+    switchToolFavoriteProfile(profileId: string): void {
+        if (this.controller) {
+            this.controller.switchFavoriteProfile(profileId);
+            return;
+        }
+        if (this.settings.toolState.activeTool === 'shape') switchShapeProfile(this.settings.toolState, profileId);
+        else switchStrokeProfile(this.settings.toolState, profileId);
+        this.debouncedSaveSettings();
+    }
+
+    createToolFavoriteProfile(name: string): void {
+        if (this.controller) {
+            this.controller.createFavoriteProfile(name);
+            return;
+        }
+        if (this.settings.toolState.activeTool === 'shape') createShapeProfile(this.settings.toolState, name);
+        else createStrokeProfile(this.settings.toolState, name);
+        this.debouncedSaveSettings();
+    }
+
+    getStrokeFavoriteProfiles(): StrokeFavoriteProfile[] {
+        if (!Array.isArray(this.settings.toolState.strokeFavoriteProfiles) || this.settings.toolState.strokeFavoriteProfiles.length === 0) {
+            this.settings.toolState.strokeFavoriteProfiles = DEFAULT_STROKE_FAVORITE_PROFILES.map(sp => ({
+                ...sp, pen: [...sp.pen], highlighter: [...sp.highlighter],
+            }));
+        }
+        return this.settings.toolState.strokeFavoriteProfiles;
+    }
+
+    getShapeFavoriteProfiles(): ShapeFavoriteProfile[] {
+        if (!Array.isArray(this.settings.toolState.shapeFavoriteProfiles) || this.settings.toolState.shapeFavoriteProfiles.length === 0) {
+            this.settings.toolState.shapeFavoriteProfiles = DEFAULT_SHAPE_FAVORITE_PROFILES.map(shp => ({
+                ...shp, shape: [...shp.shape],
+            }));
+        }
+        return this.settings.toolState.shapeFavoriteProfiles;
+    }
+
+    async renameStrokeProfile(profileId: string, name: string): Promise<boolean> {
+        const ok = this.controller ? this.controller.renameStrokeProfile(profileId, name) : renameStrokeProfile(this.settings.toolState, profileId, name);
+        await this.saveSettings();
+        return ok;
+    }
+
+    async deleteStrokeProfile(profileId: string): Promise<boolean> {
+        const ok = this.controller ? this.controller.deleteStrokeProfile(profileId) : deleteStrokeProfile(this.settings.toolState, profileId);
+        await this.saveSettings();
+        return ok;
+    }
+
+    async createStrokeProfile(name: string): Promise<void> {
+        if (this.controller) this.controller.createStrokeProfile(name);
+        else createStrokeProfile(this.settings.toolState, name);
+        await this.saveSettings();
+    }
+
+    async renameShapeProfile(profileId: string, name: string): Promise<boolean> {
+        const ok = this.controller ? this.controller.renameShapeProfile(profileId, name) : renameShapeProfile(this.settings.toolState, profileId, name);
+        await this.saveSettings();
+        return ok;
+    }
+
+    async deleteShapeProfile(profileId: string): Promise<boolean> {
+        const ok = this.controller ? this.controller.deleteShapeProfile(profileId) : deleteShapeProfile(this.settings.toolState, profileId);
+        await this.saveSettings();
+        return ok;
+    }
+
+    async createShapeProfile(name: string): Promise<void> {
+        if (this.controller) this.controller.createShapeProfile(name);
+        else createShapeProfile(this.settings.toolState, name);
+        await this.saveSettings();
+    }
+
+    toggleSyncFavoriteProfiles(sync: boolean): void {
+        if (this.controller) {
+            this.controller.toggleSyncFavoriteProfiles(sync);
+            return;
+        }
+        this.settings.toolState.syncFavoriteProfiles = sync;
+        this.debouncedSaveSettings();
+    }
+
+    getActiveToolFavoritesCount(): number {
+        const tool = this.settings.toolState.activeTool;
+        if (tool === 'pen' || tool === 'highlighter' || tool === 'shape') {
+            return getCanonicalFavorites(this.settings.toolState, tool).length;
+        }
+        return 0;
+    }
+
+    cycleActiveToolFavorite(): boolean {
+        if (this.controller) return this.controller.cycleActiveToolFavorite();
+        const tool = this.settings.toolState.activeTool;
+        if (tool === 'eraser' || tool === 'lasso') {
+            this.settings.toolState.activeTool = 'pen';
+            new Notice('Apolo: Pluma');
+            this.debouncedSaveSettings();
+            return true;
+        }
+        if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return false;
+
+        const profile = tool === 'shape' ? getActiveShapeProfile(this.settings.toolState) : getActiveStrokeProfile(this.settings.toolState);
+        const list = getCanonicalFavorites(this.settings.toolState, tool);
+        if (!list || list.length < 2) {
+            new Notice(`${profile.name}: Sin favoritos para ciclar`);
+            return false;
+        }
+
+        const next = getNextFavoritePreset(list, { tool, ...this.settings.toolState[tool] } as any);
+        if (!next) return false;
+
+        this.applyToolFavorite(next.preset);
+        new Notice(`${profile.name} · Favorito ${next.index + 1}/${list.length}`);
+        return true;
+    }
+
+    cycleActiveToolProfile(): boolean {
+        if (this.controller) return this.controller.cycleActiveToolProfile();
+        const isShape = this.settings.toolState.activeTool === 'shape';
+        const profiles = isShape ? this.settings.toolState.shapeFavoriteProfiles : this.settings.toolState.strokeFavoriteProfiles;
+        const activeId = isShape ? this.settings.toolState.activeShapeProfileId : this.settings.toolState.activeStrokeProfileId;
+        if (!profiles || profiles.length === 0) return false;
+        const currIdx = profiles.findIndex(p => p.id === activeId);
+        const nextProfile = profiles[currIdx !== -1 ? (currIdx + 1) % profiles.length : 0];
+        this.switchToolFavoriteProfile(nextProfile.id);
+        new Notice(`Perfil: ${nextProfile.name}`);
+        return true;
+    }
+
     private registerCommands(): void {
         this.addCommand({
             id: 'apolo-insert-canvas',
@@ -587,6 +827,35 @@ export default class ApoloCanvasPlugin extends Plugin {
             id: 'apolo-tool-highlighter',
             name: 'Apolo Canvas: Seleccionar marcador',
             callback: () => this.controller?.selectTool('highlighter'),
+        });
+
+        this.addCommand({
+            id: 'apolo-cycle-favorite-preset',
+            name: 'Apolo Canvas: Ciclar siguiente favorito de la herramienta activa',
+            callback: () => {
+                this.cycleActiveToolFavorite();
+            },
+        });
+
+        this.addCommand({
+            id: 'apolo-cycle-favorite-profile',
+            name: 'Apolo Canvas: Cambiar al siguiente perfil de favoritos de la herramienta activa',
+            callback: () => {
+                this.cycleActiveToolProfile();
+            },
+        });
+
+        this.addCommand({
+            id: 'apolo-toggle-spen-debug-hud',
+            name: 'Apolo Canvas: Mostrar/Ocultar diagnóstico de eventos S-Pen en pantalla',
+            callback: () => {
+                this.settings.showSpenDebugHud = !this.settings.showSpenDebugHud;
+                if (this.controller) {
+                    this.controller.setSpenDebugHud(this.settings.showSpenDebugHud);
+                }
+                new Notice(`Apolo S-Pen HUD: ${this.settings.showSpenDebugHud ? 'Activado' : 'Desactivado'}`);
+                void this.saveSettings();
+            },
         });
 
         this.addCommand({
@@ -725,6 +994,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                 shapeRecognition: this.settings.shapeRecognition,
                 straightenLines: this.settings.straightenLines,
                 toolbarSlot: this.settings.toolbarSlot,
+                showSpenDebugHud: this.settings.showSpenDebugHud,
                 favorites: this.settings.favorites,
                 gridDensity: this.settings.gridDensity,
                 defaultBoxHeight: this.settings.defaultBoxHeight,
@@ -754,6 +1024,18 @@ export default class ApoloCanvasPlugin extends Plugin {
                 onFavoritesChange: (favs: PenFavorite[]) => {
                     this.settings.favorites = favs;
                     void this.saveSettings();
+                },
+                onToggleFavorite: () => {
+                    this.debouncedSaveSettings();
+                },
+                onApplyFavorite: (preset: ToolFavoritePreset) => {
+                    this.debouncedSaveSettings();
+                },
+                onDeleteFavorite: (presetId: string) => {
+                    this.debouncedSaveSettings();
+                },
+                onReorderFavorites: (fromIndex: number, toIndex: number) => {
+                    this.debouncedSaveSettings();
                 },
                 toolState: this.settings.toolState,
                 onToolStateChange: (state: WorkspaceToolState) => {
@@ -903,6 +1185,11 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.controller?.setPalmRejectionCooldown(ms);
     }
 
+    setSpenDebugHud(enabled: boolean): void {
+        this.settings.showSpenDebugHud = enabled;
+        this.controller?.setSpenDebugHud(enabled);
+    }
+
     private async flushAndDestroy(): Promise<void> {
         if (this.isShuttingDown) return;
         this.isShuttingDown = true;
@@ -1042,6 +1329,70 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        containerEl.createEl('h3', { text: 'Perfiles de Favoritos' });
+
+        new Setting(containerEl)
+            .setName('Sincronizar perfiles de favoritos (Lápices y Formas)')
+            .setDesc('Al cambiar de perfil de favoritos en Lápices o Marcadores, cambia automáticamente al perfil equivalente en Formas.')
+            .addToggle(toggle => toggle
+                .setValue(Boolean(this.plugin.settings.toolState?.syncFavoriteProfiles))
+                .onChange(async value => {
+                    this.plugin.toggleSyncFavoriteProfiles(value);
+                    await this.plugin.saveSettings();
+                }));
+
+        const renderProfileSection = (
+            heading: string,
+            profiles: Array<{ id: string; name: string }>,
+            addLabel: string,
+            placeholder: string,
+            onRename: (id: string, val: string) => Promise<boolean>,
+            onDelete: (id: string) => Promise<boolean>,
+            onCreate: (name: string) => Promise<void>,
+        ) => {
+            containerEl.createEl('h4', { text: heading });
+            const canDelete = profiles.length > 1;
+            profiles.forEach((prof) => {
+                const setting = new Setting(containerEl)
+                    .addText(text => text.setValue(prof.name).setPlaceholder('Nombre del perfil').onChange(async val => { await onRename(prof.id, val); }))
+                    .addExtraButton(btn => btn
+                        .setIcon('trash')
+                        .setTooltip(canDelete ? 'Eliminar perfil' : 'No se puede eliminar el único perfil')
+                        .setDisabled(!canDelete)
+                        .onClick(async () => { if (canDelete) { await onDelete(prof.id); this.display(); } }));
+                setting.settingEl.style.borderTop = 'none';
+                setting.settingEl.style.padding = '4px 0';
+            });
+            let newName = '';
+            new Setting(containerEl)
+                .setName(addLabel)
+                .addText(text => text.setPlaceholder(placeholder).onChange(val => { newName = val; }))
+                .addButton(btn => btn.setButtonText('+ Añadir').setCta().onClick(async () => {
+                    await onCreate(newName.trim() || 'Nuevo perfil');
+                    newName = '';
+                    this.display();
+                }));
+        };
+
+        renderProfileSection(
+            'Perfiles de Trazos (Plumas y Marcadores)',
+            this.plugin.getStrokeFavoriteProfiles(),
+            'Añadir perfil de trazos',
+            'Ej: Matemáticas',
+            (id, val) => this.plugin.renameStrokeProfile(id, val),
+            (id) => this.plugin.deleteStrokeProfile(id),
+            (name) => this.plugin.createStrokeProfile(name),
+        );
+        renderProfileSection(
+            'Perfiles de Formas',
+            this.plugin.getShapeFavoriteProfiles(),
+            'Añadir perfil de formas',
+            'Ej: Diagramas',
+            (id, val) => this.plugin.renameShapeProfile(id, val),
+            (id) => this.plugin.deleteShapeProfile(id),
+            (name) => this.plugin.createShapeProfile(name),
+        );
+
         containerEl.createEl('h3', { text: 'Cajas de Dibujo (Canvas)' });
 
         new Setting(containerEl)
@@ -1133,6 +1484,16 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.defaultBoxBorderOutline ?? false)
                 .onChange(async value => {
                     this.plugin.settings.defaultBoxBorderOutline = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Diagnóstico de eventos S-Pen en pantalla')
+            .setDesc('Muestra un panel flotante semitransparente con los últimos eventos del lápiz (pointerdown, pointermove, contextmenu) para depuración en tabletas.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.showSpenDebugHud ?? false)
+                .onChange(async value => {
+                    this.plugin.setSpenDebugHud(value);
                     await this.plugin.saveSettings();
                 }));
     }

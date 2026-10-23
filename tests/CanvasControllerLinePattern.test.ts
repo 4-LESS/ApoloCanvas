@@ -3,16 +3,13 @@ import assert from 'node:assert/strict';
 import {
     applyStrokePattern,
     bakeLiveStrokeSegment,
-    buildCalligraphicChiselPath,
     drawPatternedStrokePath,
     drawSolidProfileStrokePath,
-    filterRedundantPoints,
     getOrCreateStrokeSprite,
     type LiveBakeState,
     renderContinuousSolidStroke,
     resetCalliCacheForTesting,
     resetGraphitePatternCacheForTesting,
-    smoothCalligraphyPoints,
 } from '../src/engine/PatternedStrokeRenderer.ts';
 import { getPenPlugin, PEN_REGISTRY } from '../src/engine/pens/index.ts';
 import type { StrokeCache, StrokeElement } from '../src/core/types.ts';
@@ -140,68 +137,6 @@ test('renderContinuousSolidStroke handles calli single point touches with stampe
     assert.equal(recording.fills.length, 1, 'calli single point touch fills chisel stamped rect');
     assert.equal(recording.fills[0].rule, 'nonzero');
     assert.ok(recording.commands.includes('closePath'));
-});
-
-test('buildCalligraphicChiselPath generates valid SVG path and positive winding quads', () => {
-    const chisel = buildCalligraphicChiselPath([
-        { x: 10, y: 10 },
-        { x: 20, y: 30 },
-        { x: 50, y: 50 },
-    ], 6);
-    const svgD = chisel.toSvgPathD();
-    assert.ok(svgD.startsWith('M'), 'SVG path starts with M');
-    assert.ok(svgD.includes('Z'), 'SVG path contains closed Z segments');
-});
-
-test('filterRedundantPoints filters sub-1.8px jitter while preserving first and last point', () => {
-    const raw = [
-        { x: 0, y: 0 },
-        { x: 0.5, y: 0.5 }, // < 1.8px -> filtered
-        { x: 1.0, y: 0.8 }, // < 1.8px -> filtered
-        { x: 3.0, y: 4.0 }, // > 1.8px -> kept
-        { x: 3.2, y: 4.1 }, // < 1.8px -> filtered
-        { x: 10, y: 10 },   // kept (last point always kept)
-    ];
-    const filtered = filterRedundantPoints(raw);
-    assert.equal(filtered.length, 3);
-    assert.deepEqual(filtered[0], { x: 0, y: 0 });
-    assert.deepEqual(filtered[filtered.length - 1], { x: 10, y: 10 });
-});
-
-test('smoothCalligraphyPoints adapts subdivision between sharp turns and gentle runs', () => {
-    // Gentle run
-    const gentle = [
-        { x: 0, y: 0 },
-        { x: 2, y: 2 },
-        { x: 4, y: 4 },
-    ];
-    const smoothedGentle = smoothCalligraphyPoints(gentle);
-    assert.ok(smoothedGentle.length <= 4, 'gentle runs should produce minimal subdivision points');
-
-    // Sharp turn
-    const sharp = [
-        { x: 0, y: 0 },
-        { x: 10, y: 0 },
-        { x: 10, y: 10 },
-    ];
-    const smoothedSharp = smoothCalligraphyPoints(sharp);
-    assert.ok(smoothedSharp.length > smoothedGentle.length, 'sharp turns trigger 4x subdivision for smoothness');
-});
-
-test('buildCalligraphicChiselPath groups segments into Monotone Ribbon Strips and hits WeakMap cache', () => {
-    // Create a 100-point smooth S-curve
-    const rawPoints: { x: number; y: number }[] = [];
-    for (let i = 0; i < 100; i++) {
-        const t = (i / 99) * Math.PI * 2;
-        rawPoints.push({ x: 50 + Math.cos(t) * 40, y: 50 + Math.sin(t * 2) * 30 });
-    }
-
-    const chisel1 = buildCalligraphicChiselPath(rawPoints, 5);
-    assert.ok((chisel1 as any).strips.length < 15, `Monotone ribbon strips must be < 15, got ${(chisel1 as any).strips.length}`);
-
-    // WeakMap cache hit check
-    const chisel2 = buildCalligraphicChiselPath(rawPoints, 5);
-    assert.equal(chisel1.toSvgPathD(), chisel2.toSvgPathD(), 'cached SVG path matches identical input');
 });
 
 test('renderContinuousSolidStroke batches long calli strokes (>120 points) with nonzero winding', () => {

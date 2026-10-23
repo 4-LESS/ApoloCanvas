@@ -1,4 +1,5 @@
 import type { Point } from '../../core/types.ts';
+import { isConfirmedBarrelPress, isStylusBarrelButton, hasDeliberateStylusMovement } from './StylusCapabilities.ts';
 
 export interface InputManagerOptions {
     palmRejectionCooldownMs?: number;
@@ -68,6 +69,8 @@ export class InputManager {
     private activeDrawingPointerId: number | null = null;
     private activeDrawingPointerType: 'pen' | 'mouse' | null = null;
     private activeBarrel = false;
+    private lastPointerDownTime = 0;
+    private pointerDownStartPos: { x: number; y: number } | null = null;
     private readonly previousTouchAction: string;
     private readonly previousUserSelect: string;
     private readonly pointPool: Point[] = [];
@@ -166,6 +169,9 @@ export class InputManager {
             this.markPenHover();
             this.options.onPenHoverOrContact?.(event);
         }
+
+        this.lastPointerDownTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        this.pointerDownStartPos = { x: event.clientX, y: event.clientY };
 
         if (this.isDrawingStart(event)) {
             if (this.options.shouldAcceptPointer && !this.options.shouldAcceptPointer(event)) {
@@ -315,6 +321,8 @@ export class InputManager {
         this.activeDrawingPointerId = null;
         this.activeDrawingPointerType = null;
         this.activeBarrel = false;
+        this.lastPointerDownTime = 0;
+        this.pointerDownStartPos = null;
         if (event.pointerType === 'pen') this.lastPenContactAt = Date.now();
     };
 
@@ -336,13 +344,52 @@ export class InputManager {
         this.activeDrawingPointerId = null;
         this.activeDrawingPointerType = null;
         this.activeBarrel = false;
+        this.lastPointerDownTime = 0;
+        this.pointerDownStartPos = null;
         if (event.pointerType === 'pen') this.lastPenContactAt = Date.now();
         this.options.onStrokeCancel?.();
     };
 
+    public cancelActiveDrawing(): void {
+        if (this.activeDrawingPointerId !== null) {
+            this.activeDrawingPointerId = null;
+            this.activeDrawingPointerType = null;
+            this.activeBarrel = false;
+            this.lastPointerDownTime = 0;
+            this.pointerDownStartPos = null;
+            this.options.onStrokeCancel?.();
+        }
+    }
+
     private readonly handleContextMenu = (event: MouseEvent): void => {
         event.preventDefault?.();
         event.stopPropagation?.();
+
+        // Strictly reject non-pen pointers (mouse, touch)
+        if ('pointerType' in event && (event as any).pointerType && (event as any).pointerType !== 'pen') {
+            return;
+        }
+
+        // Only confirmed physical barrel button signals are allowed to cancel active drawing
+        const isConfirmedBarrel = this.activeBarrel || isConfirmedBarrelPress(event as any) || isStylusBarrelButton(event as any);
+        if (!isConfirmedBarrel) {
+            return;
+        }
+
+        // If the stylus has already demonstrated deliberate drawing movement (>8px from pointerdown),
+        // do NOT abort or discard the stroke on stray contextmenu signals.
+        const hasMoved = hasDeliberateStylusMovement(
+            this.pointerDownStartPos,
+            { x: event.clientX, y: event.clientY },
+            8,
+        );
+        if (hasMoved) {
+            return;
+        }
+
+        if (this.activeDrawingPointerId !== null) {
+            this.cancelActiveDrawing();
+        }
     };
 
     private stopDrawingEvent(event: PointerEvent): void {
@@ -371,7 +418,7 @@ export class InputManager {
     }
 
     private isBarrel(event: PointerEvent): boolean {
-        return (event.buttons & 2) !== 0 || event.button === 2;
+        return isConfirmedBarrelPress(event) || isStylusBarrelButton(event);
     }
 
     private fillPoint(event: PointerEvent, bounds: DOMRect, point: Point): void {

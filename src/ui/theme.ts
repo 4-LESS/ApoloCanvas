@@ -1,4 +1,4 @@
-import type { PenFavorite, PenProfile, PenProfileId, ShapeType } from '../core/types.ts';
+import type { PenFavorite, PenProfile, PenProfileId, ShapeType, StrokePattern } from '../core/types.ts';
 
 /**
  * Checks whether Obsidian is currently rendering in dark theme.
@@ -143,6 +143,8 @@ export const ICONS = {
     pencil: 'M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z',
     bookmark: 'M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z',
     star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+    starOff: 'M8.34 2.69L12 2l3.09 6.26L22 9.27l-3.32 3.24 M18.37 18.36L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01 M2 2l20 20',
+    arrowLeft: 'M19 12H5 M12 19l-7-7 7-7',
     plus: 'M12 5v14 M5 12h14',
     minus: 'M5 12h14',
     clock: 'M12 6v6l4 2 M12 22a10 10 0 100-20 10 10 0 000 20z',
@@ -154,6 +156,10 @@ export const ICONS = {
     sendToBack: 'M12 3v14m5-5l-5 5-5-5 M4 21h16',
     sliders: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6',
     trash: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
+    chevronUp: 'M6 15l6-6 6 6',
+    chevronDown: 'M6 9l6 6 6-6',
+    chevronLeft: 'M15 18l-6-6 6-6',
+    chevronRight: 'M9 18l6-6-6-6',
 };
 
 export interface SvgOptions {
@@ -236,6 +242,33 @@ export function createSvgFromMarkup(markup: string): SVGSVGElement {
     return svg;
 }
 
+/**
+ * Sets an accessible tooltip on an element for Obsidian without triggering
+ * duplicate native browser tooltips.
+ * In Obsidian WebView, setting `aria-label` triggers Obsidian's rich tooltip.
+ * If `title` is also set as a DOM attribute, Chromium spawns a second native tooltip.
+ * We set `aria-label` and define a JS `.title` getter so unit tests still pass.
+ */
+export function setAccessibleTooltip(el: HTMLElement, label: string, jsTitle?: string): void {
+    el.setAttribute?.('aria-label', label);
+    if (typeof el.removeAttribute === 'function') {
+        el.removeAttribute('title');
+    }
+    const titleVal = jsTitle ?? label;
+    try {
+        Object.defineProperty(el, 'title', {
+            get: () => titleVal,
+            set: () => {},
+            configurable: true,
+        });
+    } catch {
+        (el as any).title = titleVal;
+    }
+    if ((el as any).title !== titleVal) {
+        (el as any).title = titleVal;
+    }
+}
+
 export function createSvg(pathD: string, options: SvgOptions = {}): SVGSVGElement {
     const size = options.size ?? 24;
     const w = options.width ?? size;
@@ -270,33 +303,91 @@ export function createSvg(pathD: string, options: SvgOptions = {}): SVGSVGElemen
 }
 
 /**
- * Creates an SVG stroke preview wave for a given profile and color.
+ * Creates an SVG stroke preview wave for a given profile and color, or for a favorite preset configuration.
+ * Supports both modern preset signature (color, width, profileId, opacity, pattern)
+ * and legacy signature (profile, baseWidth, color, width, height).
  */
 export function createStrokeWavePreview(
-    profile: PenProfile,
+    colorOrProfile: string | PenProfile,
     baseWidth: number,
-    color: string,
+    profileIdOrColor?: PenProfileId | PenProfile | string,
+    opacityOrWidth?: number,
+    patternOrHeight?: StrokePattern | number,
     width = 150,
     height = 40,
 ): SVGSVGElement {
-    const waveD = 'M4 28 C30 6 50 38 76 20 S120 8 146 24';
+    let color: string;
+    let profile: PenProfile;
+    let opacity: number;
+    let pattern: StrokePattern = 'solid';
+    let svgW = width;
+    let svgH = height;
+
+    if (typeof colorOrProfile === 'object' && colorOrProfile !== null) {
+        // Legacy: (profile, baseWidth, color, width?, height?)
+        profile = colorOrProfile;
+        color = typeof profileIdOrColor === 'string' ? profileIdOrColor : '#1F4FD8';
+        if (typeof opacityOrWidth === 'number') svgW = opacityOrWidth;
+        if (typeof patternOrHeight === 'number') svgH = patternOrHeight;
+        opacity = profile.op;
+    } else {
+        // Modern: (color, baseWidth, profileId?, opacity?, pattern?, width?, height?)
+        color = colorOrProfile;
+        const profId = typeof profileIdOrColor === 'string'
+            ? (profileIdOrColor as PenProfileId)
+            : (typeof profileIdOrColor === 'object' && profileIdOrColor ? profileIdOrColor.id : 'fountain');
+        profile = PEN_PROFILES[profId] ?? PEN_PROFILES.fountain;
+
+        if (typeof opacityOrWidth === 'number') {
+            opacity = opacityOrWidth > 1 ? opacityOrWidth / 100 : Math.max(0, opacityOrWidth);
+        } else {
+            opacity = profile.op;
+        }
+
+        if (typeof patternOrHeight === 'string') {
+            pattern = patternOrHeight as StrokePattern;
+        }
+    }
+
+    // La onda se define sobre una base de 150x40 y se escala al tamaño pedido,
+    // así puede ocupar todo el ancho de la tarjeta sin deformar el trazo.
+    const sx = svgW / 150;
+    const sy = svgH / 40;
+    const pt = (x: number, y: number) => `${+(x * sx).toFixed(1)} ${+(y * sy).toFixed(1)}`;
+    const waveD = `M${pt(4, 28)} C${pt(30, 6)} ${pt(50, 38)} ${pt(76, 20)} S${pt(120, 8)} ${pt(146, 24)}`;
+
+    // Grosor efectivo: nunca más del 60% del alto, para que no se recorte.
+    const effWidth = Math.min(svgH * 0.6, Math.max(1.5, baseWidth * profile.wm));
+
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', String(width));
-    svg.setAttribute('height', String(height));
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    svg.setAttribute('width', String(svgW));
+    svg.setAttribute('height', String(svgH));
+    svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
     svg.setAttribute('fill', 'none');
     svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('preserveAspectRatio', 'none');
 
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', waveD);
     path.setAttribute('stroke', mapInkColorForDark(color));
-    path.setAttribute('stroke-width', String(Math.max(1.5, baseWidth * profile.wm)));
-    path.setAttribute('stroke-linecap', profile.cap);
+    path.setAttribute('stroke-width', String(effWidth));
+    path.setAttribute('stroke-linecap', pattern === 'dashed' ? 'butt' : profile.cap);
     path.setAttribute('stroke-linejoin', 'round');
-    path.setAttribute('stroke-opacity', String(profile.op));
-    if (profile.dash) {
+    path.setAttribute('stroke-opacity', String(opacity));
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
+
+    if (pattern === 'dashed') {
+        const dashLen = Math.max(6, Math.round(effWidth * 2.5));
+        const gapLen = Math.max(4, Math.round(effWidth * 1.8));
+        path.setAttribute('stroke-dasharray', `${dashLen} ${gapLen}`);
+    } else if (pattern === 'dotted') {
+        const gapLen = Math.max(4, Math.round(effWidth * 2));
+        path.setAttribute('stroke-dasharray', `0.1 ${gapLen}`);
+        path.setAttribute('stroke-linecap', 'round');
+    } else if (profile.dash) {
         path.setAttribute('stroke-dasharray', profile.dash);
     }
+
     svg.appendChild(path);
     return svg;
 }
