@@ -28,7 +28,9 @@ export interface StrokeStyle {
     isHighlighter?: boolean;
 }
 
-export type ShapeType = 'line' | 'arrow' | 'rect' | 'rounded-rect' | 'ellipse' | 'triangle';
+export type BuiltInShapeType = 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'cylinder';
+export type ShapeType = BuiltInShapeType | (string & {});
+export type ShapeFillPattern = 'solid' | 'hachure' | 'cross-hatch' | 'dots';
 
 export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'link';
 
@@ -80,9 +82,11 @@ export interface HighlighterFavoritePreset extends BaseFavoritePreset {
 export interface ShapeFavoritePreset extends BaseFavoritePreset {
     tool: 'shape';
     shapeType: ShapeType;
+    regularize?: boolean;
     fillEnabled?: boolean;
     fillColor?: string;
     fillOpacity?: number;
+    fillPattern?: ShapeFillPattern;
 }
 
 export type ToolFavoritePreset =
@@ -140,9 +144,11 @@ export interface WorkspaceToolState {
         width: number;
         opacity: number;
         pattern: StrokePattern;
+        regularize?: boolean;
         fillEnabled?: boolean;
         fillColor?: string;
         fillOpacity?: number;
+        fillPattern?: ShapeFillPattern;
         activeSlotIndex: number;
         palette: { colors: string[]; opacities: number[] };
     };
@@ -310,9 +316,11 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
         width: 3,
         opacity: 1,
         pattern: 'solid',
+        regularize: false,
         fillEnabled: false,
         fillColor: '',
-        fillOpacity: 1,
+        fillOpacity: 0.2,
+        fillPattern: 'solid',
         activeSlotIndex: 0,
         palette: {
             colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
@@ -496,9 +504,11 @@ export function hydrateFromSavedState(
             width: saved.shape?.width ?? fallback.shape.width,
             opacity: saved.shape?.opacity ?? fallback.shape.opacity,
             pattern: saved.shape?.pattern ?? fallback.shape.pattern,
+            regularize: saved.shape?.regularize ?? fallback.shape.regularize ?? false,
             fillEnabled: saved.shape?.fillEnabled ?? fallback.shape.fillEnabled,
             fillColor: saved.shape?.fillColor ?? fallback.shape.fillColor,
             fillOpacity: saved.shape?.fillOpacity ?? fallback.shape.fillOpacity,
+            fillPattern: saved.shape?.fillPattern ?? fallback.shape.fillPattern ?? 'solid',
             activeSlotIndex: saved.shape?.activeSlotIndex ?? fallback.shape.activeSlotIndex,
             palette: {
                 colors: saved.shape?.palette?.colors?.length === 4
@@ -600,9 +610,11 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
             width: state.shape.width,
             opacity: state.shape.opacity,
             pattern: state.shape.pattern,
+            regularize: state.shape.regularize,
             fillEnabled: state.shape.fillEnabled,
             fillColor: state.shape.fillColor,
             fillOpacity: state.shape.fillOpacity,
+            fillPattern: state.shape.fillPattern,
             activeSlotIndex: state.shape.activeSlotIndex,
             palette: {
                 colors: [...state.shape.palette.colors],
@@ -681,6 +693,10 @@ export interface ShapeElement extends InkElementBase {
     endY: number;           // v1 normalized by column width
     style: StrokeStyle;
     fillColor?: string;
+    fillEnabled?: boolean;
+    fillOpacity?: number;
+    fillPattern?: ShapeFillPattern;
+    regularize?: boolean;
     rotation?: number;      // Radians
     bounds: BoundingBox;    // Normalized bounds: minU, minV, maxU, maxV
 }
