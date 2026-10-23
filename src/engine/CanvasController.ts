@@ -720,6 +720,10 @@ export class CanvasController {
             snapGrid: this.snapGrid,
             straightenLines: this.straightenLines,
             onlyHighlighter: this.toolState.eraser.onlyHighlighter,
+            regularize: this.toolState.shape.regularize,
+            fillEnabled: this.toolState.shape.fillEnabled,
+            fillColor: this.toolState.shape.fillColor,
+            fillPattern: this.toolState.shape.fillPattern,
         };
     }
 
@@ -803,6 +807,30 @@ export class CanvasController {
                     this.toolbar?.setSnapGrid(enabled);
                     this.renderDirty = true;
                     this.schedulePaint();
+                    this.notifyToolStateChange();
+                },
+                onToggleRegularize: (enabled) => {
+                    this.toolState.shape.regularize = enabled;
+                    this.estuche?.updateState({ regularize: enabled });
+                    this.syncEstucheFavoriteState();
+                    this.notifyToolStateChange();
+                },
+                onToggleFillEnabled: (enabled) => {
+                    this.toolState.shape.fillEnabled = enabled;
+                    this.estuche?.updateState({ fillEnabled: enabled });
+                    this.syncEstucheFavoriteState();
+                    this.notifyToolStateChange();
+                },
+                onChangeFillColor: (color) => {
+                    this.toolState.shape.fillColor = color;
+                    this.estuche?.updateState({ fillColor: color });
+                    this.syncEstucheFavoriteState();
+                    this.notifyToolStateChange();
+                },
+                onChangeFillPattern: (pattern) => {
+                    this.toolState.shape.fillPattern = pattern;
+                    this.estuche?.updateState({ fillPattern: pattern });
+                    this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onToggleStraighten: (enabled) => {
