@@ -26,47 +26,34 @@ export interface FavoritesDrawerCallbacks {
     onProfileModeChange?: (mode: 'list' | 'create') => void;
 }
 
-/**
- * Returns a human-friendly Spanish label for a favorite preset.
- */
+function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+    return el;
+}
+
 export function getPresetLabel(preset: ToolFavoritePreset): string {
-    if (preset.name && preset.name.trim().length > 0) {
-        return preset.name.trim();
-    }
+    if (preset.name && preset.name.trim().length > 0) return preset.name.trim();
     if (preset.tool === 'pen') {
-        const pen = preset as PenFavoritePreset;
-        switch (pen.profileId) {
-            case 'fountain': return 'Estilográfica';
-            case 'calli': return 'Caligráfica';
-            case 'ball': return 'Bolígrafo';
-            case 'pencil': return 'Lápiz';
-            case 'hlr': return 'Marcador redondo';
-            case 'hlf': return 'Marcador plano';
-            default: return 'Pluma';
-        }
+        const labels: Record<string, string> = {
+            fountain: 'Estilográfica', calli: 'Caligráfica', ball: 'Bolígrafo',
+            pencil: 'Lápiz', hlr: 'Marcador redondo', hlf: 'Marcador plano',
+        };
+        return labels[(preset as PenFavoritePreset).profileId] || 'Pluma';
     }
     if (preset.tool === 'highlighter') {
-        const hl = preset as HighlighterFavoritePreset;
-        return hl.profileId === 'hlf' ? 'Marcador plano' : 'Marcador redondo';
+        return (preset as HighlighterFavoritePreset).profileId === 'hlf' ? 'Marcador plano' : 'Marcador redondo';
     }
     if (preset.tool === 'shape') {
-        const shape = preset as ShapeFavoritePreset;
-        switch (shape.shapeType) {
-            case 'rect': return 'Rectángulo';
-            case 'rounded-rect': return 'Rectángulo redondeado';
-            case 'ellipse': return 'Círculo';
-            case 'triangle': return 'Triángulo';
-            case 'line': return 'Línea';
-            case 'arrow': return 'Flecha';
-            default: return 'Forma';
-        }
+        const labels: Record<string, string> = {
+            rect: 'Rectángulo', 'rounded-rect': 'Rectángulo redondeado',
+            ellipse: 'Círculo', triangle: 'Triángulo', line: 'Línea', arrow: 'Flecha',
+        };
+        return labels[(preset as ShapeFavoritePreset).shapeType] || 'Forma';
     }
     return 'Favorito';
 }
 
-/**
- * Returns the SVG path (from ICONS) that represents the tool/profile/shape of a preset.
- */
 export function getPresetIcon(preset: ToolFavoritePreset): string {
     if (preset.tool === 'shape') {
         const shapes = ICONS.shapes as Record<string, string>;
@@ -75,20 +62,13 @@ export function getPresetIcon(preset: ToolFavoritePreset): string {
         return shapes[key] ?? shapes.rect;
     }
     const profileId = (preset as PenFavoritePreset | HighlighterFavoritePreset).profileId;
-    switch (profileId) {
-        case 'fountain': return ICONS.pen;
-        case 'calli': return ICONS.feather;
-        case 'ball': return ICONS.ballpoint;
-        case 'pencil': return ICONS.pencil;
-        case 'hlf': return ICONS.highlighterChisel;
-        case 'hlr': return ICONS.highlighterRound;
-        default: return preset.tool === 'highlighter' ? ICONS.highlighter : ICONS.pen;
-    }
+    const map: Record<string, string> = {
+        fountain: ICONS.pen, calli: ICONS.feather, ball: ICONS.ballpoint,
+        pencil: ICONS.pencil, hlf: ICONS.highlighterChisel, hlr: ICONS.highlighterRound,
+    };
+    return map[profileId] || (preset.tool === 'highlighter' ? ICONS.highlighter : ICONS.pen);
 }
 
-/**
- * Tooltip / aria text: the info that no longer takes space on the card.
- */
 export function getPresetTooltip(preset: ToolFavoritePreset): string {
     const parts: string[] = [];
     if (preset.name) parts.push(preset.name);
@@ -99,21 +79,15 @@ export function getPresetTooltip(preset: ToolFavoritePreset): string {
     return parts.join(' · ');
 }
 
-/**
- * Creates a pure DOM inline SVG preview for a shape favorite preset.
- */
 export function createShapePreview(
     preset: ShapeFavoritePreset,
     width = 64,
     height = 64,
 ): SVGSVGElement {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', String(width));
-    svg.setAttribute('height', String(height));
-    svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    const svg = svgEl('svg', {
+        width, height, viewBox: `0 0 ${width} ${height}`,
+        fill: 'none', 'aria-hidden': 'true', preserveAspectRatio: 'xMidYMid meet',
+    });
 
     const strokeColor = mapInkColorForDark(preset.color || '#2F6BFF');
     const strokeWidth = Math.max(1.5, Math.min(6, preset.width || 3));
@@ -135,17 +109,12 @@ export function createShapePreview(
         el.setAttribute('stroke-opacity', String(strokeOpacity));
         el.setAttribute('vector-effect', 'non-scaling-stroke');
         el.setAttribute('fill', fill);
-        if (fill !== 'none') {
-            el.setAttribute('fill-opacity', String(fillOpacity));
-        }
+        if (fill !== 'none') el.setAttribute('fill-opacity', String(fillOpacity));
         if (pattern === 'dashed') {
-            const dash = Math.max(6, Math.round(strokeWidth * 2.5));
-            const gap = Math.max(4, Math.round(strokeWidth * 1.8));
-            el.setAttribute('stroke-dasharray', `${dash} ${gap}`);
+            el.setAttribute('stroke-dasharray', `${Math.max(6, Math.round(strokeWidth * 2.5))} ${Math.max(4, Math.round(strokeWidth * 1.8))}`);
             el.setAttribute('stroke-linecap', 'butt');
         } else if (pattern === 'dotted') {
-            const gap = Math.max(4, Math.round(strokeWidth * 2));
-            el.setAttribute('stroke-dasharray', `0.1 ${gap}`);
+            el.setAttribute('stroke-dasharray', `0.1 ${Math.max(4, Math.round(strokeWidth * 2))}`);
             el.setAttribute('stroke-linecap', 'round');
         } else {
             el.setAttribute('stroke-linecap', 'round');
@@ -154,194 +123,65 @@ export function createShapePreview(
     };
 
     const isSquare = width === height;
-
-    if (isSquare) {
-        switch (preset.shapeType) {
-            case 'line': {
-                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', '12');
-                line.setAttribute('y1', '52');
-                line.setAttribute('x2', '52');
-                line.setAttribute('y2', '12');
-                applyCommonAttributes(line);
-                svg.appendChild(line);
-                break;
-            }
-            case 'arrow': {
-                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', '14');
-                line.setAttribute('y1', '50');
-                line.setAttribute('x2', '50');
-                line.setAttribute('y2', '14');
-                applyCommonAttributes(line);
-                svg.appendChild(line);
-
-                const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                head.setAttribute('d', 'M35 14 H50 V29');
-                head.setAttribute('stroke', strokeColor);
-                head.setAttribute('stroke-width', String(strokeWidth));
-                head.setAttribute('stroke-opacity', String(strokeOpacity));
-                head.setAttribute('stroke-linecap', 'round');
-                head.setAttribute('stroke-linejoin', 'round');
-                head.setAttribute('vector-effect', 'non-scaling-stroke');
-                head.setAttribute('fill', 'none');
-                svg.appendChild(head);
-                break;
-            }
-            case 'ellipse': {
-                const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-                ellipse.setAttribute('cx', '32');
-                ellipse.setAttribute('cy', '32');
-                ellipse.setAttribute('rx', '22');
-                ellipse.setAttribute('ry', '22');
-                applyCommonAttributes(ellipse);
-                svg.appendChild(ellipse);
-                break;
-            }
-            case 'rounded-rect': {
-                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', '8');
-                rect.setAttribute('y', '14');
-                rect.setAttribute('width', '48');
-                rect.setAttribute('height', '36');
-                rect.setAttribute('rx', '8');
-                rect.setAttribute('ry', '8');
-                applyCommonAttributes(rect);
-                svg.appendChild(rect);
-                break;
-            }
-            case 'triangle': {
-                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-                polygon.setAttribute('points', '32,10 54,50 10,50');
-                applyCommonAttributes(polygon);
-                svg.appendChild(polygon);
-                break;
-            }
-            case 'rect':
-            default: {
-                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', '8');
-                rect.setAttribute('y', '14');
-                rect.setAttribute('width', '48');
-                rect.setAttribute('height', '36');
-                rect.setAttribute('rx', '4');
-                rect.setAttribute('ry', '4');
-                applyCommonAttributes(rect);
-                svg.appendChild(rect);
-                break;
-            }
-        }
-        return svg;
-    }
-
-    const padX = 20;
-    const padY = 6;
-    const w = width - padX * 2;
-    const h = height - padY * 2;
+    const padX = 20, padY = 6, w = width - padX * 2, h = height - padY * 2;
+    const addWithCommon = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>) => {
+        const el = svgEl(tag, attrs);
+        applyCommonAttributes(el);
+        svg.appendChild(el);
+    };
 
     switch (preset.shapeType) {
-        case 'line': {
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', String(padX));
-            line.setAttribute('y1', String(height / 2));
-            line.setAttribute('x2', String(width - padX));
-            line.setAttribute('y2', String(height / 2));
-            applyCommonAttributes(line);
-            svg.appendChild(line);
+        case 'line':
+            addWithCommon('line', isSquare
+                ? { x1: 12, y1: 52, x2: 52, y2: 12 }
+                : { x1: padX, y1: height / 2, x2: width - padX, y2: height / 2 });
             break;
-        }
         case 'arrow': {
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            const endX = width - padX;
-            const midY = height / 2;
-            line.setAttribute('x1', String(padX));
-            line.setAttribute('y1', String(midY));
-            line.setAttribute('x2', String(endX));
-            line.setAttribute('y2', String(midY));
-            applyCommonAttributes(line);
-            svg.appendChild(line);
-
-            const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            head.setAttribute('d', `M${endX - 10} ${midY - 6} L${endX} ${midY} L${endX - 10} ${midY + 6}`);
-            head.setAttribute('stroke', strokeColor);
-            head.setAttribute('stroke-width', String(strokeWidth));
-            head.setAttribute('stroke-opacity', String(strokeOpacity));
-            head.setAttribute('stroke-linecap', 'round');
-            head.setAttribute('stroke-linejoin', 'round');
-            head.setAttribute('fill', 'none');
-            svg.appendChild(head);
+            const endX = width - padX, midY = height / 2;
+            addWithCommon('line', isSquare
+                ? { x1: 14, y1: 50, x2: 50, y2: 14 }
+                : { x1: padX, y1: midY, x2: endX, y2: midY });
+            svg.appendChild(svgEl('path', {
+                d: isSquare ? 'M35 14 H50 V29' : `M${endX - 10} ${midY - 6} L${endX} ${midY} L${endX - 10} ${midY + 6}`,
+                stroke: strokeColor, 'stroke-width': strokeWidth, 'stroke-opacity': strokeOpacity,
+                'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+                ...(isSquare ? { 'vector-effect': 'non-scaling-stroke' } : {}),
+                fill: 'none',
+            }));
             break;
         }
-        case 'ellipse': {
-            const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
-            ellipse.setAttribute('cx', String(width / 2));
-            ellipse.setAttribute('cy', String(height / 2));
-            ellipse.setAttribute('rx', String(w / 2));
-            ellipse.setAttribute('ry', String(h / 2));
-            applyCommonAttributes(ellipse);
-            svg.appendChild(ellipse);
+        case 'ellipse':
+            addWithCommon('ellipse', isSquare
+                ? { cx: 32, cy: 32, rx: 22, ry: 22 }
+                : { cx: width / 2, cy: height / 2, rx: w / 2, ry: h / 2 });
             break;
-        }
-        case 'rounded-rect': {
-            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            rect.setAttribute('x', String(padX));
-            rect.setAttribute('y', String(padY));
-            rect.setAttribute('width', String(w));
-            rect.setAttribute('height', String(h));
-            rect.setAttribute('rx', '8');
-            rect.setAttribute('ry', '8');
-            applyCommonAttributes(rect);
-            svg.appendChild(rect);
+        case 'rounded-rect':
+            addWithCommon('rect', isSquare
+                ? { x: 8, y: 14, width: 48, height: 36, rx: 8, ry: 8 }
+                : { x: padX, y: padY, width: w, height: h, rx: 8, ry: 8 });
             break;
-        }
-        case 'triangle': {
-            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-            const topPt = `${width / 2},${padY}`;
-            const rightPt = `${width - padX},${height - padY}`;
-            const leftPt = `${padX},${height - padY}`;
-            polygon.setAttribute('points', `${topPt} ${rightPt} ${leftPt}`);
-            applyCommonAttributes(polygon);
-            svg.appendChild(polygon);
+        case 'triangle':
+            addWithCommon('polygon', {
+                points: isSquare ? '32,10 54,50 10,50' : `${width / 2},${padY} ${width - padX},${height - padY} ${padX},${height - padY}`,
+            });
             break;
-        }
         case 'rect':
-        default: {
-            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            rect.setAttribute('x', String(padX));
-            rect.setAttribute('y', String(padY));
-            rect.setAttribute('width', String(w));
-            rect.setAttribute('height', String(h));
-            rect.setAttribute('rx', '2');
-            rect.setAttribute('ry', '2');
-            applyCommonAttributes(rect);
-            svg.appendChild(rect);
+        default:
+            addWithCommon('rect', isSquare
+                ? { x: 8, y: 14, width: 48, height: 36, rx: 4, ry: 4 }
+                : { x: padX, y: padY, width: w, height: h, rx: 2, ry: 2 });
             break;
-        }
     }
 
     return svg;
 }
 
-/**
- * Creates a pure DOM 6-dot drag grip icon matching the unified design mockup.
- */
 export function create6DotGripSvg(): SVGSVGElement {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 16 20');
-    svg.setAttribute('fill', 'currentColor');
-    svg.setAttribute('aria-hidden', 'true');
+    const svg = svgEl('svg', { viewBox: '0 0 16 20', fill: 'currentColor', 'aria-hidden': 'true' });
     svg.style.pointerEvents = 'none';
     svg.style.touchAction = 'none';
-    const coords: [number, number][] = [
-        [4.5, 4], [11.5, 4],
-        [4.5, 10], [11.5, 10],
-        [4.5, 16], [11.5, 16],
-    ];
-    for (const [cx, cy] of coords) {
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', String(cx));
-        circle.setAttribute('cy', String(cy));
-        circle.setAttribute('r', '1.5');
+    for (const [cx, cy] of [[4.5, 4], [11.5, 4], [4.5, 10], [11.5, 10], [4.5, 16], [11.5, 16]]) {
+        const circle = svgEl('circle', { cx, cy, r: 1.5 });
         circle.style.pointerEvents = 'none';
         circle.style.touchAction = 'none';
         svg.appendChild(circle);

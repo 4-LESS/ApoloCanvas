@@ -18,157 +18,18 @@ import {
     cloneWorkspaceToolState,
     type WorkspaceToolState,
 } from '../src/core/types.ts';
-
-function createMockEnvironment() {
-    const createElement = (tag: string) => {
-        const children: any[] = [];
-        const classes = new Set<string>();
-        const attributes = new Map<string, string>();
-        const elementListeners = new Map<string, Function[]>();
-        const styleObj: any = {
-            display: '',
-            zIndex: '',
-            position: '',
-            top: '',
-            left: '',
-            right: '',
-            bottom: '',
-            transform: '',
-            setProperty: (k: string, v: string) => { styleObj[k] = v; },
-            getPropertyValue: (k: string) => styleObj[k] ?? '',
-        };
-        const el: any = {
-            tagName: tag.toUpperCase(),
-            style: styleObj,
-            dataset: {},
-            hidden: false,
-            className: '',
-            children,
-            title: '',
-            type: '',
-            value: '',
-            textContent: '',
-            classList: {
-                add: (...cs: string[]) => {
-                    for (const c of cs) {
-                        for (const item of c.split(/\s+/).filter(Boolean)) classes.add(item);
-                    }
-                    el.className = [...classes].join(' ');
-                },
-                remove: (...cs: string[]) => {
-                    for (const c of cs) {
-                        for (const item of c.split(/\s+/).filter(Boolean)) classes.delete(item);
-                    }
-                    el.className = [...classes].join(' ');
-                },
-                contains: (c: string) => classes.has(c) || el.className.split(/\s+/).filter(Boolean).includes(c),
-                toggle: (c: string, force?: boolean) => {
-                    const next = force !== undefined ? force : !classes.has(c);
-                    if (next) classes.add(c); else classes.delete(c);
-                    el.className = [...classes].join(' ');
-                    return next;
-                },
-            },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); },
-            getAttribute: (k: string) => attributes.get(k) ?? null,
-            hasAttribute: (k: string) => attributes.has(k),
-            removeAttribute: (k: string) => { attributes.delete(k); },
-            appendChild: (child: any) => { children.push(child); child.parentElement = el; return child; },
-            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            remove: () => {
-                if (el.parentElement?.children) {
-                    const idx = el.parentElement.children.indexOf(el);
-                    if (idx !== -1) el.parentElement.children.splice(idx, 1);
-                }
-            },
-            contains: (target: any) => target === el || children.some(c => c === target || c?.contains?.(target)),
-            querySelector: (sel: string): any => {
-                const findIn = (node: any): any => {
-                    if (!node) return null;
-                    if (sel.startsWith('.') && node.classList?.contains(sel.slice(1))) return node;
-                    if (sel.startsWith('#') && node.id === sel.slice(1)) return node;
-                    if (sel.toLowerCase() === node.tagName?.toLowerCase()) return node;
-                    for (const child of node.children || []) {
-                        const res = findIn(child);
-                        if (res) return res;
-                    }
-                    return null;
-                };
-                return findIn(el);
-            },
-            querySelectorAll: (sel: string): any[] => {
-                const results: any[] = [];
-                const collect = (node: any) => {
-                    if (!node) return;
-                    if (sel.startsWith('.') && node.classList?.contains(sel.slice(1))) results.push(node);
-                    else if (sel.toLowerCase() === node.tagName?.toLowerCase()) results.push(node);
-                    for (const child of node.children || []) collect(child);
-                };
-                for (const child of children) collect(child);
-                return results;
-            },
-            addEventListener: (type: string, fn: Function) => {
-                if (!elementListeners.has(type)) elementListeners.set(type, []);
-                elementListeners.get(type)!.push(fn);
-            },
-            removeEventListener: (type: string, fn: Function) => {
-                const list = elementListeners.get(type);
-                if (list) {
-                    const idx = list.indexOf(fn);
-                    if (idx !== -1) list.splice(idx, 1);
-                }
-            },
-            getBoundingClientRect: () => ({
-                top: 100,
-                bottom: 200,
-                left: 100,
-                right: 300,
-                width: 200,
-                height: 100,
-            }),
-            offsetWidth: 280,
-            offsetHeight: 320,
-            onclick: null as any,
-            onkeydown: null as any,
-        };
-        return el;
-    };
-
-    const mockDocument: any = {
-        body: createElement('body'),
-        createElement,
-        createElementNS: (_ns: string, tag: string) => createElement(tag),
-        removeEventListener: () => {},
-        addEventListener: () => {},
-    };
-
-    return mockDocument;
-}
+import { setupMockDom } from './helpers/mockDom.ts';
 
 describe('ToolEstuche Favorites Integration (Task 3 of 4)', () => {
-    let prevDoc: any;
-    let prevWindow: any;
+    let cleanup: () => void;
 
     beforeEach(() => {
-        prevDoc = (globalThis as any).document;
-        prevWindow = (globalThis as any).window;
-        const mockDoc = createMockEnvironment();
-        (globalThis as any).document = mockDoc;
-        (globalThis as any).window = {
-            document: mockDoc,
-            innerWidth: 1024,
-            innerHeight: 768,
-            addEventListener: () => {},
-            removeEventListener: () => {},
-            setTimeout: (fn: Function) => fn(),
-            clearTimeout: () => {},
-        };
+        const { teardown } = setupMockDom();
+        cleanup = teardown;
     });
 
     afterEach(() => {
-        (globalThis as any).document = prevDoc;
-        (globalThis as any).window = prevWindow;
+        cleanup?.();
     });
 
     function createTestEstuche(initialOverrides?: Partial<ToolEstucheState>, callbackOverrides?: Partial<ToolEstucheCallbacks>) {

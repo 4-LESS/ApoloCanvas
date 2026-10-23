@@ -662,41 +662,7 @@ export class CanvasController {
                 if (this.estuche?.isOpen()) {
                     this.estuche.close();
                 } else {
-                    const toolBtn = this.toolbar?.getToolButton(tool);
-                    const favsList = (tool === 'pen' || tool === 'highlighter' || tool === 'shape')
-                        ? this.getToolFavorites(tool)
-                        : this.favorites;
-                    const isFav = (tool === 'pen' || tool === 'highlighter' || tool === 'shape')
-                        ? this.isCurrentToolFavorited()
-                        : false;
-                    this.estuche?.open({
-                        tool,
-                        slot: this.toolbarSlot,
-                        color: this.style.color,
-                        width: this.style.width,
-                        profileId: this.penProfileId,
-                        smoothing: this.smoothing,
-                        pressureSensitivity: this.pressureSensitivity,
-                        opacity: this.style.opacity,
-                        lineStyle: this.style.pattern,
-                        pattern: this.style.pattern,
-                        favorites: favsList,
-                        isCurrentFavorite: isFav,
-                        showingFavorites: false,
-                        eraserMode: this.eraserMode,
-                        eraserRadius: this.eraserRadius,
-                        scribbleToErase: this.scribbleToErase,
-                        lassoMode: this.lassoMode,
-                        shapeType: this.shapeType,
-                        snapGrid: this.snapGrid,
-                        straightenLines: this.straightenLines,
-                        onlyHighlighter: this.toolState.eraser.onlyHighlighter,
-                        strokeFavoriteProfiles: this.toolState.strokeFavoriteProfiles,
-                        activeStrokeProfileId: this.toolState.activeStrokeProfileId,
-                        shapeFavoriteProfiles: this.toolState.shapeFavoriteProfiles,
-                        activeShapeProfileId: this.toolState.activeShapeProfileId,
-                        syncFavoriteProfiles: this.toolState.syncFavoriteProfiles,
-                    }, toolBtn);
+                    this.estuche?.open(this.buildEstucheState(tool, false), this.toolbar?.getToolButton(tool));
                 }
             },
             onUndo: () => this.performUndo(),
@@ -722,35 +688,41 @@ export class CanvasController {
         }, this.uiRoot);
     }
 
+    private buildEstucheState(tool: ToolType = this.tool, showingFavorites?: boolean): any {
+        const isFavTool = tool === 'pen' || tool === 'highlighter' || tool === 'shape';
+        return {
+            tool,
+            slot: this.toolbarSlot,
+            color: this.style.color,
+            width: this.style.width,
+            profileId: this.penProfileId,
+            smoothing: this.smoothing,
+            pressureSensitivity: this.pressureSensitivity,
+            opacity: this.style.opacity,
+            lineStyle: this.style.pattern,
+            pattern: this.style.pattern,
+            favorites: isFavTool ? this.getToolFavorites(tool) : this.favorites,
+            isCurrentFavorite: isFavTool ? this.isCurrentToolFavorited() : false,
+            ...(showingFavorites !== undefined ? { showingFavorites } : {}),
+            strokeFavoriteProfiles: this.toolState.strokeFavoriteProfiles,
+            activeStrokeProfileId: this.toolState.activeStrokeProfileId,
+            shapeFavoriteProfiles: this.toolState.shapeFavoriteProfiles,
+            activeShapeProfileId: this.toolState.activeShapeProfileId,
+            syncFavoriteProfiles: this.toolState.syncFavoriteProfiles,
+            eraserMode: this.eraserMode,
+            eraserRadius: this.eraserRadius,
+            scribbleToErase: this.scribbleToErase,
+            lassoMode: this.lassoMode,
+            shapeType: this.shapeType,
+            snapGrid: this.snapGrid,
+            straightenLines: this.straightenLines,
+            onlyHighlighter: this.toolState.eraser.onlyHighlighter,
+        };
+    }
+
     private initEstuche(): void {
         this.estuche = new ToolEstuche(
-            {
-                tool: this.tool,
-                slot: this.toolbarSlot,
-                color: this.style.color,
-                width: this.style.width,
-                profileId: this.penProfileId,
-                smoothing: this.smoothing,
-                pressureSensitivity: this.pressureSensitivity,
-                opacity: this.style.opacity,
-                lineStyle: this.style.pattern,
-                pattern: this.style.pattern,
-                favorites: this.getActiveToolFavorites(),
-                isCurrentFavorite: this.isCurrentToolFavorited(),
-                strokeFavoriteProfiles: this.toolState.strokeFavoriteProfiles,
-                activeStrokeProfileId: this.toolState.activeStrokeProfileId,
-                shapeFavoriteProfiles: this.toolState.shapeFavoriteProfiles,
-                activeShapeProfileId: this.toolState.activeShapeProfileId,
-                syncFavoriteProfiles: this.toolState.syncFavoriteProfiles,
-                eraserMode: this.eraserMode,
-                eraserRadius: this.eraserRadius,
-                scribbleToErase: this.scribbleToErase,
-                lassoMode: this.lassoMode,
-                shapeType: this.shapeType,
-                snapGrid: this.snapGrid,
-                straightenLines: this.straightenLines,
-                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
-            },
+            this.buildEstucheState(this.tool),
             {
                 onSelectProfile: (profileId) => this.applyPenProfile(profileId),
                 onChangeColor: (color) => this.setInkColor(color),
@@ -1398,9 +1370,7 @@ export class CanvasController {
         if (e.pointerType === 'pen') {
             this.isPenTipDown = false;
             this.lastPenEventTime = performance.now();
-            if (!this.isPenBarrelEvent(e) || e.buttons === 0) {
-                this.penBarrelPressed = false;
-            }
+            if (!this.isPenBarrelEvent(e) || e.buttons === 0) this.penBarrelPressed = false;
         } else if (e.buttons === 0) {
             this.penBarrelPressed = false;
         }
@@ -1410,29 +1380,16 @@ export class CanvasController {
     private readonly onPointerCancel = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
             this.isPenTipDown = false;
-            this.penBarrelPressed = false;
             this.lastPenEventTime = performance.now();
-        } else {
-            this.penBarrelPressed = false;
         }
+        this.penBarrelPressed = false;
         this.updateDebugHud(e);
     };
 
-    private readonly onPointerLeave = (e: PointerEvent): void => {
-        if (e.pointerType === 'pen') {
-            this.isPenTipDown = false;
-            this.penBarrelPressed = false;
-            this.lastPenEventTime = performance.now();
-        } else {
-            this.penBarrelPressed = false;
-        }
-        this.updateDebugHud(e);
-    };
+    private readonly onPointerLeave = this.onPointerCancel;
 
     private readonly onLostPointerCapture = (e: PointerEvent): void => {
-        if (e.pointerType === 'pen') {
-            this.isPenTipDown = false;
-        }
+        if (e.pointerType === 'pen') this.isPenTipDown = false;
         this.updateDebugHud(e);
     };
 
@@ -1446,10 +1403,8 @@ export class CanvasController {
     public setSpenDebugHud(enabled: boolean): void {
         this.showSpenDebugHud = enabled;
         if (!enabled) {
-            if (this.debugInputHudEl) {
-                this.debugInputHudEl.remove();
-                this.debugInputHudEl = null;
-            }
+            this.debugInputHudEl?.remove();
+            this.debugInputHudEl = null;
         } else {
             this.ensureDebugHud();
         }
@@ -1464,21 +1419,7 @@ export class CanvasController {
         if (this.debugInputHudEl) return;
         const hud = document.createElement('div');
         hud.className = 'apolo-spen-debug-hud';
-        hud.style.position = 'absolute';
-        hud.style.bottom = '12px';
-        hud.style.left = '12px';
-        hud.style.zIndex = '1000';
-        hud.style.pointerEvents = 'none';
-        hud.style.fontFamily = 'monospace';
-        hud.style.fontSize = '11px';
-        hud.style.lineHeight = '1.3';
-        hud.style.whiteSpace = 'pre';
-        hud.style.backgroundColor = 'rgba(0, 0, 0, 0.75)';
-        hud.style.color = '#00ff66';
-        hud.style.padding = '6px 10px';
-        hud.style.borderRadius = '6px';
-        hud.style.border = '1px solid rgba(0, 255, 102, 0.4)';
-        hud.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+        hud.style.cssText = 'position:absolute;bottom:12px;left:12px;z-index:1000;pointer-events:none;font:11px/1.3 monospace;white-space:pre;background:rgba(0,0,0,0.75);color:#00ff66;padding:6px 10px;border-radius:6px;border:1px solid rgba(0,255,102,0.4)';
         hud.textContent = 'S-Pen HUD Activo — Esperando eventos...';
         this.uiRoot.appendChild(hud);
         this.debugInputHudEl = hud;
@@ -1488,20 +1429,11 @@ export class CanvasController {
         if (!this.showSpenDebugHud) return;
         this.ensureDebugHud();
         if (!this.debugInputHudEl) return;
-
         const pEvent = e as PointerEvent;
-        const pType = pEvent.pointerType ?? 'mouse';
-        const btn = typeof e.button === 'number' ? e.button : -1;
-        const btns = typeof e.buttons === 'number' ? e.buttons : 0;
         const press = typeof pEvent.pressure === 'number' ? pEvent.pressure.toFixed(2) : '0.00';
-        const ctxLabel = context ? ` (${context})` : '';
-
-        const line = `[${e.type}${ctxLabel}] ptr=${pType} btn=${btn} btns=${btns} p=${press} tipDown=${this.isPenTipDown} barrel=${this.penBarrelPressed}`;
+        const line = `[${e.type}${context ? ` (${context})` : ''}] ptr=${pEvent.pointerType ?? 'mouse'} btn=${e.button ?? -1} btns=${e.buttons ?? 0} p=${press} tipDown=${this.isPenTipDown} barrel=${this.penBarrelPressed}`;
         this.debugHudLogs.push(line);
-        if (this.debugHudLogs.length > 4) {
-            this.debugHudLogs.shift();
-        }
-
+        if (this.debugHudLogs.length > 4) this.debugHudLogs.shift();
         this.debugInputHudEl.textContent = this.debugHudLogs.join('\n');
     }
 
@@ -2080,50 +2012,27 @@ export class CanvasController {
     }
 
     public applyToolFavoritePreset(preset: ToolFavoritePreset): void {
-        if (preset.tool === 'pen') {
-            if (this.tool !== 'pen') {
-                this.setTool('pen', false);
-            }
+        if (this.tool !== preset.tool) this.setTool(preset.tool, false);
+
+        if (preset.tool === 'pen' || preset.tool === 'highlighter') {
+            const targetState = preset.tool === 'pen' ? this.toolState.pen : this.toolState.highlighter;
             this.applyPenProfile(preset.profileId);
             this.setInkColor(preset.color);
             this.setWidth(preset.width);
             if (preset.opacity !== undefined) {
                 this.style.opacity = preset.opacity;
-                this.toolState.pen.opacity = preset.opacity;
+                targetState.opacity = preset.opacity;
             }
             if (preset.pattern) {
                 this.style.pattern = preset.pattern;
-                this.toolState.pen.pattern = preset.pattern;
+                targetState.pattern = preset.pattern;
             }
-            if (preset.straightenLines !== undefined) {
-                this.setStraightenLines(preset.straightenLines);
-            }
-            if (preset.smoothing !== undefined) {
+            if (preset.straightenLines !== undefined) this.setStraightenLines(preset.straightenLines);
+            if (preset.tool === 'pen' && preset.smoothing !== undefined) {
                 this.smoothing = preset.smoothing;
                 this.toolState.pen.smoothing = preset.smoothing;
             }
-        } else if (preset.tool === 'highlighter') {
-            if (this.tool !== 'highlighter') {
-                this.setTool('highlighter', false);
-            }
-            this.applyPenProfile(preset.profileId);
-            this.setInkColor(preset.color);
-            this.setWidth(preset.width);
-            if (preset.opacity !== undefined) {
-                this.style.opacity = preset.opacity;
-                this.toolState.highlighter.opacity = preset.opacity;
-            }
-            if (preset.pattern) {
-                this.style.pattern = preset.pattern;
-                this.toolState.highlighter.pattern = preset.pattern;
-            }
-            if (preset.straightenLines !== undefined) {
-                this.setStraightenLines(preset.straightenLines);
-            }
         } else if (preset.tool === 'shape') {
-            if (this.tool !== 'shape') {
-                this.setTool('shape', false);
-            }
             this.shapeType = preset.shapeType;
             this.toolState.shape.shapeType = preset.shapeType;
             this.toolbar?.setShape(preset.shapeType);
@@ -2138,15 +2047,9 @@ export class CanvasController {
                 this.style.pattern = preset.pattern;
                 this.toolState.shape.pattern = preset.pattern;
             }
-            if (preset.fillEnabled !== undefined) {
-                this.toolState.shape.fillEnabled = preset.fillEnabled;
-            }
-            if (preset.fillColor !== undefined) {
-                this.toolState.shape.fillColor = preset.fillColor;
-            }
-            if (preset.fillOpacity !== undefined) {
-                this.toolState.shape.fillOpacity = preset.fillOpacity;
-            }
+            if (preset.fillEnabled !== undefined) this.toolState.shape.fillEnabled = preset.fillEnabled;
+            if (preset.fillColor !== undefined) this.toolState.shape.fillColor = preset.fillColor;
+            if (preset.fillOpacity !== undefined) this.toolState.shape.fillOpacity = preset.fillOpacity;
         }
 
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
@@ -2166,14 +2069,16 @@ export class CanvasController {
         this.options.onApplyFavorite?.(preset);
     }
 
+    private syncAndNotifyFavorites(): void {
+        this.syncEstucheFavoriteState();
+        this.notifyToolStateChange();
+    }
+
     public deleteToolFavoritePreset(presetId: string): void {
         const tool = this.tool;
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
-        const currentList = this.getToolFavorites(tool);
-        const updated = removeFavoriteById(currentList, presetId);
-        setCanonicalFavorites(this.toolState, tool, updated);
-        this.syncEstucheFavoriteState();
-        this.notifyToolStateChange();
+        setCanonicalFavorites(this.toolState, tool, removeFavoriteById(this.getToolFavorites(tool), presetId));
+        this.syncAndNotifyFavorites();
         this.options.onDeleteFavorite?.(presetId);
         this.toast?.show('Favorito eliminado');
     }
@@ -2181,91 +2086,62 @@ export class CanvasController {
     public reorderToolFavorites(fromIndex: number, toIndex: number): void {
         const tool = this.tool;
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
-        const currentList = this.getToolFavorites(tool);
-        const updated = reorderFavorites(currentList, fromIndex, toIndex);
-        setCanonicalFavorites(this.toolState, tool, updated);
-        this.syncEstucheFavoriteState();
-        this.notifyToolStateChange();
+        setCanonicalFavorites(this.toolState, tool, reorderFavorites(this.getToolFavorites(tool), fromIndex, toIndex));
+        this.syncAndNotifyFavorites();
         this.options.onReorderFavorites?.(fromIndex, toIndex);
     }
 
     public switchFavoriteProfile(profileId: string): void {
-        const isShape = this.tool === 'shape';
-        if (isShape) {
-            switchShapeProfile(this.toolState, profileId);
-        } else {
-            switchStrokeProfile(this.toolState, profileId);
-        }
-        this.syncEstucheFavoriteState();
-        this.notifyToolStateChange();
+        if (this.tool === 'shape') switchShapeProfile(this.toolState, profileId);
+        else switchStrokeProfile(this.toolState, profileId);
+        this.syncAndNotifyFavorites();
     }
 
     public createFavoriteProfile(name: string): void {
-        const isShape = this.tool === 'shape';
-        if (isShape) {
-            this.createShapeProfile(name);
-        } else {
-            this.createStrokeProfile(name);
-        }
+        if (this.tool === 'shape') this.createShapeProfile(name);
+        else this.createStrokeProfile(name);
     }
 
     public createStrokeProfile(name: string): void {
         createStrokeProfile(this.toolState, name);
-        this.syncEstucheFavoriteState();
-        this.notifyToolStateChange();
+        this.syncAndNotifyFavorites();
         this.toast?.show(`Perfil "${name}" creado`);
     }
 
     public createShapeProfile(name: string): void {
         createShapeProfile(this.toolState, name);
-        this.syncEstucheFavoriteState();
-        this.notifyToolStateChange();
+        this.syncAndNotifyFavorites();
         this.toast?.show(`Perfil "${name}" creado`);
     }
 
     public renameStrokeProfile(profileId: string, name: string): boolean {
-        const success = renameStrokeProfile(this.toolState, profileId, name);
-        if (success) {
-            this.syncEstucheFavoriteState();
-            this.notifyToolStateChange();
-        }
-        return success;
+        const ok = renameStrokeProfile(this.toolState, profileId, name);
+        if (ok) this.syncAndNotifyFavorites();
+        return ok;
     }
 
     public deleteStrokeProfile(profileId: string): boolean {
-        const success = deleteStrokeProfile(this.toolState, profileId);
-        if (success) {
-            this.syncEstucheFavoriteState();
-            this.notifyToolStateChange();
-        }
-        return success;
+        const ok = deleteStrokeProfile(this.toolState, profileId);
+        if (ok) this.syncAndNotifyFavorites();
+        return ok;
     }
 
     public renameShapeProfile(profileId: string, name: string): boolean {
-        const success = renameShapeProfile(this.toolState, profileId, name);
-        if (success) {
-            this.syncEstucheFavoriteState();
-            this.notifyToolStateChange();
-        }
-        return success;
+        const ok = renameShapeProfile(this.toolState, profileId, name);
+        if (ok) this.syncAndNotifyFavorites();
+        return ok;
     }
 
     public deleteShapeProfile(profileId: string): boolean {
-        const success = deleteShapeProfile(this.toolState, profileId);
-        if (success) {
-            this.syncEstucheFavoriteState();
-            this.notifyToolStateChange();
-        }
-        return success;
+        const ok = deleteShapeProfile(this.toolState, profileId);
+        if (ok) this.syncAndNotifyFavorites();
+        return ok;
     }
 
     public renameFavoritePreset(presetId: string, newName: string): boolean {
-        const success = renameFavoritePreset(this.toolState, this.tool as FavoritableTool, presetId, newName);
-        if (success) {
-            this.syncEstucheFavoriteState();
-            this.notifyToolStateChange();
-        }
-        return success;
+        const ok = renameFavoritePreset(this.toolState, this.tool as FavoritableTool, presetId, newName);
+        if (ok) this.syncAndNotifyFavorites();
+        return ok;
     }
 
     public toggleSyncFavoriteProfiles(sync: boolean): void {
@@ -2279,13 +2155,10 @@ export class CanvasController {
                 activeStroke.name,
                 currIdx,
             );
-            if (matchingShape) {
-                this.toolState.activeShapeProfileId = matchingShape.id;
-            }
+            if (matchingShape) this.toolState.activeShapeProfileId = matchingShape.id;
             syncLegacyFavoritesSlice(this.toolState);
         }
-        this.syncEstucheFavoriteState();
-        this.notifyToolStateChange();
+        this.syncAndNotifyFavorites();
         this.toast?.show(sync ? 'Perfiles sincronizados' : 'Perfiles independientes');
     }
 
@@ -2294,127 +2167,63 @@ export class CanvasController {
     }
 
     public getToolFavorites(tool: 'pen' | 'highlighter' | 'shape'): ToolFavoritePreset[] {
-        if (!this.toolState) return [];
-        return getCanonicalFavorites(this.toolState, tool);
+        return this.toolState ? getCanonicalFavorites(this.toolState, tool) : [];
     }
 
     public getActiveToolFavoritesCount(): number {
         const tool = this.tool;
-        if (tool === 'pen' || tool === 'highlighter' || tool === 'shape') {
-            return this.getToolFavorites(tool).length;
-        }
-        return 0;
+        return (tool === 'pen' || tool === 'highlighter' || tool === 'shape') ? this.getToolFavorites(tool).length : 0;
     }
 
     public toggleEstucheFavorites(targetTool?: ToolType): void {
         const tool = targetTool || this.tool;
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
-        if (tool !== this.tool) {
-            this.setTool(tool);
-        }
+        if (tool !== this.tool) this.setTool(tool);
         if (this.estuche?.isOpen()) {
             this.estuche.close();
         } else {
-            const toolBtn = this.toolbar?.getToolButton(tool);
-            const favsList = this.getToolFavorites(tool);
-            const isFav = this.isCurrentToolFavorited();
-            this.estuche?.open({
-                tool,
-                slot: this.toolbarSlot,
-                color: this.style.color,
-                width: this.style.width,
-                profileId: this.penProfileId,
-                smoothing: this.smoothing,
-                pressureSensitivity: this.pressureSensitivity,
-                opacity: this.style.opacity,
-                lineStyle: this.style.pattern,
-                pattern: this.style.pattern,
-                favorites: favsList,
-                isCurrentFavorite: isFav,
-                showingFavorites: true,
-                eraserMode: this.eraserMode,
-                eraserRadius: this.eraserRadius,
-                scribbleToErase: this.scribbleToErase,
-                lassoMode: this.lassoMode,
-                shapeType: this.shapeType,
-                snapGrid: this.snapGrid,
-                straightenLines: this.straightenLines,
-                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
-                strokeFavoriteProfiles: this.toolState.strokeFavoriteProfiles,
-                activeStrokeProfileId: this.toolState.activeStrokeProfileId,
-                shapeFavoriteProfiles: this.toolState.shapeFavoriteProfiles,
-                activeShapeProfileId: this.toolState.activeShapeProfileId,
-            }, toolBtn);
+            this.estuche?.open(this.buildEstucheState(tool, true), this.toolbar?.getToolButton(tool));
         }
     }
 
     public cycleActiveToolFavorite(): boolean {
         const tool = this.tool;
-
-        // Fallback: if active tool is eraser or lasso, switch to pen so barrel button is never a dead no-op
         if (tool === 'eraser' || tool === 'lasso') {
             this.setTool('pen');
             this.toast?.show('Herramienta: Pluma');
             return true;
         }
-
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return false;
 
-        let list: ToolFavoritePreset[] = [];
-        let profileName = '';
+        const profile = tool === 'shape' ? getActiveShapeProfile(this.toolState) : getActiveStrokeProfile(this.toolState);
+        const list: ToolFavoritePreset[] = tool === 'shape'
+            ? (profile as any).shape
+            : (profile as any)[tool];
 
-        if (tool === 'pen') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            list = profile.pen;
-            profileName = profile.name;
-        } else if (tool === 'highlighter') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            list = profile.highlighter;
-            profileName = profile.name;
-        } else if (tool === 'shape') {
-            const profile = getActiveShapeProfile(this.toolState);
-            list = profile.shape;
-            profileName = profile.name;
-        }
-
-        // If active profile has no favorites, open ToolEstuche on Favorites view for immediate visual feedback
         if (!list || list.length === 0) {
             this.toggleEstucheFavorites();
-            this.toast?.show(`${profileName} · Sin favoritos guardados`);
+            this.toast?.show(`${profile.name} · Sin favoritos guardados`);
             return false;
         }
 
-        const currentSlice = this.getCurrentToolSlice();
-        const next = getNextFavoritePreset(list, currentSlice);
+        const next = getNextFavoritePreset(list, this.getCurrentToolSlice());
         if (!next) return false;
 
         this.applyToolFavoritePreset(next.preset);
-        this.toast?.show(`${profileName} · Favorito ${next.index + 1}/${list.length}`);
+        this.toast?.show(`${profile.name} · Favorito ${next.index + 1}/${list.length}`);
         return true;
     }
 
     public cycleActiveToolProfile(): boolean {
-        const tool = this.tool;
-        const isShape = tool === 'shape';
-        if (isShape) {
-            const profiles = this.toolState.shapeFavoriteProfiles;
-            if (!profiles || profiles.length === 0) return false;
-            const currIdx = profiles.findIndex(p => p.id === this.toolState.activeShapeProfileId);
-            const nextIdx = currIdx !== -1 ? (currIdx + 1) % profiles.length : 0;
-            const nextProfile = profiles[nextIdx];
-            this.switchFavoriteProfile(nextProfile.id);
-            this.toast?.show(`Perfil: ${nextProfile.name}`);
-            return true;
-        } else {
-            const profiles = this.toolState.strokeFavoriteProfiles;
-            if (!profiles || profiles.length === 0) return false;
-            const currIdx = profiles.findIndex(p => p.id === this.toolState.activeStrokeProfileId);
-            const nextIdx = currIdx !== -1 ? (currIdx + 1) % profiles.length : 0;
-            const nextProfile = profiles[nextIdx];
-            this.switchFavoriteProfile(nextProfile.id);
-            this.toast?.show(`Perfil: ${nextProfile.name}`);
-            return true;
-        }
+        const isShape = this.tool === 'shape';
+        const profiles = isShape ? this.toolState.shapeFavoriteProfiles : this.toolState.strokeFavoriteProfiles;
+        const activeId = isShape ? this.toolState.activeShapeProfileId : this.toolState.activeStrokeProfileId;
+        if (!profiles || profiles.length === 0) return false;
+        const currIdx = profiles.findIndex(p => p.id === activeId);
+        const nextProfile = profiles[currIdx !== -1 ? (currIdx + 1) % profiles.length : 0];
+        this.switchFavoriteProfile(nextProfile.id);
+        this.toast?.show(`Perfil: ${nextProfile.name}`);
+        return true;
     }
 
     public getEstuche(): ToolEstuche | null {
@@ -2587,25 +2396,7 @@ export class CanvasController {
             this.toolbar?.setTool(this.tool, this.shapeType);
             this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
             this.toolbar?.setThicknessValues(this.style.width, this.eraserRadius);
-            this.estuche?.updateState({
-                tool: this.tool,
-                slot: this.toolbarSlot,
-                color: this.style.color,
-                width: this.style.width,
-                profileId: this.penProfileId,
-                smoothing: this.smoothing,
-                pressureSensitivity: this.pressureSensitivity,
-                lineStyle: this.style.pattern,
-                pattern: this.style.pattern,
-                straightenLines: this.straightenLines,
-                onlyHighlighter: this.toolState.eraser.onlyHighlighter,
-                eraserMode: this.eraserMode,
-                eraserRadius: this.eraserRadius,
-                scribbleToErase: this.scribbleToErase,
-                lassoMode: this.lassoMode,
-                shapeType: this.shapeType,
-                snapGrid: this.snapGrid,
-            });
+            this.estuche?.updateState(this.buildEstucheState(this.tool));
             this.syncEstucheFavoriteState();
             this.updateLayerPointerEvents();
         }

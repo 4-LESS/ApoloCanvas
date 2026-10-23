@@ -289,6 +289,44 @@ export class ToolEstuche implements PopoverInstance {
         });
     }
 
+    private syncSliderVisual(input?: HTMLInputElement, bubble?: HTMLElement, val?: number, defaultMin = 1, defaultMax = 20): void {
+        if (val === undefined || !input || !bubble) return;
+        input.value = String(val);
+        bubble.textContent = String(val);
+        const min = Number(input.min) || defaultMin;
+        const max = Number(input.max) || defaultMax;
+        const ratio = Math.max(0, Math.min(1, (val - min) / (max - min)));
+        const pct = `${(ratio * 100).toFixed(1)}%`;
+        bubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
+        const track = input.parentElement;
+        if (track) {
+            track.style.setProperty?.('--val', pct);
+            const fill = (track as any).querySelector
+                ? ((track as any).querySelector('.slider-fill') as HTMLElement | null)
+                : ((track as any).children ? (Array.from((track as any).children) as any[]).find((c: any) => c.className?.includes?.('slider-fill')) : null) as HTMLElement | null;
+            if (fill) fill.style.width = pct;
+        }
+    }
+
+    private syncSwitchVisual(sw?: HTMLElement, checked?: boolean): void {
+        if (checked === undefined || !sw) return;
+        sw.classList.toggle('is-checked', checked);
+        sw.classList.toggle('is-on', checked);
+        const thumb = sw.querySelector('.popover-switch-thumb') as HTMLElement | null;
+        if (thumb) thumb.style.transform = checked ? 'translateX(18px)' : 'none';
+    }
+
+    private getDomainProfilesList(): Array<StrokeFavoriteProfile | ShapeFavoriteProfile> {
+        if (this.state.tool === 'shape') {
+            return Array.isArray(this.state.shapeFavoriteProfiles) && this.state.shapeFavoriteProfiles.length > 0
+                ? this.state.shapeFavoriteProfiles
+                : DEFAULT_SHAPE_FAVORITE_PROFILES;
+        }
+        return Array.isArray(this.state.strokeFavoriteProfiles) && this.state.strokeFavoriteProfiles.length > 0
+            ? this.state.strokeFavoriteProfiles
+            : DEFAULT_STROKE_FAVORITE_PROFILES;
+    }
+
     updateState(partial: Partial<ToolEstucheState>): void {
         const previousTool = this.state.tool;
         const previousShowingFavs = this.state.showingFavorites;
@@ -309,9 +347,7 @@ export class ToolEstuche implements PopoverInstance {
             return;
         }
 
-        if (partial.isCurrentFavorite !== undefined) {
-            this.updateStarButtonVisual();
-        }
+        if (partial.isCurrentFavorite !== undefined) this.updateStarButtonVisual();
 
         if (
             partial.favorites !== undefined ||
@@ -324,89 +360,26 @@ export class ToolEstuche implements PopoverInstance {
             this.updateFavsButtonVisual();
             this.updateHeaderTitleVisual();
             if (this.state.showingFavorites && this.favoritesDrawer) {
-                const tool = this.state.tool as FavoritableTool;
-                const isShape = tool === 'shape';
-                const profiles = isShape
-                    ? (this.state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES)
-                    : (this.state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES);
-                const activeProfileId = isShape
-                    ? (this.state.activeShapeProfileId ?? 'general')
-                    : (this.state.activeStrokeProfileId ?? 'notes');
-                const syncFavoriteProfiles = Boolean(this.state.syncFavoriteProfiles);
-
                 this.favoritesDrawer.update(
-                    tool,
+                    this.state.tool as FavoritableTool,
                     this.getToolFavorites(),
                     this.getCurrentToolSlice(),
-                    profiles,
-                    activeProfileId,
-                    syncFavoriteProfiles,
+                    this.getDomainProfilesList(),
+                    this.getActiveProfileId(),
+                    Boolean(this.state.syncFavoriteProfiles),
                 );
             }
         }
 
         // In-place updates: zero DOM destruction to preserve slider drags and focus
-        if (partial.width !== undefined && this.widthInput && this.widthBubble) {
-            this.widthInput.value = String(partial.width);
-            this.widthBubble.textContent = String(partial.width);
-            const min = Number(this.widthInput.min) || 1;
-            const max = Number(this.widthInput.max) || 20;
-            const ratio = Math.max(0, Math.min(1, (partial.width - min) / (max - min)));
-            const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.widthBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-            const track = this.widthInput.parentElement;
-            if (track) {
-                track.style.setProperty?.('--val', pct);
-                const fill = (track as any).querySelector
-                    ? ((track as any).querySelector('.slider-fill') as HTMLElement | null)
-                    : ((track as any).children ? (Array.from((track as any).children) as any[]).find((c: any) => c.className?.includes?.('slider-fill')) : null) as HTMLElement | null;
-                if (fill) fill.style.width = pct;
-            }
+        this.syncSliderVisual(this.widthInput, this.widthBubble, partial.width, 1, 20);
+        if (partial.smoothing !== undefined) {
+            this.syncSliderVisual(this.smoothingInput, this.smoothingBubble, Math.round(partial.smoothing * 10), 0, 10);
         }
-
-        if (partial.smoothing !== undefined && this.smoothingInput && this.smoothingBubble) {
-            const val = Math.round(partial.smoothing * 10);
-            this.smoothingInput.value = String(val);
-            this.smoothingBubble.textContent = String(val);
-            const ratio = Math.max(0, Math.min(1, val / 10));
-            const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.smoothingBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-            const track = this.smoothingInput.parentElement;
-            if (track) {
-                track.style.setProperty?.('--val', pct);
-                const fill = (track as any).querySelector
-                    ? ((track as any).querySelector('.slider-fill') as HTMLElement | null)
-                    : ((track as any).children ? (Array.from((track as any).children) as any[]).find((c: any) => c.className?.includes?.('slider-fill')) : null) as HTMLElement | null;
-                if (fill) fill.style.width = pct;
-            }
-        }
-
-        if (partial.opacity !== undefined && this.opacityInput && this.opacityBubble) {
-            const val = Math.round(partial.opacity);
-            this.opacityInput.value = String(val);
-            this.opacityBubble.textContent = String(val);
-            const ratio = Math.max(0, Math.min(1, val / 100));
-            const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-            const track = this.opacityInput.parentElement;
-            if (track) {
-                track.style.setProperty('--val', pct);
-                const fill = track.querySelector('.slider-fill') as HTMLElement | null;
-                if (fill) fill.style.width = pct;
-            }
-        } else if (partial.pressureSensitivity !== undefined && this.opacityInput && this.opacityBubble) {
-            const val = Math.round(partial.pressureSensitivity * 100);
-            this.opacityInput.value = String(val);
-            this.opacityBubble.textContent = String(val);
-            const ratio = Math.max(0, Math.min(1, val / 100));
-            const pct = `${(ratio * 100).toFixed(1)}%`;
-            this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-            const track = this.opacityInput.parentElement;
-            if (track) {
-                track.style.setProperty('--val', pct);
-                const fill = track.querySelector('.slider-fill') as HTMLElement | null;
-                if (fill) fill.style.width = pct;
-            }
+        if (partial.opacity !== undefined) {
+            this.syncSliderVisual(this.opacityInput, this.opacityBubble, Math.round(partial.opacity), 0, 100);
+        } else if (partial.pressureSensitivity !== undefined) {
+            this.syncSliderVisual(this.opacityInput, this.opacityBubble, Math.round(partial.pressureSensitivity * 100), 0, 100);
         }
 
         if ((partial.lineStyle !== undefined || partial.pattern !== undefined) && this.lineStyleChips.size > 0) {
@@ -420,45 +393,25 @@ export class ToolEstuche implements PopoverInstance {
             }
         }
 
-        if (partial.straightenLines !== undefined && this.straightenSwitch) {
-            this.straightenSwitch.classList.toggle('is-checked', partial.straightenLines);
-            this.straightenSwitch.classList.toggle('is-on', partial.straightenLines);
-            const thumb = this.straightenSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
-            if (thumb) thumb.style.transform = partial.straightenLines ? 'translateX(18px)' : 'none';
-        }
-
-        if (partial.onlyHighlighter !== undefined && this.onlyHighlighterSwitch) {
-            this.onlyHighlighterSwitch.classList.toggle('is-checked', partial.onlyHighlighter);
-            this.onlyHighlighterSwitch.classList.toggle('is-on', partial.onlyHighlighter);
-            const thumb = this.onlyHighlighterSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
-            if (thumb) thumb.style.transform = partial.onlyHighlighter ? 'translateX(18px)' : 'none';
-        }
+        this.syncSwitchVisual(this.straightenSwitch, partial.straightenLines);
+        this.syncSwitchVisual(this.onlyHighlighterSwitch, partial.onlyHighlighter);
+        this.syncSwitchVisual(this.snapGridSwitch, partial.snapGrid);
+        this.syncSwitchVisual(this.scribbleSwitch, partial.scribbleToErase);
 
         if (partial.profileId !== undefined) {
-            for (const [id, btn] of this.toolButtons) {
-                btn.classList.toggle('is-active', id === partial.profileId);
-            }
+            for (const [id, btn] of this.toolButtons) btn.classList.toggle('is-active', id === partial.profileId);
         }
 
         if (partial.color !== undefined) {
             const clean = partial.color.toUpperCase();
             this.pushRecentColor(partial.color);
-            for (const [col, btn] of this.swatchButtons) {
-                btn.classList.toggle('is-active', col.toUpperCase() === clean);
-            }
+            for (const [col, btn] of this.swatchButtons) btn.classList.toggle('is-active', col.toUpperCase() === clean);
             this.container.style.setProperty('--hl-color', partial.color);
-            if (this.opacityInput?.parentElement) {
-                this.opacityInput.parentElement.style.setProperty('--hl-color', partial.color);
-            }
+            this.opacityInput?.parentElement?.style.setProperty('--hl-color', partial.color);
         }
 
-        if (partial.eraserRadius !== undefined && this.eraserRadiusInput && this.eraserRadiusBubble) {
-            this.eraserRadiusInput.value = String(partial.eraserRadius);
-            this.eraserRadiusBubble.textContent = String(partial.eraserRadius);
-            const min = Number(this.eraserRadiusInput.min) || 8;
-            const max = Number(this.eraserRadiusInput.max) || 60;
-            const ratio = Math.max(0, Math.min(1, (partial.eraserRadius - min) / (max - min)));
-            this.eraserRadiusBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
+        if (partial.eraserRadius !== undefined) {
+            this.syncSliderVisual(this.eraserRadiusInput, this.eraserRadiusBubble, partial.eraserRadius, 8, 60);
             if (this.eraserPreviewDot) {
                 const dotSize = Math.max(12, Math.min(36, partial.eraserRadius * 0.7));
                 this.eraserPreviewDot.style.width = `${dotSize}px`;
@@ -467,15 +420,11 @@ export class ToolEstuche implements PopoverInstance {
         }
 
         if (partial.eraserMode !== undefined) {
-            for (const [mode, btn] of this.eraserModeButtons) {
-                btn.classList.toggle('is-active', mode === partial.eraserMode);
-            }
+            for (const [mode, btn] of this.eraserModeButtons) btn.classList.toggle('is-active', mode === partial.eraserMode);
         }
 
         if (partial.lassoMode !== undefined) {
-            for (const [mode, btn] of this.lassoModeButtons) {
-                btn.classList.toggle('is-active', mode === partial.lassoMode);
-            }
+            for (const [mode, btn] of this.lassoModeButtons) btn.classList.toggle('is-active', mode === partial.lassoMode);
         }
 
         if (partial.shapeType !== undefined) {
@@ -490,23 +439,7 @@ export class ToolEstuche implements PopoverInstance {
             }
         }
 
-        if (partial.snapGrid !== undefined && this.snapGridSwitch) {
-            this.snapGridSwitch.classList.toggle('is-checked', partial.snapGrid);
-            this.snapGridSwitch.classList.toggle('is-on', partial.snapGrid);
-            const thumb = this.snapGridSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
-            if (thumb) thumb.style.transform = partial.snapGrid ? 'translateX(18px)' : 'none';
-        }
-
-        if (partial.scribbleToErase !== undefined && this.scribbleSwitch) {
-            this.scribbleSwitch.classList.toggle('is-checked', partial.scribbleToErase);
-            this.scribbleSwitch.classList.toggle('is-on', partial.scribbleToErase);
-            const thumb = this.scribbleSwitch.querySelector('.popover-switch-thumb') as HTMLElement | null;
-            if (thumb) thumb.style.transform = partial.scribbleToErase ? 'translateX(18px)' : 'none';
-        }
-
-        if (partial.slot !== undefined) {
-            this.position(this.currentAnchorEl);
-        }
+        if (partial.slot !== undefined) this.position(this.currentAnchorEl);
     }
 
     public setShowingFavorites(showing: boolean): void {
@@ -559,20 +492,11 @@ export class ToolEstuche implements PopoverInstance {
     }
 
     private getActiveToolProfiles(): Array<{ id: string; name: string }> {
-        const isShape = this.state.tool === 'shape';
-        const profiles = isShape
-            ? (Array.isArray(this.state.shapeFavoriteProfiles) && this.state.shapeFavoriteProfiles.length > 0
-                ? this.state.shapeFavoriteProfiles
-                : DEFAULT_SHAPE_FAVORITE_PROFILES)
-            : (Array.isArray(this.state.strokeFavoriteProfiles) && this.state.strokeFavoriteProfiles.length > 0
-                ? this.state.strokeFavoriteProfiles
-                : DEFAULT_STROKE_FAVORITE_PROFILES);
-        return profiles.map(p => ({ id: p.id, name: p.name }));
+        return this.getDomainProfilesList().map(p => ({ id: p.id, name: p.name }));
     }
 
     private getActiveProfileId(): string {
-        const isShape = this.state.tool === 'shape';
-        return isShape
+        return this.state.tool === 'shape'
             ? (this.state.activeShapeProfileId ?? 'general')
             : (this.state.activeStrokeProfileId ?? 'notes');
     }
@@ -580,33 +504,20 @@ export class ToolEstuche implements PopoverInstance {
     private getActiveProfileName(): string {
         const profiles = this.getActiveToolProfiles();
         const activeId = this.getActiveProfileId();
-        const activeProfile = profiles.find(p => p.id === activeId) ?? profiles[0];
-        return activeProfile?.name || 'Favoritos';
+        return (profiles.find(p => p.id === activeId) ?? profiles[0])?.name || 'Favoritos';
     }
 
     public switchProfile(profileId: string): void {
-        const isShape = this.state.tool === 'shape';
-        if (isShape) {
-            this.state.activeShapeProfileId = profileId;
-        } else {
-            this.state.activeStrokeProfileId = profileId;
-        }
+        if (this.state.tool === 'shape') this.state.activeShapeProfileId = profileId;
+        else this.state.activeStrokeProfileId = profileId;
         this.updateHeaderTitleVisual();
         this.updateFavsButtonVisual();
         if (this.favoritesDrawer) {
-            const tool = this.state.tool as FavoritableTool;
-            const profiles = isShape
-                ? (Array.isArray(this.state.shapeFavoriteProfiles) && this.state.shapeFavoriteProfiles.length > 0
-                    ? this.state.shapeFavoriteProfiles
-                    : DEFAULT_SHAPE_FAVORITE_PROFILES)
-                : (Array.isArray(this.state.strokeFavoriteProfiles) && this.state.strokeFavoriteProfiles.length > 0
-                    ? this.state.strokeFavoriteProfiles
-                    : DEFAULT_STROKE_FAVORITE_PROFILES);
             this.favoritesDrawer.update(
-                tool,
+                this.state.tool as FavoritableTool,
                 this.getToolFavorites(),
                 this.getCurrentToolSlice(),
-                profiles,
+                this.getDomainProfilesList(),
                 profileId,
                 Boolean(this.state.syncFavoriteProfiles),
             );
@@ -617,8 +528,7 @@ export class ToolEstuche implements PopoverInstance {
     private updateHeaderTitleVisual(): void {
         if (!this.titleEl) return;
         if (this.state.showingFavorites) {
-            const profileName = this.getActiveProfileName();
-            this.titleEl.textContent = profileName;
+            this.titleEl.textContent = this.getActiveProfileName();
 
             if (!this.headerDotsContainer && this.titleEl.parentElement) {
                 const dotsContainer = document.createElement('nav');
@@ -631,12 +541,10 @@ export class ToolEstuche implements PopoverInstance {
             if (this.headerDotsContainer) {
                 this.headerDotsContainer.replaceChildren();
                 const profiles = this.getActiveToolProfiles();
-                const activeProfileId = this.getActiveProfileId();
-                const currIdx = profiles.findIndex(p => p.id === activeProfileId);
+                const currIdx = profiles.findIndex(p => p.id === this.getActiveProfileId());
                 const safeIdx = currIdx !== -1 ? currIdx : 0;
                 const isLastProfile = safeIdx === profiles.length - 1;
 
-                // 1. Prev Navigation Chevron (<)
                 const prevBtn = document.createElement('button');
                 prevBtn.type = 'button';
                 prevBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-prev';
@@ -646,44 +554,30 @@ export class ToolEstuche implements PopoverInstance {
                     prevBtn.classList.add('is-disabled');
                     prevBtn.disabled = true;
                 } else {
-                    prevBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        this.switchProfile(profiles[safeIdx - 1].id);
-                    };
+                    prevBtn.onclick = (e) => { e.stopPropagation(); this.switchProfile(profiles[safeIdx - 1].id); };
                 }
                 this.headerDotsContainer.appendChild(prevBtn);
 
-                // 2. Track of dots
                 const track = document.createElement('div');
                 track.className = 'apolo-kit-dots-track';
-
                 profiles.forEach((p, idx) => {
                     const dot = document.createElement('button');
                     dot.type = 'button';
-                    const isActive = idx === safeIdx;
-                    dot.className = `dot popover-header-dot apolo-kit-dot${isActive ? ' is-active' : ''}`;
+                    dot.className = `dot popover-header-dot apolo-kit-dot${idx === safeIdx ? ' is-active' : ''}`;
                     setAccessibleTooltip(dot, `Perfil ${p.name}`, p.name);
-                    dot.onclick = (e) => {
-                        e.stopPropagation();
-                        this.switchProfile(p.id);
-                    };
+                    dot.onclick = (e) => { e.stopPropagation(); this.switchProfile(p.id); };
                     track.appendChild(dot);
                 });
 
-                // Add Profile dot indicator at the end
                 const addDot = document.createElement('button');
                 addDot.type = 'button';
                 addDot.className = `dot-add popover-header-dot apolo-kit-dot is-add-dot${isLastProfile ? ' is-next-hint' : ''}`;
                 setAccessibleTooltip(addDot, 'Nuevo perfil');
                 addDot.appendChild(createSvg(ICONS.plus, { size: 10, strokeWidth: 2.2 }));
-                addDot.onclick = (e) => {
-                    e.stopPropagation();
-                    this.favoritesDrawer?.openCreateProfileForm();
-                };
+                addDot.onclick = (e) => { e.stopPropagation(); this.favoritesDrawer?.openCreateProfileForm(); };
                 track.appendChild(addDot);
                 this.headerDotsContainer.appendChild(track);
 
-                // 3. Next Navigation Chevron (>)
                 const nextBtn = document.createElement('button');
                 nextBtn.type = 'button';
                 nextBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-next';
@@ -691,75 +585,15 @@ export class ToolEstuche implements PopoverInstance {
                 nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
                 nextBtn.onclick = (e) => {
                     e.stopPropagation();
-                    if (safeIdx < profiles.length - 1) {
-                        this.switchProfile(profiles[safeIdx + 1].id);
-                    } else {
-                        this.favoritesDrawer?.openCreateProfileForm();
-                    }
+                    if (safeIdx < profiles.length - 1) this.switchProfile(profiles[safeIdx + 1].id);
+                    else this.favoritesDrawer?.openCreateProfileForm();
                 };
                 this.headerDotsContainer.appendChild(nextBtn);
             }
         } else {
             this.titleEl.textContent = this.getTitleForTool(this.state.tool);
-            if (this.headerDotsContainer) {
-                this.headerDotsContainer.replaceChildren();
-            }
+            this.headerDotsContainer?.replaceChildren();
         }
-    }
-
-    private renderCreateProfileHeaderDots(): void {
-        if (!this.headerDotsContainer) return;
-        this.headerDotsContainer.replaceChildren();
-
-        const profiles = this.getActiveToolProfiles();
-
-        // 1. Prev Navigation Chevron (<)
-        const prevBtn = document.createElement('button');
-        prevBtn.type = 'button';
-        prevBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-prev';
-        setAccessibleTooltip(prevBtn, 'Cancelar y volver');
-        prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 12, strokeWidth: 2 }));
-        prevBtn.onclick = (e) => {
-            e.stopPropagation();
-            this.favoritesDrawer?.closeCreateProfileForm?.();
-            this.updateHeaderTitleVisual();
-        };
-        this.headerDotsContainer.appendChild(prevBtn);
-
-        // 2. Track of dots
-        const track = document.createElement('div');
-        track.className = 'apolo-kit-dots-track';
-
-        profiles.forEach((p) => {
-            const dot = document.createElement('button');
-            dot.type = 'button';
-            dot.className = 'dot popover-header-dot apolo-kit-dot';
-            setAccessibleTooltip(dot, `Perfil ${p.name}`, p.name);
-            dot.onclick = (e) => {
-                e.stopPropagation();
-                this.favoritesDrawer?.closeCreateProfileForm?.();
-                this.switchProfile(p.id);
-            };
-            track.appendChild(dot);
-        });
-
-        // Add Profile dot indicator (active)
-        const addDot = document.createElement('button');
-        addDot.type = 'button';
-        addDot.className = 'dot-add popover-header-dot apolo-kit-dot is-add-dot is-active';
-        setAccessibleTooltip(addDot, 'Nuevo perfil');
-        addDot.appendChild(createSvg(ICONS.plus, { size: 10, strokeWidth: 2.2 }));
-        track.appendChild(addDot);
-        this.headerDotsContainer.appendChild(track);
-
-        // 3. Next Navigation Chevron (>) (disabled in create view)
-        const nextBtn = document.createElement('button');
-        nextBtn.type = 'button';
-        nextBtn.className = 'arrow apolo-kit-nav-btn apolo-kit-nav-next is-disabled';
-        nextBtn.disabled = true;
-        setAccessibleTooltip(nextBtn, 'Perfil siguiente');
-        nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 12, strokeWidth: 2 }));
-        this.headerDotsContainer.appendChild(nextBtn);
     }
 
     private getToolFavorites(): ToolFavoritePreset[] {
@@ -857,67 +691,34 @@ export class ToolEstuche implements PopoverInstance {
 
     private renderFavoritesDrawerContent(): void {
         this.destroyFavoritesDrawer();
-        const tool = this.state.tool as FavoritableTool;
-        const favorites = this.getToolFavorites();
-        const currentSlice = this.getCurrentToolSlice();
-        const isShape = tool === 'shape';
-        const profiles = isShape
-            ? (Array.isArray(this.state.shapeFavoriteProfiles) && this.state.shapeFavoriteProfiles.length > 0
-                ? this.state.shapeFavoriteProfiles
-                : DEFAULT_SHAPE_FAVORITE_PROFILES)
-            : (Array.isArray(this.state.strokeFavoriteProfiles) && this.state.strokeFavoriteProfiles.length > 0
-                ? this.state.strokeFavoriteProfiles
-                : DEFAULT_STROKE_FAVORITE_PROFILES);
-        const activeProfileId = isShape
-            ? (this.state.activeShapeProfileId ?? 'general')
-            : (this.state.activeStrokeProfileId ?? 'notes');
-        const syncFavoriteProfiles = Boolean(this.state.syncFavoriteProfiles);
-
         this.favoritesDrawer = new FavoritesDrawer(
             {
                 onSelectFavorite: (preset) => {
                     this.callbacks.onApplyFavorite?.(preset);
                     this.close();
                 },
-                onDeleteFavorite: (presetId) => {
-                    this.callbacks.onDeleteFavorite?.(presetId);
-                },
-                onReorderFavorite: (fromIndex, toIndex) => {
-                    this.callbacks.onReorderFavorites?.(fromIndex, toIndex);
-                },
-                onRenameFavorite: (presetId, newName) => {
-                    this.callbacks.onRenameFavorite?.(presetId, newName);
-                },
-                onSwitchProfile: (profileId) => {
-                    this.switchProfile(profileId);
-                },
-                onCreateProfile: (name) => {
-                    this.callbacks.onCreateProfile?.(name);
-                },
-                onToggleSyncProfiles: (sync) => {
-                    this.callbacks.onToggleSyncProfiles?.(sync);
-                },
+                onDeleteFavorite: (presetId) => this.callbacks.onDeleteFavorite?.(presetId),
+                onReorderFavorite: (fromIndex, toIndex) => this.callbacks.onReorderFavorites?.(fromIndex, toIndex),
+                onRenameFavorite: (presetId, newName) => this.callbacks.onRenameFavorite?.(presetId, newName),
+                onSwitchProfile: (profileId) => this.switchProfile(profileId),
+                onCreateProfile: (name) => this.callbacks.onCreateProfile?.(name),
+                onToggleSyncProfiles: (sync) => this.callbacks.onToggleSyncProfiles?.(sync),
                 onProfileModeChange: (mode) => {
-                    if (mode === 'create') {
-                        if (this.titleEl) this.titleEl.textContent = 'Nuevo perfil';
-                        if (this.headerDotsContainer) this.headerDotsContainer.style.display = 'none';
-                        if (this.starBtn) this.starBtn.style.display = 'none';
-                        if (this.favsBtn) setAccessibleTooltip(this.favsBtn, 'Cancelar y volver');
-                    } else {
-                        if (this.headerDotsContainer) this.headerDotsContainer.style.display = '';
-                        if (this.starBtn) this.starBtn.style.display = '';
-                        if (this.favsBtn) setAccessibleTooltip(this.favsBtn, 'Volver al estuche');
-                        this.updateHeaderTitleVisual();
-                    }
+                    const isCreate = mode === 'create';
+                    if (isCreate && this.titleEl) this.titleEl.textContent = 'Nuevo perfil';
+                    if (this.headerDotsContainer) this.headerDotsContainer.style.display = isCreate ? 'none' : '';
+                    if (this.starBtn) this.starBtn.style.display = isCreate ? 'none' : '';
+                    if (this.favsBtn) setAccessibleTooltip(this.favsBtn, isCreate ? 'Cancelar y volver' : 'Volver al estuche');
+                    if (!isCreate) this.updateHeaderTitleVisual();
                 },
             },
-            tool,
-            favorites,
-            currentSlice,
+            this.state.tool as FavoritableTool,
+            this.getToolFavorites(),
+            this.getCurrentToolSlice(),
             this.bodyEl,
-            profiles,
-            activeProfileId,
-            syncFavoriteProfiles,
+            this.getDomainProfilesList(),
+            this.getActiveProfileId(),
+            Boolean(this.state.syncFavoriteProfiles),
         );
     }
 
@@ -1020,10 +821,6 @@ export class ToolEstuche implements PopoverInstance {
         this.headerEl.append(hdLeft, titleContainer, rightBtns);
     }
 
-    private renderPenHeader(): void {
-        this.renderFavoritesAwareHeader(this.getTitleForTool(this.state.tool));
-    }
-
     private renderSimpleHeader(titleText: string): void {
         const hdLeft = document.createElement('div');
         hdLeft.className = 'hd-left';
@@ -1051,11 +848,7 @@ export class ToolEstuche implements PopoverInstance {
         this.headerEl.append(hdLeft, titleContainer, rightBtns);
     }
 
-    // =========================================================================
-    // Pen Content (Image 2 - 1:1 visually with mockup)
-    // =========================================================================
     private renderPenContent(): void {
-        // 1. Selector de Herramientas (4 profiles)
         const toolsRow = document.createElement('div');
         toolsRow.className = 'popover-tools-selector';
         toolsRow.setAttribute('role', 'radiogroup');
@@ -1073,15 +866,7 @@ export class ToolEstuche implements PopoverInstance {
             btn.type = 'button';
             const isActive = this.state.profileId === t.id;
             btn.className = `tool-btn popover-tool-opt ${isActive ? 'is-active' : ''}`;
-            btn.style.display = 'flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            btn.style.width = '100%';
-            btn.style.height = '44px';
-            btn.style.minHeight = '44px';
-            btn.style.borderRadius = '14px';
-            btn.style.boxSizing = 'border-box';
-            btn.style.padding = '8px';
+            btn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:44px;min-height:44px;border-radius:14px;box-sizing:border-box;padding:8px';
             setAccessibleTooltip(btn, t.label);
             btn.setAttribute('aria-pressed', String(isActive));
 
@@ -1106,58 +891,34 @@ export class ToolEstuche implements PopoverInstance {
         }
         this.bodyEl.appendChild(toolsRow);
 
-        // 2. Slider Grosor (1 to 20 px)
-        const widthSlider = this.createSlider(
-            'Grosor',
-            this.state.width,
-            1,
-            20,
-            0.5,
-            (val) => {
-                this.state.width = val;
-                this.callbacks.onChangeWidth(val);
-            }
-        );
+        const widthSlider = this.createSlider('Grosor', this.state.width, 1, 20, 0.5, (val) => {
+            this.state.width = val;
+            this.callbacks.onChangeWidth(val);
+        });
         this.widthInput = widthSlider.input;
         this.widthBubble = widthSlider.bubble;
         this.bodyEl.appendChild(widthSlider.element);
 
-        // 3. Slider Suavizado (0 to 10)
-        const smoothingSlider = this.createSlider(
-            'Suavizado',
-            Math.round(this.state.smoothing * 10),
-            0,
-            10,
-            1,
-            (val) => {
-                this.state.smoothing = val / 10;
-                this.callbacks.onChangeSmoothing(this.state.smoothing);
-            }
-        );
+        const smoothingSlider = this.createSlider('Suavizado', Math.round(this.state.smoothing * 10), 0, 10, 1, (val) => {
+            this.state.smoothing = val / 10;
+            this.callbacks.onChangeSmoothing(this.state.smoothing);
+        });
         this.smoothingInput = smoothingSlider.input;
         this.smoothingBubble = smoothingSlider.bubble;
         this.bodyEl.appendChild(smoothingSlider.element);
 
-        // 4. Line styles grid (solid, dashed, dotted)
         this.bodyEl.appendChild(this.createLineStylesGrid((pattern) => {
             this.state.lineStyle = pattern;
             this.state.pattern = pattern;
             this.callbacks.onChangeLineStyle?.(pattern);
         }));
 
-        // 5. Toggle Row: "Enderezar líneas"
-        const straightenRow = this.createToggleRow(
-            'Enderezar líneas',
-            !!this.state.straightenLines,
-            (checked) => {
-                this.state.straightenLines = checked;
-                this.callbacks.onToggleStraighten?.(checked);
-            }
-        );
+        const straightenRow = this.createToggleRow('Enderezar líneas', !!this.state.straightenLines, (checked) => {
+            this.state.straightenLines = checked;
+            this.callbacks.onToggleStraighten?.(checked);
+        });
         this.straightenSwitch = (straightenRow as any).__switch as HTMLElement;
         this.bodyEl.appendChild(straightenRow);
-
-        // 6. Paleta de Colores
         this.bodyEl.appendChild(this.createPaletteSection());
     }
 
@@ -1319,101 +1080,84 @@ export class ToolEstuche implements PopoverInstance {
         this.bodyEl.appendChild(this.createPaletteSection());
     }
 
-    // =========================================================================
-    // Eraser Content
-    // =========================================================================
-    private renderEraserContent(): void {
-        // 1. Selector de Modos (Whole vs Reticle)
+    private createRadioModeList<T extends string>(
+        modes: Array<{ id: T; label: string }>,
+        activeId: T,
+        buttonMap: Map<string, HTMLElement>,
+        onSelect: (id: T) => void,
+    ): HTMLElement {
         const modesList = document.createElement('div');
         modesList.className = 'eraser-modes-list';
-
-        const modes: Array<{ id: EraserMode; label: string }> = [
-            { id: 'whole', label: 'Borrar trazo completo' },
-            { id: 'reticle', label: 'Borrar por área (retícula)' },
-        ];
-
         for (const m of modes) {
             const row = document.createElement('button');
             row.type = 'button';
-            row.className = `eraser-radio-row ${this.state.eraserMode === m.id ? 'is-active' : ''}`;
-
+            row.className = `eraser-radio-row ${activeId === m.id ? 'is-active' : ''}`;
             const circle = document.createElement('div');
             circle.className = 'eraser-radio-circle';
             const dot = document.createElement('div');
             dot.className = 'eraser-radio-inner-dot';
             circle.appendChild(dot);
-
             const span = document.createElement('span');
             span.textContent = m.label;
-
             row.append(circle, span);
             row.onclick = () => {
-                this.state.eraserMode = m.id;
-                for (const [, r] of this.eraserModeButtons) r.classList.remove('is-active');
+                for (const [, r] of buttonMap) r.classList.remove('is-active');
                 row.classList.add('is-active');
-                this.callbacks.onSelectEraserMode(m.id);
+                onSelect(m.id);
             };
-
-            this.eraserModeButtons.set(m.id, row);
+            buttonMap.set(m.id, row);
             modesList.appendChild(row);
         }
-        this.bodyEl.appendChild(modesList);
+        return modesList;
+    }
+
+    private renderEraserContent(): void {
+        this.bodyEl.appendChild(this.createRadioModeList<EraserMode>(
+            [
+                { id: 'whole', label: 'Borrar trazo completo' },
+                { id: 'reticle', label: 'Borrar por área (retícula)' },
+            ],
+            this.state.eraserMode,
+            this.eraserModeButtons,
+            (id) => {
+                this.state.eraserMode = id;
+                this.callbacks.onSelectEraserMode(id);
+            },
+        ));
 
         const divider = document.createElement('div');
         divider.className = 'eraser-divider';
         this.bodyEl.appendChild(divider);
 
-        // 2. Slider Tamaño del Borrador (8 to 60 px)
-        const radiusSlider = this.createSlider(
-            'Tamaño del borrador',
-            this.state.eraserRadius,
-            8,
-            60,
-            2,
-            (val) => {
-                this.state.eraserRadius = val;
-                this.callbacks.onChangeEraserRadius(val);
-                if (this.eraserPreviewDot) {
-                    const dotSize = Math.max(12, Math.min(36, val * 0.7));
-                    this.eraserPreviewDot.style.width = `${dotSize}px`;
-                    this.eraserPreviewDot.style.height = `${dotSize}px`;
-                }
+        const radiusSlider = this.createSlider('Tamaño del borrador', this.state.eraserRadius, 8, 60, 2, (val) => {
+            this.state.eraserRadius = val;
+            this.callbacks.onChangeEraserRadius(val);
+            if (this.eraserPreviewDot) {
+                const dotSize = Math.max(12, Math.min(36, val * 0.7));
+                this.eraserPreviewDot.style.width = `${dotSize}px`;
+                this.eraserPreviewDot.style.height = `${dotSize}px`;
             }
-        );
+        });
         this.eraserRadiusInput = radiusSlider.input;
         this.eraserRadiusBubble = radiusSlider.bubble;
         this.bodyEl.appendChild(radiusSlider.element);
 
-        // 3. Toggle Row: "Borrar resaltador solamente"
-        const onlyHighlighterRow = this.createToggleRow(
-            'Borrar resaltador solamente',
-            !!this.state.onlyHighlighter,
-            (checked) => {
-                this.state.onlyHighlighter = checked;
-                this.callbacks.onToggleOnlyHighlighter?.(checked);
-            }
-        );
+        const onlyHighlighterRow = this.createToggleRow('Borrar resaltador solamente', !!this.state.onlyHighlighter, (checked) => {
+            this.state.onlyHighlighter = checked;
+            this.callbacks.onToggleOnlyHighlighter?.(checked);
+        });
         this.onlyHighlighterSwitch = (onlyHighlighterRow as any).__switch as HTMLElement;
         this.bodyEl.appendChild(onlyHighlighterRow);
 
-        // 4. Toggle Row: "Garabato para borrar"
-        const scribbleRow = this.createToggleRow(
-            'Garabato para borrar',
-            this.state.scribbleToErase,
-            (checked) => {
-                this.state.scribbleToErase = checked;
-                this.callbacks.onToggleScribble(checked);
-            }
-        );
+        const scribbleRow = this.createToggleRow('Garabato para borrar', this.state.scribbleToErase, (checked) => {
+            this.state.scribbleToErase = checked;
+            this.callbacks.onToggleScribble(checked);
+        });
         this.scribbleSwitch = (scribbleRow as any).__switch as HTMLElement;
         this.bodyEl.appendChild(scribbleRow);
     }
 
-    // =========================================================================
-    // Shape Content
-    // =========================================================================
     private renderShapeContent(): void {
-        // 1. Grid de Formas (5 shapes con targets simétricos)
         const shapesGrid = document.createElement('div');
         shapesGrid.className = 'shape-grid shape-grid-selector';
         shapesGrid.setAttribute('role', 'radiogroup');
@@ -1428,11 +1172,10 @@ export class ToolEstuche implements PopoverInstance {
         ];
 
         const activeShape = this.state.shapeType || 'rect';
-        const isShapeActive = (defType: string) => {
-            return defType === activeShape ||
-                (defType === 'rect' && (activeShape as string) === 'rectangle') ||
-                (defType === 'ellipse' && (activeShape as string) === 'circle');
-        };
+        const isShapeActive = (defType: string) =>
+            defType === activeShape ||
+            (defType === 'rect' && (activeShape as string) === 'rectangle') ||
+            (defType === 'ellipse' && (activeShape as string) === 'circle');
 
         for (const def of shapeDefs) {
             const btn = document.createElement('button');
@@ -1461,83 +1204,42 @@ export class ToolEstuche implements PopoverInstance {
         }
         this.bodyEl.appendChild(shapesGrid);
 
-        // 2. Slider Grosor (1 to 12 px)
-        const widthSlider = this.createSlider(
-            'Grosor de trazo',
-            this.state.width,
-            1,
-            12,
-            0.5,
-            (val) => {
-                this.state.width = val;
-                this.callbacks.onChangeWidth(val);
-            }
-        );
+        const widthSlider = this.createSlider('Grosor de trazo', this.state.width, 1, 12, 0.5, (val) => {
+            this.state.width = val;
+            this.callbacks.onChangeWidth(val);
+        });
         this.widthInput = widthSlider.input;
         this.widthBubble = widthSlider.bubble;
         this.bodyEl.appendChild(widthSlider.element);
 
-        // 3. Line styles grid
         this.bodyEl.appendChild(this.createLineStylesGrid((pattern) => {
             this.state.lineStyle = pattern;
             this.state.pattern = pattern;
             this.callbacks.onChangeLineStyle?.(pattern);
         }));
 
-        // 4. Toggle Row: "Imán de cuadrícula"
-        const snapRow = this.createToggleRow(
-            'Imán de cuadrícula',
-            this.state.snapGrid,
-            (checked) => {
-                this.state.snapGrid = checked;
-                this.callbacks.onToggleSnapGrid(checked);
-            }
-        );
+        const snapRow = this.createToggleRow('Imán de cuadrícula', this.state.snapGrid, (checked) => {
+            this.state.snapGrid = checked;
+            this.callbacks.onToggleSnapGrid(checked);
+        });
         this.snapGridSwitch = (snapRow as any).__switch as HTMLElement;
         this.bodyEl.appendChild(snapRow);
-
-        // 5. Paleta de Colores
         this.bodyEl.appendChild(this.createPaletteSection());
     }
 
-    // =========================================================================
-    // Lasso Content
-    // =========================================================================
     private renderLassoContent(): void {
-        const modesList = document.createElement('div');
-        modesList.className = 'eraser-modes-list';
-
-        const modes: Array<{ id: LassoMode; label: string }> = [
-            { id: 'free', label: 'Lazo libre' },
-            { id: 'rect', label: 'Lazo rectangular' },
-        ];
-
-        for (const m of modes) {
-            const row = document.createElement('button');
-            row.type = 'button';
-            row.className = `eraser-radio-row ${this.state.lassoMode === m.id ? 'is-active' : ''}`;
-
-            const circle = document.createElement('div');
-            circle.className = 'eraser-radio-circle';
-            const dot = document.createElement('div');
-            dot.className = 'eraser-radio-inner-dot';
-            circle.appendChild(dot);
-
-            const span = document.createElement('span');
-            span.textContent = m.label;
-
-            row.append(circle, span);
-            row.onclick = () => {
-                this.state.lassoMode = m.id;
-                for (const [, r] of this.lassoModeButtons) r.classList.remove('is-active');
-                row.classList.add('is-active');
-                this.callbacks.onSelectLassoMode(m.id);
-            };
-
-            this.lassoModeButtons.set(m.id, row);
-            modesList.appendChild(row);
-        }
-        this.bodyEl.appendChild(modesList);
+        this.bodyEl.appendChild(this.createRadioModeList<LassoMode>(
+            [
+                { id: 'free', label: 'Lazo libre' },
+                { id: 'rect', label: 'Lazo rectangular' },
+            ],
+            this.state.lassoMode,
+            this.lassoModeButtons,
+            (id) => {
+                this.state.lassoMode = id;
+                this.callbacks.onSelectLassoMode(id);
+            },
+        ));
     }
 
     // =========================================================================
@@ -1662,25 +1364,13 @@ export class ToolEstuche implements PopoverInstance {
             const isActive = s.id === activePattern;
             btn.className = `line-chip popover-line-chip ${isActive ? 'is-active' : ''}`;
             btn.setAttribute('aria-pressed', String(isActive));
-            btn.style.display = 'flex';
-            btn.style.alignItems = 'center';
-            btn.style.justifyContent = 'center';
-            btn.style.width = '100%';
-            btn.style.height = '38px';
-            btn.style.minHeight = '38px';
-            btn.style.borderRadius = '12px';
-            btn.style.boxSizing = 'border-box';
-            btn.style.padding = '0 12px';
+            btn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:38px;min-height:38px;border-radius:12px;box-sizing:border-box;padding:0 12px';
             setAccessibleTooltip(btn, s.label);
 
             const pill = document.createElement('span');
             pill.className = 'popover-line-chip-pill';
             pill.setAttribute('aria-hidden', 'true');
-            pill.style.display = 'flex';
-            pill.style.alignItems = 'center';
-            pill.style.justifyContent = 'center';
-            pill.style.width = '100%';
-            pill.style.height = '100%';
+            pill.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%';
 
             const bar = document.createElement('div');
             bar.className = `popover-line-bar ${s.cls}`;
@@ -1708,10 +1398,7 @@ export class ToolEstuche implements PopoverInstance {
     private createToggleRow(title: string, initialChecked: boolean, onToggle?: (checked: boolean) => void): HTMLElement {
         const toggleRow = document.createElement('label');
         toggleRow.className = 'toggle-row popover-toggle-row';
-        toggleRow.style.display = 'flex';
-        toggleRow.style.alignItems = 'center';
-        toggleRow.style.justifyContent = 'space-between';
-        toggleRow.style.width = '100%';
+        toggleRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;width:100%';
 
         const tTitle = document.createElement('span');
         tTitle.className = 'toggle-label popover-toggle-title';
@@ -1723,23 +1410,12 @@ export class ToolEstuche implements PopoverInstance {
         sw.className = `switch popover-switch ${initialChecked ? 'is-on is-checked' : ''}`;
         sw.setAttribute('role', 'switch');
         sw.setAttribute('aria-checked', String(initialChecked));
-        sw.style.position = 'relative';
-        sw.style.display = 'inline-block';
-        sw.style.width = '40px';
-        sw.style.height = '22px';
-        sw.style.flexShrink = '0';
+        sw.style.cssText = 'position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0';
         setAccessibleTooltip(sw, title);
 
         const thumb = document.createElement('span');
         thumb.className = 'popover-switch-thumb';
-        thumb.style.position = 'absolute';
-        thumb.style.top = '2px';
-        thumb.style.left = '2px';
-        thumb.style.width = '16px';
-        thumb.style.height = '16px';
-        thumb.style.borderRadius = '50%';
-        thumb.style.background = '#ffffff';
-        thumb.style.pointerEvents = 'none';
+        thumb.style.cssText = 'position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#ffffff;pointer-events:none';
         thumb.style.transform = initialChecked ? 'translateX(18px)' : 'none';
         sw.appendChild(thumb);
 
@@ -1850,22 +1526,8 @@ export class ToolEstuche implements PopoverInstance {
                     this.currentPageIndex = 0;
 
                     this.container.style.setProperty('--hl-color', newColor);
-                    if (this.opacityInput?.parentElement) {
-                        this.opacityInput.parentElement.style.setProperty('--hl-color', newColor);
-                    }
-
-                    const nextOpacity = this.getOpacityPercent();
-                    if (this.opacityInput && this.opacityBubble) {
-                        this.opacityInput.value = String(nextOpacity);
-                        this.opacityBubble.textContent = String(nextOpacity);
-                        const ratio = Math.max(0, Math.min(1, nextOpacity / 100));
-                        this.opacityBubble.style.left = `calc(${ratio * 100}% - ${ratio * 24}px)`;
-                        const track = this.opacityInput.parentElement;
-                        if (track) {
-                            track.style.setProperty('--val', `${(ratio * 100).toFixed(1)}%`);
-                        }
-                    }
-
+                    this.opacityInput?.parentElement?.style.setProperty('--hl-color', newColor);
+                    this.syncSliderVisual(this.opacityInput, this.opacityBubble, this.getOpacityPercent(), 0, 100);
                     this.updateColorsUI();
                     this.callbacks.onChangeColor(newColor);
                     this.callbacks.onChangeOpacity?.(opacity);

@@ -23,43 +23,10 @@ import { ToolEstuche } from '../src/ui/ToolEstuche.ts';
 import { Toolbar } from '../src/ui/Toolbar.ts';
 import { CanvasController } from '../src/engine/CanvasController.ts';
 import { EngineEventBus } from '../src/core/events.ts';
+import { createMockEnvironment } from './helpers/mockDom.ts';
 
-function createMockContext() {
-    return {
-        save: () => {},
-        restore: () => {},
-        beginPath: () => {},
-        moveTo: () => {},
-        lineTo: () => {},
-        quadraticCurveTo: () => {},
-        arc: () => {},
-        ellipse: () => {},
-        roundRect: () => {},
-        rect: () => {},
-        fill: () => {},
-        stroke: () => {},
-        clearRect: () => {},
-        drawImage: () => {},
-        setLineDash: () => {},
-        createPattern: () => null,
-        translate: () => {},
-        scale: () => {},
-        transform: () => {},
-        setTransform: () => {},
-        resetTransform: () => {},
-        clip: () => {},
-        closePath: () => {},
-        lineWidth: 1,
-        strokeStyle: '#000',
-        fillStyle: '#000',
-        globalAlpha: 1,
-        lineCap: 'round',
-        lineJoin: 'round',
-        globalCompositeOperation: 'source-over',
-    };
-}
-
-function createMockEnvironment() {
+function createMockCycleEnv() {
+    const mockDocument = createMockEnvironment();
     const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
     const mockWindow: any = {
         innerWidth: 1024,
@@ -88,189 +55,11 @@ function createMockEnvironment() {
         requestAnimationFrame: (cb: Function) => setTimeout(cb, 16),
         cancelAnimationFrame: (id: any) => clearTimeout(id),
     };
-
-    const createElement = (tag: string) => {
-        const children: any[] = [];
-        const classes = new Set<string>();
-        const attributes = new Map<string, string>();
-        const elementListeners = new Map<string, Array<{ fn: Function; options?: any }>>();
-        const mockCtx = createMockContext();
-        const styleObj: any = {
-            display: '',
-            zIndex: '',
-            position: 'relative',
-            left: '0px',
-            top: '0px',
-            width: '800px',
-            height: '600px',
-            cursor: 'default',
-            overflow: 'auto',
-            userSelect: 'none',
-            transform: '',
-            transformOrigin: '',
-            setProperty: (k: string, v: string) => { styleObj[k] = v; },
-            getPropertyValue: (k: string) => styleObj[k] ?? '',
-        };
-        const el: any = {
-            tagName: tag.toUpperCase(),
-            style: styleObj,
-            dataset: {},
-            hidden: false,
-            className: '',
-            children,
-            title: '',
-            type: '',
-            value: '',
-            width: 800,
-            height: 600,
-            clientWidth: 800,
-            clientHeight: 600,
-            scrollWidth: 800,
-            scrollHeight: 600,
-            scrollLeft: 0,
-            scrollTop: 0,
-            isConnected: true,
-            getContext: () => mockCtx,
-            toDataURL: () => 'data:image/png;base64,',
-            focus: () => {},
-            blur: () => {},
-            classList: {
-                add: (...items: string[]) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    for (const item of items) set.add(item);
-                    el.className = [...set].join(' ');
-                },
-                remove: (...items: string[]) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    for (const item of items) set.delete(item);
-                    el.className = [...set].join(' ');
-                },
-                contains: (c: string) => el.className.split(/\s+/).filter(Boolean).includes(c),
-                toggle: (c: string, force?: boolean) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    const next = force !== undefined ? force : !set.has(c);
-                    if (next) set.add(c); else set.delete(c);
-                    el.className = [...set].join(' ');
-                    return next;
-                },
-            },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); },
-            getAttribute: (k: string) => attributes.get(k) ?? null,
-            hasAttribute: (k: string) => attributes.has(k),
-            removeAttribute: (k: string) => { attributes.delete(k); },
-            appendChild: (child: any) => { children.push(child); child.parentElement = el; return child; },
-            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c && typeof c === 'object') c.parentElement = el; },
-            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c && typeof c === 'object') c.parentElement = el; },
-            remove: () => {
-                if (el.parentElement?.children) {
-                    const idx = el.parentElement.children.indexOf(el);
-                    if (idx !== -1) el.parentElement.children.splice(idx, 1);
-                }
-            },
-            addEventListener: (event: string, fn: Function, options?: any) => {
-                if (!elementListeners.has(event)) elementListeners.set(event, []);
-                elementListeners.get(event)!.push({ fn, options });
-            },
-            removeEventListener: (event: string, fn: Function) => {
-                const list = elementListeners.get(event);
-                if (list) {
-                    const idx = list.findIndex(item => item.fn === fn);
-                    if (idx !== -1) list.splice(idx, 1);
-                }
-            },
-            dispatchEvent: (evObj: any) => {
-                let stoppedImmediate = false;
-                const origStopImmediate = evObj.stopImmediatePropagation;
-                evObj.stopImmediatePropagation = () => {
-                    stoppedImmediate = true;
-                    if (origStopImmediate) origStopImmediate();
-                };
-                const list = elementListeners.get(evObj.type) || [];
-                for (const item of [...list]) {
-                    if (stoppedImmediate) break;
-                    item.fn(evObj);
-                }
-                return !evObj.defaultPrevented;
-            },
-            click: () => {
-                const ev = {
-                    type: 'click',
-                    target: el,
-                    currentTarget: el,
-                    defaultPrevented: false,
-                    preventDefault: () => { ev.defaultPrevented = true; },
-                    stopPropagation: () => {},
-                    stopImmediatePropagation: () => {},
-                };
-                if (typeof el.onclick === 'function') el.onclick(ev);
-                el.dispatchEvent(ev);
-            },
-            getBoundingClientRect: () => ({
-                top: 0,
-                left: 0,
-                bottom: 600,
-                right: 800,
-                width: 800,
-                height: 600,
-                x: 0,
-                y: 0,
-                toJSON: () => {},
-            }),
-            querySelector: (sel: string): any => {
-                const find = (node: any): any => {
-                    for (const child of node.children) {
-                        if (!child || typeof child !== 'object') continue;
-                        if (sel.startsWith('.') && child.classList?.contains(sel.slice(1))) return child;
-                        if (sel.startsWith('#') && child.id === sel.slice(1)) return child;
-                        if (sel.includes('[data-') && child.hasAttribute?.(sel.replace(/[[\]]/g, '').split('=')[0])) return child;
-                        if (child.tagName?.toLowerCase() === sel.toLowerCase()) return child;
-                        const nested = find(child);
-                        if (nested) return nested;
-                    }
-                    return null;
-                };
-                return find(el);
-            },
-            querySelectorAll: (sel: string): any[] => {
-                const results: any[] = [];
-                const search = (node: any) => {
-                    for (const child of node.children) {
-                        if (!child || typeof child !== 'object') continue;
-                        if (sel.startsWith('.') && child.classList?.contains(sel.slice(1))) results.push(child);
-                        else if (child.tagName?.toLowerCase() === sel.toLowerCase()) results.push(child);
-                        search(child);
-                    }
-                };
-                search(el);
-                return results;
-            },
-            contains: (child: any): boolean => {
-                if (child === el) return true;
-                const check = (node: any): boolean => {
-                    for (const c of node.children) {
-                        if (c === child || check(c)) return true;
-                    }
-                    return false;
-                };
-                return check(el);
-            },
-            closest: (_sel: string): any => null,
-        };
-        return el;
-    };
-
-    const mockDocument: any = {
-        body: createElement('body'),
-        createElement,
-        createElementNS: (_ns: string, tag: string) => createElement(tag),
-        elementsFromPoint: () => [],
-    };
-
     return { mockWindow, mockDocument };
 }
 
 describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profile', () => {
-    let mockEnv: ReturnType<typeof createMockEnvironment>;
+    let mockEnv: ReturnType<typeof createMockCycleEnv>;
     let origWindow: any;
     let origDocument: any;
     let origComputedStyle: any;
@@ -279,7 +68,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
     let origCAF: any;
 
     beforeEach(() => {
-        mockEnv = createMockEnvironment();
+        mockEnv = createMockCycleEnv();
         origWindow = (globalThis as any).window;
         origDocument = (globalThis as any).document;
         origComputedStyle = (globalThis as any).getComputedStyle;

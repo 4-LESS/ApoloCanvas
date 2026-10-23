@@ -14,7 +14,7 @@ describe('Sandbox Modular Canvas Architecture', () => {
         assert.ok(fs.existsSync(path.join(sandboxDir, 'pens', 'fountain.js')), 'pens/fountain.js must exist');
         assert.ok(fs.existsSync(path.join(sandboxDir, 'pens', 'calli.js')), 'pens/calli.js must exist');
         assert.ok(fs.existsSync(path.join(sandboxDir, 'pens', 'pencil.js')), 'pens/pencil.js must exist');
-        assert.ok(fs.existsSync(path.join(sandboxDir, 'pens', 'pencil-simple.js')), 'pens/pencil-simple.js must exist');
+        assert.ok(fs.existsSync(path.join(sandboxDir, 'pens', 'pencil-sketch.js')), 'pens/pencil-sketch.js must exist');
     });
 
     it('pens export renderPen/renderCanvas function and execute without error via dynamic folder scan', async () => {
@@ -473,10 +473,7 @@ describe('Sandbox Modular Canvas Architecture', () => {
                             penId === 'calli' ||
                             penId === 'fountain-v2' ||
                             penId === 'pencil' ||
-                            penId === 'pencil-sketch' ||
-                            penId === 'pencil-atlasv2' ||
-                            penId === 'pencil-atlasv4' ||
-                            penId === 'pencil-atlasClaude'
+                            penId === 'pencil-sketch'
                         ) {
                             renderFn(ctx, livePoints, style);
                         }
@@ -542,7 +539,7 @@ describe('Sandbox Modular Canvas Architecture', () => {
                 );
             }
 
-            assert.ok(results.length >= 10, 'All executable pens must be benchmarked at 50,000 points');
+            assert.ok(results.length >= 6, 'All executable pens must be benchmarked at 50,000 points');
             const sketchRes = results.find(r => r.id === 'pencil-sketch');
             assert.ok(sketchRes && sketchRes.avgFps >= 60, 'pencil-sketch must sustain >= 60 FPS average up to 50,000 points');
             const fountainV2Res = results.find(r => r.id === 'fountain-v2');
