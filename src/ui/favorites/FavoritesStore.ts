@@ -6,6 +6,8 @@ import type {
     ShapeFavoritePreset,
     StrokePattern,
     ShapeType,
+    BuiltInShapeType,
+    ShapeFillPattern,
     PenProfileId,
     ToolFavoritePreset,
     StrokeFavoriteProfile,
@@ -129,10 +131,12 @@ export function computeFavoriteFingerprint(presetOrState: any): string {
 
     // shape
     const shapeType = presetOrState.shapeType || 'rect';
+    const regularize = Boolean(presetOrState.regularize);
     const fillEnabled = Boolean(presetOrState.fillEnabled);
     const fillColor = fillEnabled ? (presetOrState.fillColor ?? '').trim().toLowerCase() : '';
     const fillOpacity = fillEnabled ? normalizeOpacity(presetOrState.fillOpacity, 'shape') : 0;
-    return `shape|${shapeType}|${color}|${width}|${opacity}|${pattern}|fill:${fillEnabled}|${fillColor}|${fillOpacity}`;
+    const fillPattern = fillEnabled ? (presetOrState.fillPattern || 'solid') : 'solid';
+    return `shape|${shapeType}|${color}|${width}|${opacity}|${pattern}|regularize:${regularize}|fill:${fillEnabled}|${fillColor}|${fillOpacity}|${fillPattern}`;
 }
 
 /**
@@ -190,9 +194,11 @@ export function createFavoritePreset(slice: any, toolOverride?: FavoritableTool)
         ...base,
         tool: 'shape',
         shapeType: (slice?.shapeType as ShapeType) || 'rect',
+        regularize: slice?.regularize !== undefined ? Boolean(slice.regularize) : undefined,
         fillEnabled: slice?.fillEnabled !== undefined ? Boolean(slice.fillEnabled) : undefined,
         fillColor: slice?.fillColor !== undefined ? String(slice.fillColor) : undefined,
         fillOpacity: slice?.fillOpacity !== undefined ? Number(slice.fillOpacity) : undefined,
+        fillPattern: (slice?.fillPattern as ShapeFillPattern) || undefined,
     };
     return shapePreset;
 }
