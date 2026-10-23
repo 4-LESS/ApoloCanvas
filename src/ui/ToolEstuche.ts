@@ -11,11 +11,13 @@ import type {
     ToolType,
     StrokeFavoriteProfile,
     ShapeFavoriteProfile,
+    ShapeFillPattern,
 } from '../core/types.ts';
 import {
     DEFAULT_STROKE_FAVORITE_PROFILES,
     DEFAULT_SHAPE_FAVORITE_PROFILES,
 } from '../core/types.ts';
+import { listShapePlugins } from '../engine/shapes/index.ts';
 import { ICONS, createSvg, setAccessibleTooltip } from './theme.ts';
 import type { PopoverController, PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
@@ -49,6 +51,10 @@ export interface ToolEstucheState {
     shapeFavoriteProfiles?: ShapeFavoriteProfile[];
     activeShapeProfileId?: string;
     syncFavoriteProfiles?: boolean;
+    regularize?: boolean;
+    fillEnabled?: boolean;
+    fillColor?: string;
+    fillPattern?: ShapeFillPattern;
 }
 
 export interface ToolEstucheCallbacks {
@@ -77,6 +83,10 @@ export interface ToolEstucheCallbacks {
     onSelectLassoMode: (mode: LassoMode) => void;
     onSelectShapeType: (shapeType: ShapeType) => void;
     onToggleSnapGrid: (enabled: boolean) => void;
+    onToggleRegularize?: (enabled: boolean) => void;
+    onToggleFillEnabled?: (enabled: boolean) => void;
+    onChangeFillColor?: (color: string) => void;
+    onChangeFillPattern?: (pattern: ShapeFillPattern) => void;
     onClose?: () => void;
 }
 
@@ -108,6 +118,12 @@ export class ToolEstuche implements PopoverInstance {
     private lassoModeButtons: Map<string, HTMLElement> = new Map();
     private shapeButtons: Map<string, HTMLElement> = new Map();
     private lineStyleChips: Map<string, HTMLElement> = new Map();
+    private regularizeSwitch?: HTMLElement;
+    private fillSwitch?: HTMLElement;
+    private fillSubpanel?: HTMLElement;
+    private fillPatternChips: Map<string, HTMLElement> = new Map();
+    private fillColorRowEl?: HTMLElement;
+    private fillColorButtons: Map<string, HTMLElement> = new Map();
     private straightenSwitch?: HTMLElement;
     private onlyHighlighterSwitch?: HTMLElement;
     private swatchRowEl?: HTMLElement;
@@ -396,6 +412,26 @@ export class ToolEstuche implements PopoverInstance {
         this.syncSwitchVisual(this.straightenSwitch, partial.straightenLines);
         this.syncSwitchVisual(this.onlyHighlighterSwitch, partial.onlyHighlighter);
         this.syncSwitchVisual(this.snapGridSwitch, partial.snapGrid);
+        this.syncSwitchVisual(this.regularizeSwitch, partial.regularize);
+        this.syncSwitchVisual(this.fillSwitch, partial.fillEnabled);
+        if (partial.fillEnabled !== undefined && this.fillSubpanel) {
+            this.fillSubpanel.classList.toggle('is-disabled', !partial.fillEnabled);
+        }
+        if (partial.fillPattern !== undefined && this.fillPatternChips.size > 0) {
+            this.state.fillPattern = partial.fillPattern;
+            for (const [pat, btn] of this.fillPatternChips) {
+                const isActive = pat === partial.fillPattern;
+                btn.classList.toggle('is-active', isActive);
+                btn.setAttribute('aria-pressed', String(isActive));
+            }
+        }
+        if (partial.fillColor !== undefined && this.fillColorButtons.size > 0) {
+            const cleanFill = partial.fillColor.toUpperCase();
+            this.state.fillColor = partial.fillColor;
+            for (const [col, btn] of this.fillColorButtons) {
+                btn.classList.toggle('is-active', col.toUpperCase() === cleanFill);
+            }
+        }
         this.syncSwitchVisual(this.scribbleSwitch, partial.scribbleToErase);
 
         if (partial.profileId !== undefined) {
@@ -1158,12 +1194,7 @@ export class ToolEstuche implements PopoverInstance {
     }
 
     private renderShapeContent(): void {
-        const shapesGrid = document.createElement('div');
-        shapesGrid.className = 'shape-grid shape-grid-selector';
-        shapesGrid.setAttribute('role', 'radiogroup');
-        shapesGrid.setAttribute('aria-label', 'Tipo de forma');
-
-        const shapeDefs: Array<{ type: ShapeType; label: string; iconD: string }> = [
+        const shapeDefs: Array<{ type: ShapeType; label: string; iconD?: string; iconPaths?: readonly string[] }> = [
             { type: 'line', label: 'Línea', iconD: ICONS.shapes.line },
             { type: 'arrow', label: 'Flecha', iconD: ICONS.shapes.arrow },
             { type: 'rect', label: 'Rectángulo', iconD: ICONS.shapes.rect },
@@ -1171,38 +1202,133 @@ export class ToolEstuche implements PopoverInstance {
             { type: 'triangle', label: 'Triángulo', iconD: ICONS.shapes.triangle },
         ];
 
+        const customPlugins = listShapePlugins().filter((p) => {
+            const id = p.id;
+            return id !== 'line' && id !== 'arrow' && id !== 'rectangle' && id !== 'rect' &&
+                   id !== 'rounded-rect' && id !== 'ellipse' && id !== 'circle' && id !== 'triangle';
+        });
+
         const activeShape = this.state.shapeType || 'rect';
         const isShapeActive = (defType: string) =>
             defType === activeShape ||
             (defType === 'rect' && (activeShape as string) === 'rectangle') ||
             (defType === 'ellipse' && (activeShape as string) === 'circle');
 
-        for (const def of shapeDefs) {
+        const createShapeButton = (
+            type: ShapeType,
+            label: string,
+            iconD?: string,
+            iconPaths?: readonly string[]
+        ): HTMLButtonElement => {
             const btn = document.createElement('button');
             btn.type = 'button';
-            const isActive = isShapeActive(def.type);
+            const isActive = isShapeActive(type);
             btn.className = `shape-btn shape-grid-btn ${isActive ? 'is-active' : ''}`;
             btn.setAttribute('role', 'radio');
             btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
             btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-            setAccessibleTooltip(btn, def.label);
-            btn.appendChild(createSvg(def.iconD, { size: 26, strokeWidth: 1.6 }));
+            setAccessibleTooltip(btn, label);
+
+            if (iconPaths && iconPaths.length > 0) {
+                const combined = iconPaths.join(' ');
+                btn.appendChild(createSvg(combined, { size: 26, strokeWidth: 1.6 }));
+            } else if (iconD) {
+                btn.appendChild(createSvg(iconD, { size: 26, strokeWidth: 1.6 }));
+            }
 
             btn.onclick = () => {
-                this.state.shapeType = def.type;
+                this.state.shapeType = type;
                 for (const [t, b] of this.shapeButtons) {
-                    const active = t === def.type;
+                    const active = isShapeActive(t);
                     b.classList.toggle('is-active', active);
                     b.setAttribute('aria-checked', active ? 'true' : 'false');
                     b.setAttribute('aria-pressed', active ? 'true' : 'false');
                 }
-                this.callbacks.onSelectShapeType(def.type);
+                this.callbacks.onSelectShapeType(type);
             };
 
-            this.shapeButtons.set(def.type, btn);
-            shapesGrid.appendChild(btn);
+            this.shapeButtons.set(type, btn);
+            return btn;
+        };
+
+        const baseGrid = document.createElement('div');
+        baseGrid.className = 'shape-grid shape-grid-selector';
+        baseGrid.setAttribute('role', 'radiogroup');
+        baseGrid.setAttribute('aria-label', 'Formas base');
+        for (const def of shapeDefs) {
+            baseGrid.appendChild(createShapeButton(def.type, def.label, def.iconD));
         }
-        this.bodyEl.appendChild(shapesGrid);
+        this.bodyEl.appendChild(baseGrid);
+
+        if (customPlugins.length > 0) {
+            let customPageIndex = 0;
+            const pageSize = 3;
+            const maxPage = Math.ceil(customPlugins.length / pageSize) - 1;
+
+            const customRow = document.createElement('div');
+            customRow.className = 'shape-custom-row';
+            customRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;margin-top:6px;padding-bottom:12px;border-bottom:1px solid var(--apolo-border);box-sizing:border-box';
+
+            const prevBtn = document.createElement('button');
+            prevBtn.type = 'button';
+            prevBtn.className = 'shape-btn shape-nav-btn';
+            prevBtn.style.cssText = 'width:32px;height:40px;display:grid;place-items:center;flex-shrink:0;cursor:pointer;border-radius:10px;background:var(--apolo-card);border:1px solid transparent;color:var(--apolo-text-muted)';
+            setAccessibleTooltip(prevBtn, 'Formas anteriores');
+            prevBtn.appendChild(createSvg(ICONS.chevronLeft, { size: 18, strokeWidth: 2 }));
+
+            const nextBtn = document.createElement('button');
+            nextBtn.type = 'button';
+            nextBtn.className = 'shape-btn shape-nav-btn';
+            nextBtn.style.cssText = 'width:32px;height:40px;display:grid;place-items:center;flex-shrink:0;cursor:pointer;border-radius:10px;background:var(--apolo-card);border:1px solid transparent;color:var(--apolo-text-muted)';
+            setAccessibleTooltip(nextBtn, 'Formas siguientes');
+            nextBtn.appendChild(createSvg(ICONS.chevronRight, { size: 18, strokeWidth: 2 }));
+
+            const itemsContainer = document.createElement('div');
+            itemsContainer.className = 'shape-custom-items';
+            itemsContainer.style.cssText = 'display:grid;grid-template-columns:repeat(3, 1fr);gap:6px;flex:1;min-width:0';
+            itemsContainer.setAttribute('role', 'radiogroup');
+            itemsContainer.setAttribute('aria-label', 'Formas adicionales');
+
+            const renderCustomPage = () => {
+                itemsContainer.replaceChildren();
+                const start = customPageIndex * pageSize;
+                const pageItems = customPlugins.slice(start, start + pageSize);
+
+                for (const plugin of pageItems) {
+                    const iconPaths = plugin.iconSvgPaths ?? [];
+                    const btn = createShapeButton(plugin.id, plugin.name, undefined, iconPaths);
+                    itemsContainer.appendChild(btn);
+                }
+
+                prevBtn.disabled = customPageIndex <= 0;
+                prevBtn.style.opacity = customPageIndex <= 0 ? '0.35' : '1';
+                prevBtn.style.pointerEvents = customPageIndex <= 0 ? 'none' : 'auto';
+
+                nextBtn.disabled = customPageIndex >= maxPage;
+                nextBtn.style.opacity = customPageIndex >= maxPage ? '0.35' : '1';
+                nextBtn.style.pointerEvents = customPageIndex >= maxPage ? 'none' : 'auto';
+            };
+
+            prevBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (customPageIndex > 0) {
+                    customPageIndex--;
+                    renderCustomPage();
+                }
+            };
+
+            nextBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (customPageIndex < maxPage) {
+                    customPageIndex++;
+                    renderCustomPage();
+                }
+            };
+
+            renderCustomPage();
+            customRow.append(prevBtn, itemsContainer, nextBtn);
+            this.bodyEl.appendChild(customRow);
+        }
 
         const widthSlider = this.createSlider('Grosor de trazo', this.state.width, 1, 12, 0.5, (val) => {
             this.state.width = val;
@@ -1218,12 +1344,154 @@ export class ToolEstuche implements PopoverInstance {
             this.callbacks.onChangeLineStyle?.(pattern);
         }));
 
-        const snapRow = this.createToggleRow('Imán de cuadrícula', this.state.snapGrid, (checked) => {
-            this.state.snapGrid = checked;
-            this.callbacks.onToggleSnapGrid(checked);
+        // Formas perfectas (1:1 / 15°)
+        const regularizeRow = this.createToggleRow('Formas perfectas (1:1)', !!this.state.regularize, (checked) => {
+            this.state.regularize = checked;
+            this.callbacks.onToggleRegularize?.(checked);
         });
-        this.snapGridSwitch = (snapRow as any).__switch as HTMLElement;
-        this.bodyEl.appendChild(snapRow);
+        this.regularizeSwitch = (regularizeRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(regularizeRow);
+
+        // Infill Options (Relleno)
+        const fillToggleRow = this.createToggleRow('Relleno', !!this.state.fillEnabled, (checked) => {
+            this.state.fillEnabled = checked;
+            if (this.fillSubpanel) {
+                this.fillSubpanel.classList.toggle('is-disabled', !checked);
+            }
+            this.callbacks.onToggleFillEnabled?.(checked);
+        });
+        this.fillSwitch = (fillToggleRow as any).__switch as HTMLElement;
+        this.bodyEl.appendChild(fillToggleRow);
+
+        // Subpanel for Fill Patterns & Fill Color
+        const fillSubpanel = document.createElement('div');
+        fillSubpanel.className = `shape-fill-subpanel ${!this.state.fillEnabled ? 'is-disabled' : ''}`;
+        this.fillSubpanel = fillSubpanel;
+
+        // Pattern selector chips
+        const patternRow = document.createElement('div');
+        patternRow.className = 'line-grid popover-lines-grid';
+        patternRow.setAttribute('role', 'radiogroup');
+        patternRow.setAttribute('aria-label', 'Patrón de relleno');
+        patternRow.style.cssText = 'display:grid;grid-template-columns:repeat(4, 1fr);gap:4px;width:100%';
+
+        const patterns: Array<{ id: ShapeFillPattern; label: string; iconSvg: string }> = [
+            { id: 'solid', label: 'Relleno sólido', iconSvg: '<rect x="3" y="3" width="18" height="18" rx="3" fill="currentColor" opacity="0.4" stroke="currentColor" stroke-width="1.5"/>' },
+            { id: 'hachure', label: 'Líneas diagonales', iconSvg: '<rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="1.5"/><line x1="4" y1="12" x2="12" y2="4" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="20" x2="20" y2="12" stroke="currentColor" stroke-width="1.5"/>' },
+            { id: 'cross-hatch', label: 'Líneas cruzadas', iconSvg: '<rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" stroke-width="1.5"/><line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="1.5"/><line x1="4" y1="12" x2="12" y2="4" stroke="currentColor" stroke-width="1.5"/><line x1="12" y1="20" x2="20" y2="12" stroke="currentColor" stroke-width="1.5"/>' },
+            { id: 'dots', label: 'Puntos punteados', iconSvg: '<rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><circle cx="16" cy="8" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="8" cy="16" r="1.5" fill="currentColor"/><circle cx="16" cy="16" r="1.5" fill="currentColor"/>' },
+        ];
+
+        const activePattern = this.state.fillPattern ?? 'solid';
+        this.fillPatternChips.clear();
+
+        for (const p of patterns) {
+            const pBtn = document.createElement('button');
+            pBtn.type = 'button';
+            const isActive = p.id === activePattern;
+            pBtn.className = `line-chip popover-line-chip ${isActive ? 'is-active' : ''}`;
+            pBtn.setAttribute('role', 'radio');
+            pBtn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+            pBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+            pBtn.style.cssText = 'display:flex;align-items:center;justify-content:center;height:34px;min-height:34px;padding:0;border-radius:10px;cursor:pointer';
+            setAccessibleTooltip(pBtn, p.label);
+            pBtn.appendChild(createSvg(p.iconSvg, { size: 20, strokeWidth: 1.5 }));
+
+            pBtn.onclick = () => {
+                this.state.fillPattern = p.id;
+                for (const [pat, b] of this.fillPatternChips) {
+                    const active = pat === p.id;
+                    b.classList.toggle('is-active', active);
+                    b.setAttribute('aria-checked', active ? 'true' : 'false');
+                    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+                }
+                this.callbacks.onChangeFillPattern?.(p.id);
+            };
+
+            this.fillPatternChips.set(p.id, pBtn);
+            patternRow.appendChild(pBtn);
+        }
+        fillSubpanel.appendChild(patternRow);
+
+        // Fill Color Swatches Row
+        const fillColorRow = document.createElement('div');
+        fillColorRow.className = 'swatch-row popover-swatches-row';
+        fillColorRow.style.cssText = 'display:flex;align-items:center;gap:6px;width:100%;margin-top:4px';
+        fillColorRow.setAttribute('role', 'radiogroup');
+        fillColorRow.setAttribute('aria-label', 'Color de relleno');
+        this.fillColorRowEl = fillColorRow;
+        this.fillColorButtons.clear();
+
+        const currentFillColor = (this.state.fillColor || this.state.color).toUpperCase();
+        const fillPaletteColors = (this.colorPages[0] || this.recentColors).slice(0, 7);
+
+        for (const col of fillPaletteColors) {
+            const sw = document.createElement('button');
+            sw.type = 'button';
+            const isActive = currentFillColor === col.toUpperCase();
+            sw.className = `swatch popover-swatch-circle ${isActive ? 'is-active' : ''}`;
+            sw.setAttribute('role', 'radio');
+            sw.setAttribute('aria-checked', isActive ? 'true' : 'false');
+            setAccessibleTooltip(sw, `Color de relleno ${col}`);
+            sw.style.backgroundColor = col;
+            sw.style.setProperty('--c', col);
+            sw.style.setProperty('--swatch-color', col);
+
+            const inner = document.createElement('span');
+            inner.className = 'popover-swatch-inner';
+            inner.style.backgroundColor = col;
+            sw.appendChild(inner);
+
+            sw.onclick = () => {
+                this.state.fillColor = col;
+                for (const [, s] of this.fillColorButtons) {
+                    s.classList.remove('is-active');
+                    s.setAttribute('aria-checked', 'false');
+                }
+                sw.classList.add('is-active');
+                sw.setAttribute('aria-checked', 'true');
+                this.callbacks.onChangeFillColor?.(col);
+            };
+
+            this.fillColorButtons.set(col, sw);
+            fillColorRow.appendChild(sw);
+        }
+
+        // Add custom color button for fill
+        const addFillBtn = document.createElement('button');
+        addFillBtn.type = 'button';
+        addFillBtn.className = 'swatch-add popover-color-add';
+        addFillBtn.setAttribute('data-apolo-popover-trigger', 'true');
+        setAccessibleTooltip(addFillBtn, 'Personalizar color de relleno');
+        addFillBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
+
+        addFillBtn.onclick = (e) => {
+            e.stopPropagation();
+            const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
+            this.colorPicker.open(
+                addFillBtn,
+                this.state.slot,
+                toolbarEl,
+                this.state.fillColor || this.state.color,
+                (newColor) => {
+                    this.state.fillColor = newColor;
+                    for (const [, s] of this.fillColorButtons) {
+                        const active = s.style.backgroundColor.toUpperCase() === newColor.toUpperCase();
+                        s.classList.toggle('is-active', active);
+                        s.setAttribute('aria-checked', active ? 'true' : 'false');
+                    }
+                    this.callbacks.onChangeFillColor?.(newColor);
+                },
+                null,
+                100
+            );
+        };
+        fillColorRow.appendChild(addFillBtn);
+
+        fillSubpanel.appendChild(fillColorRow);
+        this.bodyEl.appendChild(fillSubpanel);
+
+        // Stroke color palette section
         this.bodyEl.appendChild(this.createPaletteSection());
     }
 

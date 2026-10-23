@@ -641,4 +641,127 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             controller.destroy();
         });
     });
+
+    describe('5. ToolEstuche Shapes UI Controls & Accessibility', () => {
+        test('renders base shapes and custom shapes row with pagination', async () => {
+            const { mockWindow, mockDocument } = createMockEngineEnv();
+            (globalThis as any).window = mockWindow;
+            (globalThis as any).document = mockDocument;
+
+            const { ToolEstuche } = await import('../src/ui/ToolEstuche.ts');
+            const root = mockDocument.createElement('div');
+            mockDocument.body.appendChild(root);
+
+            let selectedShape: string | undefined;
+            let toggledRegularize: boolean | undefined;
+            let toggledFill: boolean | undefined;
+            let changedFillPattern: string | undefined;
+            let changedFillColor: string | undefined;
+
+            const estuche = new ToolEstuche(
+                {
+                    tool: 'shape',
+                    slot: 'bottom',
+                    color: '#111827',
+                    width: 2,
+                    profileId: 'fountain',
+                    smoothing: 0.5,
+                    pressureSensitivity: 0.5,
+                    favorites: [],
+                    eraserMode: 'whole',
+                    eraserRadius: 15,
+                    scribbleToErase: false,
+                    lassoMode: 'free',
+                    shapeType: 'rectangle',
+                    snapGrid: false,
+                    regularize: false,
+                    fillEnabled: false,
+                    fillColor: '#1F4FD8',
+                    fillPattern: 'solid',
+                },
+                {
+                    onSelectProfile: () => {},
+                    onChangeColor: () => {},
+                    onChangeWidth: () => {},
+                    onChangeSmoothing: () => {},
+                    onChangePressure: () => {},
+                    onUseFavorite: () => {},
+                    onSaveFavorite: () => {},
+                    onSelectEraserMode: () => {},
+                    onChangeEraserRadius: () => {},
+                    onToggleScribble: () => {},
+                    onSelectLassoMode: () => {},
+                    onSelectShapeType: (s) => { selectedShape = s; },
+                    onToggleSnapGrid: () => {},
+                    onToggleRegularize: (reg) => { toggledRegularize = reg; },
+                    onToggleFillEnabled: (fe) => { toggledFill = fe; },
+                    onChangeFillPattern: (fp) => { changedFillPattern = fp; },
+                    onChangeFillColor: (fc) => { changedFillColor = fc; },
+                },
+                root as any,
+            );
+
+            estuche.open(undefined, mockDocument.createElement('button') as any);
+
+            // Verify base shape buttons
+            const baseSelector = estuche.container.querySelector('.shape-grid-selector');
+            assert.ok(baseSelector, 'Must render .shape-grid-selector');
+            const baseButtons = baseSelector.children;
+            assert.strictEqual(baseButtons.length, 5, 'Must render 5 base shape buttons');
+
+            // Verify custom shapes row exists because diamond, hexagon, cylinder are registered
+            const customRow = estuche.container.querySelector('.shape-custom-row');
+            assert.ok(customRow, 'Must render custom shapes row');
+            const customContainer = customRow.querySelector('.shape-custom-items');
+            assert.ok(customContainer, 'Must render .shape-custom-items');
+            const customItems = customContainer.children;
+            assert.ok(customItems.length >= 1, 'Must render custom shape items in the row');
+
+            // Click custom shape (e.g. first custom button)
+            (customItems[0] as HTMLElement).click();
+            assert.ok(selectedShape, 'Selecting custom shape button triggers onSelectShapeType');
+
+            // Verify "Formas perfectas (1:1)" switch replaces snapGrid
+            const regularizeToggle = Array.from(estuche.container.querySelectorAll('.toggle-label'))
+                .find((el) => el.textContent?.includes('Formas perfectas'));
+            assert.ok(regularizeToggle, 'Must render "Formas perfectas (1:1)" toggle label');
+
+            const regSwitch = (regularizeToggle.parentElement?.querySelector('.popover-switch')) as HTMLElement;
+            assert.ok(regSwitch, 'Must render switch for regularize');
+            regSwitch.click();
+            assert.strictEqual(toggledRegularize, true, 'Clicking regularize switch triggers onToggleRegularize');
+
+            // Verify Fill toggle row
+            const fillToggle = Array.from(estuche.container.querySelectorAll('.toggle-label'))
+                .find((el) => el.textContent === 'Relleno');
+            assert.ok(fillToggle, 'Must render "Relleno" toggle label');
+
+            const fillSw = (fillToggle.parentElement?.querySelector('.popover-switch')) as HTMLElement;
+            assert.ok(fillSw, 'Must render switch for fill');
+            fillSw.click();
+            assert.strictEqual(toggledFill, true, 'Clicking fill switch triggers onToggleFillEnabled');
+
+            // Verify 4 fill pattern chips
+            const fillSubpanel = estuche.container.querySelector('.shape-fill-subpanel');
+            assert.ok(fillSubpanel, 'Must render .shape-fill-subpanel');
+            const patternGroup = fillSubpanel.querySelector('.line-grid');
+            assert.ok(patternGroup, 'Must render pattern group');
+            const patternChips = patternGroup.children;
+            assert.strictEqual(patternChips.length, 4, 'Must render 4 fill pattern chips');
+
+            // Click hachure pattern chip
+            (patternChips[1] as HTMLElement).click();
+            assert.strictEqual(changedFillPattern, 'hachure', 'Clicking second pattern chip selects hachure');
+
+            // Verify fill color swatches
+            const fillColorRow = fillSubpanel.querySelector('.swatch-row');
+            assert.ok(fillColorRow, 'Must render fillColorRow');
+            const fillSwatches = fillColorRow.querySelectorAll('.swatch');
+            assert.ok(fillSwatches.length >= 4, 'Must render fill color swatches');
+            (fillSwatches[0] as HTMLElement).click();
+            assert.ok(changedFillColor, 'Clicking fill swatch triggers onChangeFillColor');
+
+            estuche.destroy();
+        });
+    });
 });
