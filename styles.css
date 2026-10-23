@@ -4848,6 +4848,11 @@ button.apolo-box-menu-swatch,
   touch-action: pan-y;
   padding-right: 2px;
 }
+.list.is-dragging-active,
+.apolo-favorites-list.is-dragging-active {
+  touch-action: none;
+  overflow: hidden;
+}
 .list::-webkit-scrollbar,
 .apolo-favorites-list::-webkit-scrollbar {
   display: none;
@@ -4895,6 +4900,9 @@ button.apolo-box-menu-swatch,
   background: var(--card);
   cursor: pointer;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: pan-y;
   box-sizing: border-box;
   transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease, background .12s, border-color .12s, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
 }
@@ -5066,8 +5074,19 @@ button.apolo-box-menu-swatch,
   color: var(--apolo-text-faint, var(--faint, #9ca3af));
   cursor: grab;
   touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
   opacity: 0.7;
   transition: opacity .12s, color .12s;
+}
+
+.apolo-favorite-drag-handle svg,
+.apolo-favorite-drag-handle svg *,
+.grip svg,
+.grip svg * {
+  touch-action: none;
+  pointer-events: none;
 }
 
 .grip:hover,
@@ -5125,16 +5144,30 @@ button.apolo-box-menu-swatch,
 .apolo-estuche-popover .shape-card button.grip,
 .apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle,
 .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
-.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle,
-.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
-.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle,
-.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
-.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
   position: absolute;
   right: 4px;
   top: 4px;
   width: 34px;
   height: 34px;
+  color: var(--apolo-text-faint, var(--faint, #9ca3af));
+  opacity: 0.7;
+  touch-action: none;
+}
+
+.is-mobile .apolo-estuche-popover .shape-card button.grip,
+.is-mobile .apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.is-mobile .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover .shape-card button.grip,
+.is-tablet .apolo-estuche-popover .shape-card button.apolo-favorite-drag-handle,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
+.is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
   color: var(--apolo-text-faint, var(--faint, #9ca3af));
   opacity: 0.7;
   touch-action: none;

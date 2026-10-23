@@ -54,6 +54,8 @@ function createMockEnvironment() {
             right: '',
             bottom: '',
             transform: '',
+            touchAction: '',
+            overflow: '',
             setProperty: (k: string, v: string) => { styleObj[k] = v; },
             getPropertyValue: (k: string) => styleObj[k] ?? '',
         };
@@ -219,6 +221,13 @@ function createMockEnvironment() {
                     const idx = list.indexOf(fn);
                     if (idx !== -1) list.splice(idx, 1);
                 }
+            },
+            dispatchEvent: (ev: any) => {
+                const list = elementListeners.get(ev.type);
+                if (list) {
+                    for (const fn of [...list]) fn(ev);
+                }
+                return !ev.defaultPrevented;
             },
             getBoundingClientRect: () => ({
                 top: 100,
@@ -1424,6 +1433,79 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             window.dispatchEvent(new Event('pointermove'));
             window.dispatchEvent(new Event('pointerup'));
             assert.strictEqual(card.style.transform, '');
+        });
+
+        test('touchstart on drag handle prevents default and stops propagation to shield vertical drags from WebView scroll recognizers', () => {
+            const p1 = createFavoritePreset({ tool: 'pen', color: '#1f4fd8', width: 3 });
+            const drawer = new FavoritesDrawer({
+                onSelectFavorite: () => {},
+                onDeleteFavorite: () => {},
+                onReorderFavorite: () => {},
+            }, 'pen', [p1]);
+
+            const card = drawer.el.querySelector('.card') as HTMLElement;
+            const handle = card.querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+
+            let defaultPrevented = false;
+            let propagationStopped = false;
+            const touchEvent = {
+                type: 'touchstart',
+                cancelable: true,
+                preventDefault: () => { defaultPrevented = true; },
+                stopPropagation: () => { propagationStopped = true; },
+            };
+
+            handle.dispatchEvent(touchEvent);
+            assert.strictEqual(defaultPrevented, true, 'touchstart on handle must prevent default to disable Android scroll recognizer');
+            assert.strictEqual(propagationStopped, true, 'touchstart on handle must stop propagation');
+        });
+
+        test('pointerdown locks list container touchAction and overflow, restoring them cleanly on drag completion', async () => {
+            const p1 = createFavoritePreset({ tool: 'pen', color: '#1f4fd8', width: 3 });
+            const p2 = createFavoritePreset({ tool: 'pen', color: '#10b981', width: 5 });
+            const drawer = new FavoritesDrawer({
+                onSelectFavorite: () => {},
+                onDeleteFavorite: () => {},
+                onReorderFavorite: () => {},
+            }, 'pen', [p1, p2]);
+
+            const listEl = drawer.el.querySelector('.apolo-favorites-list') as HTMLElement;
+            const cards = drawer.el.querySelectorAll('.card');
+            const handle0 = cards[0].querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+
+            // Before drag: default container styles
+            assert.strictEqual(listEl.classList.contains('is-dragging-active'), false);
+
+            // Pointerdown begins drag setup
+            handle0.onpointerdown?.({
+                clientX: 120,
+                clientY: 60,
+                stopPropagation: () => {},
+                pointerId: 1,
+            } as any);
+
+            // Container must be locked immediately
+            assert.strictEqual(listEl.classList.contains('is-dragging-active'), true);
+            assert.strictEqual(listEl.style.touchAction, 'none');
+            assert.strictEqual(listEl.style.overflow, 'hidden');
+
+            // Mismatched pointercancel (e.g. pointerId = 99) must NOT cancel the active drag
+            const cancelMismatched = new Event('pointercancel') as any;
+            cancelMismatched.pointerId = 99;
+            window.dispatchEvent(cancelMismatched);
+            assert.strictEqual(listEl.classList.contains('is-dragging-active'), true, 'Mismatched pointercancel must be ignored');
+
+            // Complete drag via pointerup
+            const upEv = new Event('pointerup') as any;
+            upEv.clientX = 120;
+            upEv.clientY = 60;
+            upEv.pointerId = 1;
+            window.dispatchEvent(upEv);
+
+            // State cleanly reset
+            assert.strictEqual(listEl.classList.contains('is-dragging-active'), false);
+            assert.strictEqual(listEl.style.touchAction, '');
+            assert.strictEqual(listEl.style.overflow, '');
         });
     });
 });

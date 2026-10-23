@@ -330,6 +330,8 @@ export function create6DotGripSvg(): SVGSVGElement {
     svg.setAttribute('viewBox', '0 0 16 20');
     svg.setAttribute('fill', 'currentColor');
     svg.setAttribute('aria-hidden', 'true');
+    svg.style.pointerEvents = 'none';
+    svg.style.touchAction = 'none';
     const coords: [number, number][] = [
         [4.5, 4], [11.5, 4],
         [4.5, 10], [11.5, 10],
@@ -340,6 +342,8 @@ export function create6DotGripSvg(): SVGSVGElement {
         circle.setAttribute('cx', String(cx));
         circle.setAttribute('cy', String(cy));
         circle.setAttribute('r', '1.5');
+        circle.style.pointerEvents = 'none';
+        circle.style.touchAction = 'none';
         svg.appendChild(circle);
     }
     return svg;
@@ -830,19 +834,40 @@ export class FavoritesDrawer {
         handleBtn.type = 'button';
         handleBtn.className = 'grip apolo-favorite-handle-wrap apolo-favorite-drag-handle';
         setAccessibleTooltip(handleBtn, 'Arrastrar para reordenar o sacar para eliminar');
+        handleBtn.style.touchAction = 'none';
+        handleBtn.style.userSelect = 'none';
         handleBtn.appendChild(create6DotGripSvg());
+
+        // Intercept native touchstart on drag handle with passive: false to prevent
+        // Android WebView compositor from intercepting pure vertical drags for scrolling.
+        const onHandleTouchStart = (touchEv: TouchEvent) => {
+            if (touchEv.cancelable) {
+                touchEv.preventDefault();
+            }
+            touchEv.stopPropagation();
+        };
+        handleBtn.addEventListener('touchstart', onHandleTouchStart, { passive: false });
+        handleBtn.addEventListener('touchmove', (touchEv: TouchEvent) => {
+            if (touchEv.cancelable) {
+                touchEv.preventDefault();
+            }
+        }, { passive: false });
 
         let dragState: DrawerDragState = 'idle';
         let startX = 0;
         let startY = 0;
         let currentTargetIdx = index;
         let dropTimeout: ReturnType<typeof setTimeout> | null = null;
+        let touchMoveWindowHandler: ((ev: TouchEvent) => void) | null = null;
 
         handleBtn.onpointerdown = (e: PointerEvent) => {
+            if (e.button !== undefined && e.button !== 0 && e.pointerType === 'mouse') return;
             if (typeof e.preventDefault === 'function') {
                 e.preventDefault();
             }
-            e.stopPropagation();
+            if (typeof e.stopPropagation === 'function') {
+                e.stopPropagation();
+            }
             try {
                 handleBtn.setPointerCapture(e.pointerId);
             } catch (_) {}
@@ -863,6 +888,25 @@ export class FavoritesDrawer {
             const isShape = this.tool === 'shape';
             const cardHeight = (card.offsetHeight || (isShape ? 96 : 48)) + (isShape ? 8 : 4);
             const cardWidth = (card.offsetWidth || 138) + 8;
+
+            // Immediately lock scrolling on the list and card to prevent Android WebView
+            // from claiming any pure vertical motion as native scroll before drag threshold.
+            const originalListTouchAction = listEl ? (listEl.style.touchAction || '') : '';
+            const originalListOverflow = listEl ? (listEl.style.overflow || '') : '';
+            if (listEl) {
+                listEl.classList.add('is-dragging-active');
+                listEl.style.touchAction = 'none';
+                listEl.style.overflow = 'hidden';
+            }
+            card.style.touchAction = 'none';
+
+            // Global window touchmove interceptor during active drag to forbid browser scrolling
+            touchMoveWindowHandler = (touchEv: TouchEvent) => {
+                if (touchEv.cancelable) {
+                    touchEv.preventDefault();
+                }
+            };
+            window.addEventListener('touchmove', touchMoveWindowHandler, { passive: false });
 
             // Pre-calculate resting slot centers for all cards before any transforms
             const slotCenters = allCards.map((c, idx) => {
@@ -896,6 +940,10 @@ export class FavoritesDrawer {
                     clearTimeout(dropTimeout);
                     dropTimeout = null;
                 }
+                if (touchMoveWindowHandler) {
+                    window.removeEventListener('touchmove', touchMoveWindowHandler);
+                    touchMoveWindowHandler = null;
+                }
                 card.classList.remove('is-dragging', 'is-drag-out');
                 card.style.zIndex = '';
                 card.style.opacity = '';
@@ -905,19 +953,24 @@ export class FavoritesDrawer {
                 card.style.overflow = '';
                 card.style.transform = '';
                 card.style.transition = '';
+                card.style.touchAction = '';
                 allCards.forEach(c => {
                     c.style.transform = '';
                     c.style.transition = '';
                     c.style.zIndex = '';
+                    c.style.touchAction = '';
                 });
                 if (listEl) {
-                    listEl.style.touchAction = '';
+                    listEl.classList.remove('is-dragging-active');
+                    listEl.style.touchAction = originalListTouchAction;
+                    listEl.style.overflow = originalListOverflow;
                 }
                 dragState = 'idle';
                 this.activeDragAbort = null;
             };
 
             const onPointerMove = (moveEv: PointerEvent) => {
+                if (moveEv.pointerId !== undefined && e.pointerId !== undefined && moveEv.pointerId !== e.pointerId) return;
                 if (dragState === 'dropping' || dragState === 'cancelled') return;
                 if (typeof moveEv.preventDefault === 'function') {
                     moveEv.preventDefault();
@@ -931,9 +984,6 @@ export class FavoritesDrawer {
                     card.classList.add('is-dragging');
                     card.style.zIndex = '30';
                     card.style.transition = 'none';
-                    if (listEl) {
-                        listEl.style.touchAction = 'none';
-                    }
                 }
 
                 if (dragState !== 'dragging' && dragState !== 'drag-out') return;
@@ -1030,6 +1080,7 @@ export class FavoritesDrawer {
             };
 
             const onPointerCancel = (cancelEv: PointerEvent) => {
+                if (cancelEv.pointerId !== undefined && e.pointerId !== undefined && cancelEv.pointerId !== e.pointerId) return;
                 try {
                     handleBtn.releasePointerCapture(cancelEv.pointerId);
                 } catch (_) {}
@@ -1038,6 +1089,7 @@ export class FavoritesDrawer {
                 window.removeEventListener('pointercancel', onPointerCancel);
 
                 if (dragState === 'idle') {
+                    cleanupDragTransforms();
                     this.activeDragAbort = null;
                     return;
                 }
@@ -1046,6 +1098,7 @@ export class FavoritesDrawer {
             };
 
             const onPointerUp = (upEv: PointerEvent) => {
+                if (upEv.pointerId !== undefined && e.pointerId !== undefined && upEv.pointerId !== e.pointerId) return;
                 try {
                     handleBtn.releasePointerCapture(upEv.pointerId);
                 } catch (_) {}
@@ -1054,6 +1107,7 @@ export class FavoritesDrawer {
                 window.removeEventListener('pointercancel', onPointerCancel);
 
                 if (dragState === 'idle') {
+                    cleanupDragTransforms();
                     this.activeDragAbort = null;
                     return;
                 }
