@@ -365,6 +365,17 @@ export class InputManager {
         event.preventDefault?.();
         event.stopPropagation?.();
 
+        // Strictly reject non-pen pointers (mouse, touch)
+        if ('pointerType' in event && (event as any).pointerType && (event as any).pointerType !== 'pen') {
+            return;
+        }
+
+        // Only confirmed physical barrel button signals are allowed to cancel active drawing
+        const isConfirmedBarrel = this.activeBarrel || isStylusBarrelButton(event as any);
+        if (!isConfirmedBarrel) {
+            return;
+        }
+
         // If the stylus has already demonstrated deliberate drawing movement (>8px from pointerdown),
         // do NOT abort or discard the stroke on stray contextmenu signals.
         const hasMoved = hasDeliberateStylusMovement(
@@ -376,23 +387,7 @@ export class InputManager {
             return;
         }
 
-        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        const elapsedSinceDown = this.lastPointerDownTime > 0
-            ? now - this.lastPointerDownTime
-            : Number.POSITIVE_INFINITY;
-
-        // Case A — Long-Press Hold: pen tip held stationary on canvas (>180ms)
-        if (this.activeDrawingPointerId !== null && elapsedSinceDown > 180) {
-            return;
-        }
-
-        // Case B — Instant S-Pen Barrel Tap: abort nascent stationary dot
-        if (this.activeDrawingPointerId !== null && elapsedSinceDown <= 180) {
-            this.cancelActiveDrawing();
-            return;
-        }
-
-        if ((event as any).pointerType === 'pen' || (Date.now() - this.lastPenContactAt < 500)) {
+        if (this.activeDrawingPointerId !== null) {
             this.cancelActiveDrawing();
         }
     };

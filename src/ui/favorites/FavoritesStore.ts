@@ -15,6 +15,7 @@ import type {
 import {
     DEFAULT_STROKE_FAVORITE_PROFILES,
     DEFAULT_SHAPE_FAVORITE_PROFILES,
+    attachFavoritesProjection,
 } from '../../core/types.ts';
 
 export type {
@@ -332,16 +333,13 @@ export function getActiveShapeProfile(state: WorkspaceToolState): ShapeFavoriteP
 }
 
 /**
- * Synchronizes the legacy `state.favorites` slice with the currently active profiles.
+ * Ensures the dynamic read/write projection `state.favorites` is attached
+ * to the canonical profiles.
  */
 export function syncLegacyFavoritesSlice(state: WorkspaceToolState): void {
-    const stroke = getActiveStrokeProfile(state);
-    const shape = getActiveShapeProfile(state);
-    state.favorites = {
-        pen: stroke.pen,
-        highlighter: stroke.highlighter,
-        shape: shape.shape,
-    };
+    if (!state.favorites || Object.getOwnPropertyDescriptor(state, 'favorites')?.get === undefined) {
+        attachFavoritesProjection(state);
+    }
 }
 
 /**

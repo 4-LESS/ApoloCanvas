@@ -1247,6 +1247,13 @@ export class CanvasController {
             return;
         }
 
+        // Only confirmed physical barrel button signals are allowed to cancel strokes or latch barrel state
+        const isConfirmedBarrel = this.penBarrelPressed || isStylusBarrelButton(event);
+        if (!isConfirmedBarrel) {
+            this.updateDebugHud(event, 'contextmenu-unconfirmed-ignored');
+            return;
+        }
+
         // If the stylus has already demonstrated deliberate drawing movement (>8px from pointerdown),
         // do NOT abort or discard the active stroke on stray contextmenu signals.
         const hasMoved = hasDeliberateStylusMovement(
@@ -1259,22 +1266,8 @@ export class CanvasController {
             return;
         }
 
-        const elapsedSinceDown = this.lastPointerDownTime > 0
-            ? performance.now() - this.lastPointerDownTime
-            : Number.POSITIVE_INFINITY;
-
-        // Case A — Long-Press Hold (this.isDrawing && elapsedSinceDown > 180):
-        // The user is simply holding the pen tip stationary on the canvas without pressing the barrel button.
-        // Do NOTHING (do NOT cycle favorites and do NOT cancel the active stroke).
-        if (this.isDrawing && elapsedSinceDown > 180) {
-            this.updateDebugHud(event, 'long-press-ignore');
-            return;
-        }
-
-        // Case B — Instant S-Pen Barrel + Tap (!this.isDrawing || elapsedSinceDown <= 180):
-        // The user held the S-Pen barrel button and tapped the screen (which fires contextmenu immediately on contact, within 0..180ms, often with pointerType === "" and button === -1, buttons === 0).
-        // If a nascent stroke just started (this.isDrawing && elapsedSinceDown <= 180), abort/discard that nascent stroke immediately so no stray dot is left on the canvas.
-        if (this.isDrawing && elapsedSinceDown <= 180) {
+        // Confirmed stationary barrel press: cancel nascent stroke if drawing
+        if (this.isDrawing) {
             this.cancelActiveStroke();
         }
 
@@ -1291,6 +1284,9 @@ export class CanvasController {
         if (event.pointerType === 'pen') {
             this.lastPenEventTime = performance.now();
             this.isPenTipDown = true;
+            if (!this.isPenBarrelEvent(event)) {
+                this.penBarrelPressed = false;
+            }
         }
         this.lastPointerDownTime = performance.now();
         this.pointerDownStartPos = { x: event.clientX, y: event.clientY };
