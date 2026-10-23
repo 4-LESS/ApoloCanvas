@@ -471,8 +471,14 @@ export class ToolEstuche implements PopoverInstance {
         }
 
         if (partial.shapeType !== undefined) {
+            const active = partial.shapeType;
             for (const [type, btn] of this.shapeButtons) {
-                btn.classList.toggle('is-active', type === partial.shapeType);
+                const isActive = type === active ||
+                    (type === 'rect' && (active as string) === 'rectangle') ||
+                    (type === 'ellipse' && (active as string) === 'circle');
+                btn.classList.toggle('is-active', isActive);
+                btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+                btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
             }
         }
 
@@ -1397,9 +1403,11 @@ export class ToolEstuche implements PopoverInstance {
     // Shape Content
     // =========================================================================
     private renderShapeContent(): void {
-        // 1. Grid de Formas (5 shapes con targets de 44px)
+        // 1. Grid de Formas (5 shapes con targets simétricos)
         const shapesGrid = document.createElement('div');
-        shapesGrid.className = 'shape-grid-selector';
+        shapesGrid.className = 'shape-grid shape-grid-selector';
+        shapesGrid.setAttribute('role', 'radiogroup');
+        shapesGrid.setAttribute('aria-label', 'Tipo de forma');
 
         const shapeDefs: Array<{ type: ShapeType; label: string; iconD: string }> = [
             { type: 'line', label: 'Línea', iconD: ICONS.shapes.line },
@@ -1409,17 +1417,32 @@ export class ToolEstuche implements PopoverInstance {
             { type: 'triangle', label: 'Triángulo', iconD: ICONS.shapes.triangle },
         ];
 
+        const activeShape = this.state.shapeType || 'rect';
+        const isShapeActive = (defType: string) => {
+            return defType === activeShape ||
+                (defType === 'rect' && (activeShape as string) === 'rectangle') ||
+                (defType === 'ellipse' && (activeShape as string) === 'circle');
+        };
+
         for (const def of shapeDefs) {
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = `shape-grid-btn ${this.state.shapeType === def.type ? 'is-active' : ''}`;
+            const isActive = isShapeActive(def.type);
+            btn.className = `shape-btn shape-grid-btn ${isActive ? 'is-active' : ''}`;
+            btn.setAttribute('role', 'radio');
+            btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+            btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
             setAccessibleTooltip(btn, def.label);
-            btn.appendChild(createSvg(def.iconD, { size: 24 }));
+            btn.appendChild(createSvg(def.iconD, { size: 20 }));
 
             btn.onclick = () => {
                 this.state.shapeType = def.type;
-                for (const [, b] of this.shapeButtons) b.classList.remove('is-active');
-                btn.classList.add('is-active');
+                for (const [t, b] of this.shapeButtons) {
+                    const active = t === def.type;
+                    b.classList.toggle('is-active', active);
+                    b.setAttribute('aria-checked', active ? 'true' : 'false');
+                    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+                }
                 this.callbacks.onSelectShapeType(def.type);
             };
 

@@ -4190,40 +4190,56 @@ button.apolo-box-menu-swatch,
 .eraser-divider { height: 1px; background-color: var(--apolo-border-subtle); margin: 4px 0; }
 
 /* 7. Formas */
+.shape-grid,
 .shape-grid-selector {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
-  background: var(--apolo-bg-alt);
-  padding: 6px;
-  border-radius: 16px;
+  padding: 0 0 12px;
+  background: transparent;
+  border-radius: 0;
+  border-bottom: 1px solid var(--apolo-border);
 }
 
+.apolo-ui .shape-btn,
 .apolo-ui .shape-grid-btn,
+.shape-btn,
 .shape-grid-btn {
   all: unset;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 44px;
-  border-radius: 12px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  height: 42px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 11px;
+  background: var(--apolo-card);
+  border: 1px solid transparent;
   color: var(--apolo-text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background .12s, border-color .12s, color .12s;
 }
 
-.shape-grid-btn:hover { color: var(--apolo-text); background: rgba(128,128,128,0.1); }
-.shape-grid-btn.is-active {
+.shape-btn:hover,
+.shape-grid-btn:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
+}
+
+.shape-btn:focus-visible,
+.shape-grid-btn:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: -2px;
+}
+
+.shape-btn.is-active,
+.shape-grid-btn.is-active,
+.apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active,
+.apolo-estuche-popover .shape-grid button.shape-btn.is-active {
+  background: var(--apolo-accent-subtle);
+  border-color: var(--apolo-accent-light);
   color: var(--apolo-accent);
-  background: var(--apolo-accent-light);
-  border-radius: 12px;
-  box-shadow: inset 0 0 0 1px var(--apolo-accent), var(--apolo-shadow-sm);
-}
-
-.apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active {
-  color: #2f6bff;
-  background-color: rgba(47, 107, 255, 0.22);
-  box-shadow: inset 0 0 0 1px #2f6bff, 0 0 0 2px rgba(47, 107, 255, 0.16);
+  box-shadow: none;
 }
 
 .shape-fill-subpanel {
@@ -4779,17 +4795,42 @@ button.apolo-box-menu-swatch,
   gap: 4px;
   max-height: 300px;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-y;
   padding-right: 2px;
 }
 .list::-webkit-scrollbar,
 .apolo-favorites-list::-webkit-scrollbar {
-  width: 4px;
+  display: none;
+  width: 0;
+  height: 0;
 }
 .list::-webkit-scrollbar-thumb,
 .apolo-favorites-list::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+  display: none;
+}
+
+/* Cuadrícula 2-columnas para favoritos de formas */
+.apolo-estuche-popover .list.is-shape-grid,
+.apolo-estuche-popover .apolo-favorites-list.is-shape-grid,
+.apolo-estuche-popover .shape-fav-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  touch-action: pan-y;
+  padding-right: 0;
+}
+.apolo-estuche-popover .list.is-shape-grid::-webkit-scrollbar,
+.apolo-estuche-popover .apolo-favorites-list.is-shape-grid::-webkit-scrollbar,
+.apolo-estuche-popover .shape-fav-grid::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .card,
@@ -4821,20 +4862,181 @@ button.apolo-box-menu-swatch,
 }
 .card.is-active,
 .apolo-favorite-card.is-active {
-  background: var(--accent-subtle) !important;
-  border-color: var(--accent-light) !important;
+  background: var(--accent-subtle);
+  border-color: var(--accent-light);
 }
 .theme-light .card.is-active,
 .theme-light .apolo-favorite-card.is-active,
 :root .card.is-active,
 :root .apolo-favorite-card.is-active {
-  background: #eef3ff !important;
-  border-color: rgba(47, 107, 255, 0.24) !important;
+  background: #eef3ff;
+  border-color: rgba(47, 107, 255, 0.24);
 }
 .theme-dark .card.is-active,
 .theme-dark .apolo-favorite-card.is-active {
-  background: rgba(91, 140, 255, 0.18) !important;
-  border-color: rgba(91, 140, 255, 0.30) !important;
+  background: rgba(91, 140, 255, 0.18);
+  border-color: rgba(91, 140, 255, 0.30);
+}
+
+/* Favoritos de formas (Cuadrícula 2xN minimalista y cuadrada 1:1) */
+.apolo-estuche-popover .shape-card,
+.apolo-estuche-popover .apolo-favorite-card.shape-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 96px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--apolo-card);
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  grid-template-columns: none;
+  column-gap: 0;
+  box-sizing: border-box;
+  transition: background .12s, border-color .12s;
+}
+
+.apolo-estuche-popover .shape-card:hover,
+.apolo-estuche-popover .shape-card.is-hover,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:hover {
+  background: var(--apolo-card-hover);
+}
+
+.apolo-estuche-popover .shape-card:focus-visible,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: -2px;
+}
+
+.apolo-estuche-popover .shape-card.is-active,
+.apolo-estuche-popover .apolo-favorite-card.shape-card.is-active,
+.theme-light .apolo-estuche-popover .apolo-favorite-card.shape-card.is-active,
+.theme-dark .apolo-estuche-popover .apolo-favorite-card.shape-card.is-active,
+:root .apolo-estuche-popover .apolo-favorite-card.shape-card.is-active {
+  background: var(--apolo-accent-subtle);
+  border-color: var(--apolo-accent-light);
+}
+
+/* Lienzo cuadrado 1:1 central */
+.apolo-estuche-popover .shape-stage,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .shape-stage {
+  width: 68px;
+  height: 68px;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.apolo-estuche-popover .shape-stage svg,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .shape-stage svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.apolo-estuche-popover .shape-stage path,
+.apolo-estuche-popover .shape-stage rect,
+.apolo-estuche-popover .shape-stage circle,
+.apolo-estuche-popover .shape-stage ellipse,
+.apolo-estuche-popover .shape-stage polygon,
+.apolo-estuche-popover .shape-stage line {
+  vector-effect: non-scaling-stroke;
+}
+
+/* Asa de arrastre en esquina superior derecha */
+.apolo-estuche-popover .shape-card button.grip,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 18px;
+  height: 22px;
+  min-width: 18px;
+  min-height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--apolo-text-faint, #9ca3af);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0.65;
+  transition: opacity .12s, color .12s;
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+
+.apolo-estuche-popover .shape-card:hover button.grip,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:hover button.apolo-favorite-drag-handle {
+  opacity: 1;
+  color: var(--apolo-text);
+}
+
+.apolo-estuche-popover .shape-card button.grip svg,
+.apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle svg {
+  width: 11px;
+  height: 15px;
+  fill: currentColor;
+}
+
+/* Acciones / Botón flotante eliminar en esquina inferior derecha */
+.apolo-estuche-popover .shape-card .actions,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .actions,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .apolo-favorite-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--apolo-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .16), 0 0 0 1px var(--apolo-border);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s;
+}
+
+.shape-card:hover .actions,
+.shape-card.is-hover .actions,
+.shape-card:focus-within .actions,
+.apolo-estuche-popover .shape-card:hover .actions,
+.apolo-estuche-popover .shape-card.is-hover .actions,
+.apolo-estuche-popover .shape-card:focus-within .actions,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:hover .actions,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:hover .apolo-favorite-actions,
+.apolo-estuche-popover .apolo-favorite-card.shape-card:focus-within .apolo-favorite-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.apolo-estuche-popover .shape-card .actions button.ibtn,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .actions button.ibtn,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .apolo-favorite-actions button.ibtn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 6px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: var(--apolo-text-muted);
+}
+
+.apolo-estuche-popover .shape-card .actions button.ibtn.danger:hover,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .actions button.ibtn.danger:hover,
+.apolo-estuche-popover .apolo-favorite-card.shape-card .apolo-favorite-actions button.ibtn.danger:hover {
+  color: var(--apolo-danger, #ef4444);
+  background: rgba(239, 68, 68, .12);
 }
 
 .glyph,
@@ -4875,32 +5077,32 @@ button.apolo-box-menu-swatch,
 .grip,
 .apolo-favorite-handle-wrap,
 .apolo-favorite-drag-handle {
-  all: unset !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 28px !important;
-  height: 34px !important;
-  color: var(--muted) !important;
-  cursor: grab !important;
-  touch-action: none !important;
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  box-sizing: border-box !important;
-  transition: color 0.15s ease, transform 0.15s ease !important;
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 34px;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  box-sizing: border-box;
+  transition: color 0.15s ease, transform 0.15s ease;
 }
 .grip:hover,
 .apolo-favorite-drag-handle:hover {
-  color: var(--text) !important;
-  background: transparent !important;
+  color: var(--text);
+  background: transparent;
 }
 .grip:active,
 .apolo-favorite-drag-handle:active,
 .card.is-dragging .grip {
-  cursor: grabbing !important;
-  color: var(--text) !important;
+  cursor: grabbing;
+  color: var(--text);
 }
 .grip svg,
 .apolo-favorite-drag-handle svg {
@@ -4911,16 +5113,16 @@ button.apolo-box-menu-swatch,
 
 .card.is-dragging,
 .apolo-favorite-card.is-dragging {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
-  cursor: grabbing !important;
-  z-index: 30 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  cursor: grabbing;
+  z-index: 30;
 }
 .card.is-drag-out,
 .apolo-favorite-card.is-drag-out {
-  background: rgba(239, 68, 68, 0.14) !important;
-  border-color: rgba(239, 68, 68, 0.5) !important;
-  opacity: 0.65 !important;
-  transform: scale(0.96) !important;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.5);
+  opacity: 0.65;
+  transform: scale(0.96);
 }
 
 /* Estado Vacío */

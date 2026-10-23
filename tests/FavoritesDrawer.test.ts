@@ -754,6 +754,35 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             // Handle is rendered clean without extra menu
             assert.ok(card.querySelector('.apolo-favorite-delete-btn'));
         });
+
+        test('Shapes Estuche renders 5-column grid selector with active shape indicator', () => {
+            const { estuche, root } = createEstucheHelper(
+                {
+                    tool: 'shape',
+                    shapeType: 'triangle',
+                },
+                {},
+            );
+            estuche.open();
+
+            const grid = root.querySelector('.shape-grid-selector');
+            assert.ok(grid, 'Shape selector grid must exist');
+            assert.ok(grid.classList.contains('shape-grid'), 'Selector must have .shape-grid class');
+
+            const buttons = grid.querySelectorAll('.shape-btn');
+            assert.strictEqual(buttons.length, 5, 'Must have 5 shape selector buttons');
+
+            // Triangle should be active
+            const activeBtn = grid.querySelector('.shape-btn.is-active');
+            assert.ok(activeBtn, 'Active shape button must exist');
+            assert.strictEqual(activeBtn.getAttribute('aria-pressed'), 'true');
+
+            // Update to rect
+            estuche.updateState({ shapeType: 'rect' });
+            const rectBtn = grid.querySelectorAll('.shape-btn')[2];
+            assert.ok(rectBtn.classList.contains('is-active'));
+            assert.strictEqual(rectBtn.getAttribute('aria-pressed'), 'true');
+        });
     });
 
     // =========================================================================
@@ -958,6 +987,66 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             const expectedTooltip = getPresetTooltip(p1);
             assert.strictEqual(card.getAttribute('aria-label'), expectedTooltip);
             assert.strictEqual(card.title, expectedTooltip);
+        });
+
+        test('FavoritesDrawer shape cards render minimalist 1:1 stage without glyph, without title tooltip, and with delete action', () => {
+            const s1 = createFavoritePreset({
+                tool: 'shape',
+                shapeType: 'rect',
+                color: '#2F6BFF',
+                width: 3,
+                pattern: 'solid',
+            }) as ShapeFavoritePreset;
+
+            let deletedId: string | null = null;
+            const callbacks: FavoritesDrawerCallbacks = {
+                onSelectFavorite: () => {},
+                onDeleteFavorite: (id) => { deletedId = id; },
+                onReorderFavorite: () => {},
+            };
+
+            const drawer = new FavoritesDrawer(callbacks, 'shape', [s1]);
+            const list = drawer.el.querySelector('.apolo-favorites-list');
+            assert.ok(list);
+            assert.ok(list.classList.contains('is-shape-grid'), 'Shape favorites list must have .is-shape-grid');
+            assert.ok(list.classList.contains('shape-fav-grid'), 'Shape favorites list must have .shape-fav-grid');
+
+            const card = drawer.el.querySelector('.apolo-favorite-card');
+            assert.ok(card);
+            assert.ok(card.classList.contains('shape-card'), 'Card must have .shape-card');
+
+            // No glyph
+            const glyph = card.querySelector('.apolo-favorite-glyph');
+            assert.strictEqual(glyph, null, 'Shape card must NOT render .glyph');
+
+            // No title tooltip
+            assert.strictEqual(card.title, '', 'Shape card must NOT have title attribute');
+            assert.ok(card.getAttribute('aria-label'), 'Shape card must keep aria-label');
+
+            // 1:1 shape stage preview
+            const stage = card.querySelector('.shape-stage');
+            assert.ok(stage, 'Shape card must render .shape-stage');
+            const svg = stage.querySelector('svg');
+            assert.ok(svg);
+            assert.ok(svg.querySelector('rect'));
+
+            // Drag handle exists
+            const handle = card.querySelector('.apolo-favorite-drag-handle');
+            assert.ok(handle, 'Drag handle must exist');
+
+            // Delete action button exists and fires onDeleteFavorite
+            const actions = card.querySelector('.apolo-favorite-actions');
+            assert.ok(actions, 'Actions container must exist');
+            const deleteBtn = actions.querySelector('.apolo-favorite-delete-btn') as HTMLButtonElement | null;
+            assert.ok(deleteBtn, 'Delete button must exist in actions container');
+
+            let stopped = false;
+            deleteBtn.onclick({
+                stopPropagation: () => { stopped = true; },
+            } as any);
+
+            assert.strictEqual(deletedId, s1.id);
+            assert.strictEqual(stopped, true);
         });
     });
 });

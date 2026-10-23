@@ -102,8 +102,8 @@ export function getPresetTooltip(preset: ToolFavoritePreset): string {
  */
 export function createShapePreview(
     preset: ShapeFavoritePreset,
-    width = 140,
-    height = 36,
+    width = 64,
+    height = 64,
 ): SVGSVGElement {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('width', String(width));
@@ -150,6 +150,87 @@ export function createShapePreview(
         }
         el.setAttribute('stroke-linejoin', 'round');
     };
+
+    const isSquare = width === height;
+
+    if (isSquare) {
+        switch (preset.shapeType) {
+            case 'line': {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', '12');
+                line.setAttribute('y1', '52');
+                line.setAttribute('x2', '52');
+                line.setAttribute('y2', '12');
+                applyCommonAttributes(line);
+                svg.appendChild(line);
+                break;
+            }
+            case 'arrow': {
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', '14');
+                line.setAttribute('y1', '50');
+                line.setAttribute('x2', '50');
+                line.setAttribute('y2', '14');
+                applyCommonAttributes(line);
+                svg.appendChild(line);
+
+                const head = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                head.setAttribute('d', 'M35 14 H50 V29');
+                head.setAttribute('stroke', strokeColor);
+                head.setAttribute('stroke-width', String(strokeWidth));
+                head.setAttribute('stroke-opacity', String(strokeOpacity));
+                head.setAttribute('stroke-linecap', 'round');
+                head.setAttribute('stroke-linejoin', 'round');
+                head.setAttribute('vector-effect', 'non-scaling-stroke');
+                head.setAttribute('fill', 'none');
+                svg.appendChild(head);
+                break;
+            }
+            case 'ellipse': {
+                const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+                ellipse.setAttribute('cx', '32');
+                ellipse.setAttribute('cy', '32');
+                ellipse.setAttribute('rx', '22');
+                ellipse.setAttribute('ry', '22');
+                applyCommonAttributes(ellipse);
+                svg.appendChild(ellipse);
+                break;
+            }
+            case 'rounded-rect': {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', '8');
+                rect.setAttribute('y', '14');
+                rect.setAttribute('width', '48');
+                rect.setAttribute('height', '36');
+                rect.setAttribute('rx', '8');
+                rect.setAttribute('ry', '8');
+                applyCommonAttributes(rect);
+                svg.appendChild(rect);
+                break;
+            }
+            case 'triangle': {
+                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                polygon.setAttribute('points', '32,10 54,50 10,50');
+                applyCommonAttributes(polygon);
+                svg.appendChild(polygon);
+                break;
+            }
+            case 'rect':
+            default: {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', '8');
+                rect.setAttribute('y', '14');
+                rect.setAttribute('width', '48');
+                rect.setAttribute('height', '36');
+                rect.setAttribute('rx', '4');
+                rect.setAttribute('ry', '4');
+                applyCommonAttributes(rect);
+                svg.appendChild(rect);
+                break;
+            }
+        }
+        return svg;
+    }
 
     const padX = 20;
     const padY = 6;
@@ -670,6 +751,9 @@ export class FavoritesDrawer {
     private renderFavoritesList(): void {
         const listContainer = document.createElement('div');
         listContainer.className = 'list apolo-favorites-list';
+        if (this.tool === 'shape') {
+            listContainer.classList.add('is-shape-grid', 'shape-fav-grid');
+        }
 
         const activeFp = this.currentSlice
             ? computeFavoriteFingerprint({ ...this.currentSlice, tool: inferTool(this.currentSlice, this.tool) })
@@ -689,14 +773,20 @@ export class FavoritesDrawer {
      */
     private buildCard(preset: ToolFavoritePreset, index: number, isActive: boolean): HTMLElement {
         const tooltip = getPresetTooltip(preset);
+        const isShape = preset.tool === 'shape';
 
         const card = document.createElement('div');
-        card.className = `card apolo-favorite-card${isActive ? ' is-active' : ''}`;
+        card.className = `card apolo-favorite-card${isActive ? ' is-active' : ''}${isShape ? ' shape-card' : ''}`;
         card.dataset.presetId = preset.id;
         card.setAttribute('role', 'button');
         card.setAttribute('tabindex', '0');
         card.setAttribute('aria-pressed', String(isActive));
-        setAccessibleTooltip(card, tooltip);
+        if (isShape) {
+            // Sin atributo title en las tarjetas de forma para evitar tooltips no deseados
+            card.setAttribute('aria-label', tooltip);
+        } else {
+            setAccessibleTooltip(card, tooltip);
+        }
 
         card.onclick = () => this.callbacks.onSelectFavorite(preset);
         card.onkeydown = (e) => {
@@ -707,21 +797,25 @@ export class FavoritesDrawer {
             }
         };
 
-        // 1) Tool glyph
-        const glyph = document.createElement('span');
-        glyph.className = 'glyph apolo-favorite-glyph';
-        glyph.appendChild(createSvg(getPresetIcon(preset), { size: 18 }));
+        // 1) Tool glyph (omitted for shape cards per design requirement)
+        let glyph: HTMLElement | null = null;
+        if (!isShape) {
+            glyph = document.createElement('span');
+            glyph.className = 'glyph apolo-favorite-glyph';
+            glyph.appendChild(createSvg(getPresetIcon(preset), { size: 18 }));
+        }
 
-        // 2) Preview (wave is drawn wide; shapes keep their compact box)
+        // 2) Preview (shapes use square shape-stage; strokes use wave)
         const previewEl = document.createElement('div');
-        previewEl.className = 'preview apolo-favorite-preview';
-        if (preset.tool === 'pen' || preset.tool === 'highlighter') {
+        if (isShape) {
+            previewEl.className = 'shape-stage preview apolo-favorite-preview';
+            previewEl.appendChild(createShapePreview(preset as ShapeFavoritePreset));
+        } else {
+            previewEl.className = 'preview apolo-favorite-preview';
             const stroke = preset as PenFavoritePreset | HighlighterFavoritePreset;
             previewEl.appendChild(
                 createStrokeWavePreview(stroke.color, stroke.width, stroke.profileId, stroke.opacity, stroke.pattern, 220, 32),
             );
-        } else if (preset.tool === 'shape') {
-            previewEl.appendChild(createShapePreview(preset as ShapeFavoritePreset));
         }
 
         // 3) Drag Handle (Reorder & Drag out to delete)
@@ -767,7 +861,7 @@ export class FavoritesDrawer {
 
                 const isOutside = moveEv.clientX < drawerRect.left - 15 ||
                                   moveEv.clientX > drawerRect.right + 15 ||
-                                  Math.abs(dx) > 80;
+                                  Math.abs(dx) > 100;
 
                 if (isOutside) {
                     isDragOut = true;
@@ -779,9 +873,17 @@ export class FavoritesDrawer {
                     isDragOut = false;
                     card.classList.remove('is-drag-out');
 
-                    const offsetIndex = Math.round(dy / cardHeight);
-                    const newTargetIdx = Math.max(0, Math.min(this.favorites.length - 1, index + offsetIndex));
-                    currentTargetIdx = newTargetIdx;
+                    if (this.tool === 'shape') {
+                        const cardWidth = (card.offsetWidth || 135) + 8;
+                        const colOffset = Math.round(dx / cardWidth);
+                        const rowOffset = Math.round(dy / cardHeight);
+                        const newTargetIdx = Math.max(0, Math.min(this.favorites.length - 1, index + rowOffset * 2 + colOffset));
+                        currentTargetIdx = newTargetIdx;
+                    } else {
+                        const offsetIndex = Math.round(dy / cardHeight);
+                        const newTargetIdx = Math.max(0, Math.min(this.favorites.length - 1, index + offsetIndex));
+                        currentTargetIdx = newTargetIdx;
+                    }
 
                     allCards.forEach((c, cIdx) => {
                         if (c === card) return;
@@ -888,17 +990,41 @@ export class FavoritesDrawer {
             card.removeAttribute('draggable');
         };
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.type = 'button';
-        deleteBtn.className = 'apolo-favorite-delete-btn';
-        deleteBtn.style.display = 'none';
-        deleteBtn.setAttribute('aria-hidden', 'true');
-        deleteBtn.onclick = (e) => {
-            e.stopPropagation();
-            this.callbacks.onDeleteFavorite(preset.id);
-        };
+        if (isShape) {
+            const actionsEl = document.createElement('div');
+            actionsEl.className = 'actions apolo-favorite-actions';
 
-        card.append(glyph, previewEl, handleBtn, deleteBtn);
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'ibtn danger apolo-favorite-delete-btn';
+            deleteBtn.setAttribute('aria-label', 'Eliminar');
+            setAccessibleTooltip(deleteBtn, 'Eliminar');
+            deleteBtn.appendChild(createSvg(ICONS.trash, { size: 14 }));
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.callbacks.onDeleteFavorite(preset.id);
+            };
+            actionsEl.appendChild(deleteBtn);
+
+            card.append(previewEl, handleBtn, actionsEl);
+        } else {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'apolo-favorite-delete-btn';
+            deleteBtn.style.display = 'none';
+            deleteBtn.setAttribute('aria-hidden', 'true');
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.callbacks.onDeleteFavorite(preset.id);
+            };
+
+            if (glyph) {
+                card.append(glyph, previewEl, handleBtn, deleteBtn);
+            } else {
+                card.append(previewEl, handleBtn, deleteBtn);
+            }
+        }
+
         return card;
     }
 
