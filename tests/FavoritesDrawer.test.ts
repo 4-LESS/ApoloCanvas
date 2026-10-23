@@ -255,12 +255,29 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
         prevWindow = (globalThis as any).window;
         const mockDoc = createMockEnvironment();
         (globalThis as any).document = mockDoc;
+        const windowListeners = new Map<string, Function[]>();
         (globalThis as any).window = {
             document: mockDoc,
             innerWidth: 1024,
             innerHeight: 768,
-            addEventListener: () => {},
-            removeEventListener: () => {},
+            addEventListener: (type: string, fn: Function) => {
+                if (!windowListeners.has(type)) windowListeners.set(type, []);
+                windowListeners.get(type)!.push(fn);
+            },
+            removeEventListener: (type: string, fn: Function) => {
+                const list = windowListeners.get(type);
+                if (list) {
+                    const idx = list.indexOf(fn);
+                    if (idx !== -1) list.splice(idx, 1);
+                }
+            },
+            dispatchEvent: (ev: any) => {
+                const list = windowListeners.get(ev.type);
+                if (list) {
+                    for (const fn of [...list]) fn(ev);
+                }
+                return true;
+            },
             setTimeout: (fn: Function) => fn(),
             clearTimeout: () => {},
         };
@@ -1050,6 +1067,164 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
 
             assert.strictEqual(deletedId, s1.id);
             assert.strictEqual(stopped, true);
+        });
+
+        test('shape favorites drawer supports horizontal 2-column reordering without accidental drag-out deletion', async () => {
+            const s1 = createFavoritePreset({
+                tool: 'shape',
+                shapeType: 'rectangle',
+                strokeColor: '#2f6bff',
+                strokeWidth: 2,
+            });
+            const s2 = createFavoritePreset({
+                tool: 'shape',
+                shapeType: 'ellipse',
+                strokeColor: '#10b981',
+                strokeWidth: 3,
+            });
+
+            let reordered: [number, number] | null = null;
+            let deletedId: string | null = null;
+            const callbacks: FavoritesDrawerCallbacks = {
+                onSelectFavorite: () => {},
+                onDeleteFavorite: (id) => { deletedId = id; },
+                onReorderFavorite: (from, to) => { reordered = [from, to]; },
+            };
+
+            const drawer = new FavoritesDrawer(callbacks, 'shape', [s1, s2]);
+            const cards = drawer.el.querySelectorAll('.shape-card');
+            assert.strictEqual(cards.length, 2);
+
+            const handle0 = cards[0].querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+            assert.ok(handle0);
+
+            // Mock drawerRect (popover width 320px)
+            drawer.el.getBoundingClientRect = () => ({
+                left: 100,
+                right: 420,
+                top: 50,
+                bottom: 300,
+                width: 320,
+                height: 250,
+                x: 100,
+                y: 50,
+                toJSON: () => {},
+            } as any);
+
+            // Mock card 0 and card 1 bounding rects (2-column layout)
+            cards[0].getBoundingClientRect = () => ({
+                left: 114,
+                right: 252,
+                top: 60,
+                bottom: 156,
+                width: 138,
+                height: 96,
+                x: 114,
+                y: 60,
+                toJSON: () => {},
+            } as any);
+            cards[1].getBoundingClientRect = () => ({
+                left: 268,
+                right: 406,
+                top: 60,
+                bottom: 156,
+                width: 138,
+                height: 96,
+                x: 268,
+                y: 60,
+                toJSON: () => {},
+            } as any);
+
+            // 1. Pointer down on handle of card 0 (at clientX=240, clientY=70)
+            handle0.onpointerdown?.({
+                clientX: 240,
+                clientY: 70,
+                stopPropagation: () => {},
+                pointerId: 1,
+            } as any);
+
+            // 2. Drag horizontally to the right across columns to clientX=370 (dx = 130px, inside drawerRect)
+            const moveEv = new Event('pointermove') as any;
+            moveEv.clientX = 370;
+            moveEv.clientY = 70;
+            window.dispatchEvent(moveEv);
+
+            // Must NOT be marked as isDragOut / accidental deletion even though dx > 100
+            assert.strictEqual(cards[0].classList.contains('is-drag-out'), false, 'Horizontal movement between columns must NOT trigger is-drag-out');
+            assert.strictEqual(cards[0].classList.contains('is-dragging'), true, 'Card must be in dragging state');
+
+            // Sibling card (card 1) should have received horizontal shift
+            const card1Transform = (cards[1] as HTMLElement).style.transform;
+            assert.ok(card1Transform.includes('translate'), 'Sibling card should displace horizontally');
+
+            // 3. Pointer up inside slot 1
+            const upEv = new Event('pointerup') as any;
+            upEv.clientX = 370;
+            upEv.clientY = 70;
+            upEv.pointerId = 1;
+            window.dispatchEvent(upEv);
+
+            // Wait for drop animation timeout (180ms)
+            await new Promise((r) => setTimeout(r, 200));
+
+            assert.deepStrictEqual(reordered, [0, 1], 'Reorder callback should be invoked with (0, 1)');
+            assert.strictEqual(deletedId, null, 'Must NOT trigger deletion during horizontal reordering');
+        });
+
+        test('shape favorites drawer triggers deletion when deliberately dragged outside popover bounds', async () => {
+            const s1 = createFavoritePreset({
+                tool: 'shape',
+                shapeType: 'rectangle',
+                strokeColor: '#2f6bff',
+                strokeWidth: 2,
+            });
+
+            let deletedId: string | null = null;
+            const callbacks: FavoritesDrawerCallbacks = {
+                onSelectFavorite: () => {},
+                onDeleteFavorite: (id) => { deletedId = id; },
+                onReorderFavorite: () => {},
+            };
+
+            const drawer = new FavoritesDrawer(callbacks, 'shape', [s1]);
+            const card = drawer.el.querySelector('.shape-card') as HTMLElement;
+            const handle = card.querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+
+            drawer.el.getBoundingClientRect = () => ({
+                left: 100,
+                right: 420,
+                top: 50,
+                bottom: 300,
+                width: 320,
+                height: 250,
+                x: 100,
+                y: 50,
+                toJSON: () => {},
+            } as any);
+
+            handle.onpointerdown?.({
+                clientX: 180,
+                clientY: 100,
+                stopPropagation: () => {},
+                pointerId: 1,
+            } as any);
+
+            // Drag outside to the right of drawer (clientX = 460 > right + 30)
+            const moveEv = new Event('pointermove') as any;
+            moveEv.clientX = 460;
+            moveEv.clientY = 100;
+            window.dispatchEvent(moveEv);
+
+            assert.strictEqual(card.classList.contains('is-drag-out'), true, 'Card outside drawer must have is-drag-out');
+
+            const upEv = new Event('pointerup') as any;
+            upEv.clientX = 460;
+            upEv.clientY = 100;
+            upEv.pointerId = 1;
+            window.dispatchEvent(upEv);
+
+            await new Promise((r) => setTimeout(r, 250));
+            assert.strictEqual(deletedId, s1.id, 'Dragging outside and releasing must delete favorite');
         });
     });
 });

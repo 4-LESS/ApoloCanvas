@@ -833,6 +833,10 @@ export class FavoritesDrawer {
 
         handleBtn.onpointerdown = (e: PointerEvent) => {
             e.stopPropagation();
+            try {
+                handleBtn.setPointerCapture(e.pointerId);
+            } catch (_) {}
+
             isDragging = false;
             isDragOut = false;
             startX = e.clientX;
@@ -842,7 +846,36 @@ export class FavoritesDrawer {
             const listEl = card.parentElement as HTMLElement | null;
             const allCards = listEl ? (Array.from(listEl.children) as HTMLElement[]) : [];
             const drawerRect = this.el.getBoundingClientRect();
-            const cardHeight = (card.offsetHeight || 48) + 4;
+            const isShape = this.tool === 'shape';
+            const cardHeight = (card.offsetHeight || (isShape ? 96 : 48)) + (isShape ? 8 : 4);
+            const cardWidth = (card.offsetWidth || 138) + 8;
+
+            // Pre-calculate resting slot centers for all cards before any transforms
+            const slotCenters = allCards.map((c, idx) => {
+                const r = c.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    return {
+                        x: r.left + r.width / 2,
+                        y: r.top + r.height / 2,
+                    };
+                }
+                // Fallback for headless / simulated environments without layout engine
+                if (isShape) {
+                    const col = idx % 2;
+                    const row = Math.floor(idx / 2);
+                    return {
+                        x: drawerRect.left + col * cardWidth + cardWidth / 2,
+                        y: drawerRect.top + row * cardHeight + cardHeight / 2,
+                    };
+                }
+                return {
+                    x: drawerRect.left + 150,
+                    y: drawerRect.top + idx * cardHeight + cardHeight / 2,
+                };
+            });
+
+            const originX = slotCenters[index]?.x ?? startX;
+            const originY = slotCenters[index]?.y ?? startY;
 
             const onPointerMove = (moveEv: PointerEvent) => {
                 const dx = moveEv.clientX - startX;
@@ -857,49 +890,77 @@ export class FavoritesDrawer {
 
                 if (!isDragging) return;
 
-                card.style.transform = `translate(${dx}px, ${dy}px) scale(1.02)`;
-
-                const isOutside = moveEv.clientX < drawerRect.left - 15 ||
-                                  moveEv.clientX > drawerRect.right + 15 ||
-                                  Math.abs(dx) > 100;
+                // For shapes in a 2-column grid, horizontal movement across columns is standard reordering
+                // and must NOT trigger accidental deletion. Deletion only triggers when dragging out
+                // beyond the popover drawer boundaries.
+                const isOutside = isShape
+                    ? (moveEv.clientX < drawerRect.left - 30 ||
+                       moveEv.clientX > drawerRect.right + 30 ||
+                       moveEv.clientY < drawerRect.top - 30 ||
+                       moveEv.clientY > drawerRect.bottom + 30)
+                    : (moveEv.clientX < drawerRect.left - 15 ||
+                       moveEv.clientX > drawerRect.right + 15 ||
+                       Math.abs(dx) > 100);
 
                 if (isOutside) {
                     isDragOut = true;
                     card.classList.add('is-drag-out');
+                    card.style.transform = `translate(${dx}px, ${dy}px) scale(0.94)`;
                     allCards.forEach(c => {
-                        if (c !== card) c.style.transform = 'translateY(0px)';
+                        if (c !== card) {
+                            c.style.transform = '';
+                            c.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)';
+                        }
                     });
                 } else {
                     isDragOut = false;
                     card.classList.remove('is-drag-out');
+                    card.style.transform = `translate(${dx}px, ${dy}px) scale(1.02)`;
 
-                    if (this.tool === 'shape') {
-                        const cardWidth = (card.offsetWidth || 135) + 8;
-                        const colOffset = Math.round(dx / cardWidth);
-                        const rowOffset = Math.round(dy / cardHeight);
-                        const newTargetIdx = Math.max(0, Math.min(this.favorites.length - 1, index + rowOffset * 2 + colOffset));
-                        currentTargetIdx = newTargetIdx;
-                    } else {
-                        const offsetIndex = Math.round(dy / cardHeight);
-                        const newTargetIdx = Math.max(0, Math.min(this.favorites.length - 1, index + offsetIndex));
-                        currentTargetIdx = newTargetIdx;
+                    // Find closest slot by Euclidean distance to dragged card center
+                    const draggedCenterX = originX + dx;
+                    const draggedCenterY = originY + dy;
+                    let bestIdx = index;
+                    let minDist = Infinity;
+                    for (let j = 0; j < slotCenters.length; j++) {
+                        const dist = Math.hypot(draggedCenterX - slotCenters[j].x, draggedCenterY - slotCenters[j].y);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            bestIdx = j;
+                        }
                     }
+                    currentTargetIdx = bestIdx;
 
                     allCards.forEach((c, cIdx) => {
                         if (c === card) return;
                         c.style.transition = 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)';
-                        if (index < currentTargetIdx && cIdx > index && cIdx <= currentTargetIdx) {
-                            c.style.transform = `translateY(-${cardHeight}px)`;
-                        } else if (index > currentTargetIdx && cIdx < index && cIdx >= currentTargetIdx) {
-                            c.style.transform = `translateY(${cardHeight}px)`;
+
+                        let targetSlot = cIdx;
+                        if (index < currentTargetIdx) {
+                            if (cIdx > index && cIdx <= currentTargetIdx) {
+                                targetSlot = cIdx - 1;
+                            }
+                        } else if (index > currentTargetIdx) {
+                            if (cIdx >= currentTargetIdx && cIdx < index) {
+                                targetSlot = cIdx + 1;
+                            }
+                        }
+
+                        if (targetSlot === cIdx || !slotCenters[targetSlot] || !slotCenters[cIdx]) {
+                            c.style.transform = '';
                         } else {
-                            c.style.transform = 'translateY(0px)';
+                            const shiftX = slotCenters[targetSlot].x - slotCenters[cIdx].x;
+                            const shiftY = slotCenters[targetSlot].y - slotCenters[cIdx].y;
+                            c.style.transform = `translate(${shiftX}px, ${shiftY}px)`;
                         }
                     });
                 }
             };
 
             const onPointerUp = (upEv: PointerEvent) => {
+                try {
+                    handleBtn.releasePointerCapture(upEv.pointerId);
+                } catch (_) {}
                 window.removeEventListener('pointermove', onPointerMove);
                 window.removeEventListener('pointerup', onPointerUp);
                 window.removeEventListener('pointercancel', onPointerUp);
@@ -922,10 +983,11 @@ export class FavoritesDrawer {
                     }, 220);
                 } else {
                     card.classList.remove('is-dragging');
-                    if (currentTargetIdx !== index) {
-                        const targetY = (currentTargetIdx - index) * cardHeight;
+                    if (currentTargetIdx !== index && slotCenters[currentTargetIdx] && slotCenters[index]) {
+                        const dropDx = slotCenters[currentTargetIdx].x - slotCenters[index].x;
+                        const dropDy = slotCenters[currentTargetIdx].y - slotCenters[index].y;
                         card.style.transition = 'transform 0.18s cubic-bezier(0.2, 0, 0, 1)';
-                        card.style.transform = `translate(0px, ${targetY}px)`;
+                        card.style.transform = `translate(${dropDx}px, ${dropDy}px)`;
                         setTimeout(() => {
                             allCards.forEach(c => {
                                 c.style.transform = '';

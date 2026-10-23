@@ -4943,7 +4943,7 @@ button.apolo-box-menu-swatch,
   grid-template-columns: none;
   column-gap: 0;
   box-sizing: border-box;
-  transition: background .12s, border-color .12s;
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease, background .12s, border-color .12s, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
 }
 
 .apolo-estuche-popover .shape-card:hover,
@@ -5130,10 +5130,10 @@ button.apolo-box-menu-swatch,
 .is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.grip,
 .is-tablet .apolo-estuche-popover .apolo-favorite-card.shape-card button.apolo-favorite-drag-handle {
   position: absolute;
-  right: 8px;
-  top: 8px;
-  width: 20px;
-  height: 24px;
+  right: 6px;
+  top: 6px;
+  width: 24px;
+  height: 28px;
   color: var(--apolo-text-faint, var(--faint, #9ca3af));
   opacity: 0.7;
 }
