@@ -243,11 +243,19 @@ export class ToolEstuche implements PopoverInstance {
         this.container.hidden = true;
         this.container.style.display = 'none';
         this.container.classList.remove('apolo-popover-animated');
+        this.destroyFavoritesDrawer();
         this.colorPicker?.close();
         if (this.popoverController) {
             this.popoverController.close(this);
         }
         this.callbacks.onClose?.();
+    }
+
+    private destroyFavoritesDrawer(): void {
+        if (this.favoritesDrawer) {
+            this.favoritesDrawer.destroy();
+            this.favoritesDrawer = undefined;
+        }
     }
 
     hide(): void {
@@ -815,6 +823,7 @@ export class ToolEstuche implements PopoverInstance {
     }
 
     private render(): void {
+        this.destroyFavoritesDrawer();
         this.headerEl.replaceChildren();
         this.bodyEl.replaceChildren();
 
@@ -847,6 +856,7 @@ export class ToolEstuche implements PopoverInstance {
     }
 
     private renderFavoritesDrawerContent(): void {
+        this.destroyFavoritesDrawer();
         const tool = this.state.tool as FavoritableTool;
         const favorites = this.getToolFavorites();
         const currentSlice = this.getCurrentToolSlice();
@@ -1887,6 +1897,7 @@ export class ToolEstuche implements PopoverInstance {
 
     destroy(): void {
         this.close();
+        this.destroyFavoritesDrawer();
         this.colorPicker?.destroy();
         this.container.remove();
     }

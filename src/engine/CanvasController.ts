@@ -1366,9 +1366,8 @@ export class CanvasController {
         if (e.pointerType === 'pen') {
             this.lastPenEventTime = performance.now();
 
-            // On Android WebView, hovering with S-Pen barrel button reports buttons === 1
-            // without pointerdown ever firing (isPenTipDown === false).
-            // On Windows Ink / W3C, it reports buttons & 32, buttons & 2, button 2, or button 5.
+            // Stylus barrel detection in hover (Windows Ink / W3C reports buttons & 32 / button 5;
+            // Android / DeX reports buttons & 2 / button 2).
             const barrelHoverActive = !this.isPenTipDown && !this.isDrawing && isStylusHoverBarrel(e);
 
             if (barrelHoverActive) {

@@ -785,13 +785,13 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
 
             const canvas = (controller as any).canvas;
 
-            // Hovering over screen with Samsung S-Pen barrel button pressed (Android reports buttons: 1)
+            // Hovering over screen with stylus barrel button pressed (e.g. W3C buttons: 32 or Android buttons: 2)
             let prevented = false;
             let stopped = false;
             canvas.dispatchEvent({
                 type: 'pointermove',
                 pointerType: 'pen',
-                buttons: 1,
+                buttons: 32,
                 button: -1,
                 pressure: 0,
                 clientX: 200,
@@ -801,7 +801,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
                 stopImmediatePropagation: () => { stopped = true; },
             });
 
-            assert.strictEqual(cycleCount, 0, 'Canvas hover with buttons=1 must NOT trigger cycle (reserved for eraser)');
+            assert.strictEqual(cycleCount, 0, 'Canvas hover with barrel button must NOT trigger cycle (reserved for eraser)');
             assert.strictEqual(prevented, true, 'Default action must be prevented');
             assert.strictEqual(stopped, true, 'Propagation must be stopped');
             assert.strictEqual((controller as any).penBarrelPressed, true, 'Latch must be set to true');
@@ -928,11 +928,11 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
 
             const canvas = (controller as any).canvas;
 
-            // 1. Press barrel button while hovering
+            // 1. Press barrel button while hovering (buttons: 32 or 2)
             canvas.dispatchEvent({
                 type: 'pointermove',
                 pointerType: 'pen',
-                buttons: 1,
+                buttons: 32,
                 button: -1,
                 pressure: 0,
                 clientX: 100,
@@ -959,7 +959,7 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             canvas.dispatchEvent({
                 type: 'pointermove',
                 pointerType: 'pen',
-                buttons: 1,
+                buttons: 32,
                 button: -1,
                 pressure: 0,
                 clientX: 100,

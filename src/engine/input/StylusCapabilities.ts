@@ -40,15 +40,28 @@ export function isStylusBarrelButton(event: PointerEvent | MouseEvent): boolean 
 }
 
 /**
- * Checks if a stylus hover event carries an Android WebView hover-barrel signal.
- * Android WebViews frequently report barrel hover with buttons === 1 or 32 at pressure === 0.
+ * Checks if a stylus hover event carries an authentic stylus barrel button signal.
+ *
+ * Requirements:
+ * 1. Must be strictly a pen device (pointerType === 'pen').
+ * 2. Must be hovering with zero or undefined contact pressure (pressure === 0).
+ * 3. Primary tip contact (buttons === 1) is STRICTLY REJECTED: zero-pressure tip touches
+ *    must never be falsely recognized as a barrel button press.
+ * 4. Must match W3C standard barrel/eraser (bit 5 / 32) or Android/DeX secondary button
+ *    (bit 1 / 2, button 2, or button 5).
  */
 export function isStylusHoverBarrel(event: PointerEvent): boolean {
     if (event.pointerType !== 'pen') return false;
     const isZeroPressure = event.pressure === 0 || event.pressure === undefined;
     if (!isZeroPressure) return false;
 
-    return (event.buttons & 32) !== 0 || (event.buttons & 2) !== 0 || event.buttons === 1;
+    // Primary tip button (buttons === 1) is NEVER a barrel press
+    if (event.buttons === 1) return false;
+
+    const button = typeof event.button === 'number' ? event.button : -1;
+    const buttons = typeof event.buttons === 'number' ? event.buttons : 0;
+
+    return (buttons & 32) !== 0 || (buttons & 2) !== 0 || button === 2 || button === 5;
 }
 
 /**

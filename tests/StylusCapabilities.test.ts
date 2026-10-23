@@ -39,15 +39,20 @@ describe('StylusCapabilities - Strict Stylus & S-Pen Hardening', () => {
         assert.strictEqual(isStylusBarrelButton({ pointerType: 'pen', button: -1, buttons: 2 } as any), true);
     });
 
-    test('isStylusHoverBarrel detects Android WebView hover barrel signal', () => {
-        // Hovering pen with pressure === 0 and buttons === 1
-        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0, buttons: 1 } as any), true);
-        // Hovering pen with buttons === 32
+    test('isStylusHoverBarrel strictly detects valid barrel bitmasks and rejects tip button', () => {
+        // Primary tip button (buttons === 1) must NEVER be treated as hover barrel
+        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0, buttons: 1 } as any), false);
+        // W3C barrel / eraser button (buttons & 32)
         assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0, buttons: 32 } as any), true);
+        // Android / Samsung DeX secondary barrel button (buttons & 2)
+        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0, buttons: 2 } as any), true);
+        // Event with button: 2 or button: 5
+        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0, button: 2, buttons: 0 } as any), true);
+        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0, button: 5, buttons: 0 } as any), true);
         // Pen touching canvas with active pressure (> 0) is NOT a hover barrel
-        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0.5, buttons: 1 } as any), false);
+        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'pen', pressure: 0.5, buttons: 32 } as any), false);
         // Mouse hover is NOT a stylus hover barrel
-        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'mouse', pressure: 0, buttons: 1 } as any), false);
+        assert.strictEqual(isStylusHoverBarrel({ pointerType: 'mouse', pressure: 0, buttons: 32 } as any), false);
     });
 
     test('hasDeliberateStylusMovement correctly discriminates stationary taps from drawing strokes', () => {

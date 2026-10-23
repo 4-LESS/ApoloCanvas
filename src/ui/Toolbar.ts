@@ -120,6 +120,7 @@ export class Toolbar {
     private resizeObserver: ResizeObserver | null = null;
     private lastToolTapTime = new Map<ToolType, number>();
     private lastBarrelDrawerOpenTime = 0;
+    private isStylusBarrelLatched = false;
     private pendingEstucheTimeout: number | null = null;
 
     // Set of currently overflowed items (hidden from toolbar, delegated to MoreMenu)
@@ -559,19 +560,28 @@ export class Toolbar {
                     this.pendingEstucheTimeout = null;
                 }
                 const now = Date.now();
-                if (now - this.lastBarrelDrawerOpenTime > 300) {
-                    this.lastBarrelDrawerOpenTime = now;
-                    if (this.options.onToggleEstucheFavorites && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
-                        this.options.onToggleEstucheFavorites(def.tool);
-                    } else {
-                        this.options.onToggleEstuche(def.tool);
-                    }
+                if (this.isStylusBarrelLatched || (now - this.lastBarrelDrawerOpenTime < 300)) {
+                    return;
+                }
+                this.isStylusBarrelLatched = true;
+                this.lastBarrelDrawerOpenTime = now;
+                if (this.options.onToggleEstucheFavorites && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                    this.options.onToggleEstucheFavorites(def.tool);
+                } else {
+                    this.options.onToggleEstuche(def.tool);
                 }
             };
 
             btn.addEventListener('contextmenu', (e) => {
                 if ('pointerType' in e && (e as any).pointerType && (e as any).pointerType !== 'pen') return;
+                const now = Date.now();
+                if (this.isStylusBarrelLatched || (now - this.lastBarrelDrawerOpenTime < 300)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
                 handleBarrelOpenFavorites(e);
+                this.isStylusBarrelLatched = false;
             });
 
             btn.addEventListener('pointerdown', (e: PointerEvent) => {
@@ -581,8 +591,34 @@ export class Toolbar {
             });
 
             btn.addEventListener('pointermove', (e: PointerEvent) => {
-                if (isStylusHoverBarrel(e) && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
-                    handleBarrelOpenFavorites(e);
+                if (e.pointerType !== 'pen') return;
+                const isHover = isStylusHoverBarrel(e);
+                const isBarrel = isStylusBarrelButton(e);
+                if (isHover || isBarrel) {
+                    if (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape') {
+                        handleBarrelOpenFavorites(e);
+                    }
+                } else if (this.isStylusBarrelLatched) {
+                    // Barrel button was released during hover movement
+                    this.isStylusBarrelLatched = false;
+                }
+            });
+
+            btn.addEventListener('pointerup', (e: PointerEvent) => {
+                if (e.pointerType === 'pen') {
+                    this.isStylusBarrelLatched = false;
+                }
+            });
+
+            btn.addEventListener('pointerleave', (e: PointerEvent) => {
+                if (e.pointerType === 'pen') {
+                    this.isStylusBarrelLatched = false;
+                }
+            });
+
+            btn.addEventListener('pointercancel', (e: PointerEvent) => {
+                if (e.pointerType === 'pen') {
+                    this.isStylusBarrelLatched = false;
                 }
             });
 
@@ -1425,6 +1461,7 @@ export class Toolbar {
     }
 
     closeAllPopovers(): void {
+        this.isStylusBarrelLatched = false;
         if (this.thicknessPopover?.isOpen()) {
             this.thicknessPopover.close();
             this.thicknessTriggerBtn?.classList.remove('is-open');
