@@ -335,22 +335,45 @@ describe('Canonical Profile Store & Stylus Barrel Guard Narrowing', () => {
             assert.strictEqual(state.favorites.pen[0].color, '#1F4FD8');
         });
 
-        test('Direct push and array mutation on state.favorites directly modifies the active canonical profile', () => {
+        test('state.favorites is strictly read-only and frozen: direct array mutation is blocked at runtime', () => {
             const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
             const preset = createFavoritePreset({ tool: 'pen', profileId: 'pencil', color: '#10B981', width: 3 }) as PenFavoritePreset;
 
-            // Mutate via legacy projection push
-            state.favorites.pen.push(preset);
+            // Snapshot and its arrays are frozen
+            assert.strictEqual(Object.isFrozen(state.favorites), true);
+            assert.strictEqual(Object.isFrozen(state.favorites.pen), true);
+            assert.strictEqual(Object.isFrozen(state.favorites.highlighter), true);
+            assert.strictEqual(Object.isFrozen(state.favorites.shape), true);
 
-            // Canonical profile must have received the preset
-            const activeProfile = getActiveStrokeProfile(state);
-            assert.strictEqual(activeProfile.pen.length, 1);
-            assert.strictEqual(activeProfile.pen[0].id, preset.id);
+            // Direct mutation throws at runtime
+            assert.throws(() => {
+                (state.favorites.pen as any).push(preset);
+            }, TypeError);
 
-            // Update canonical favorites and sync snapshot
+            // Mutations must use canonical store APIs
+            setCanonicalFavorites(state, 'pen', [preset]);
+            assert.strictEqual(state.favorites.pen.length, 1);
+            assert.strictEqual(state.favorites.pen[0].id, preset.id);
+            assert.strictEqual(getActiveStrokeProfile(state).pen[0].id, preset.id);
+
+            // Clearing canonical favorites updates active profile and legacy projection immediately
             setCanonicalFavorites(state, 'pen', []);
-            assert.strictEqual(activeProfile.pen.length, 0);
+            assert.strictEqual(getActiveStrokeProfile(state).pen.length, 0);
             assert.strictEqual(state.favorites.pen.length, 0);
+        });
+
+        test('Invariants are path-independent: legacy payload assigned to favorites setter self-heals canonical profiles', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const penPreset = createFavoritePreset({ tool: 'pen', profileId: 'ball', color: '#336699', width: 2 }) as PenFavoritePreset;
+
+            // External caller bypasses canonical store and assigns to state.favorites
+            (state as any).favorites = { pen: [penPreset], highlighter: [], shape: [] };
+
+            // Self-healing automatically populates the canonical active profile
+            assert.strictEqual(getActiveStrokeProfile(state).pen.length, 1);
+            assert.strictEqual(getActiveStrokeProfile(state).pen[0].color, '#336699');
+            assert.strictEqual(state.favorites.pen.length, 1);
+            assert.strictEqual(state.favorites.pen[0].color, '#336699');
         });
 
         test('mergeWorkspaceToolState strictly ignores saved.favorites when canonical profiles are present', () => {

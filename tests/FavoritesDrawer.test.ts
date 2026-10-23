@@ -15,6 +15,7 @@ import {
     toggleFavoritePreset,
     removeFavoriteById,
     reorderFavorites,
+    setCanonicalFavorites,
     MAX_FAVORITES_PER_TOOL,
 } from '../src/ui/favorites/FavoritesStore.ts';
 import {
@@ -409,7 +410,7 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
                 width: 6,
                 pattern: 'dashed',
             }) as PenFavoritePreset;
-            state.favorites.pen.push(penPreset);
+            setCanonicalFavorites(state, 'pen', [penPreset]);
 
             const hlPreset = createFavoritePreset({
                 tool: 'highlighter',
@@ -417,7 +418,7 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
                 color: '#fdd835',
                 width: 24,
             }) as HighlighterFavoritePreset;
-            state.favorites.highlighter.push(hlPreset);
+            setCanonicalFavorites(state, 'highlighter', [hlPreset]);
 
             const shapePreset = createFavoritePreset({
                 tool: 'shape',
@@ -426,7 +427,7 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
                 width: 4,
                 fillEnabled: true,
             }) as ShapeFavoritePreset;
-            state.favorites.shape.push(shapePreset);
+            setCanonicalFavorites(state, 'shape', [shapePreset]);
 
             assert.strictEqual(state.favorites.pen.length, 1);
             assert.strictEqual(state.favorites.highlighter.length, 1);
@@ -437,7 +438,7 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             assert.strictEqual(state.favorites.shape[0].id, shapePreset.id);
 
             // Removing from pen does not affect highlighter or shape
-            state.favorites.pen = removeFavoriteById(state.favorites.pen, penPreset.id);
+            setCanonicalFavorites(state, 'pen', removeFavoriteById(state.favorites.pen, penPreset.id));
             assert.strictEqual(state.favorites.pen.length, 0);
             assert.strictEqual(state.favorites.highlighter.length, 1);
             assert.strictEqual(state.favorites.shape.length, 1);
@@ -821,23 +822,23 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
         test('saved favorites survive WorkspaceToolState serialization and hydration', () => {
             const state: WorkspaceToolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
 
-            state.favorites.pen.push(createFavoritePreset({
+            setCanonicalFavorites(state, 'pen', [createFavoritePreset({
                 tool: 'pen',
                 profileId: 'calli',
                 color: '#2563eb',
                 width: 5,
                 pattern: 'dashed',
                 straightenLines: true,
-            }) as PenFavoritePreset);
+            }) as PenFavoritePreset]);
 
-            state.favorites.highlighter.push(createFavoritePreset({
+            setCanonicalFavorites(state, 'highlighter', [createFavoritePreset({
                 tool: 'highlighter',
                 profileId: 'hlr',
                 color: '#facc15',
                 width: 22,
-            }) as HighlighterFavoritePreset);
+            }) as HighlighterFavoritePreset]);
 
-            state.favorites.shape.push(createFavoritePreset({
+            setCanonicalFavorites(state, 'shape', [createFavoritePreset({
                 tool: 'shape',
                 shapeType: 'ellipse',
                 color: '#10b981',
@@ -845,7 +846,7 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
                 fillEnabled: true,
                 fillColor: '#6ee7b7',
                 fillOpacity: 0.4,
-            }) as ShapeFavoritePreset);
+            }) as ShapeFavoritePreset]);
 
             // Simulate saving to Obsidian data store (JSON stringify)
             const serialized = JSON.stringify(state);

@@ -7,6 +7,7 @@ import {
     removeFavoriteById,
     reorderFavorites,
     findMatchingFavorite,
+    setCanonicalFavorites,
     type ToolFavoritePreset,
     type PenFavoritePreset,
     type HighlighterFavoritePreset,
@@ -348,7 +349,7 @@ describe('ToolEstuche Favorites Integration (Task 3 of 4)', () => {
         // 2. Toggle favorite -> Added
         const addResult = toggleFavoritePreset(toolState.favorites.pen, { tool: 'pen', ...toolState.pen });
         assert.strictEqual(addResult.added, true);
-        toolState.favorites.pen = addResult.updatedList;
+        setCanonicalFavorites(toolState, 'pen', addResult.updatedList);
         assert.strictEqual(toolState.favorites.pen.length, 1);
 
         // 3. Current slice now matches saved preset
@@ -367,7 +368,7 @@ describe('ToolEstuche Favorites Integration (Task 3 of 4)', () => {
 
         // 6. Delete favorite preset
         const presetId = toolState.favorites.pen[0].id;
-        toolState.favorites.pen = removeFavoriteById(toolState.favorites.pen, presetId);
+        setCanonicalFavorites(toolState, 'pen', removeFavoriteById(toolState.favorites.pen, presetId));
         assert.strictEqual(toolState.favorites.pen.length, 0);
         assert.strictEqual(Boolean(findMatchingFavorite(toolState.favorites.pen, toolState.pen)), false);
     });

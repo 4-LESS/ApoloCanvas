@@ -155,11 +155,7 @@ export interface WorkspaceToolState {
     lasso: {
         mode: LassoMode;
     };
-    favorites: {
-        pen: PenFavoritePreset[];
-        highlighter: HighlighterFavoritePreset[];
-        shape: ShapeFavoritePreset[];
-    };
+    readonly favorites: LegacyFavoriteSnapshot;
     strokeFavoriteProfiles: StrokeFavoriteProfile[];
     activeStrokeProfileId: string;
     shapeFavoriteProfiles: ShapeFavoriteProfile[];
@@ -181,9 +177,9 @@ export interface FavoriteState {
 }
 
 export interface LegacyFavoriteSnapshot {
-    pen: PenFavoritePreset[];
-    highlighter: HighlighterFavoritePreset[];
-    shape: ShapeFavoritePreset[];
+    readonly pen: readonly PenFavoritePreset[];
+    readonly highlighter: readonly HighlighterFavoritePreset[];
+    readonly shape: readonly ShapeFavoritePreset[];
 }
 
 export const DEFAULT_STROKE_FAVORITE_PROFILES: StrokeFavoriteProfile[] = [
@@ -198,49 +194,83 @@ export const DEFAULT_SHAPE_FAVORITE_PROFILES: ShapeFavoriteProfile[] = [
     { id: 'engineering', name: 'Ingeniería', shape: [] },
 ];
 
-export function getActiveStrokeList(state: { strokeFavoriteProfiles?: StrokeFavoriteProfile[]; activeStrokeProfileId?: string }): StrokeFavoriteProfile {
-    const profiles = state.strokeFavoriteProfiles ?? DEFAULT_STROKE_FAVORITE_PROFILES;
+export function getActiveStrokeList(state: {
+    strokeFavoriteProfiles?: StrokeFavoriteProfile[];
+    activeStrokeProfileId?: string;
+}): StrokeFavoriteProfile {
+    const profiles = Array.isArray(state.strokeFavoriteProfiles) && state.strokeFavoriteProfiles.length > 0
+        ? state.strokeFavoriteProfiles
+        : DEFAULT_STROKE_FAVORITE_PROFILES;
     const found = profiles.find(p => p.id === state.activeStrokeProfileId);
     return found ?? profiles[0] ?? DEFAULT_STROKE_FAVORITE_PROFILES[0];
 }
 
-export function getActiveShapeList(state: { shapeFavoriteProfiles?: ShapeFavoriteProfile[]; activeShapeProfileId?: string }): ShapeFavoriteProfile {
-    const profiles = state.shapeFavoriteProfiles ?? DEFAULT_SHAPE_FAVORITE_PROFILES;
+export function getActiveShapeList(state: {
+    shapeFavoriteProfiles?: ShapeFavoriteProfile[];
+    activeShapeProfileId?: string;
+}): ShapeFavoriteProfile {
+    const profiles = Array.isArray(state.shapeFavoriteProfiles) && state.shapeFavoriteProfiles.length > 0
+        ? state.shapeFavoriteProfiles
+        : DEFAULT_SHAPE_FAVORITE_PROFILES;
     const found = profiles.find(p => p.id === state.activeShapeProfileId);
     return found ?? profiles[0] ?? DEFAULT_SHAPE_FAVORITE_PROFILES[0];
 }
 
 /**
  * Builds a derived snapshot-only projection of favorites from the canonical active profiles.
+ * The returned object and its inner arrays are deeply frozen to guarantee runtime immutability.
  */
 export function getLegacySnapshot(state: {
     strokeFavoriteProfiles?: StrokeFavoriteProfile[];
     activeStrokeProfileId?: string;
     shapeFavoriteProfiles?: ShapeFavoriteProfile[];
     activeShapeProfileId?: string;
+    favorites?: any;
 }): LegacyFavoriteSnapshot {
     const stroke = getActiveStrokeList(state);
     const shape = getActiveShapeList(state);
-    return {
-        pen: stroke.pen,
-        highlighter: stroke.highlighter,
-        shape: shape.shape,
-    };
+    return Object.freeze({
+        pen: Object.freeze(Array.isArray(stroke.pen) ? [...stroke.pen] : []),
+        highlighter: Object.freeze(Array.isArray(stroke.highlighter) ? [...stroke.highlighter] : []),
+        shape: Object.freeze(Array.isArray(shape.shape) ? [...shape.shape] : []),
+    });
+}
+
+/**
+ * Attaches the dynamic read-only getter and self-healing setter for legacy `state.favorites`.
+ * This prevents stale projections, path dependencies, and direct array bypass.
+ */
+export function attachFavoritesProjection(state: WorkspaceToolState): WorkspaceToolState {
+    Object.defineProperty(state, 'favorites', {
+        get() {
+            return getLegacySnapshot(this);
+        },
+        set(legacyPayload: any) {
+            if (legacyPayload && typeof legacyPayload === 'object') {
+                const stroke = getActiveStrokeList(this);
+                const shape = getActiveShapeList(this);
+                if (Array.isArray(legacyPayload.pen)) {
+                    stroke.pen = legacyPayload.pen.map((p: any) => ({ ...p }));
+                }
+                if (Array.isArray(legacyPayload.highlighter)) {
+                    stroke.highlighter = legacyPayload.highlighter.map((h: any) => ({ ...h }));
+                }
+                if (Array.isArray(legacyPayload.shape)) {
+                    shape.shape = legacyPayload.shape.map((s: any) => ({ ...s }));
+                }
+            }
+        },
+        enumerable: true,
+        configurable: true,
+    });
+    return state;
 }
 
 /**
  * Synchronizes the legacy `state.favorites` snapshot projection from the canonical profile trees.
  */
 export function syncLegacyFavoritesSlice(state: WorkspaceToolState): void {
-    state.favorites = getLegacySnapshot(state);
-}
-
-/**
- * Compatibility projection helper kept for backward compatibility with existing tests.
- */
-export function attachFavoritesProjection(state: WorkspaceToolState): WorkspaceToolState {
-    syncLegacyFavoritesSlice(state);
-    return state;
+    attachFavoritesProjection(state);
 }
 
 export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
@@ -298,11 +328,11 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
     lasso: {
         mode: 'free',
     },
-    favorites: {
-        pen: [],
-        highlighter: [],
-        shape: [],
-    },
+    favorites: Object.freeze({
+        pen: Object.freeze([]),
+        highlighter: Object.freeze([]),
+        shape: Object.freeze([]),
+    }),
     strokeFavoriteProfiles: [
         { id: 'notes', name: 'Notas', pen: [], highlighter: [] },
         { id: 'academic', name: 'Académico', pen: [], highlighter: [] },
@@ -488,7 +518,11 @@ export function hydrateFromSavedState(
         lasso: {
             mode: saved.lasso?.mode ?? fallback.lasso.mode,
         },
-        favorites: saved.favorites ?? { pen: [], highlighter: [], shape: [] },
+        favorites: Object.freeze({
+            pen: Object.freeze([]),
+            highlighter: Object.freeze([]),
+            shape: Object.freeze([]),
+        }),
         strokeFavoriteProfiles: strokeProfiles,
         activeStrokeProfileId: activeStrokeId,
         shapeFavoriteProfiles: shapeProfiles,
@@ -496,8 +530,25 @@ export function hydrateFromSavedState(
         syncFavoriteProfiles: Boolean(saved.syncFavoriteProfiles ?? fallback.syncFavoriteProfiles ?? false),
     };
 
+    // Attach dynamic read-only getter and self-healing setter projection
+    attachFavoritesProjection(hydrated);
+
     // Run explicit one-way migration if legacy flat favorites exist and profiles are empty
-    migrateLegacyFavorites(hydrated);
+    if (saved?.favorites && typeof saved.favorites === 'object') {
+        const strokeEmpty = strokeProfiles.every(p => p.pen.length === 0 && p.highlighter.length === 0);
+        const shapeEmpty = shapeProfiles.every(p => p.shape.length === 0);
+        const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) ?? strokeProfiles[0];
+        const activeShape = shapeProfiles.find(p => p.id === activeShapeId) ?? shapeProfiles[0];
+        if (strokeEmpty && activeStroke && Array.isArray((saved.favorites as any).pen) && (saved.favorites as any).pen.length > 0) {
+            activeStroke.pen = (saved.favorites as any).pen.map((p: any) => ({ ...p }));
+        }
+        if (strokeEmpty && activeStroke && Array.isArray((saved.favorites as any).highlighter) && (saved.favorites as any).highlighter.length > 0) {
+            activeStroke.highlighter = (saved.favorites as any).highlighter.map((h: any) => ({ ...h }));
+        }
+        if (shapeEmpty && activeShape && Array.isArray((saved.favorites as any).shape) && (saved.favorites as any).shape.length > 0) {
+            activeShape.shape = (saved.favorites as any).shape.map((s: any) => ({ ...s }));
+        }
+    }
 
     return hydrated;
 }
@@ -567,11 +618,11 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
         lasso: {
             mode: state.lasso.mode,
         },
-        favorites: state.favorites ? {
-            pen: Array.isArray(state.favorites.pen) ? state.favorites.pen.map(p => ({ ...p })) : [],
-            highlighter: Array.isArray(state.favorites.highlighter) ? state.favorites.highlighter.map(h => ({ ...h })) : [],
-            shape: Array.isArray(state.favorites.shape) ? state.favorites.shape.map(s => ({ ...s })) : [],
-        } : { pen: [], highlighter: [], shape: [] },
+        favorites: Object.freeze({
+            pen: Object.freeze([]),
+            highlighter: Object.freeze([]),
+            shape: Object.freeze([]),
+        }),
         strokeFavoriteProfiles: strokeProfiles,
         activeStrokeProfileId: activeStrokeId,
         shapeFavoriteProfiles: shapeProfiles,
@@ -579,11 +630,25 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
         syncFavoriteProfiles: Boolean(state.syncFavoriteProfiles),
     };
 
-    // If cloned state has legacy favorites but empty profiles, migrate once
-    migrateLegacyFavorites(cloned);
+    // Attach dynamic read-only getter and self-healing setter projection
+    attachFavoritesProjection(cloned);
 
-    // Re-derive legacy snapshot from the cloned profiles
-    syncLegacyFavoritesSlice(cloned);
+    // If cloned state has legacy favorites but empty profiles, migrate once
+    if (state.favorites && typeof state.favorites === 'object') {
+        const strokeEmpty = strokeProfiles.every(p => p.pen.length === 0 && p.highlighter.length === 0);
+        const shapeEmpty = shapeProfiles.every(p => p.shape.length === 0);
+        const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) ?? strokeProfiles[0];
+        const activeShape = shapeProfiles.find(p => p.id === activeShapeId) ?? shapeProfiles[0];
+        if (strokeEmpty && activeStroke && Array.isArray(state.favorites.pen) && state.favorites.pen.length > 0) {
+            activeStroke.pen = state.favorites.pen.map(p => ({ ...p }));
+        }
+        if (strokeEmpty && activeStroke && Array.isArray(state.favorites.highlighter) && state.favorites.highlighter.length > 0) {
+            activeStroke.highlighter = state.favorites.highlighter.map(h => ({ ...h }));
+        }
+        if (shapeEmpty && activeShape && Array.isArray(state.favorites.shape) && state.favorites.shape.length > 0) {
+            activeShape.shape = state.favorites.shape.map(s => ({ ...s }));
+        }
+    }
 
     return cloned;
 }
