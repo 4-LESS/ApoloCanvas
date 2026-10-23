@@ -255,7 +255,8 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
 };
 
 export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToolState {
-    const strokeProfiles: StrokeFavoriteProfile[] = Array.isArray(state.strokeFavoriteProfiles) && state.strokeFavoriteProfiles.length > 0
+    const hasExistingStrokeProfiles = Array.isArray(state.strokeFavoriteProfiles) && state.strokeFavoriteProfiles.length > 0;
+    const strokeProfiles: StrokeFavoriteProfile[] = hasExistingStrokeProfiles
         ? state.strokeFavoriteProfiles.map(sp => ({
             id: sp.id,
             name: sp.name,
@@ -268,7 +269,8 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
         ? state.activeStrokeProfileId
         : strokeProfiles[0].id;
 
-    const shapeProfiles: ShapeFavoriteProfile[] = Array.isArray(state.shapeFavoriteProfiles) && state.shapeFavoriteProfiles.length > 0
+    const hasExistingShapeProfiles = Array.isArray(state.shapeFavoriteProfiles) && state.shapeFavoriteProfiles.length > 0;
+    const shapeProfiles: ShapeFavoriteProfile[] = hasExistingShapeProfiles
         ? state.shapeFavoriteProfiles.map(shp => ({
             id: shp.id,
             name: shp.name,
@@ -283,15 +285,22 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
     const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) || strokeProfiles[0];
     const activeShape = shapeProfiles.find(p => p.id === activeShapeId) || shapeProfiles[0];
 
-    // Mirror any directly set legacy favorites if active profile was empty
-    if (Array.isArray(state.favorites?.pen) && state.favorites.pen.length > 0 && activeStroke.pen.length === 0) {
-        activeStroke.pen = state.favorites.pen.map(p => ({ ...p }));
+    // Compatibility migration: if state.favorites has presets while all profile trees are completely empty,
+    // populate the active profile from state.favorites so legacy code/tests continue working seamlessly.
+    const allStrokeProfilesEmpty = strokeProfiles.every(p => p.pen.length === 0 && p.highlighter.length === 0);
+    if (allStrokeProfilesEmpty) {
+        if (Array.isArray(state.favorites?.pen) && state.favorites.pen.length > 0) {
+            activeStroke.pen = state.favorites.pen.map(p => ({ ...p }));
+        }
+        if (Array.isArray(state.favorites?.highlighter) && state.favorites.highlighter.length > 0) {
+            activeStroke.highlighter = state.favorites.highlighter.map(h => ({ ...h }));
+        }
     }
-    if (Array.isArray(state.favorites?.highlighter) && state.favorites.highlighter.length > 0 && activeStroke.highlighter.length === 0) {
-        activeStroke.highlighter = state.favorites.highlighter.map(h => ({ ...h }));
-    }
-    if (Array.isArray(state.favorites?.shape) && state.favorites.shape.length > 0 && activeShape.shape.length === 0) {
-        activeShape.shape = state.favorites.shape.map(s => ({ ...s }));
+    const allShapeProfilesEmpty = shapeProfiles.every(shp => shp.shape.length === 0);
+    if (allShapeProfilesEmpty) {
+        if (Array.isArray(state.favorites?.shape) && state.favorites.shape.length > 0) {
+            activeShape.shape = state.favorites.shape.map(s => ({ ...s }));
+        }
     }
 
     return {
@@ -369,8 +378,9 @@ export function mergeWorkspaceToolState(
     if (!saved) return cloneWorkspaceToolState(fallback);
 
     // Hydrate stroke profiles
-    const strokeProfiles: StrokeFavoriteProfile[] = Array.isArray(saved.strokeFavoriteProfiles) && saved.strokeFavoriteProfiles.length > 0
-        ? saved.strokeFavoriteProfiles.map(sp => ({
+    const hasSavedStrokeProfiles = Array.isArray(saved.strokeFavoriteProfiles) && saved.strokeFavoriteProfiles.length > 0;
+    const strokeProfiles: StrokeFavoriteProfile[] = hasSavedStrokeProfiles
+        ? saved.strokeFavoriteProfiles!.map(sp => ({
             id: sp.id,
             name: sp.name,
             pen: Array.isArray(sp.pen) ? sp.pen.map(p => ({ ...p })) : [],
@@ -392,8 +402,9 @@ export function mergeWorkspaceToolState(
             : strokeProfiles[0].id);
 
     // Hydrate shape profiles
-    const shapeProfiles: ShapeFavoriteProfile[] = Array.isArray(saved.shapeFavoriteProfiles) && saved.shapeFavoriteProfiles.length > 0
-        ? saved.shapeFavoriteProfiles.map(shp => ({
+    const hasSavedShapeProfiles = Array.isArray(saved.shapeFavoriteProfiles) && saved.shapeFavoriteProfiles.length > 0;
+    const shapeProfiles: ShapeFavoriteProfile[] = hasSavedShapeProfiles
+        ? saved.shapeFavoriteProfiles!.map(shp => ({
             id: shp.id,
             name: shp.name,
             shape: Array.isArray(shp.shape) ? shp.shape.map(s => ({ ...s })) : [],
@@ -415,15 +426,22 @@ export function mergeWorkspaceToolState(
     const activeStroke = strokeProfiles.find(p => p.id === activeStrokeId) || strokeProfiles[0];
     const activeShape = shapeProfiles.find(p => p.id === activeShapeId) || shapeProfiles[0];
 
-    // Legacy migration: if saved.favorites has presets but active profile is empty
-    if (Array.isArray(saved.favorites?.pen) && saved.favorites.pen.length > 0 && activeStroke.pen.length === 0) {
-        activeStroke.pen = saved.favorites.pen.map(p => ({ ...p }));
+    // Compatibility migration: if saved.favorites has presets while all profile trees are completely empty,
+    // populate the active profile from saved.favorites so legacy files/tests continue working seamlessly.
+    const allSavedStrokeProfilesEmpty = strokeProfiles.every(p => p.pen.length === 0 && p.highlighter.length === 0);
+    if (allSavedStrokeProfilesEmpty) {
+        if (Array.isArray(saved.favorites?.pen) && saved.favorites.pen.length > 0) {
+            activeStroke.pen = saved.favorites.pen.map(p => ({ ...p }));
+        }
+        if (Array.isArray(saved.favorites?.highlighter) && saved.favorites.highlighter.length > 0) {
+            activeStroke.highlighter = saved.favorites.highlighter.map(h => ({ ...h }));
+        }
     }
-    if (Array.isArray(saved.favorites?.highlighter) && saved.favorites.highlighter.length > 0 && activeStroke.highlighter.length === 0) {
-        activeStroke.highlighter = saved.favorites.highlighter.map(h => ({ ...h }));
-    }
-    if (Array.isArray(saved.favorites?.shape) && saved.favorites.shape.length > 0 && activeShape.shape.length === 0) {
-        activeShape.shape = saved.favorites.shape.map(s => ({ ...s }));
+    const allSavedShapeProfilesEmpty = shapeProfiles.every(shp => shp.shape.length === 0);
+    if (allSavedShapeProfilesEmpty) {
+        if (Array.isArray(saved.favorites?.shape) && saved.favorites.shape.length > 0) {
+            activeShape.shape = saved.favorites.shape.map(s => ({ ...s }));
+        }
     }
 
     return {

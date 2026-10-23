@@ -47,6 +47,7 @@ import { SpatialGrid } from './spatial/SpatialGrid.ts';
 import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
 import { Predictor } from './input/Predictor.ts';
+import { isStylusBarrelButton, isStylusHoverBarrel, hasDeliberateStylusMovement } from './input/StylusCapabilities.ts';
 import { EngineEventBus } from '../core/events.ts';
 import { Toolbar } from '../ui/Toolbar.ts';
 import { ToolEstuche } from '../ui/ToolEstuche.ts';
@@ -60,6 +61,8 @@ import {
     getActiveStrokeProfile,
     getActiveShapeProfile,
     syncLegacyFavoritesSlice,
+    getCanonicalFavorites,
+    setCanonicalFavorites,
     findMatchingProfile,
     switchStrokeProfile,
     switchShapeProfile,
@@ -658,7 +661,7 @@ export class CanvasController {
                 } else {
                     const toolBtn = this.toolbar?.getToolButton(tool);
                     const favsList = (tool === 'pen' || tool === 'highlighter' || tool === 'shape')
-                        ? this.toolState.favorites[tool]
+                        ? this.getToolFavorites(tool)
                         : this.favorites;
                     const isFav = (tool === 'pen' || tool === 'highlighter' || tool === 'shape')
                         ? this.isCurrentToolFavorited()
@@ -1236,6 +1239,18 @@ export class CanvasController {
         event.stopPropagation();
         event.stopImmediatePropagation?.();
 
+        // If the stylus has already demonstrated deliberate drawing movement (>8px from pointerdown),
+        // do NOT abort or discard the active stroke on stray contextmenu signals.
+        const hasMoved = hasDeliberateStylusMovement(
+            this.pointerDownStartPos,
+            { x: event.clientX, y: event.clientY },
+            8,
+        );
+        if (hasMoved) {
+            this.updateDebugHud(event, 'contextmenu-ignore-moving-stroke');
+            return;
+        }
+
         const elapsedSinceDown = this.lastPointerDownTime > 0
             ? performance.now() - this.lastPointerDownTime
             : Number.POSITIVE_INFINITY;
@@ -1261,11 +1276,7 @@ export class CanvasController {
     };
 
     private isPenBarrelEvent(e: PointerEvent | MouseEvent): boolean {
-        const button = typeof e.button === 'number' ? e.button : -1;
-        const buttons = typeof e.buttons === 'number' ? e.buttons : 0;
-        // W3C barrel button is button === 5 or buttons bitmask 32 (0x20),
-        // while Samsung DeX / some Android WebViews map it to button === 2 or buttons bitmask 2.
-        return button === 5 || button === 2 || (buttons & 32) !== 0 || (buttons & 2) !== 0;
+        return isStylusBarrelButton(e);
     }
 
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
@@ -1355,13 +1366,7 @@ export class CanvasController {
             // On Android WebView, hovering with S-Pen barrel button reports buttons === 1
             // without pointerdown ever firing (isPenTipDown === false).
             // On Windows Ink / W3C, it reports buttons & 32, buttons & 2, button 2, or button 5.
-            const barrelHoverActive = !this.isPenTipDown && !this.isDrawing && (
-                e.buttons === 1 ||
-                (e.buttons & 2) !== 0 ||
-                (e.buttons & 32) !== 0 ||
-                e.button === 2 ||
-                e.button === 5
-            );
+            const barrelHoverActive = !this.isPenTipDown && !this.isDrawing && isStylusHoverBarrel(e);
 
             if (barrelHoverActive) {
                 if (!this.penBarrelPressed) {
@@ -1985,19 +1990,7 @@ export class CanvasController {
 
     public getActiveToolFavorites(): ToolFavoritePreset[] {
         if (!this.toolState) return [];
-        if (this.tool === 'pen') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            return profile.pen ?? [];
-        }
-        if (this.tool === 'highlighter') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            return profile.highlighter ?? [];
-        }
-        if (this.tool === 'shape') {
-            const profile = getActiveShapeProfile(this.toolState);
-            return profile.shape ?? [];
-        }
-        return [];
+        return getCanonicalFavorites(this.toolState, this.tool as FavoritableTool);
     }
 
     public getCurrentToolSlice(): any {
@@ -2073,19 +2066,7 @@ export class CanvasController {
 
         const currentList = this.getActiveToolFavorites();
         const result = toggleFavoritePreset(currentList, slice);
-        if (tool === 'pen') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            profile.pen = result.updatedList as PenFavoritePreset[];
-            this.toolState.favorites.pen = profile.pen;
-        } else if (tool === 'highlighter') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            profile.highlighter = result.updatedList as HighlighterFavoritePreset[];
-            this.toolState.favorites.highlighter = profile.highlighter;
-        } else if (tool === 'shape') {
-            const profile = getActiveShapeProfile(this.toolState);
-            profile.shape = result.updatedList as ShapeFavoritePreset[];
-            this.toolState.favorites.shape = profile.shape;
-        }
+        setCanonicalFavorites(this.toolState, tool, result.updatedList);
 
         this.syncEstucheFavoriteState();
         this.notifyToolStateChange();
@@ -2187,19 +2168,9 @@ export class CanvasController {
     public deleteToolFavoritePreset(presetId: string): void {
         const tool = this.tool;
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
-        if (tool === 'pen') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            profile.pen = removeFavoriteById(profile.pen, presetId);
-            this.toolState.favorites.pen = profile.pen;
-        } else if (tool === 'highlighter') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            profile.highlighter = removeFavoriteById(profile.highlighter, presetId);
-            this.toolState.favorites.highlighter = profile.highlighter;
-        } else if (tool === 'shape') {
-            const profile = getActiveShapeProfile(this.toolState);
-            profile.shape = removeFavoriteById(profile.shape, presetId);
-            this.toolState.favorites.shape = profile.shape;
-        }
+        const currentList = this.getToolFavorites(tool);
+        const updated = removeFavoriteById(currentList, presetId);
+        setCanonicalFavorites(this.toolState, tool, updated);
         this.syncEstucheFavoriteState();
         this.notifyToolStateChange();
         this.options.onDeleteFavorite?.(presetId);
@@ -2209,19 +2180,9 @@ export class CanvasController {
     public reorderToolFavorites(fromIndex: number, toIndex: number): void {
         const tool = this.tool;
         if (tool !== 'pen' && tool !== 'highlighter' && tool !== 'shape') return;
-        if (tool === 'pen') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            profile.pen = reorderFavorites(profile.pen, fromIndex, toIndex);
-            this.toolState.favorites.pen = profile.pen;
-        } else if (tool === 'highlighter') {
-            const profile = getActiveStrokeProfile(this.toolState);
-            profile.highlighter = reorderFavorites(profile.highlighter, fromIndex, toIndex);
-            this.toolState.favorites.highlighter = profile.highlighter;
-        } else if (tool === 'shape') {
-            const profile = getActiveShapeProfile(this.toolState);
-            profile.shape = reorderFavorites(profile.shape, fromIndex, toIndex);
-            this.toolState.favorites.shape = profile.shape;
-        }
+        const currentList = this.getToolFavorites(tool);
+        const updated = reorderFavorites(currentList, fromIndex, toIndex);
+        setCanonicalFavorites(this.toolState, tool, updated);
         this.syncEstucheFavoriteState();
         this.notifyToolStateChange();
         this.options.onReorderFavorites?.(fromIndex, toIndex);
@@ -2332,14 +2293,8 @@ export class CanvasController {
     }
 
     public getToolFavorites(tool: 'pen' | 'highlighter' | 'shape'): ToolFavoritePreset[] {
-        if (tool === 'pen') {
-            return getActiveStrokeProfile(this.toolState).pen;
-        } else if (tool === 'highlighter') {
-            return getActiveStrokeProfile(this.toolState).highlighter;
-        } else if (tool === 'shape') {
-            return getActiveShapeProfile(this.toolState).shape;
-        }
-        return [];
+        if (!this.toolState) return [];
+        return getCanonicalFavorites(this.toolState, tool);
     }
 
     public getActiveToolFavoritesCount(): number {

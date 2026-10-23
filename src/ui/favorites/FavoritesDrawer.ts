@@ -12,6 +12,8 @@ import {
 import { computeFavoriteFingerprint, inferTool } from './FavoritesStore.ts';
 import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark, setAccessibleTooltip } from '../theme.ts';
 
+export type DrawerDragState = 'idle' | 'dragging' | 'drag-out' | 'dropping' | 'cancelled';
+
 export interface FavoritesDrawerCallbacks {
     onSelectFavorite: (preset: ToolFavoritePreset) => void;
     onDeleteFavorite: (presetId: string) => void;
@@ -364,6 +366,7 @@ export class FavoritesDrawer {
     private pointerStartX = 0;
     private pointerStartY = 0;
     private isPointerDown = false;
+    private activeDragAbort: (() => void) | null = null;
 
     constructor(
         callbacks: FavoritesDrawerCallbacks,
@@ -410,7 +413,7 @@ export class FavoritesDrawer {
     private setupSwipeListeners(): void {
         this.el.addEventListener('pointerdown', (e: PointerEvent) => {
             const target = e.target as HTMLElement | null;
-            if (target?.closest?.('.apolo-profile-name-input, .apolo-profile-create-btn, .apolo-profile-cancel-btn, .field, .btn-ok')) {
+            if (target?.closest?.('.apolo-profile-name-input, .apolo-profile-create-btn, .apolo-profile-cancel-btn, .field, .btn-ok, .apolo-favorite-drag-handle, .grip')) {
                 return;
             }
             this.pointerStartX = e.clientX;
@@ -633,6 +636,10 @@ export class FavoritesDrawer {
      * Renders or re-renders the drawer contents.
      */
     private render(): void {
+        if (this.activeDragAbort) {
+            this.activeDragAbort();
+            this.activeDragAbort = null;
+        }
         this.el.replaceChildren();
 
         // 1. Either Create Profile View or Favorites List / Empty State
@@ -825,11 +832,11 @@ export class FavoritesDrawer {
         setAccessibleTooltip(handleBtn, 'Arrastrar para reordenar o sacar para eliminar');
         handleBtn.appendChild(create6DotGripSvg());
 
-        let isDragging = false;
+        let dragState: DrawerDragState = 'idle';
         let startX = 0;
         let startY = 0;
         let currentTargetIdx = index;
-        let isDragOut = false;
+        let dropTimeout: ReturnType<typeof setTimeout> | null = null;
 
         handleBtn.onpointerdown = (e: PointerEvent) => {
             e.stopPropagation();
@@ -837,8 +844,12 @@ export class FavoritesDrawer {
                 handleBtn.setPointerCapture(e.pointerId);
             } catch (_) {}
 
-            isDragging = false;
-            isDragOut = false;
+            if (this.activeDragAbort) {
+                this.activeDragAbort();
+                this.activeDragAbort = null;
+            }
+
+            dragState = 'idle';
             startX = e.clientX;
             startY = e.clientY;
             currentTargetIdx = index;
@@ -877,18 +888,43 @@ export class FavoritesDrawer {
             const originX = slotCenters[index]?.x ?? startX;
             const originY = slotCenters[index]?.y ?? startY;
 
+            const cleanupDragTransforms = () => {
+                if (dropTimeout) {
+                    clearTimeout(dropTimeout);
+                    dropTimeout = null;
+                }
+                card.classList.remove('is-dragging', 'is-drag-out');
+                card.style.zIndex = '';
+                card.style.opacity = '';
+                card.style.maxHeight = '';
+                card.style.padding = '';
+                card.style.margin = '';
+                card.style.overflow = '';
+                card.style.transform = '';
+                card.style.transition = '';
+                allCards.forEach(c => {
+                    c.style.transform = '';
+                    c.style.transition = '';
+                    c.style.zIndex = '';
+                });
+                dragState = 'idle';
+                this.activeDragAbort = null;
+            };
+
             const onPointerMove = (moveEv: PointerEvent) => {
+                if (dragState === 'dropping' || dragState === 'cancelled') return;
+
                 const dx = moveEv.clientX - startX;
                 const dy = moveEv.clientY - startY;
 
-                if (!isDragging && Math.hypot(dx, dy) > 4) {
-                    isDragging = true;
+                if (dragState === 'idle' && Math.hypot(dx, dy) > 4) {
+                    dragState = 'dragging';
                     card.classList.add('is-dragging');
                     card.style.zIndex = '30';
                     card.style.transition = 'none';
                 }
 
-                if (!isDragging) return;
+                if (dragState !== 'dragging' && dragState !== 'drag-out') return;
 
                 // For shapes in a 2-column grid, horizontal movement across columns is standard reordering
                 // and must NOT trigger accidental deletion. Deletion only triggers when dragging out
@@ -903,7 +939,7 @@ export class FavoritesDrawer {
                        Math.abs(dx) > 100);
 
                 if (isOutside) {
-                    isDragOut = true;
+                    dragState = 'drag-out';
                     card.classList.add('is-drag-out');
                     card.style.transform = `translate(${dx}px, ${dy}px) scale(0.94)`;
                     allCards.forEach(c => {
@@ -913,7 +949,7 @@ export class FavoritesDrawer {
                         }
                     });
                 } else {
-                    isDragOut = false;
+                    dragState = 'dragging';
                     card.classList.remove('is-drag-out');
                     card.style.transform = `translate(${dx}px, ${dy}px) scale(1.02)`;
 
@@ -957,17 +993,36 @@ export class FavoritesDrawer {
                 }
             };
 
+            const onPointerCancel = (cancelEv: PointerEvent) => {
+                try {
+                    handleBtn.releasePointerCapture(cancelEv.pointerId);
+                } catch (_) {}
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+                window.removeEventListener('pointercancel', onPointerCancel);
+
+                if (dragState === 'idle') {
+                    this.activeDragAbort = null;
+                    return;
+                }
+                dragState = 'cancelled';
+                cleanupDragTransforms();
+            };
+
             const onPointerUp = (upEv: PointerEvent) => {
                 try {
                     handleBtn.releasePointerCapture(upEv.pointerId);
                 } catch (_) {}
                 window.removeEventListener('pointermove', onPointerMove);
                 window.removeEventListener('pointerup', onPointerUp);
-                window.removeEventListener('pointercancel', onPointerUp);
+                window.removeEventListener('pointercancel', onPointerCancel);
 
-                if (!isDragging) return;
+                if (dragState === 'idle') {
+                    this.activeDragAbort = null;
+                    return;
+                }
 
-                if (isDragOut) {
+                if (dragState === 'drag-out') {
                     const finalDx = upEv.clientX - startX;
                     const flyX = finalDx >= 0 ? 180 : -180;
                     card.style.transition = 'transform 0.22s ease, opacity 0.2s ease, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease';
@@ -978,41 +1033,49 @@ export class FavoritesDrawer {
                     card.style.margin = '0';
                     card.style.overflow = 'hidden';
 
-                    setTimeout(() => {
+                    dropTimeout = setTimeout(() => {
+                        cleanupDragTransforms();
                         this.callbacks.onDeleteFavorite(preset.id);
                     }, 220);
-                } else {
+                    return;
+                }
+
+                if (dragState === 'dragging') {
+                    dragState = 'dropping';
                     card.classList.remove('is-dragging');
                     if (currentTargetIdx !== index && slotCenters[currentTargetIdx] && slotCenters[index]) {
                         const dropDx = slotCenters[currentTargetIdx].x - slotCenters[index].x;
                         const dropDy = slotCenters[currentTargetIdx].y - slotCenters[index].y;
                         card.style.transition = 'transform 0.18s cubic-bezier(0.2, 0, 0, 1)';
                         card.style.transform = `translate(${dropDx}px, ${dropDy}px)`;
-                        setTimeout(() => {
-                            allCards.forEach(c => {
-                                c.style.transform = '';
-                                c.style.transition = '';
-                                c.style.zIndex = '';
-                            });
-                            this.callbacks.onReorderFavorite(index, currentTargetIdx);
+                        dropTimeout = setTimeout(() => {
+                            const targetIdx = currentTargetIdx;
+                            cleanupDragTransforms();
+                            this.callbacks.onReorderFavorite(index, targetIdx);
                         }, 180);
                     } else {
                         card.style.transition = 'transform 0.18s ease';
                         card.style.transform = 'translate(0px, 0px)';
-                        setTimeout(() => {
-                            allCards.forEach(c => {
-                                c.style.transform = '';
-                                c.style.transition = '';
-                                c.style.zIndex = '';
-                            });
+                        dropTimeout = setTimeout(() => {
+                            cleanupDragTransforms();
                         }, 180);
                     }
                 }
             };
 
+            this.activeDragAbort = () => {
+                try {
+                    handleBtn.releasePointerCapture(e.pointerId);
+                } catch (_) {}
+                window.removeEventListener('pointermove', onPointerMove);
+                window.removeEventListener('pointerup', onPointerUp);
+                window.removeEventListener('pointercancel', onPointerCancel);
+                cleanupDragTransforms();
+            };
+
             window.addEventListener('pointermove', onPointerMove);
             window.addEventListener('pointerup', onPointerUp);
-            window.addEventListener('pointercancel', onPointerUp);
+            window.addEventListener('pointercancel', onPointerCancel);
         };
 
         // Native HTML5 Drag and Drop fallback on card
@@ -1079,6 +1142,10 @@ export class FavoritesDrawer {
      * Removes the drawer from the DOM.
      */
     destroy(): void {
+        if (this.activeDragAbort) {
+            this.activeDragAbort();
+            this.activeDragAbort = null;
+        }
         this.el.remove();
     }
 }

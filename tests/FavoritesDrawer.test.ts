@@ -1238,5 +1238,145 @@ describe('FavoritesDrawer & Transversal Favorites System (Task 4 of 4)', () => {
             await new Promise((r) => setTimeout(r, 250));
             assert.strictEqual(deletedId, s1.id, 'Dragging outside and releasing must delete favorite');
         });
+
+        test('pointercancel mid-drag aborts state machine to cancelled, resets card transforms, and suppresses deletion/reordering', async () => {
+            const p1 = createFavoritePreset({ tool: 'pen', color: '#1f4fd8', width: 3 });
+            const p2 = createFavoritePreset({ tool: 'pen', color: '#10b981', width: 5 });
+
+            let deletedId: string | null = null;
+            let reordered: [number, number] | null = null;
+            const callbacks: FavoritesDrawerCallbacks = {
+                onSelectFavorite: () => {},
+                onDeleteFavorite: (id) => { deletedId = id; },
+                onReorderFavorite: (from, to) => { reordered = [from, to]; },
+            };
+
+            const drawer = new FavoritesDrawer(callbacks, 'pen', [p1, p2]);
+            const cards = drawer.el.querySelectorAll('.card') as any as HTMLElement[];
+            assert.strictEqual(cards.length, 2);
+            const card0 = cards[0];
+            const handle0 = card0.querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+
+            drawer.el.getBoundingClientRect = () => ({
+                left: 100,
+                right: 420,
+                top: 50,
+                bottom: 300,
+                width: 320,
+                height: 250,
+            } as any);
+
+            // Start drag on card 0
+            handle0.onpointerdown?.({
+                clientX: 120,
+                clientY: 60,
+                stopPropagation: () => {},
+                pointerId: 1,
+            } as any);
+
+            // Move far outside (would be a drag-out deletion)
+            const moveEv = new Event('pointermove') as any;
+            moveEv.clientX = 500;
+            moveEv.clientY = 60;
+            window.dispatchEvent(moveEv);
+
+            assert.strictEqual(card0.classList.contains('is-drag-out'), true);
+
+            // System fires pointercancel (palm rejection, gesture takeover)
+            const cancelEv = new Event('pointercancel') as any;
+            cancelEv.pointerId = 1;
+            window.dispatchEvent(cancelEv);
+
+            await new Promise((r) => setTimeout(r, 250));
+
+            // Must NOT delete or reorder
+            assert.strictEqual(deletedId, null, 'pointercancel must suppress deletion');
+            assert.strictEqual(reordered, null, 'pointercancel must suppress reordering');
+
+            // All classes and inline transforms must be reset
+            assert.strictEqual(card0.classList.contains('is-drag-out'), false);
+            assert.strictEqual(card0.classList.contains('is-dragging'), false);
+            assert.strictEqual(card0.style.transform, '');
+            assert.strictEqual(cards[1].style.transform, '');
+        });
+
+        test('rapid pointerup before 4px displacement completes in idle without transforms or callbacks', async () => {
+            const p1 = createFavoritePreset({ tool: 'pen', color: '#1f4fd8', width: 3 });
+
+            let deletedId: string | null = null;
+            let reordered: [number, number] | null = null;
+            const callbacks: FavoritesDrawerCallbacks = {
+                onSelectFavorite: () => {},
+                onDeleteFavorite: (id) => { deletedId = id; },
+                onReorderFavorite: (from, to) => { reordered = [from, to]; },
+            };
+
+            const drawer = new FavoritesDrawer(callbacks, 'pen', [p1]);
+            const card = drawer.el.querySelector('.card') as HTMLElement;
+            const handle = card.querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+
+            handle.onpointerdown?.({
+                clientX: 120,
+                clientY: 60,
+                stopPropagation: () => {},
+                pointerId: 1,
+            } as any);
+
+            // Micro-movement 1px (below 4px threshold)
+            const moveEv = new Event('pointermove') as any;
+            moveEv.clientX = 121;
+            moveEv.clientY = 60;
+            window.dispatchEvent(moveEv);
+
+            assert.strictEqual(card.classList.contains('is-dragging'), false);
+
+            // Pointerup released
+            const upEv = new Event('pointerup') as any;
+            upEv.clientX = 121;
+            upEv.clientY = 60;
+            upEv.pointerId = 1;
+            window.dispatchEvent(upEv);
+
+            await new Promise((r) => setTimeout(r, 50));
+
+            assert.strictEqual(deletedId, null);
+            assert.strictEqual(reordered, null);
+            assert.strictEqual(card.style.transform, '');
+        });
+
+        test('destroy() during active drag cleanly aborts state machine and window listeners', () => {
+            const p1 = createFavoritePreset({ tool: 'pen', color: '#1f4fd8', width: 3 });
+            const drawer = new FavoritesDrawer({
+                onSelectFavorite: () => {},
+                onDeleteFavorite: () => {},
+                onReorderFavorite: () => {},
+            }, 'pen', [p1]);
+
+            const card = drawer.el.querySelector('.card') as HTMLElement;
+            const handle = card.querySelector('.apolo-favorite-drag-handle') as HTMLElement;
+
+            handle.onpointerdown?.({
+                clientX: 120,
+                clientY: 60,
+                stopPropagation: () => {},
+                pointerId: 1,
+            } as any);
+
+            // Move past threshold
+            const moveEv = new Event('pointermove') as any;
+            moveEv.clientX = 135;
+            moveEv.clientY = 60;
+            window.dispatchEvent(moveEv);
+
+            assert.strictEqual(card.classList.contains('is-dragging'), true);
+
+            // Teardown during active drag
+            drawer.destroy();
+
+            // Subsequent window events should be dead
+            window.dispatchEvent(new Event('pointermove'));
+            window.dispatchEvent(new Event('pointerup'));
+            assert.strictEqual(card.style.transform, '');
+        });
     });
 });

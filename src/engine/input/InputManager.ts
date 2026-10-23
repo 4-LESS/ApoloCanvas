@@ -1,4 +1,5 @@
 import type { Point } from '../../core/types.ts';
+import { isStylusBarrelButton, hasDeliberateStylusMovement } from './StylusCapabilities.ts';
 
 export interface InputManagerOptions {
     palmRejectionCooldownMs?: number;
@@ -363,6 +364,18 @@ export class InputManager {
     private readonly handleContextMenu = (event: MouseEvent): void => {
         event.preventDefault?.();
         event.stopPropagation?.();
+
+        // If the stylus has already demonstrated deliberate drawing movement (>8px from pointerdown),
+        // do NOT abort or discard the stroke on stray contextmenu signals.
+        const hasMoved = hasDeliberateStylusMovement(
+            this.pointerDownStartPos,
+            { x: event.clientX, y: event.clientY },
+            8,
+        );
+        if (hasMoved) {
+            return;
+        }
+
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const elapsedSinceDown = this.lastPointerDownTime > 0
             ? now - this.lastPointerDownTime
@@ -373,7 +386,7 @@ export class InputManager {
             return;
         }
 
-        // Case B — Instant S-Pen Barrel Tap: abort nascent drawing
+        // Case B — Instant S-Pen Barrel Tap: abort nascent stationary dot
         if (this.activeDrawingPointerId !== null && elapsedSinceDown <= 180) {
             this.cancelActiveDrawing();
             return;
@@ -410,7 +423,7 @@ export class InputManager {
     }
 
     private isBarrel(event: PointerEvent): boolean {
-        return (event.buttons & 2) !== 0 || event.button === 2;
+        return isStylusBarrelButton(event);
     }
 
     private fillPoint(event: PointerEvent, bounds: DOMRect, point: Point): void {

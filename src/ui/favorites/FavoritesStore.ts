@@ -345,6 +345,41 @@ export function syncLegacyFavoritesSlice(state: WorkspaceToolState): void {
 }
 
 /**
+ * Returns the canonical list of favorites for a tool from the currently active profile.
+ */
+export function getCanonicalFavorites(state: WorkspaceToolState, tool: FavoritableTool): ToolFavoritePreset[] {
+    if (tool === 'pen') {
+        return getActiveStrokeProfile(state).pen;
+    }
+    if (tool === 'highlighter') {
+        return getActiveStrokeProfile(state).highlighter;
+    }
+    if (tool === 'shape') {
+        return getActiveShapeProfile(state).shape;
+    }
+    return [];
+}
+
+/**
+ * Updates the canonical list of favorites for a tool in the active profile and
+ * synchronizes the legacy `state.favorites` projection.
+ */
+export function setCanonicalFavorites(
+    state: WorkspaceToolState,
+    tool: FavoritableTool,
+    favorites: ToolFavoritePreset[],
+): void {
+    if (tool === 'pen') {
+        getActiveStrokeProfile(state).pen = favorites as PenFavoritePreset[];
+    } else if (tool === 'highlighter') {
+        getActiveStrokeProfile(state).highlighter = favorites as HighlighterFavoritePreset[];
+    } else if (tool === 'shape') {
+        getActiveShapeProfile(state).shape = favorites as ShapeFavoritePreset[];
+    }
+    syncLegacyFavoritesSlice(state);
+}
+
+/**
  * Resolves a matching profile across domains by ID, normalized name, or fallback index.
  */
 export function findMatchingProfile<T extends { id: string; name: string }>(

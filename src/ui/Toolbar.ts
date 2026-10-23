@@ -2,6 +2,7 @@ import type { EraserMode, PenFavorite, PenProfileId, ShapeType, ThicknessPreset,
 import { ICONS, createSvg } from './theme.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { ThicknessPopover } from './popover/ThicknessPopover.ts';
+import { isStylusBarrelButton, isStylusHoverBarrel } from '../engine/input/StylusCapabilities.ts';
 
 export interface ToolbarOptions {
     slot: ToolbarSlot;
@@ -569,21 +570,18 @@ export class Toolbar {
             };
 
             btn.addEventListener('contextmenu', (e) => {
+                if ('pointerType' in e && (e as any).pointerType && (e as any).pointerType !== 'pen') return;
                 handleBarrelOpenFavorites(e);
             });
 
             btn.addEventListener('pointerdown', (e: PointerEvent) => {
-                const button = typeof e.button === 'number' ? e.button : -1;
-                const buttons = typeof e.buttons === 'number' ? e.buttons : 0;
-                const isBarrel = button === 2 || button === 5 || (buttons & 2) !== 0 || (buttons & 32) !== 0;
-                if (isBarrel && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                if (isStylusBarrelButton(e) && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
                     handleBarrelOpenFavorites(e);
                 }
             });
 
             btn.addEventListener('pointermove', (e: PointerEvent) => {
-                const isHoverBarrel = e.pointerType === 'pen' && e.buttons === 1 && (e.pressure === 0 || e.pressure === undefined);
-                if (isHoverBarrel && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
+                if (isStylusHoverBarrel(e) && (def.tool === 'pen' || def.tool === 'highlighter' || def.tool === 'shape')) {
                     handleBarrelOpenFavorites(e);
                 }
             });

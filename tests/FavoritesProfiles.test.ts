@@ -10,6 +10,8 @@ import {
     getActiveStrokeProfile,
     getActiveShapeProfile,
     syncLegacyFavoritesSlice,
+    getCanonicalFavorites,
+    setCanonicalFavorites,
     findMatchingProfile,
     switchStrokeProfile,
     switchShapeProfile,
@@ -831,6 +833,72 @@ describe('Phase 5: Independent Favorite Profiles for Strokes & Shapes', () => {
             // Renaming to empty string clears the custom name
             renameFavoritePreset(state, 'pen', p1.id, '');
             assert.strictEqual(state.strokeFavoriteProfiles[0].pen[0].name, undefined);
+        });
+    });
+
+    // =========================================================================
+    // 6. Canonical Profile State & Compatibility Projection
+    // =========================================================================
+    describe('6. Canonical Profile State & Compatibility Projection', () => {
+        test('getCanonicalFavorites and setCanonicalFavorites operate directly on active profile and project to favorites', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const penFav = createFavoritePreset({ tool: 'pen', color: '#3b82f6', width: 4 }) as PenFavoritePreset;
+            const hlFav = createFavoritePreset({ tool: 'highlighter', color: '#eab308', width: 18 }) as HighlighterFavoritePreset;
+            const shapeFav = createFavoritePreset({ tool: 'shape', color: '#10b981', shapeType: 'rectangle' }) as ShapeFavoritePreset;
+
+            setCanonicalFavorites(state, 'pen', [penFav]);
+            setCanonicalFavorites(state, 'highlighter', [hlFav]);
+            setCanonicalFavorites(state, 'shape', [shapeFav]);
+
+            // Canonical profile contains presets
+            const strokeProfile = getActiveStrokeProfile(state);
+            assert.strictEqual(strokeProfile.pen.length, 1);
+            assert.strictEqual(strokeProfile.pen[0].id, penFav.id);
+            assert.strictEqual(strokeProfile.highlighter.length, 1);
+            assert.strictEqual(strokeProfile.highlighter[0].id, hlFav.id);
+
+            const shapeProfile = getActiveShapeProfile(state);
+            assert.strictEqual(shapeProfile.shape.length, 1);
+            assert.strictEqual(shapeProfile.shape[0].id, shapeFav.id);
+
+            // Legacy projection state.favorites is automatically synchronized
+            assert.strictEqual(state.favorites.pen.length, 1);
+            assert.strictEqual(state.favorites.pen[0].id, penFav.id);
+            assert.strictEqual(state.favorites.highlighter.length, 1);
+            assert.strictEqual(state.favorites.highlighter[0].id, hlFav.id);
+            assert.strictEqual(state.favorites.shape.length, 1);
+            assert.strictEqual(state.favorites.shape[0].id, shapeFav.id);
+
+            // getCanonicalFavorites reads active profile
+            assert.deepStrictEqual(getCanonicalFavorites(state, 'pen'), [penFav]);
+            assert.deepStrictEqual(getCanonicalFavorites(state, 'highlighter'), [hlFav]);
+            assert.deepStrictEqual(getCanonicalFavorites(state, 'shape'), [shapeFav]);
+        });
+
+        test('deliberately empty profile does NOT get overwritten by other profiles on clone or merge', () => {
+            const state = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
+            const penFav = createFavoritePreset({ tool: 'pen', color: '#ef4444', width: 2 }) as PenFavoritePreset;
+
+            // Profile 0 (Notas) has 1 favorite
+            setCanonicalFavorites(state, 'pen', [penFav]);
+            assert.strictEqual(state.favorites.pen.length, 1);
+
+            // Switch to Profile 1 (Académico), which is deliberately empty
+            switchStrokeProfile(state, 'academic');
+            assert.strictEqual(state.favorites.pen.length, 0, 'Active profile Académico must project 0 favorites');
+
+            // Serialization & hydration must preserve empty profile without reviving Profile 0 favorites
+            const cloned = cloneWorkspaceToolState(state);
+            assert.strictEqual(cloned.activeStrokeProfileId, 'academic');
+            assert.strictEqual(cloned.favorites.pen.length, 0, 'Cloned state on empty profile must remain empty');
+            assert.strictEqual(cloned.strokeFavoriteProfiles[0].pen.length, 1, 'Profile 0 must preserve its favorite');
+            assert.strictEqual(cloned.strokeFavoriteProfiles[1].pen.length, 0, 'Profile 1 must remain empty');
+
+            const merged = mergeWorkspaceToolState(JSON.parse(JSON.stringify(state)));
+            assert.strictEqual(merged.activeStrokeProfileId, 'academic');
+            assert.strictEqual(merged.favorites.pen.length, 0, 'Hydrated state on empty profile must remain empty');
+            assert.strictEqual(merged.strokeFavoriteProfiles[0].pen.length, 1);
+            assert.strictEqual(merged.strokeFavoriteProfiles[1].pen.length, 0);
         });
     });
 });
