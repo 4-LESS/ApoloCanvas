@@ -25,8 +25,14 @@ export function isStylusPointer(event: UIEvent | PointerEvent | MouseEvent): boo
  * 3. Android / Samsung WebView / DeX barrel: button === 2 or buttons bitmask 2 (0x02).
  */
 export function isStylusBarrelButton(event: PointerEvent | MouseEvent): boolean {
-    // If pointerType is present and not 'pen', strictly ignore
-    if ('pointerType' in event && (event as PointerEvent).pointerType && (event as PointerEvent).pointerType !== 'pen') {
+    // 1. Strictly require pointerType to be 'pen' if pointerType property is present.
+    // Mouse right-clicks and touch taps must NEVER be recognized as a stylus barrel button.
+    if ('pointerType' in event) {
+        if ((event as PointerEvent).pointerType !== 'pen') {
+            return false;
+        }
+    } else {
+        // Plain MouseEvent without pointerType is a standard mouse event, never a stylus barrel
         return false;
     }
 

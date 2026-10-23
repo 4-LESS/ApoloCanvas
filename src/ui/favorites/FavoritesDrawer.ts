@@ -926,17 +926,14 @@ export class FavoritesDrawer {
 
                 if (dragState !== 'dragging' && dragState !== 'drag-out') return;
 
-                // For shapes in a 2-column grid, horizontal movement across columns is standard reordering
-                // and must NOT trigger accidental deletion. Deletion only triggers when dragging out
-                // beyond the popover drawer boundaries.
-                const isOutside = isShape
-                    ? (moveEv.clientX < drawerRect.left - 30 ||
-                       moveEv.clientX > drawerRect.right + 30 ||
-                       moveEv.clientY < drawerRect.top - 30 ||
-                       moveEv.clientY > drawerRect.bottom + 30)
-                    : (moveEv.clientX < drawerRect.left - 15 ||
-                       moveEv.clientX > drawerRect.right + 15 ||
-                       Math.abs(dx) > 100);
+                // Deletion triggers strictly when dragging intentionally outside the drawer boundaries.
+                // Reordering occurs anywhere inside the drawer without accidental deletion from horizontal swiping.
+                const isOutside = (
+                    moveEv.clientX < drawerRect.left - 24 ||
+                    moveEv.clientX > drawerRect.right + 24 ||
+                    moveEv.clientY < drawerRect.top - 24 ||
+                    moveEv.clientY > drawerRect.bottom + 24
+                );
 
                 if (isOutside) {
                     dragState = 'drag-out';

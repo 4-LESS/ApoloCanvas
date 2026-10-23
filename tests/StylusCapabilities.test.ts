@@ -20,6 +20,10 @@ describe('StylusCapabilities - Strict Stylus & S-Pen Hardening', () => {
         const mouseRightClick = { pointerType: 'mouse', button: 2, buttons: 2 } as any;
         assert.strictEqual(isStylusBarrelButton(mouseRightClick), false);
 
+        // Raw MouseEvent without pointerType property
+        const rawMouseClick = { button: 2, buttons: 2 } as any;
+        assert.strictEqual(isStylusBarrelButton(rawMouseClick), false);
+
         // Touch event with button 2
         const touchEvent = { pointerType: 'touch', button: 2, buttons: 2 } as any;
         assert.strictEqual(isStylusBarrelButton(touchEvent), false);

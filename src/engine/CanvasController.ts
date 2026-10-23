@@ -1242,6 +1242,11 @@ export class CanvasController {
         event.stopPropagation();
         event.stopImmediatePropagation?.();
 
+        // Strictly reject non-pen pointers (mouse, touch)
+        if ('pointerType' in event && (event as any).pointerType && (event as any).pointerType !== 'pen') {
+            return;
+        }
+
         // If the stylus has already demonstrated deliberate drawing movement (>8px from pointerdown),
         // do NOT abort or discard the active stroke on stray contextmenu signals.
         const hasMoved = hasDeliberateStylusMovement(

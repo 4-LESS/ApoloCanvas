@@ -20,6 +20,8 @@ import {
     renameShapeProfile,
     deleteShapeProfile,
     renameFavoritePreset,
+    setCanonicalFavorites,
+    getCanonicalFavorites,
     type ToolFavoritePreset,
     type PenFavoritePreset,
     type HighlighterFavoritePreset,
@@ -568,18 +570,15 @@ export default class ApoloCanvasPlugin extends Plugin {
         if (tool === 'pen') {
             const profile = getActiveStrokeProfile(this.settings.toolState);
             const result = toggleFavoritePreset(profile.pen, { tool: 'pen', ...this.settings.toolState.pen });
-            profile.pen = result.updatedList as PenFavoritePreset[];
-            this.settings.toolState.favorites.pen = profile.pen;
+            setCanonicalFavorites(this.settings.toolState, 'pen', result.updatedList);
         } else if (tool === 'highlighter') {
             const profile = getActiveStrokeProfile(this.settings.toolState);
             const result = toggleFavoritePreset(profile.highlighter, { tool: 'highlighter', ...this.settings.toolState.highlighter });
-            profile.highlighter = result.updatedList as HighlighterFavoritePreset[];
-            this.settings.toolState.favorites.highlighter = profile.highlighter;
+            setCanonicalFavorites(this.settings.toolState, 'highlighter', result.updatedList);
         } else if (tool === 'shape') {
             const profile = getActiveShapeProfile(this.settings.toolState);
             const result = toggleFavoritePreset(profile.shape, { tool: 'shape', ...this.settings.toolState.shape });
-            profile.shape = result.updatedList as ShapeFavoritePreset[];
-            this.settings.toolState.favorites.shape = profile.shape;
+            setCanonicalFavorites(this.settings.toolState, 'shape', result.updatedList);
         } else {
             return;
         }
@@ -642,18 +641,18 @@ export default class ApoloCanvasPlugin extends Plugin {
         const tool = this.settings.toolState.activeTool;
         if (tool === 'pen') {
             const profile = getActiveStrokeProfile(this.settings.toolState);
-            profile.pen = removeFavoriteById(profile.pen, presetId);
-            this.settings.toolState.favorites.pen = profile.pen;
+            const updated = removeFavoriteById(profile.pen, presetId);
+            setCanonicalFavorites(this.settings.toolState, 'pen', updated);
             this.debouncedSaveSettings();
         } else if (tool === 'highlighter') {
             const profile = getActiveStrokeProfile(this.settings.toolState);
-            profile.highlighter = removeFavoriteById(profile.highlighter, presetId);
-            this.settings.toolState.favorites.highlighter = profile.highlighter;
+            const updated = removeFavoriteById(profile.highlighter, presetId);
+            setCanonicalFavorites(this.settings.toolState, 'highlighter', updated);
             this.debouncedSaveSettings();
         } else if (tool === 'shape') {
             const profile = getActiveShapeProfile(this.settings.toolState);
-            profile.shape = removeFavoriteById(profile.shape, presetId);
-            this.settings.toolState.favorites.shape = profile.shape;
+            const updated = removeFavoriteById(profile.shape, presetId);
+            setCanonicalFavorites(this.settings.toolState, 'shape', updated);
             this.debouncedSaveSettings();
         }
     }
@@ -666,18 +665,18 @@ export default class ApoloCanvasPlugin extends Plugin {
         const tool = this.settings.toolState.activeTool;
         if (tool === 'pen') {
             const profile = getActiveStrokeProfile(this.settings.toolState);
-            profile.pen = reorderFavorites(profile.pen, fromIndex, toIndex);
-            this.settings.toolState.favorites.pen = profile.pen;
+            const updated = reorderFavorites(profile.pen, fromIndex, toIndex);
+            setCanonicalFavorites(this.settings.toolState, 'pen', updated);
             this.debouncedSaveSettings();
         } else if (tool === 'highlighter') {
             const profile = getActiveStrokeProfile(this.settings.toolState);
-            profile.highlighter = reorderFavorites(profile.highlighter, fromIndex, toIndex);
-            this.settings.toolState.favorites.highlighter = profile.highlighter;
+            const updated = reorderFavorites(profile.highlighter, fromIndex, toIndex);
+            setCanonicalFavorites(this.settings.toolState, 'highlighter', updated);
             this.debouncedSaveSettings();
         } else if (tool === 'shape') {
             const profile = getActiveShapeProfile(this.settings.toolState);
-            profile.shape = reorderFavorites(profile.shape, fromIndex, toIndex);
-            this.settings.toolState.favorites.shape = profile.shape;
+            const updated = reorderFavorites(profile.shape, fromIndex, toIndex);
+            setCanonicalFavorites(this.settings.toolState, 'shape', updated);
             this.debouncedSaveSettings();
         }
     }
