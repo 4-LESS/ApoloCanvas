@@ -18,7 +18,7 @@ import {
     DEFAULT_SHAPE_FAVORITE_PROFILES,
 } from '../core/types.ts';
 import { listShapePlugins } from '../engine/shapes/index.ts';
-import { ICONS, createFillGlyph, createSvg, setAccessibleTooltip } from './theme.ts';
+import { ICONS, createFillGlyph, createSvg, setAccessibleTooltip, bindTapOrClick } from './theme.ts';
 import { SliderControl, type PopoverController, type PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { applyPopoverGeometry } from './popover/PopoverGeometry.ts';
@@ -1276,6 +1276,10 @@ export class ToolEstuche implements PopoverInstance {
 
         const car = document.createElement('div');
         car.className = 'car';
+        if (shapePages.length <= 1) {
+            car.style.overflowX = 'hidden';
+            car.style.touchAction = 'manipulation';
+        }
         this.shapeCarouselEl = car;
 
         for (let pIdx = 0; pIdx < shapePages.length; pIdx++) {
@@ -1290,6 +1294,7 @@ export class ToolEstuche implements PopoverInstance {
                 btn.type = 'button';
                 const isActive = isShapeActive(shape.type);
                 btn.className = `sb shape-btn ${isActive ? 'on is-active' : ''}`.trim();
+                btn.style.touchAction = 'manipulation';
                 btn.setAttribute('role', 'radio');
                 btn.setAttribute('aria-checked', String(isActive));
                 btn.setAttribute('aria-pressed', String(isActive));
@@ -1302,7 +1307,7 @@ export class ToolEstuche implements PopoverInstance {
                     btn.appendChild(createSvg(shape.iconD, { size: 20, strokeWidth: 1.8 }));
                 }
 
-                btn.onclick = () => {
+                bindTapOrClick(btn, () => {
                     this.state.shapeType = shape.type;
                     for (const [t, b] of this.shapeButtons) {
                         const active = isShapeActive(t);
@@ -1312,7 +1317,7 @@ export class ToolEstuche implements PopoverInstance {
                         b.setAttribute('aria-pressed', String(active));
                     }
                     this.callbacks.onSelectShapeType(shape.type);
-                };
+                });
 
                 this.shapeButtons.set(shape.type, btn);
                 pgs.appendChild(btn);
@@ -1328,6 +1333,9 @@ export class ToolEstuche implements PopoverInstance {
 
         const pager = document.createElement('div');
         pager.className = 'pager';
+        if (shapePages.length <= 1) {
+            pager.style.display = 'none';
+        }
         this.shapePagerEl = pager;
 
         const updatePagerVisual = () => {
@@ -1380,6 +1388,7 @@ export class ToolEstuche implements PopoverInstance {
         const lineBtn = document.createElement('button');
         lineBtn.type = 'button';
         lineBtn.className = 'pb';
+        lineBtn.style.touchAction = 'manipulation';
         lineBtn.setAttribute('data-tb', 'line');
         setAccessibleTooltip(lineBtn, 'Tipo de línea');
         this.shapeLineBtn = lineBtn;
@@ -1393,14 +1402,15 @@ export class ToolEstuche implements PopoverInstance {
         lineCaret.setAttribute('class', 'car-t');
         lineBtn.appendChild(lineCaret);
 
-        lineBtn.onclick = () => {
+        bindTapOrClick(lineBtn, () => {
             this.toggleShapeTray('line');
-        };
+        });
 
         // 3.2 Relleno (gaveta 5 chips, densidad, color)
         const fillBtn = document.createElement('button');
         fillBtn.type = 'button';
         fillBtn.className = 'pb';
+        fillBtn.style.touchAction = 'manipulation';
         fillBtn.setAttribute('data-tb', 'fill');
         setAccessibleTooltip(fillBtn, 'Relleno de forma');
         this.shapeFillBtn = fillBtn;
@@ -1415,24 +1425,25 @@ export class ToolEstuche implements PopoverInstance {
         fillCaret.setAttribute('class', 'car-t');
         fillBtn.appendChild(fillCaret);
 
-        fillBtn.onclick = () => {
+        bindTapOrClick(fillBtn, () => {
             this.toggleShapeTray('fill');
-        };
+        });
 
         // 3.3 1:1 = Formas perfectas (toggle directo)
         const ratioBtn = document.createElement('button');
         ratioBtn.type = 'button';
         const isPerfect = Boolean(this.state.regularize);
         ratioBtn.className = `pb tg ${isPerfect ? 'on' : ''}`;
+        ratioBtn.style.touchAction = 'manipulation';
         setAccessibleTooltip(ratioBtn, 'Formas perfectas (1:1 / 45°)');
         ratioBtn.appendChild(createSvg(ICONS.ratio, { size: 18, strokeWidth: 1.8 }));
         this.shapeRegularizeBtn = ratioBtn;
 
-        ratioBtn.onclick = () => {
+        bindTapOrClick(ratioBtn, () => {
             this.state.regularize = !this.state.regularize;
             ratioBtn.classList.toggle('on', this.state.regularize);
             this.callbacks.onToggleRegularize?.(this.state.regularize);
-        };
+        });
 
         bar.append(lineBtn, fillBtn, ratioBtn);
 
@@ -1465,18 +1476,19 @@ export class ToolEstuche implements PopoverInstance {
             cc.type = 'button';
             const isActive = currentLineStyle === item.pattern;
             cc.className = `cc ${isActive ? 'on' : ''}`;
+            cc.style.touchAction = 'manipulation';
             cc.setAttribute('role', 'radio');
             cc.setAttribute('aria-checked', String(isActive));
             setAccessibleTooltip(cc, item.label);
             cc.appendChild(this.createLineOptionSvg(item.index));
 
-            cc.onclick = () => {
+            bindTapOrClick(cc, () => {
                 this.state.pattern = item.pattern;
                 this.state.lineStyle = item.pattern;
                 this.callbacks.onChangeLineStyle?.(item.pattern);
                 this.updateShapeLineVisual();
                 this.toggleShapeTray(''); // Auto-close line drawer on selection per mockup
-            };
+            });
 
             this.shapeLineOptionButtons.set(item.pattern, cc);
             lineG3.appendChild(cc);
@@ -1518,12 +1530,13 @@ export class ToolEstuche implements PopoverInstance {
             cc.type = 'button';
             const isActive = activeFillPattern === pat.id;
             cc.className = `cc ${pat.id === 'off' ? 'off' : ''} ${isActive ? 'on' : ''}`;
+            cc.style.touchAction = 'manipulation';
             cc.setAttribute('role', 'radio');
             cc.setAttribute('aria-checked', String(isActive));
             setAccessibleTooltip(cc, pat.label);
             cc.appendChild(createFillGlyph(pat.id, 3, `tray-chip-${pat.id}`));
 
-            cc.onclick = () => {
+            bindTapOrClick(cc, () => {
                 if (pat.id === 'off') {
                     this.state.fillEnabled = false;
                     this.callbacks.onToggleFillEnabled?.(false);
@@ -1534,7 +1547,7 @@ export class ToolEstuche implements PopoverInstance {
                     this.callbacks.onChangeFillPattern?.(pat.id);
                 }
                 this.updateShapeFillGlyphs();
-            };
+            });
 
             this.shapeFillPatternButtons.set(pat.id, cc);
             fillG5.appendChild(cc);
@@ -1623,12 +1636,13 @@ export class ToolEstuche implements PopoverInstance {
                 const dot = document.createElement('button');
                 dot.type = 'button';
                 dot.className = `dot ${i === pageIndex ? 'on' : ''}`;
+                dot.style.touchAction = 'manipulation';
                 setAccessibleTooltip(dot, `Página ${i + 1}`);
-                dot.onclick = () => {
+                bindTapOrClick(dot, () => {
                     if (this.shapeCarouselEl) {
                         this.shapeCarouselEl.scrollTo({ left: i * this.shapeCarouselEl.clientWidth, behavior: 'smooth' });
                     }
-                };
+                });
                 this.shapePagerEl.appendChild(dot);
             }
         } else {
@@ -1640,12 +1654,13 @@ export class ToolEstuche implements PopoverInstance {
                 const isOn = i === pageIndex;
                 const isEdge = i === start || i === end - 1;
                 dot.className = `dot ${isOn ? 'on' : ''} ${isEdge && !isOn ? 'dimmed' : ''}`.trim();
+                dot.style.touchAction = 'manipulation';
                 setAccessibleTooltip(dot, `Página ${i + 1}`);
-                dot.onclick = () => {
+                bindTapOrClick(dot, () => {
                     if (this.shapeCarouselEl) {
                         this.shapeCarouselEl.scrollTo({ left: i * this.shapeCarouselEl.clientWidth, behavior: 'smooth' });
                     }
-                };
+                });
                 this.shapePagerEl.appendChild(dot);
             }
         }
@@ -1713,14 +1728,15 @@ export class ToolEstuche implements PopoverInstance {
             sw.type = 'button';
             const isActive = activeColor === col.toUpperCase();
             sw.className = `sw ${isActive ? 'on' : ''}`;
+            sw.style.touchAction = 'manipulation';
             sw.style.setProperty('--c', col);
             setAccessibleTooltip(sw, `Color de relleno ${col}`);
 
-            sw.onclick = () => {
+            bindTapOrClick(sw, () => {
                 this.state.fillColor = col;
                 this.callbacks.onChangeFillColor?.(col);
                 this.updateShapeFillGlyphs();
-            };
+            });
 
             this.shapeSubFillButtons.set(col, sw);
             this.shapeSubFillRowEl.appendChild(sw);
@@ -1729,11 +1745,12 @@ export class ToolEstuche implements PopoverInstance {
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.className = 'ad';
+        addBtn.style.touchAction = 'manipulation';
         setAccessibleTooltip(addBtn, 'Personalizar color de relleno');
         addBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
 
-        addBtn.onclick = (e) => {
-            e.stopPropagation();
+        bindTapOrClick(addBtn, (e) => {
+            e?.stopPropagation();
             const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
             this.colorPicker.open(
                 addBtn,
@@ -1748,7 +1765,7 @@ export class ToolEstuche implements PopoverInstance {
                 null,
                 100,
             );
-        };
+        });
 
         this.shapeSubFillRowEl.appendChild(addBtn);
     }
@@ -2002,6 +2019,7 @@ export class ToolEstuche implements PopoverInstance {
             sw.type = 'button';
             const isActive = this.state.color.toUpperCase() === col.toUpperCase();
             sw.className = `swatch popover-swatch-circle ${isActive ? 'is-active' : ''}`;
+            sw.style.touchAction = 'manipulation';
             setAccessibleTooltip(sw, `Color ${col}`);
             sw.style.backgroundColor = col;
             sw.style.setProperty('--c', col);
@@ -2012,7 +2030,7 @@ export class ToolEstuche implements PopoverInstance {
             inner.style.backgroundColor = col;
             sw.appendChild(inner);
 
-            sw.onclick = () => {
+            bindTapOrClick(sw, () => {
                 this.state.color = col;
                 this.pushRecentColor(col);
                 for (const [, s] of this.swatchButtons) s.classList.remove('is-active');
@@ -2022,7 +2040,7 @@ export class ToolEstuche implements PopoverInstance {
                     this.opacityInput.parentElement.style.setProperty('--hl-color', col);
                 }
                 this.callbacks.onChangeColor(col);
-            };
+            });
 
             this.swatchButtons.set(col, sw);
             this.swatchRowEl.appendChild(sw);
@@ -2032,12 +2050,13 @@ export class ToolEstuche implements PopoverInstance {
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.className = 'swatch-add popover-color-add';
+        addBtn.style.touchAction = 'manipulation';
         addBtn.setAttribute('data-apolo-popover-trigger', 'true');
         setAccessibleTooltip(addBtn, 'Personalizar color');
         addBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
 
-        addBtn.onclick = (e) => {
-            e.stopPropagation();
+        bindTapOrClick(addBtn, (e) => {
+            e?.stopPropagation();
             const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
             this.colorPicker.open(
                 addBtn,
@@ -2061,7 +2080,7 @@ export class ToolEstuche implements PopoverInstance {
                 null,
                 this.getOpacityPercent()
             );
-        };
+        });
         this.swatchRowEl.appendChild(addBtn);
 
         // Pagination dots
@@ -2071,14 +2090,15 @@ export class ToolEstuche implements PopoverInstance {
             dot.type = 'button';
             const isActive = i === this.currentPageIndex;
             dot.className = `${i === 0 ? 'popover-pag-clock is-clock-dot ' : 'dot '}popover-pag-dot ${isActive ? 'is-active' : ''}`;
+            dot.style.touchAction = 'manipulation';
             setAccessibleTooltip(dot, i === 0 ? 'Colores recientes' : `Página ${i + 1}`);
             if (i === 0) {
                 dot.appendChild(createSvg(ICONS.clock, { size: 14 }));
             }
-            dot.onclick = () => {
+            bindTapOrClick(dot, () => {
                 this.currentPageIndex = i;
                 this.updateColorsUI();
-            };
+            });
             this.paginationEl.appendChild(dot);
         }
     }

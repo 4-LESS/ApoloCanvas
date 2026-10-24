@@ -11,7 +11,7 @@ import {
 } from '../../core/types.ts';
 import { computeFavoriteFingerprint, inferTool } from './FavoritesStore.ts';
 import { getShapePlugin } from '../../engine/shapes/index.ts';
-import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark, setAccessibleTooltip } from '../theme.ts';
+import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark, setAccessibleTooltip, bindTapOrClick } from '../theme.ts';
 
 export type DrawerDragState = 'idle' | 'dragging' | 'drag-out' | 'dropping' | 'cancelled';
 
@@ -687,7 +687,7 @@ export class FavoritesDrawer {
             setAccessibleTooltip(card, tooltip);
         }
 
-        card.onclick = () => this.callbacks.onSelectFavorite(preset);
+        bindTapOrClick(card, () => this.callbacks.onSelectFavorite(preset));
         card.onkeydown = (e) => {
             if (e.target !== card) return;
             if (e.key === 'Enter' || e.key === ' ') {

@@ -1,4 +1,4 @@
-import { ICONS, createSvg, setAccessibleTooltip } from '../theme.ts';
+import { ICONS, createSvg, setAccessibleTooltip, bindTapOrClick } from '../theme.ts';
 
 export interface SliderControlOptions {
     min?: number;
@@ -50,12 +50,13 @@ export class SliderControl {
         this.minusBtn = document.createElement('button');
         this.minusBtn.type = 'button';
         this.minusBtn.className = 'st';
+        this.minusBtn.style.touchAction = 'manipulation';
         setAccessibleTooltip(this.minusBtn, 'Disminuir');
         this.minusBtn.appendChild(createSvg(ICONS.minus, { size: 14, strokeWidth: 2 }));
-        this.minusBtn.onclick = (e) => {
-            e.stopPropagation();
+        bindTapOrClick(this.minusBtn, (e) => {
+            e?.stopPropagation();
             this.setValue(this.value - this.step, true);
-        };
+        });
 
         // Track: .trk
         this.trackEl = document.createElement('div');
@@ -78,12 +79,13 @@ export class SliderControl {
         this.plusBtn = document.createElement('button');
         this.plusBtn.type = 'button';
         this.plusBtn.className = 'st';
+        this.plusBtn.style.touchAction = 'manipulation';
         setAccessibleTooltip(this.plusBtn, 'Aumentar');
         this.plusBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
-        this.plusBtn.onclick = (e) => {
-            e.stopPropagation();
+        bindTapOrClick(this.plusBtn, (e) => {
+            e?.stopPropagation();
             this.setValue(this.value + this.step, true);
-        };
+        });
 
         // Setup pointer event handling on track with pointer capture
         this.setupPointerEvents();
@@ -109,7 +111,7 @@ export class SliderControl {
         };
 
         this.trackEl.onpointerdown = (e) => {
-            e.preventDefault();
+            if (typeof e.button === 'number' && e.button !== 0 && e.button !== -1) return;
             this.isPointerDown = true;
             try {
                 this.trackEl.setPointerCapture(e.pointerId);
