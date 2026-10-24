@@ -724,6 +724,7 @@ export class CanvasController {
             fillEnabled: this.toolState.shape.fillEnabled,
             fillColor: this.toolState.shape.fillColor,
             fillPattern: this.toolState.shape.fillPattern,
+            fillDensity: this.toolState.shape.fillDensity,
         };
     }
 
@@ -830,6 +831,12 @@ export class CanvasController {
                 onChangeFillPattern: (pattern) => {
                     this.toolState.shape.fillPattern = pattern;
                     this.estuche?.updateState({ fillPattern: pattern });
+                    this.syncEstucheFavoriteState();
+                    this.notifyToolStateChange();
+                },
+                onChangeFillDensity: (density) => {
+                    this.toolState.shape.fillDensity = density;
+                    this.estuche?.updateState({ fillDensity: density });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
@@ -3426,6 +3433,7 @@ export class CanvasController {
             fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
             fillOpacity: this.toolState.shape.fillOpacity,
             fillPattern: this.toolState.shape.fillPattern,
+            fillDensity: this.toolState.shape.fillDensity,
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
         this.document.elements.push(element);
@@ -5086,6 +5094,7 @@ export class CanvasController {
             fillColor: shape.fillColor,
             fillOpacity: shape.fillOpacity,
             fillPattern: shape.fillPattern,
+            fillDensity: shape.fillDensity,
             ...styleOverride,
         };
         plugin.renderCanvas(context, geom, styleConfig);
@@ -5139,6 +5148,7 @@ export class CanvasController {
                     fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
                     fillOpacity: this.toolState.shape.fillOpacity,
                     fillPattern: this.toolState.shape.fillPattern,
+                    fillDensity: this.toolState.shape.fillDensity,
                 };
 
                 shapePlugin.renderCanvas(context, geom, styleConfig);

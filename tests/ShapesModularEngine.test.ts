@@ -217,13 +217,13 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             assert.strictEqual(regularized.y1, 20);
         });
 
-        test('regularizeLinearGeometry snaps 13 degree angle to 15 degrees preserving total chord length', () => {
+        test('regularizeLinearGeometry snaps 40 degree angle to 45 degrees preserving total chord length', () => {
             const chordLength = 100;
-            const deg13Rad = (13 * Math.PI) / 180;
+            const deg40Rad = (40 * Math.PI) / 180;
             const x0 = 50;
             const y0 = 50;
-            const x1 = x0 + chordLength * Math.cos(deg13Rad);
-            const y1 = y0 + chordLength * Math.sin(deg13Rad);
+            const x1 = x0 + chordLength * Math.cos(deg40Rad);
+            const y1 = y0 + chordLength * Math.sin(deg40Rad);
 
             const input: ShapeRenderGeometry = {
                 x0,
@@ -238,8 +238,8 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             assert.ok(Math.abs(resultingR - chordLength) < 1e-4, 'Chord length must be preserved');
 
             const resultingAngle = Math.atan2(regularized.y1 - regularized.y0, regularized.x1 - regularized.x0);
-            const expected15DegRad = (15 * Math.PI) / 180;
-            assert.ok(Math.abs(resultingAngle - expected15DegRad) < 1e-4, 'Angle should snap to exactly 15 degrees');
+            const expected45DegRad = Math.PI / 4; // 45 degrees
+            assert.ok(Math.abs(resultingAngle - expected45DegRad) < 1e-4, 'Angle should snap to exactly 45 degrees');
 
             // Verify line and arrow plugins invoke this
             const lineNorm = lineShapePlugin.normalizeGeometry(input);
@@ -247,6 +247,21 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
 
             const arrowNorm = arrowShapePlugin.normalizeGeometry(input);
             assert.deepStrictEqual(arrowNorm, regularized);
+        });
+
+        test('triangle regularization produces an equilateral triangle (H = W * sqrt(3)/2)', () => {
+            const input: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 100,
+                y1: 100,
+                regularize: true,
+            };
+            const norm = triangleShapePlugin.normalizeGeometry(input);
+            const width = Math.abs(norm.x1 - norm.x0);
+            const height = Math.abs(norm.y1 - norm.y0);
+            assert.strictEqual(width, 100);
+            assert.ok(Math.abs(height - 100 * (Math.sqrt(3) / 2)) < 1e-4, 'Height must be W * sqrt(3)/2');
         });
     });
 
@@ -295,9 +310,9 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
                 fillOpacity: 0.5,
                 fillPattern: 'hachure',
             });
-            assert.ok(hachureSvg.body.includes('fill="url(#apolo-fill-hachure-3b82f6)"'));
+            assert.ok(hachureSvg.body.includes('fill="url(#apolo-fill-hachure-3b82f6-d3)"'));
             assert.ok(hachureSvg.defs);
-            assert.ok(hachureSvg.defs['apolo-fill-hachure-3b82f6'].includes('patternTransform="rotate(45)"'));
+            assert.ok(hachureSvg.defs['apolo-fill-hachure-3b82f6-d3'].includes('patternTransform="rotate(45)"'));
 
             // 3. Cross-hatch (crossed lines)
             const crossHatchSvg = ellipseShapePlugin.renderSvg(geom, {
@@ -308,9 +323,9 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
                 fillOpacity: 0.4,
                 fillPattern: 'cross-hatch',
             });
-            assert.ok(crossHatchSvg.body.includes('fill="url(#apolo-fill-cross-hatch-f59e0b)"'));
+            assert.ok(crossHatchSvg.body.includes('fill="url(#apolo-fill-cross-hatch-f59e0b-d3)"'));
             assert.ok(crossHatchSvg.defs);
-            assert.ok(crossHatchSvg.defs['apolo-fill-cross-hatch-f59e0b'].includes('line x1="0" y1="0" x2="8" y2="0"'));
+            assert.ok(crossHatchSvg.defs['apolo-fill-cross-hatch-f59e0b-d3'].includes('line x1="0" y1="0" x2="8" y2="0"'));
 
             // 4. Dots (stipple dot matrix)
             const dotsSvg = triangleShapePlugin.renderSvg(geom, {
@@ -321,9 +336,9 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
                 fillOpacity: 0.6,
                 fillPattern: 'dots',
             });
-            assert.ok(dotsSvg.body.includes('fill="url(#apolo-fill-dots-8b5cf6)"'));
+            assert.ok(dotsSvg.body.includes('fill="url(#apolo-fill-dots-8b5cf6-d3)"'));
             assert.ok(dotsSvg.defs);
-            assert.ok(dotsSvg.defs['apolo-fill-dots-8b5cf6'].includes('circle cx="4" cy="4" r="1.2"'));
+            assert.ok(dotsSvg.defs['apolo-fill-dots-8b5cf6-d3'].includes('circle cx="4" cy="4" r="1.2"'));
         });
 
         test('PersistenceQueue renders and deduplicates pattern defs in renderSvg and renderBoxSvg', () => {
@@ -375,18 +390,18 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
 
             const svgString = renderSvg(doc);
             assert.ok(svgString.includes('<defs>'));
-            assert.ok(svgString.includes('id="apolo-fill-hachure-3b82f6"'));
+            assert.ok(svgString.includes('id="apolo-fill-hachure-3b82f6-d3"'));
 
             // Deduplication verification: pattern ID should only appear once inside <defs>
             const defsMatch = svgString.match(/<defs>([\s\S]*?)<\/defs>/);
             assert.ok(defsMatch);
-            const occurrences = (defsMatch[1].match(/id="apolo-fill-hachure-3b82f6"/g) || []).length;
+            const occurrences = (defsMatch[1].match(/id="apolo-fill-hachure-3b82f6-d3"/g) || []).length;
             assert.strictEqual(occurrences, 1, 'Defs should deduplicate patterns with identical id');
 
             // Single element render
             const singleSvg = renderElement(element1, 800);
             assert.ok(singleSvg.includes('<rect'));
-            assert.ok(singleSvg.includes('fill="url(#apolo-fill-hachure-3b82f6)"'));
+            assert.ok(singleSvg.includes('fill="url(#apolo-fill-hachure-3b82f6-d3)"'));
         });
     });
 
@@ -703,60 +718,84 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
 
             estuche.open(undefined, mockDocument.createElement('button') as any);
 
-            // Verify base shape buttons
+            // 1. Verify Carousel & base shapes
+            const car = estuche.container.querySelector('.car');
+            assert.ok(car, 'Must render .car carousel');
+
             const baseSelector = estuche.container.querySelector('.shape-grid-selector');
             assert.ok(baseSelector, 'Must render .shape-grid-selector');
-            const baseButtons = baseSelector.children;
+            const baseButtons = baseSelector.querySelectorAll('.sb');
             assert.strictEqual(baseButtons.length, 5, 'Must render 5 base shape buttons');
 
-            // Verify custom shapes row exists because diamond, hexagon, cylinder are registered
-            const customRow = estuche.container.querySelector('.shape-custom-row');
-            assert.ok(customRow, 'Must render custom shapes row');
-            const customContainer = customRow.querySelector('.shape-custom-items');
-            assert.ok(customContainer, 'Must render .shape-custom-items');
-            const customItems = customContainer.children;
-            assert.ok(customItems.length >= 1, 'Must render custom shape items in the row');
+            // Custom shapes page exists in carousel
+            const pages = car.querySelectorAll('.pgs');
+            assert.ok(pages.length >= 2, 'Must have at least 2 pages for base and custom shapes');
+            const customPageButtons = pages[1].querySelectorAll('.sb');
+            assert.ok(customPageButtons.length >= 1, 'Must render custom shape items in the second page');
 
-            // Click custom shape (e.g. first custom button)
-            (customItems[0] as HTMLElement).click();
+            // Click custom shape (e.g. first custom button on page 2)
+            (customPageButtons[0] as HTMLElement).click();
             assert.ok(selectedShape, 'Selecting custom shape button triggers onSelectShapeType');
 
-            // Verify "Formas perfectas (1:1)" switch replaces snapGrid
-            const regularizeToggle = Array.from(estuche.container.querySelectorAll('.toggle-label'))
-                .find((el) => el.textContent?.includes('Formas perfectas'));
-            assert.ok(regularizeToggle, 'Must render "Formas perfectas (1:1)" toggle label');
+            // 2. Verify Thickness Slider (1-12)
+            const slider = estuche.container.querySelector('.sl:not(.sm)');
+            assert.ok(slider, 'Must render thickness slider .sl');
+            const track = slider.querySelector('.trk');
+            assert.ok(track, 'Must render slider track .trk');
 
-            const regSwitch = (regularizeToggle.parentElement?.querySelector('.popover-switch')) as HTMLElement;
-            assert.ok(regSwitch, 'Must render switch for regularize');
-            regSwitch.click();
-            assert.strictEqual(toggledRegularize, true, 'Clicking regularize switch triggers onToggleRegularize');
+            // 3. Verify Property Bar [Línea ▾] [Relleno ▾] [1:1]
+            const bar = estuche.container.querySelector('.bar');
+            assert.ok(bar, 'Must render control bar .bar');
 
-            // Verify Fill toggle row
-            const fillToggle = Array.from(estuche.container.querySelectorAll('.toggle-label'))
-                .find((el) => el.textContent === 'Relleno');
-            assert.ok(fillToggle, 'Must render "Relleno" toggle label');
+            // 3.1 1:1 Toggle
+            const ratioBtn = bar.querySelector('.pb.tg') as HTMLElement;
+            assert.ok(ratioBtn, 'Must render 1:1 ratio button .pb.tg');
+            ratioBtn.click();
+            assert.strictEqual(toggledRegularize, true, 'Clicking 1:1 ratio button triggers onToggleRegularize');
+            assert.ok(ratioBtn.classList.contains('on'), '1:1 ratio button has class .on when active');
 
-            const fillSw = (fillToggle.parentElement?.querySelector('.popover-switch')) as HTMLElement;
-            assert.ok(fillSw, 'Must render switch for fill');
-            fillSw.click();
-            assert.strictEqual(toggledFill, true, 'Clicking fill switch triggers onToggleFillEnabled');
+            // 3.2 Línea Tray
+            const lineBtn = bar.querySelector('[data-tb="line"]') as HTMLElement;
+            assert.ok(lineBtn, 'Must render line button');
+            const lineTray = estuche.container.querySelector('[data-t="line"]') as HTMLElement;
+            assert.ok(lineTray, 'Must render line tray');
 
-            // Verify 4 fill pattern chips
-            const fillSubpanel = estuche.container.querySelector('.shape-fill-subpanel');
-            assert.ok(fillSubpanel, 'Must render .shape-fill-subpanel');
-            const patternGroup = fillSubpanel.querySelector('.line-grid');
-            assert.ok(patternGroup, 'Must render pattern group');
-            const patternChips = patternGroup.children;
-            assert.strictEqual(patternChips.length, 4, 'Must render 4 fill pattern chips');
+            // Open line tray
+            lineBtn.click();
+            assert.ok(lineTray.classList.contains('open'), 'Line tray opens on click');
+            const lineOptions = lineTray.querySelectorAll('.cc');
+            assert.strictEqual(lineOptions.length, 3, 'Line tray has 3 options (solid, dashed, dotted)');
 
-            // Click hachure pattern chip
-            (patternChips[1] as HTMLElement).click();
-            assert.strictEqual(changedFillPattern, 'hachure', 'Clicking second pattern chip selects hachure');
+            // 3.3 Relleno Tray
+            const fillBtn = bar.querySelector('[data-tb="fill"]') as HTMLElement;
+            assert.ok(fillBtn, 'Must render fill button');
+            const fillTray = estuche.container.querySelector('[data-t="fill"]') as HTMLElement;
+            assert.ok(fillTray, 'Must render fill tray');
 
-            // Verify fill color swatches
-            const fillColorRow = fillSubpanel.querySelector('.swatch-row');
-            assert.ok(fillColorRow, 'Must render fillColorRow');
-            const fillSwatches = fillColorRow.querySelectorAll('.swatch');
+            // Open fill tray (line tray should close due to accordion behavior)
+            fillBtn.click();
+            assert.ok(fillTray.classList.contains('open'), 'Fill tray opens on click');
+            assert.ok(!lineTray.classList.contains('open'), 'Line tray closes when fill tray opens (accordion)');
+
+            // Verify 5 fill pattern chips
+            const g5 = fillTray.querySelector('.g5');
+            assert.ok(g5, 'Must render .g5 container');
+            const patternChips = g5.querySelectorAll('.cc');
+            assert.strictEqual(patternChips.length, 5, 'Must render 5 fill pattern chips');
+
+            // Click hachure pattern chip (index 2: off, solid, hachure, cross-hatch, dots)
+            (patternChips[2] as HTMLElement).click();
+            assert.strictEqual(changedFillPattern, 'hachure', 'Clicking hachure pattern chip selects hachure');
+            assert.strictEqual(toggledFill, true, 'Selecting a pattern enables fill');
+
+            // Verify density slider is visible for hachure
+            const dens = fillTray.querySelector('.dens');
+            assert.ok(dens?.classList.contains('show'), 'Density slider is shown for hachure');
+
+            // Verify subordinate fill color swatches
+            const subFillRow = fillTray.querySelector('.pf');
+            assert.ok(subFillRow, 'Must render subordinate fill color row .pf');
+            const fillSwatches = subFillRow.querySelectorAll('.sw');
             assert.ok(fillSwatches.length >= 4, 'Must render fill color swatches');
             (fillSwatches[0] as HTMLElement).click();
             assert.ok(changedFillColor, 'Clicking fill swatch triggers onChangeFillColor');

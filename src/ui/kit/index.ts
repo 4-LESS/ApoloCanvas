@@ -10,3 +10,4 @@ export * from './ActionRow.ts';
 export * from './AnchorPositioning.ts';
 export * from './PopoverShell.ts';
 export * from './PopoverController.ts';
+export * from './SliderControl.ts';

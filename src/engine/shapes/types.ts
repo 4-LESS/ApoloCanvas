@@ -28,6 +28,7 @@ export interface ShapeStyleConfig {
     fillColor?: string;
     fillOpacity?: number;
     fillPattern?: ShapeFillPattern;
+    fillDensity?: number;
 }
 
 export interface ShapePlugin {

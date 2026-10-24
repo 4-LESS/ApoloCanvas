@@ -37,7 +37,23 @@ export const triangleShapePlugin: ShapePlugin = {
     iconSvgPaths: ['M 12 4 L 21 20 H 3 Z'],
 
     normalizeGeometry(geom: ShapeRenderGeometry): ShapeRenderGeometry {
-        return geom.regularize ? regularizeClosedGeometry(geom) : { ...geom };
+        if (!geom.regularize) {
+            return { ...geom };
+        }
+        const dx = geom.x1 - geom.x0;
+        const dy = geom.y1 - geom.y0;
+        const s = Math.max(Math.abs(dx), Math.abs(dy));
+        const signX = dx < 0 ? -1 : 1;
+        const signY = dy < 0 ? -1 : 1;
+        const w = s;
+        const h = s * (Math.sqrt(3) / 2);
+        return {
+            x0: geom.x0,
+            y0: geom.y0,
+            x1: geom.x0 + signX * w,
+            y1: geom.y0 + signY * h,
+            regularize: geom.regularize,
+        };
     },
 
     renderCanvas(ctx: CanvasRenderingContext2D, geom: ShapeRenderGeometry, style: ShapeStyleConfig): void {

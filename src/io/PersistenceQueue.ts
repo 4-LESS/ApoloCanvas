@@ -775,6 +775,7 @@ function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffset
         fillColor: element.fillColor,
         fillOpacity: element.fillOpacity,
         fillPattern: element.fillPattern,
+        fillDensity: element.fillDensity,
     };
 
     return plugin.renderSvg(geom, styleConfig);

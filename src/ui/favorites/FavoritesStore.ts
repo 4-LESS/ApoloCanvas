@@ -136,7 +136,8 @@ export function computeFavoriteFingerprint(presetOrState: any): string {
     const fillColor = fillEnabled ? (presetOrState.fillColor ?? '').trim().toLowerCase() : '';
     const fillOpacity = fillEnabled ? normalizeOpacity(presetOrState.fillOpacity, 'shape') : 0;
     const fillPattern = fillEnabled ? (presetOrState.fillPattern || 'solid') : 'solid';
-    return `shape|${shapeType}|${color}|${width}|${opacity}|${pattern}|regularize:${regularize}|fill:${fillEnabled}|${fillColor}|${fillOpacity}|${fillPattern}`;
+    const fillDensity = fillEnabled ? (presetOrState.fillDensity ?? 3) : 3;
+    return `shape|${shapeType}|${color}|${width}|${opacity}|${pattern}|regularize:${regularize}|fill:${fillEnabled}|${fillColor}|${fillOpacity}|${fillPattern}|density:${fillDensity}`;
 }
 
 /**
@@ -199,6 +200,7 @@ export function createFavoritePreset(slice: any, toolOverride?: FavoritableTool)
         fillColor: slice?.fillColor !== undefined ? String(slice.fillColor) : undefined,
         fillOpacity: slice?.fillOpacity !== undefined ? Number(slice.fillOpacity) : undefined,
         fillPattern: (slice?.fillPattern as ShapeFillPattern) || undefined,
+        fillDensity: slice?.fillDensity !== undefined ? Number(slice.fillDensity) : undefined,
     };
     return shapePreset;
 }
