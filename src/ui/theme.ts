@@ -1,4 +1,4 @@
-import type { PenFavorite, PenProfile, PenProfileId, ShapeType, StrokePattern } from '../core/types.ts';
+import type { PenFavorite, PenProfile, PenProfileId, ShapeFillPattern, ShapeType, StrokePattern } from '../core/types.ts';
 
 /**
  * Checks whether Obsidian is currently rendering in dark theme.
@@ -140,6 +140,11 @@ export const ICONS = {
     keyboardMode: 'M9 4h6 M9 20h6 M12 4v16',
     link: 'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1 M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',
     close: 'M6 6l12 12 M18 6L6 18',
+    caret: 'M2.5 4.5L6 8l3.5-3.5',
+    ratio: 'M4 9V6a2 2 0 012-2h3 M20 9V6a2 2 0 00-2-2h-3 M4 15v3a2 2 0 002 2h3 M20 15v3a2 2 0 01-2 2h-3 M8.5 9.5v5 M12 10v.1 M12 14v.1 M15.5 9.5v5',
+    lineSolid: 'M3 12h18',
+    lineDashed: 'M3 12h18',
+    lineDotted: 'M3 12h18',
     check: 'M5 13l4 4L19 7',
     dragGrip: '<circle cx="4" cy="3" r="1.5"></circle><circle cx="10" cy="3" r="1.5"></circle><circle cx="4" cy="7" r="1.5"></circle><circle cx="10" cy="7" r="1.5"></circle><circle cx="4" cy="11" r="1.5"></circle><circle cx="10" cy="11" r="1.5"></circle>',
     feather: 'M20.24 12.24a6 6 0 00-8.49-8.49L5 10.5V19h8.5z M16 8L2 22 M17.5 15H9',
@@ -394,5 +399,88 @@ export function createStrokeWavePreview(
     }
 
     svg.appendChild(path);
+    return svg;
+}
+
+const GLYPH_SPACING_LEVELS = [6.5, 5, 4, 3.2, 2.6] as const;
+
+/**
+ * Creates the dynamic fill pattern icon used in the tool estuche bar and tray chips.
+ * Built entirely with DOM methods (zero innerHTML).
+ */
+export function createFillGlyph(
+    pattern: ShapeFillPattern | 'off',
+    density = 3,
+    id = 'apolo-fill-glyph',
+): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'fg');
+    svg.setAttribute('viewBox', '0 0 20 16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+
+    const clampedDensity = Math.max(1, Math.min(5, Math.round(density)));
+    const s = GLYPH_SPACING_LEVELS[clampedDensity - 1] ?? 4;
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', '2');
+    rect.setAttribute('y', '2');
+    rect.setAttribute('width', '16');
+    rect.setAttribute('height', '12');
+    rect.setAttribute('rx', '2.5');
+    rect.setAttribute('stroke-width', '1.6');
+
+    if (pattern === 'off') {
+        rect.setAttribute('fill', 'none');
+        svg.appendChild(rect);
+
+        const slash = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        slash.setAttribute('d', 'M3.5 12.5L16.5 3.5');
+        slash.setAttribute('stroke-width', '1.6');
+        slash.setAttribute('stroke', 'currentColor');
+        svg.appendChild(slash);
+        return svg;
+    }
+
+    if (pattern === 'solid') {
+        rect.setAttribute('fill', 'currentColor');
+        rect.setAttribute('fill-opacity', '0.45');
+        svg.appendChild(rect);
+        return svg;
+    }
+
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const pat = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
+    pat.setAttribute('id', id);
+    pat.setAttribute('width', String(s));
+    pat.setAttribute('height', String(s));
+    pat.setAttribute('patternUnits', 'userSpaceOnUse');
+
+    if (pattern === 'dots') {
+        pat.setAttribute('x', '1');
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', String(s / 2));
+        circle.setAttribute('cy', String(s / 2));
+        circle.setAttribute('r', '0.85');
+        circle.setAttribute('fill', 'currentColor');
+        pat.appendChild(circle);
+    } else {
+        pat.setAttribute('patternTransform', 'rotate(45)');
+        const linePath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const d = pattern === 'cross-hatch' ? `M0 0H${s} M0 0V${s}` : `M0 0H${s}`;
+        linePath.setAttribute('d', d);
+        linePath.setAttribute('stroke', 'currentColor');
+        linePath.setAttribute('stroke-width', '1.1');
+        pat.appendChild(linePath);
+    }
+
+    defs.appendChild(pat);
+    svg.appendChild(defs);
+
+    rect.setAttribute('fill', `url(#${id})`);
+    svg.appendChild(rect);
+
     return svg;
 }

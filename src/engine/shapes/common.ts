@@ -29,8 +29,8 @@ export function regularizeClosedGeometry(geom: ShapeRenderGeometry): ShapeRender
 }
 
 /**
- * Linear shape regularization: snaps the chord angle to the nearest 15 degree increment
- * (pi / 12 rad) while preserving the total chord length.
+ * Linear shape regularization: snaps the chord angle to the nearest 45 degree increment
+ * (pi / 4 rad) while preserving the total chord length.
  */
 export function regularizeLinearGeometry(geom: ShapeRenderGeometry): ShapeRenderGeometry {
     const dx = geom.x1 - geom.x0;
@@ -40,7 +40,7 @@ export function regularizeLinearGeometry(geom: ShapeRenderGeometry): ShapeRender
         return { ...geom };
     }
     const theta = Math.atan2(dy, dx);
-    const step = Math.PI / 12; // 15 degrees
+    const step = Math.PI / 4; // 45 degrees
     const snappedTheta = Math.round(theta / step) * step;
     return {
         x0: geom.x0,
@@ -95,25 +95,36 @@ export function getSvgStrokeAttributes(style: ShapeStyleConfig): string {
     return `stroke="${escapeXml(strokeColor)}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}" stroke-linecap="${lineCap}" stroke-linejoin="round"${dashAttr}`;
 }
 
+export const BASE_FILL_SPACING = 8;
+export const DENSITY_MULTIPLIERS = [2.0, 1.5, 1.0, 0.75, 0.5] as const;
+
+export function getFillPatternSpacing(density: number = 3): number {
+    const clampedDensity = Math.max(1, Math.min(5, Math.round(density)));
+    const multiplier = DENSITY_MULTIPLIERS[clampedDensity - 1] ?? 1.0;
+    return Math.round(BASE_FILL_SPACING * multiplier * 10) / 10;
+}
+
 const canvasPatternCache = new Map<string, CanvasPattern | null>();
 
 /**
  * Creates or retrieves a cached offscreen CanvasPattern for fill patterns.
  * Gracefully falls back to null in headless test environments.
- * Supports patternAngleOffsetDeg (e.g. 0° body vs 90° top cap).
+ * Supports patternAngleOffsetDeg (e.g. 0° body vs 90° top cap) and fillDensity (1..5).
  */
 export function getCanvasPattern(
     ctx: CanvasRenderingContext2D,
     fillColor: string,
     pattern: ShapeFillPattern,
     angleOffsetDeg = 0,
+    density = 3,
 ): CanvasPattern | null {
     if (pattern === 'solid') {
         return null;
     }
 
     const normAngle = ((Math.round(angleOffsetDeg) % 360) + 360) % 360;
-    const cacheKey = `${pattern}:${fillColor}:${normAngle}`;
+    const clampedDensity = Math.max(1, Math.min(5, Math.round(density)));
+    const cacheKey = `${pattern}:${fillColor}:${normAngle}:dens${clampedDensity}`;
     if (canvasPatternCache.has(cacheKey)) {
         return canvasPatternCache.get(cacheKey) ?? null;
     }
@@ -124,9 +135,10 @@ export function getCanvasPattern(
             return null;
         }
 
+        const s = getFillPatternSpacing(clampedDensity);
         const tile = document.createElement('canvas');
-        tile.width = 8;
-        tile.height = 8;
+        tile.width = s;
+        tile.height = s;
         const tctx = tile.getContext('2d');
         if (!tctx) {
             canvasPatternCache.set(cacheKey, null);
@@ -136,59 +148,62 @@ export function getCanvasPattern(
         tctx.strokeStyle = fillColor;
         tctx.fillStyle = fillColor;
 
+        const lineW = Math.max(1, Math.round(s * 0.15 * 10) / 10);
+        const dotR = Math.max(1, Math.round(s * 0.15 * 10) / 10);
+
         if (pattern === 'hachure') {
-            tctx.lineWidth = 1.2;
+            tctx.lineWidth = lineW;
             tctx.beginPath();
             if (normAngle === 90 || normAngle === 270) {
                 // Perpendicular diagonal lines (-45 deg instead of +45 deg)
                 tctx.moveTo(0, 0);
-                tctx.lineTo(8, 8);
-                tctx.moveTo(-1, 7);
-                tctx.lineTo(1, 9);
-                tctx.moveTo(7, -1);
-                tctx.lineTo(9, 1);
+                tctx.lineTo(s, s);
+                tctx.moveTo(-1, s - 1);
+                tctx.lineTo(1, s + 1);
+                tctx.moveTo(s - 1, -1);
+                tctx.lineTo(s + 1, 1);
             } else {
                 // Standard 45 deg diagonal lines
-                tctx.moveTo(0, 8);
-                tctx.lineTo(8, 0);
+                tctx.moveTo(0, s);
+                tctx.lineTo(s, 0);
                 tctx.moveTo(-1, 1);
                 tctx.lineTo(1, -1);
-                tctx.moveTo(7, 9);
-                tctx.lineTo(9, 7);
+                tctx.moveTo(s - 1, s + 1);
+                tctx.lineTo(s + 1, s - 1);
             }
             tctx.stroke();
         } else if (pattern === 'cross-hatch') {
-            tctx.lineWidth = 1.2;
+            tctx.lineWidth = lineW;
             tctx.beginPath();
             if (normAngle === 90 || normAngle === 270) {
                 // Horizontal + vertical cross-hatch to contrast with 45/-45 diagonal
-                tctx.moveTo(0, 4);
-                tctx.lineTo(8, 4);
-                tctx.moveTo(4, 0);
-                tctx.lineTo(4, 8);
+                tctx.moveTo(0, s / 2);
+                tctx.lineTo(s, s / 2);
+                tctx.moveTo(s / 2, 0);
+                tctx.lineTo(s / 2, s);
             } else {
                 // Diagonal cross-hatch (+45 and -45)
-                tctx.moveTo(0, 8);
-                tctx.lineTo(8, 0);
+                tctx.moveTo(0, s);
+                tctx.lineTo(s, 0);
                 tctx.moveTo(-1, 1);
                 tctx.lineTo(1, -1);
-                tctx.moveTo(7, 9);
-                tctx.lineTo(9, 7);
+                tctx.moveTo(s - 1, s + 1);
+                tctx.lineTo(s + 1, s - 1);
                 tctx.moveTo(0, 0);
-                tctx.lineTo(8, 8);
+                tctx.lineTo(s, s);
             }
             tctx.stroke();
         } else if (pattern === 'dots') {
             tctx.beginPath();
             if (normAngle === 90 || normAngle === 270) {
-                // Phase-shifted stipple dots (shifted by 4px half-period)
-                tctx.arc(0, 0, 1.2, 0, Math.PI * 2);
-                tctx.arc(8, 0, 1.2, 0, Math.PI * 2);
-                tctx.arc(0, 8, 1.2, 0, Math.PI * 2);
-                tctx.arc(8, 8, 1.2, 0, Math.PI * 2);
+                // Phase-shifted stipple dots (shifted by half-period)
+                tctx.arc(0, 0, dotR, 0, Math.PI * 2);
+                tctx.arc(s, 0, dotR, 0, Math.PI * 2);
+                tctx.arc(0, s, dotR, 0, Math.PI * 2);
+                tctx.arc(s, s, dotR, 0, Math.PI * 2);
             } else {
                 // Centered stipple dot
-                tctx.arc(4, 4, 1.2, 0, Math.PI * 2);
+                tctx.arc(s / 2, s / 2, dotR, 0, Math.PI * 2);
             }
             tctx.fill();
         }
@@ -218,6 +233,7 @@ export function applyCanvasFill(
 
     const fillColor = style.fillColor || style.strokeColor || '#1F4FD8';
     const fillPattern = style.fillPattern || 'solid';
+    const density = style.fillDensity ?? 3;
     const baseOpacity = style.fillOpacity !== undefined ? style.fillOpacity : 0.2;
     const opacityMultiplier = faceOptions?.opacityMultiplier !== undefined ? faceOptions.opacityMultiplier : 1;
     const effectiveOpacity = Math.max(0.05, Math.min(1, baseOpacity * opacityMultiplier));
@@ -226,7 +242,7 @@ export function applyCanvasFill(
     ctx.save();
     ctx.globalAlpha = effectiveOpacity * (style.strokeOpacity ?? 1);
 
-    const pattern = getCanvasPattern(ctx, fillColor, fillPattern, angleOffset);
+    const pattern = getCanvasPattern(ctx, fillColor, fillPattern, angleOffset, density);
     ctx.fillStyle = pattern ?? fillColor;
 
     if (fillPathFn) {
@@ -252,6 +268,10 @@ export function getSvgFillAttributes(
 
     const fillColor = style.fillColor || style.strokeColor || '#1F4FD8';
     const fillPattern = style.fillPattern || 'solid';
+    const density = style.fillDensity ?? 3;
+    const s = getFillPatternSpacing(density);
+    const lineW = Math.max(1, Math.round(s * 0.15 * 10) / 10);
+    const dotR = Math.max(1, Math.round(s * 0.15 * 10) / 10);
     const baseOpacity = style.fillOpacity !== undefined ? style.fillOpacity : 0.2;
     const opacityMultiplier = faceOptions?.opacityMultiplier !== undefined ? faceOptions.opacityMultiplier : 1;
     const effectiveOpacity = Math.max(0.05, Math.min(1, baseOpacity * opacityMultiplier));
@@ -266,18 +286,18 @@ export function getSvgFillAttributes(
     }
 
     const rotSuffix = normAngle !== 0 ? `-rot${normAngle}` : '';
-    const patternId = `apolo-fill-${fillPattern}-${cleanColor}${rotSuffix}`;
+    const patternId = `apolo-fill-${fillPattern}-${cleanColor}${rotSuffix}-d${density}`;
     let patternSvg = '';
 
     if (fillPattern === 'hachure') {
         const totalRot = 45 + normAngle;
-        patternSvg = `<pattern id="${patternId}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(${totalRot})"><line x1="0" y1="0" x2="0" y2="8" stroke="${escapeXml(fillColor)}" stroke-width="1.2"/></pattern>`;
+        patternSvg = `<pattern id="${patternId}" width="${s}" height="${s}" patternUnits="userSpaceOnUse" patternTransform="rotate(${totalRot})"><line x1="0" y1="0" x2="0" y2="${s}" stroke="${escapeXml(fillColor)}" stroke-width="${lineW}"/></pattern>`;
     } else if (fillPattern === 'cross-hatch') {
         const totalRot = 45 + normAngle;
-        patternSvg = `<pattern id="${patternId}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(${totalRot})"><line x1="0" y1="0" x2="0" y2="8" stroke="${escapeXml(fillColor)}" stroke-width="1.2"/><line x1="0" y1="0" x2="8" y2="0" stroke="${escapeXml(fillColor)}" stroke-width="1.2"/></pattern>`;
+        patternSvg = `<pattern id="${patternId}" width="${s}" height="${s}" patternUnits="userSpaceOnUse" patternTransform="rotate(${totalRot})"><line x1="0" y1="0" x2="0" y2="${s}" stroke="${escapeXml(fillColor)}" stroke-width="${lineW}"/><line x1="0" y1="0" x2="${s}" y2="0" stroke="${escapeXml(fillColor)}" stroke-width="${lineW}"/></pattern>`;
     } else if (fillPattern === 'dots') {
         const transformAttr = normAngle !== 0 ? ` patternTransform="rotate(${normAngle})"` : '';
-        patternSvg = `<pattern id="${patternId}" width="8" height="8" patternUnits="userSpaceOnUse"${transformAttr}><circle cx="4" cy="4" r="1.2" fill="${escapeXml(fillColor)}"/></pattern>`;
+        patternSvg = `<pattern id="${patternId}" width="${s}" height="${s}" patternUnits="userSpaceOnUse"${transformAttr}><circle cx="${s / 2}" cy="${s / 2}" r="${dotR}" fill="${escapeXml(fillColor)}"/></pattern>`;
     }
 
     return {

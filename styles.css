@@ -5426,3 +5426,564 @@ button.apolo-profile-cancel-btn,
   color: var(--apolo-text-muted, #888);
   cursor: pointer;
 }
+
+/* =========================================================================
+   Apolo Estuche de Formas (Mockup Compact Refactor)
+   Target: Galaxy Tab S10 with S-Pen & touch priority
+   ========================================================================= */
+
+.apolo-estuche-popover {
+  --bg: var(--apolo-bg, #ffffff);
+  --tx: var(--apolo-text, #1e2330);
+  --mu: var(--apolo-text-muted, #6b7280);
+  --fa: var(--apolo-text-faint, #9ca3af);
+  --ac: var(--apolo-accent, #2f6bff);
+  --as: var(--apolo-accent-subtle, rgba(47, 107, 255, 0.1));
+  --bd: var(--apolo-border, rgba(0, 0, 0, 0.08));
+  --cd: var(--apolo-card, rgba(128, 128, 128, 0.08));
+  --ch: var(--apolo-card-hover, rgba(128, 128, 128, 0.15));
+  --el: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.07);
+}
+
+.theme-dark .apolo-estuche-popover {
+  --bg: var(--apolo-bg, #25272d);
+  --tx: var(--apolo-text, #f3f4f6);
+  --mu: var(--apolo-text-muted, #a1a8b5);
+  --fa: var(--apolo-text-faint, #6f7684);
+  --ac: var(--apolo-accent, #5b8cff);
+  --as: var(--apolo-accent-subtle, rgba(91, 140, 255, 0.16));
+  --bd: var(--apolo-border, rgba(255, 255, 255, 0.09));
+  --cd: var(--apolo-card, rgba(255, 255, 255, 0.055));
+  --ch: var(--apolo-card-hover, rgba(255, 255, 255, 0.11));
+  --el: 0 1px 4px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* 1. Carrusel de Formas */
+.apolo-estuche-popover .car,
+.car {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  width: 100%;
+}
+.apolo-estuche-popover .car::-webkit-scrollbar,
+.car::-webkit-scrollbar {
+  display: none;
+}
+
+.apolo-estuche-popover .pgs,
+.pgs {
+  flex: 0 0 100%;
+  scroll-snap-align: start;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.apolo-estuche-popover .sb,
+.sb {
+  all: unset;
+  box-sizing: border-box;
+  height: 40px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: var(--mu);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.apolo-estuche-popover .sb::before,
+.sb::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  min-height: 40px;
+}
+.apolo-estuche-popover .sb:hover,
+.sb:hover {
+  background: var(--cd);
+  color: var(--tx);
+}
+/* ONLY active shape has the blue tinted background */
+.apolo-estuche-popover .sb.on,
+.sb.on {
+  background: var(--as) !important;
+  color: var(--ac) !important;
+}
+
+.apolo-estuche-popover .pager,
+.pager {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  height: 10px;
+  margin-top: 6px;
+}
+
+.apolo-estuche-popover .dot,
+.dot {
+  all: unset;
+  box-sizing: border-box;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fa);
+  opacity: 0.45;
+  cursor: pointer;
+  position: relative;
+  transition: width 0.15s ease, border-radius 0.15s ease, opacity 0.15s ease;
+}
+.apolo-estuche-popover .dot::before,
+.dot::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+}
+.apolo-estuche-popover .dot.on,
+.dot.on {
+  width: 13px;
+  border-radius: 3px;
+  background: var(--tx);
+  opacity: 0.9;
+}
+.apolo-estuche-popover .dot.dimmed,
+.dot.dimmed {
+  opacity: 0.2;
+}
+
+/* 2. Sliders (reutilizable: grosor y densidad) */
+.apolo-estuche-popover .sl,
+.sl {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  width: 100%;
+}
+
+.apolo-estuche-popover .st,
+.st {
+  all: unset;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--mu);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.apolo-estuche-popover .st::before,
+.st::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+.apolo-estuche-popover .st:hover,
+.st:hover {
+  background: var(--ch);
+  color: var(--tx);
+}
+
+.apolo-estuche-popover .trk,
+.trk {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(128, 128, 128, 0.5) 1.2px, transparent 1.5px) 0 center / calc(100% / var(--n, 12)) 100% repeat-x, var(--ch);
+  cursor: pointer;
+  touch-action: none;
+}
+.apolo-estuche-popover .trk::before,
+.trk::before {
+  content: '';
+  position: absolute;
+  top: -12px;
+  bottom: -12px;
+  left: 0;
+  right: 0;
+}
+
+.apolo-estuche-popover .th,
+.th {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--tx);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 0 1.5px var(--bg);
+  user-select: none;
+  pointer-events: none;
+}
+
+.apolo-estuche-popover .sl.sm,
+.sl.sm {
+  height: 22px;
+}
+.apolo-estuche-popover .sl.sm .trk,
+.sl.sm .trk {
+  height: 6px;
+}
+.apolo-estuche-popover .sl.sm .th,
+.sl.sm .th {
+  width: 16px;
+  height: 16px;
+}
+
+/* 3. Barra de Controles (Línea, Relleno, 1:1) */
+.apolo-estuche-popover .bar,
+.bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--cd);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.apolo-estuche-popover .pb,
+.pb {
+  all: unset;
+  box-sizing: border-box;
+  height: 32px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--mu);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+.apolo-estuche-popover .pb::before,
+.pb::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+.apolo-estuche-popover .pb:hover,
+.pb:hover {
+  background: var(--ch);
+  color: var(--tx);
+}
+.apolo-estuche-popover .pb.open,
+.pb.open {
+  background: var(--bg) !important;
+  color: var(--tx) !important;
+  box-shadow: var(--el) !important;
+}
+.apolo-estuche-popover .pb.tg.on,
+.pb.tg.on {
+  color: var(--ac) !important;
+}
+
+.apolo-estuche-popover .pb.hf .fg,
+.pb.hf .fg {
+  color: var(--fc, var(--tx));
+  filter: drop-shadow(0 0 0.7px rgba(0, 0, 0, 0.3));
+}
+
+.apolo-estuche-popover .fg,
+.fg {
+  width: 22px;
+  height: 17px;
+  color: var(--mu);
+  display: block;
+}
+
+.apolo-estuche-popover .car-t,
+.car-t {
+  width: 9px;
+  height: 9px;
+  opacity: 0.5;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.apolo-estuche-popover .pb.open .car-t,
+.pb.open .car-t {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+/* 4. Gavetas (Acordeón con transición de altura) */
+.apolo-estuche-popover .tray,
+.tray {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease;
+  width: 100%;
+}
+.apolo-estuche-popover .tray.open,
+.tray.open {
+  grid-template-rows: 1fr;
+}
+.apolo-estuche-popover .tray > div,
+.tray > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.apolo-estuche-popover .box,
+.box {
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--cd);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+.apolo-estuche-popover .g3,
+.g3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+.apolo-estuche-popover .g5,
+.g5 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  width: 100%;
+}
+
+.apolo-estuche-popover .cc,
+.cc {
+  all: unset;
+  box-sizing: border-box;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mu);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+.apolo-estuche-popover .cc::before,
+.cc::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+.apolo-estuche-popover .cc:hover,
+.cc:hover {
+  background: var(--ch);
+  color: var(--tx);
+}
+.apolo-estuche-popover .cc.on,
+.cc.on {
+  background: var(--bg) !important;
+  color: var(--tx);
+  box-shadow: var(--el) !important;
+}
+.apolo-estuche-popover .g5 .cc.on:not(.off),
+.g5 .cc.on:not(.off) {
+  color: var(--fc, var(--tx));
+}
+.apolo-estuche-popover .cc svg.ln,
+.cc svg.ln {
+  width: 100%;
+  height: 10px;
+  overflow: visible;
+}
+.apolo-estuche-popover .cc svg.ln line,
+.cc svg.ln line {
+  stroke: currentColor;
+  stroke-width: 2.3;
+  stroke-linecap: round;
+}
+.apolo-estuche-popover .cc .fg,
+.cc .fg {
+  color: inherit;
+}
+
+/* Densidad (animado dentro de gaveta de relleno) */
+.apolo-estuche-popover .dens,
+.dens {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease, margin 0.2s ease;
+  margin-top: -10px;
+}
+.apolo-estuche-popover .dens.show,
+.dens.show {
+  grid-template-rows: 1fr;
+  margin-top: 0;
+}
+.apolo-estuche-popover .dens > div,
+.dens > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* 5. Fila de Colores */
+.apolo-estuche-popover .sr,
+.sr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.apolo-estuche-popover .sw,
+.sw {
+  all: unset;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.12s ease;
+}
+.apolo-estuche-popover .sw::before,
+.sw::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+}
+.apolo-estuche-popover .sw:hover,
+.sw:hover {
+  transform: scale(1.08);
+}
+.apolo-estuche-popover .sw.on,
+.sw.on {
+  outline: 2px solid var(--mu);
+  outline-offset: 2px;
+}
+
+.apolo-estuche-popover .ad,
+.ad {
+  all: unset;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--fa);
+  cursor: pointer;
+  position: relative;
+}
+.apolo-estuche-popover .ad::before,
+.ad::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+}
+.apolo-estuche-popover .ad:hover,
+.ad:hover {
+  color: var(--tx);
+  background: var(--ch);
+}
+
+.apolo-estuche-popover .pf,
+.pf {
+  justify-content: flex-start;
+  gap: 9px;
+  padding-left: 2px;
+}
+.apolo-estuche-popover .pf .sw,
+.pf .sw,
+.apolo-estuche-popover .pf .ad,
+.pf .ad {
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+}
+
+.apolo-estuche-popover .pal .pager,
+.pal .pager {
+  margin-top: 10px;
+}
+.apolo-estuche-popover .pal .pager .ib,
+.pal .pager .ib {
+  all: unset;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: var(--mu);
+  cursor: pointer;
+  position: relative;
+}
+.apolo-estuche-popover .pal .pager .ib::before,
+.pal .pager .ib::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
+}
+.apolo-estuche-popover .pal .pager .ib:hover,
+.pal .pager .ib:hover {
+  color: var(--tx);
+  background: var(--ch);
+}
+.apolo-estuche-popover .pal .pager .ib.on,
+.pal .pager .ib.on {
+  color: var(--tx);
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .apolo-estuche-popover .tray,
+  .tray,
+  .apolo-estuche-popover .dens,
+  .dens,
+  .apolo-estuche-popover .car-t,
+  .car-t,
+  .apolo-estuche-popover .dot,
+  .dot,
+  .apolo-estuche-popover .sb,
+  .sb,
+  .apolo-estuche-popover .pb,
+  .pb,
+  .apolo-estuche-popover .cc,
+  .cc {
+    transition: none !important;
+  }
+}

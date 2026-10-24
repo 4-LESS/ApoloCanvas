@@ -87,6 +87,7 @@ export interface ShapeFavoritePreset extends BaseFavoritePreset {
     fillColor?: string;
     fillOpacity?: number;
     fillPattern?: ShapeFillPattern;
+    fillDensity?: number;
 }
 
 export type ToolFavoritePreset =
@@ -149,6 +150,7 @@ export interface WorkspaceToolState {
         fillColor?: string;
         fillOpacity?: number;
         fillPattern?: ShapeFillPattern;
+        fillDensity?: number;
         activeSlotIndex: number;
         palette: { colors: string[]; opacities: number[] };
     };
@@ -321,6 +323,7 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
         fillColor: '',
         fillOpacity: 0.2,
         fillPattern: 'solid',
+        fillDensity: 3,
         activeSlotIndex: 0,
         palette: {
             colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
@@ -509,6 +512,7 @@ export function hydrateFromSavedState(
             fillColor: saved.shape?.fillColor ?? fallback.shape.fillColor,
             fillOpacity: saved.shape?.fillOpacity ?? fallback.shape.fillOpacity,
             fillPattern: saved.shape?.fillPattern ?? fallback.shape.fillPattern ?? 'solid',
+            fillDensity: saved.shape?.fillDensity ?? fallback.shape.fillDensity ?? 3,
             activeSlotIndex: saved.shape?.activeSlotIndex ?? fallback.shape.activeSlotIndex,
             palette: {
                 colors: saved.shape?.palette?.colors?.length === 4
@@ -615,6 +619,7 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
             fillColor: state.shape.fillColor,
             fillOpacity: state.shape.fillOpacity,
             fillPattern: state.shape.fillPattern,
+            fillDensity: state.shape.fillDensity ?? 3,
             activeSlotIndex: state.shape.activeSlotIndex,
             palette: {
                 colors: [...state.shape.palette.colors],
@@ -696,6 +701,7 @@ export interface ShapeElement extends InkElementBase {
     fillEnabled?: boolean;
     fillOpacity?: number;
     fillPattern?: ShapeFillPattern;
+    fillDensity?: number;
     regularize?: boolean;
     rotation?: number;      // Radians
     bounds: BoundingBox;    // Normalized bounds: minU, minV, maxU, maxV
