@@ -137,6 +137,9 @@ export function createMockEnvironment(): any {
                 children.length = 0;
                 if (v !== '') children.push(String(v));
             },
+            get firstChild(): any {
+                return children[0] ?? null;
+            },
             classList: {
                 add: (...cs: string[]) => {
                     for (const c of cs) {
