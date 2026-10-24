@@ -5,7 +5,7 @@
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapePlugin, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
     applyCanvasFill,
     getStrokeDashArray,
@@ -13,6 +13,7 @@ import {
     getSvgStrokeAttributes,
     regularizeClosedGeometry,
 } from './common.ts';
+import { boxCornerHandles, boxEdgeHandles, resizeBoxByHandle } from './handles.ts';
 
 export const ellipseShapePlugin: ShapePlugin = {
     id: 'ellipse',
@@ -99,5 +100,14 @@ export const ellipseShapePlugin: ShapePlugin = {
         const ry = Math.max(0.1, Math.abs(norm.y1 - norm.y0) / 2) + tolerance;
         const eq = ((point.x - cx) / rx) ** 2 + ((point.y - cy) / ry) ** 2;
         return eq <= 1;
+    },
+
+    getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
+        const norm = this.normalizeGeometry(geom);
+        return [...boxCornerHandles(norm), ...boxEdgeHandles(norm)];
+    },
+
+    applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
+        return resizeBoxByHandle(this.normalizeGeometry(geom), handleId, newPoint, regularize ?? geom.regularize);
     },
 };

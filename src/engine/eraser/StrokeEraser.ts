@@ -1,5 +1,5 @@
 import type { BoundingBox, CanvasElement, Point, ShapeElement, StrokeElement } from '../../core/types.ts';
-import { getShapePlugin, type ShapeRenderGeometry } from '../shapes/index.ts';
+import { getShapePlugin, sampleLinearPath, shapeElementToGeometry } from '../shapes/index.ts';
 
 /**
  * Calculates squared distance from a point to a 2D line segment.
@@ -170,19 +170,11 @@ export function shapeHitDoc(
 ): boolean {
     if (eraser.length === 0) return false;
 
-    const startX = contentLeft + shape.startX * contentWidth;
-    const startY = blockTop + shape.startY * contentWidth;
-    const endX = contentLeft + shape.endX * contentWidth;
-    const endY = blockTop + shape.endY * contentWidth;
-
     const plugin = getShapePlugin(shape.shapeType);
-    const geom: ShapeRenderGeometry = {
-        x0: startX,
-        y0: startY,
-        x1: endX,
-        y1: endY,
-        regularize: shape.regularize,
-    };
+    const geom = shapeElementToGeometry(shape, contentLeft, blockTop, contentWidth);
+    const path = plugin.id === 'line' || plugin.id === 'arrow'
+        ? sampleLinearPath(plugin.normalizeGeometry(geom))
+        : null;
     const effectiveRadius = radius + (shape.style.width || 2) / 2;
     const effectiveRadiusSq = effectiveRadius * effectiveRadius;
 
@@ -190,10 +182,12 @@ export function shapeHitDoc(
         if (plugin.hitTest(geom, eraser[j], effectiveRadius)) {
             return true;
         }
-        if (j > 0 && (plugin.id === 'line' || plugin.id === 'arrow')) {
+        if (j > 0 && path) {
             const prev = eraser[j - 1];
-            if (minDistanceBetweenSegmentsSquared(startX, startY, endX, endY, prev.x, prev.y, eraser[j].x, eraser[j].y) <= effectiveRadiusSq) {
-                return true;
+            for (let k = 1; k < path.length; k++) {
+                if (minDistanceBetweenSegmentsSquared(path[k - 1].x, path[k - 1].y, path[k].x, path[k].y, prev.x, prev.y, eraser[j].x, eraser[j].y) <= effectiveRadiusSq) {
+                    return true;
+                }
             }
         }
     }

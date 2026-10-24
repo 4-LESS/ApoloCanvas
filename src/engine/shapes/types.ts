@@ -11,12 +11,32 @@ export interface ShapeSvgOutput {
     body: string;
 }
 
+export interface ShapePoint {
+    x: number;
+    y: number;
+}
+
 export interface ShapeRenderGeometry {
     x0: number;
     y0: number;
     x1: number;
     y1: number;
     regularize?: boolean;
+    /** Rectangle corner radius in the same space as x0..y1. */
+    cornerRadius?: number;
+    /** Quadratic Bezier control point for curved lines / arrows. */
+    controlPoint?: ShapePoint;
+    /** Independent vertex overrides (e.g. a free triangle). */
+    vertices?: ShapePoint[];
+}
+
+export type ShapeHandleKind = 'endpoint' | 'corner' | 'curve' | 'radius' | 'vertex';
+
+export interface ShapeHandle {
+    readonly id: string;
+    readonly kind: ShapeHandleKind;
+    readonly x: number;
+    readonly y: number;
 }
 
 export interface ShapeStyleConfig {
@@ -41,6 +61,10 @@ export interface ShapePlugin {
     renderSvg(geom: ShapeRenderGeometry, style: ShapeStyleConfig): ShapeSvgOutput;
     computeBounds(geom: ShapeRenderGeometry, strokeWidth: number): BoundingBox;
     hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean;
+    /** Editable control handles of the rendered (normalized) geometry. */
+    getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[];
+    /** Returns the geometry produced by dragging `handleId` to `newPoint`; `geom` itself is not mutated. */
+    applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry;
 }
 
 export type NormalizedPoint = [number, number];

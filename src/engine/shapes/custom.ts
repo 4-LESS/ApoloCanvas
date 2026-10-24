@@ -10,11 +10,20 @@ import type {
     CustomPathSegment,
     CustomShapeDefinition,
     CustomShapeSubpath,
+    ShapeHandle,
     ShapePlugin,
+    ShapePoint,
     ShapeRenderGeometry,
     ShapeStyleConfig,
     ShapeSvgOutput,
 } from './types.ts';
+import {
+    applyLinearHandleDrag,
+    boxCornerHandles,
+    boxEdgeHandles,
+    linearControlHandles,
+    resizeBoxByHandle,
+} from './handles.ts';
 import {
     applyCanvasFill,
     getStrokeDashArray,
@@ -256,6 +265,21 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             }
 
             return pointInBox(point.x, point.y, minX, minY, maxX, maxY, tolerance);
+        },
+
+        getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
+            const norm = this.normalizeGeometry(geom);
+            return isClosed
+                ? [...boxCornerHandles(norm), ...boxEdgeHandles(norm)]
+                : linearControlHandles(norm).filter(h => h.kind === 'endpoint');
+        },
+
+        applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
+            const norm = this.normalizeGeometry(geom);
+            const reg = regularize ?? geom.regularize;
+            return isClosed
+                ? resizeBoxByHandle(norm, handleId, newPoint, reg)
+                : applyLinearHandleDrag(norm, handleId, newPoint, reg);
         },
     };
 }
