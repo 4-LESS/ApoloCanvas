@@ -725,6 +725,7 @@ export class CanvasController {
             fillColor: this.toolState.shape.fillColor,
             fillPattern: this.toolState.shape.fillPattern,
             fillDensity: this.toolState.shape.fillDensity,
+            fillOpacity: this.toolState.shape.fillOpacity,
         };
     }
 
@@ -837,6 +838,12 @@ export class CanvasController {
                 onChangeFillDensity: (density) => {
                     this.toolState.shape.fillDensity = density;
                     this.estuche?.updateState({ fillDensity: density });
+                    this.syncEstucheFavoriteState();
+                    this.notifyToolStateChange();
+                },
+                onChangeFillOpacity: (opacity) => {
+                    this.toolState.shape.fillOpacity = opacity;
+                    this.estuche?.updateState({ fillOpacity: opacity });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },

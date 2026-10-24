@@ -215,9 +215,9 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
         estuche.open();
 
         // 1. Verify shapes carousel and pager exist
-        const car = estuche.container.querySelector('.car') as HTMLElement;
+        const car = estuche.container.querySelector('.shape-carousel') as HTMLElement;
         assert.ok(car, 'Shapes carousel should exist');
-        const pager = estuche.container.querySelector('.pager') as HTMLElement;
+        const pager = estuche.container.querySelector('.shape-pager') as HTMLElement;
         assert.ok(pager, 'Pager should exist for multi-page shapes');
 
         // 2. Select shape with stylus tap (e.g. circle / ellipse)
@@ -247,7 +247,7 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
         assert.strictEqual(selectedShape, 'ellipse', 'Stylus tap should select ellipse shape');
 
         // 3. Toggle 1:1 perfect ratio button with stylus tap
-        const ratioBtn = estuche.container.querySelector('button[data-tb="ratio"], button.pb.tg') as HTMLElement;
+        const ratioBtn = estuche.container.querySelector('button[data-tb="ratio"]') as HTMLElement;
         assert.ok(ratioBtn, 'Ratio 1:1 button should exist');
         assert.strictEqual(ratioBtn.style.touchAction, 'manipulation');
 
@@ -297,10 +297,11 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
 
         const lineTray = estuche.container.querySelector('[data-t="line"]') as HTMLElement;
         assert.ok(lineTray, 'Line tray should exist');
-        assert.ok(lineTray.classList.contains('open'), 'Line tray should be open after stylus tap');
+        assert.ok(lineTray.classList.contains('is-open'), 'Line tray should be open after stylus tap');
+        assert.strictEqual(lineTray.hidden, false, 'Open line tray is visible');
 
         // 5. Select dashed line style chip with stylus tap
-        const dashedChip = lineTray.querySelectorAll('button.cc')[1] as HTMLElement;
+        const dashedChip = lineTray.querySelectorAll('button.line-chip')[1] as HTMLElement;
         assert.ok(dashedChip, 'Dashed line chip should exist');
 
         dashedChip.dispatchEvent({
@@ -349,9 +350,9 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
 
         const fillTray = estuche.container.querySelector('[data-t="fill"]') as HTMLElement;
         assert.ok(fillTray, 'Fill tray should exist');
-        assert.ok(fillTray.classList.contains('open'), 'Fill tray should be open after stylus tap');
+        assert.ok(fillTray.classList.contains('is-open'), 'Fill tray should be open after stylus tap');
 
-        const hachureChip = fillTray.querySelectorAll('button.cc')[2] as HTMLElement;
+        const hachureChip = fillTray.querySelectorAll('button.fill-chip')[2] as HTMLElement;
         assert.ok(hachureChip, 'Hachure fill chip should exist');
 
         hachureChip.dispatchEvent({
