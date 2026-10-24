@@ -484,3 +484,64 @@ export function createFillGlyph(
 
     return svg;
 }
+
+/**
+ * Binds both pointerup (with tap-slop and duration check) and click to an element,
+ * ensuring robust responsiveness on mobile/tablet stylus/touch while preventing double-firing.
+ */
+export function bindTapOrClick(
+    el: HTMLElement,
+    action: (e?: MouseEvent | PointerEvent) => void,
+): () => void {
+    let downPos: { x: number; y: number; time: number } | null = null;
+    let lastTriggerTime = 0;
+
+    const onPointerDown = (e: PointerEvent) => {
+        if (typeof e.button === 'number' && e.button !== 0 && e.button !== -1) return;
+        downPos = { x: e.clientX, y: e.clientY, time: Date.now() };
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+        if (!downPos) return;
+        const dx = e.clientX - downPos.x;
+        const dy = e.clientY - downPos.y;
+        const dt = Date.now() - downPos.time;
+        downPos = null;
+
+        // Slop distance for stylus/finger tap: <= 12px, <= 600ms
+        if (Math.hypot(dx, dy) <= 12 && dt <= 600) {
+            lastTriggerTime = Date.now();
+            action(e);
+        }
+    };
+
+    const onPointerCancel = () => {
+        downPos = null;
+    };
+
+    const onClick = (e: MouseEvent) => {
+        if (Date.now() - lastTriggerTime < 400) {
+            e.stopPropagation();
+            return;
+        }
+        lastTriggerTime = Date.now();
+        action(e);
+    };
+
+    el.addEventListener('pointerdown', onPointerDown);
+    el.addEventListener('pointerup', onPointerUp);
+    el.addEventListener('pointercancel', onPointerCancel);
+    el.addEventListener('click', onClick);
+    el.onclick = onClick;
+
+    return () => {
+        el.removeEventListener('pointerdown', onPointerDown);
+        el.removeEventListener('pointerup', onPointerUp);
+        el.removeEventListener('pointercancel', onPointerCancel);
+        el.removeEventListener('click', onClick);
+        if (el.onclick === onClick) {
+            el.onclick = null as any;
+        }
+    };
+}
+

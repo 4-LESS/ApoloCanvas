@@ -58,6 +58,8 @@ export function createMockEnvironment(): any {
             transform: '',
             touchAction: '',
             overflow: '',
+            overflowX: '',
+            overflowY: '',
             setProperty: (k: string, v: string) => { styleObj[k] = v; },
             getPropertyValue: (k: string) => styleObj[k] ?? '',
         };
@@ -83,9 +85,11 @@ export function createMockEnvironment(): any {
                 const targetClasses = sel.slice(1).split('.');
                 return targetClasses.every(cls => Boolean(node.classList?.contains(cls) || node.className?.split(/\s+/).includes(cls)));
             }
-            if (sel.startsWith('#')) return node.id === sel.slice(1);
-            if (sel.startsWith('[') && sel.endsWith(']')) {
-                const inner = sel.slice(1, -1);
+            const tagAttrMatch = sel.match(/^([a-zA-Z0-9_-]+)?\[([^\]]+)\]$/);
+            if (tagAttrMatch) {
+                const tagPart = tagAttrMatch[1];
+                if (tagPart && tagPart.toLowerCase() !== node.tagName?.toLowerCase()) return false;
+                const inner = tagAttrMatch[2];
                 const eqIdx = inner.indexOf('=');
                 if (eqIdx !== -1) {
                     const attr = inner.slice(0, eqIdx);
@@ -94,6 +98,7 @@ export function createMockEnvironment(): any {
                 }
                 return node.hasAttribute(inner);
             }
+            if (sel.startsWith('#')) return node.id === sel.slice(1);
             if (sel.toLowerCase() === node.tagName?.toLowerCase()) return true;
             return false;
         };

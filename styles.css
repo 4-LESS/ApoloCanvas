@@ -5487,6 +5487,7 @@ button.apolo-profile-cancel-btn,
 .sb {
   all: unset;
   box-sizing: border-box;
+  touch-action: manipulation;
   height: 40px;
   border-radius: 11px;
   display: grid;
@@ -5529,6 +5530,7 @@ button.apolo-profile-cancel-btn,
 .dot {
   all: unset;
   box-sizing: border-box;
+  touch-action: manipulation;
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -5575,6 +5577,7 @@ button.apolo-profile-cancel-btn,
 .st {
   all: unset;
   box-sizing: border-box;
+  touch-action: manipulation;
   width: 24px;
   height: 24px;
   border-radius: 6px;
@@ -5589,7 +5592,7 @@ button.apolo-profile-cancel-btn,
 .st::before {
   content: '';
   position: absolute;
-  inset: -8px;
+  inset: -2px;
 }
 .apolo-estuche-popover .st:hover,
 .st:hover {
@@ -5610,8 +5613,8 @@ button.apolo-profile-cancel-btn,
 .trk::before {
   content: '';
   position: absolute;
-  top: -12px;
-  bottom: -12px;
+  top: -4px;
+  bottom: -4px;
   left: 0;
   right: 0;
 }
@@ -5666,6 +5669,7 @@ button.apolo-profile-cancel-btn,
 .pb {
   all: unset;
   box-sizing: border-box;
+  touch-action: manipulation;
   height: 32px;
   border-radius: 9px;
   display: flex;
@@ -5681,7 +5685,7 @@ button.apolo-profile-cancel-btn,
 .pb::before {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: 0;
 }
 .apolo-estuche-popover .pb:hover,
 .pb:hover {
@@ -5775,6 +5779,7 @@ button.apolo-profile-cancel-btn,
 .cc {
   all: unset;
   box-sizing: border-box;
+  touch-action: manipulation;
   height: 32px;
   border-radius: 8px;
   display: flex;
@@ -5789,7 +5794,7 @@ button.apolo-profile-cancel-btn,
 .cc::before {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: 0;
 }
 .apolo-estuche-popover .cc:hover,
 .cc:hover {
@@ -5855,6 +5860,7 @@ button.apolo-profile-cancel-btn,
 .sw {
   all: unset;
   box-sizing: border-box;
+  touch-action: manipulation;
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
@@ -5872,8 +5878,8 @@ button.apolo-profile-cancel-btn,
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
 }
 .apolo-estuche-popover .sw:hover,
 .sw:hover {
@@ -5889,6 +5895,7 @@ button.apolo-profile-cancel-btn,
 .ad {
   all: unset;
   box-sizing: border-box;
+  touch-action: manipulation;
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
@@ -5906,8 +5913,8 @@ button.apolo-profile-cancel-btn,
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
 }
 .apolo-estuche-popover .ad:hover,
 .ad:hover {
@@ -5928,6 +5935,13 @@ button.apolo-profile-cancel-btn,
   width: 20px;
   height: 20px;
   flex-basis: 20px;
+}
+.apolo-estuche-popover .pf .sw::before,
+.pf .sw::before,
+.apolo-estuche-popover .pf .ad::before,
+.pf .ad::before {
+  width: 22px;
+  height: 22px;
 }
 
 .apolo-estuche-popover .pal .pager,
