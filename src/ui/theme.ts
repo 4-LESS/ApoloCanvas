@@ -406,7 +406,7 @@ const GLYPH_SPACING_LEVELS = [6.5, 5, 4, 3.2, 2.6] as const;
 
 /**
  * Creates the dynamic fill pattern icon used in the tool estuche bar and tray chips.
- * Built entirely with DOM methods (zero innerHTML).
+ * Built entirely with DOM methods (no HTML string injection).
  */
 export function createFillGlyph(
     pattern: ShapeFillPattern | 'off',

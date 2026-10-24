@@ -144,18 +144,18 @@
    Scoped Button Reset (Zero !important, High Specificity against Obsidian)
    Neutralizes Obsidian button:not(.clickable-icon) and .is-tablet styles.
    ========================================================================== */
-.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
-.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn) {
+.apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-tablet .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-ui button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-space-block button:not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-ui button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn),
+.is-mobile .apolo-space-block button:not(.clickable-icon):not(.apolo-toolbar-btn):not(.popover-swatch-circle):not(.color-picker-sample-swatch):not(.color-quick-circle):not(.color-matrix-cell):not(.apolo-swatch-btn):not(.apolo-box-menu-close):not(.apolo-box-menu-tile):not(.apolo-box-menu-seg-btn):not(.apolo-box-menu-swatch):not(.apolo-box-menu-action-btn):not(.shape-btn):not(.shape-grid-btn):not(.prop-btn):not(.line-chip):not(.fill-chip):not(.fill-swatch):not(.shape-pager-btn):not(.apolo-card-menu-btn):not(.apolo-card-rename-btn):not(.color-picker-tab-btn):not(.seg-btn):not(.cell):not(.swatch):not(.ibtn):not(.cp-action):not(.color-action-btn):not(.color-eyedropper-btn):not(.hl-tip-btn) {
   all: unset;
   box-sizing: border-box;
   display: inline-flex;
@@ -4189,118 +4189,58 @@ button.apolo-box-menu-swatch,
 .eraser-radio-row.is-active .eraser-radio-inner-dot { transform: scale(1); }
 .eraser-divider { height: 1px; background-color: var(--apolo-border-subtle); margin: 4px 0; }
 
-/* 7. Formas */
+/* 7. Formas (botones del selector; estilos completos en "Apolo Estuche de Formas") */
 .shape-grid,
 .shape-grid-selector {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
-  padding: 0 0 12px;
-  background: transparent;
-  border-radius: 0;
-  border-bottom: 1px solid var(--apolo-border);
 }
 
 .apolo-ui .shape-btn,
 .apolo-ui .shape-grid-btn,
 .shape-btn,
-.shape-grid-btn,
-.apolo-estuche-popover button.shape-btn,
-.apolo-estuche-popover button.shape-grid-btn {
+.shape-grid-btn {
   all: unset;
   box-sizing: border-box;
-  display: grid;
-  place-items: center;
-  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 42px;
   min-width: 0;
   padding: 0;
-  border-radius: 12px;
+  border-radius: 11px;
   background: var(--apolo-card);
-  border: 1.5px solid transparent;
+  border: 1px solid transparent;
   color: var(--apolo-text-muted);
   cursor: pointer;
-  transition: background .12s, border-color .12s, color .12s;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .shape-btn:hover,
-.shape-grid-btn:hover,
-.apolo-estuche-popover button.shape-btn:hover,
-.apolo-estuche-popover button.shape-grid-btn:hover {
+.shape-grid-btn:hover {
   background: var(--apolo-card-hover);
   color: var(--apolo-text);
 }
 
 .shape-btn:focus-visible,
-.shape-grid-btn:focus-visible,
-.apolo-estuche-popover button.shape-btn:focus-visible,
-.apolo-estuche-popover button.shape-grid-btn:focus-visible {
+.shape-grid-btn:focus-visible {
   outline: 2px solid var(--apolo-accent);
   outline-offset: -2px;
 }
 
 .shape-btn.is-active,
-.shape-grid-btn.is-active,
-.apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active,
-.apolo-estuche-popover .shape-grid button.shape-btn.is-active,
-.theme-light .apolo-estuche-popover button.shape-btn.is-active,
-.theme-light .apolo-estuche-popover button.shape-grid-btn.is-active,
-:root .apolo-estuche-popover button.shape-btn.is-active,
-:root .apolo-estuche-popover button.shape-grid-btn.is-active {
-  background: #eef3ff;
-  border: 1.5px solid #2f6bff;
-  color: #2f6bff;
-  box-shadow: none;
-}
-
-.theme-dark .shape-btn.is-active,
-.theme-dark .shape-grid-btn.is-active,
-.theme-dark .apolo-estuche-popover .shape-grid-selector button.shape-grid-btn.is-active,
-.theme-dark .apolo-estuche-popover .shape-grid button.shape-btn.is-active,
-.theme-dark .apolo-estuche-popover button.shape-btn.is-active,
-.theme-dark .apolo-estuche-popover button.shape-grid-btn.is-active {
-  background: rgba(91, 140, 255, 0.18);
-  border: 1.5px solid #5b8cff;
-  color: #5b8cff;
-  box-shadow: none;
+.shape-grid-btn.is-active {
+  background: var(--apolo-accent-subtle);
+  border-color: var(--apolo-accent-light);
+  color: var(--apolo-accent);
 }
 
 .shape-btn svg,
-.shape-grid-btn svg,
-.apolo-estuche-popover button.shape-btn svg,
-.apolo-estuche-popover button.shape-grid-btn svg {
-  width: 26px;
-  height: 26px;
-  min-width: 26px;
-  min-height: 26px;
+.shape-grid-btn svg {
+  width: 22px;
+  height: 22px;
   stroke: currentColor;
-  stroke-width: 1.6;
-}
-
-.shape-btn.is-active svg,
-.shape-grid-btn.is-active svg,
-.apolo-estuche-popover button.shape-btn.is-active svg,
-.apolo-estuche-popover button.shape-grid-btn.is-active svg {
-  stroke: #2f6bff;
-}
-
-.theme-dark .shape-btn.is-active svg,
-.theme-dark .shape-grid-btn.is-active svg,
-.theme-dark .apolo-estuche-popover button.shape-btn.is-active svg,
-.theme-dark .apolo-estuche-popover button.shape-grid-btn.is-active svg {
-  stroke: #5b8cff;
-}
-
-.shape-fill-subpanel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 4px;
-  transition: opacity 0.2s ease;
-}
-
-.shape-fill-subpanel.is-disabled {
-  opacity: 0.35;
-  pointer-events: none;
 }
 
 /* 8. Modal Selector de Color (.color-picker-popover) */
@@ -5458,62 +5398,144 @@ button.apolo-profile-cancel-btn,
   --el: 0 1px 4px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-/* 1. Carrusel de Formas */
-.apolo-estuche-popover .car,
-.car {
+/* 1. Carrusel paginado de formas (5 columnas por página, sin barra de scroll) */
+.apolo-estuche-popover .shape-carousel-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.apolo-estuche-popover .shape-carousel {
   display: flex;
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
   touch-action: pan-x;
   width: 100%;
 }
-.apolo-estuche-popover .car::-webkit-scrollbar,
-.car::-webkit-scrollbar {
+.apolo-estuche-popover .shape-carousel::-webkit-scrollbar {
   display: none;
 }
+.apolo-estuche-popover .shape-carousel.is-single-page {
+  overflow-x: hidden;
+  touch-action: manipulation;
+}
 
-.apolo-estuche-popover .pgs,
-.pgs {
+.apolo-estuche-popover .shape-page {
   flex: 0 0 100%;
   scroll-snap-align: start;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   width: 100%;
+  box-sizing: border-box;
 }
 
-.apolo-estuche-popover .sb,
-.sb {
+.apolo-estuche-popover .shape-slot-empty {
+  display: block;
+  height: 42px;
+}
+
+.apolo-estuche-popover .shape-page button.shape-btn {
   all: unset;
   box-sizing: border-box;
   touch-action: manipulation;
-  height: 40px;
+  height: 42px;
+  min-width: 0;
   border-radius: 11px;
-  display: grid;
-  place-items: center;
-  color: var(--mu);
+  background: var(--apolo-card);
+  border: 1px solid transparent;
+  color: var(--apolo-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   position: relative;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.apolo-estuche-popover .sb::before,
-.sb::before {
+.apolo-estuche-popover .shape-page button.shape-btn:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
+}
+.apolo-estuche-popover .shape-page button.shape-btn:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: -2px;
+}
+/* Solo la forma activa usa el acento azul */
+.apolo-estuche-popover .shape-page button.shape-btn.is-active {
+  background: var(--apolo-accent-subtle);
+  border-color: var(--apolo-accent-light);
+  color: var(--apolo-accent);
+}
+.apolo-estuche-popover .shape-page button.shape-btn svg {
+  width: 22px;
+  height: 22px;
+  stroke: currentColor;
+}
+
+/* Pager del carrusel: flechas 18x18 + puntos que se expanden a píldora */
+.apolo-estuche-popover .shape-pager {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+  margin: 0;
+}
+.apolo-estuche-popover .shape-pager-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.apolo-estuche-popover .shape-pager button.shape-pager-btn {
+  all: unset;
+  box-sizing: border-box;
+  touch-action: manipulation;
+  cursor: pointer;
+  position: relative;
+}
+.apolo-estuche-popover .shape-pager button.shape-pager-btn::before {
   content: '';
   position: absolute;
-  inset: -2px;
-  min-height: 40px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 26px;
+  height: 26px;
 }
-.apolo-estuche-popover .sb:hover,
-.sb:hover {
-  background: var(--cd);
-  color: var(--tx);
+.apolo-estuche-popover .shape-pager button.arrow.shape-pager-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--apolo-text-muted);
 }
-/* ONLY active shape has the blue tinted background */
-.apolo-estuche-popover .sb.on,
-.sb.on {
-  background: var(--as) !important;
-  color: var(--ac) !important;
+.apolo-estuche-popover .shape-pager button.arrow.shape-pager-btn:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
+}
+.apolo-estuche-popover .shape-pager button.arrow.shape-pager-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  pointer-events: none;
+}
+.apolo-estuche-popover .shape-pager button.dot.shape-pager-btn {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--apolo-text-faint);
+  opacity: 0.55;
+  transition: width 0.15s ease, opacity 0.15s ease, background-color 0.15s ease;
+}
+.apolo-estuche-popover .shape-pager button.dot.shape-pager-btn.is-active {
+  width: 16px;
+  background: var(--apolo-text);
+  opacity: 0.9;
 }
 
 .apolo-estuche-popover .pager,
@@ -5652,199 +5674,251 @@ button.apolo-profile-cancel-btn,
   height: 16px;
 }
 
-/* 3. Barra de Controles (Línea, Relleno, 1:1) */
-.apolo-estuche-popover .bar,
-.bar {
+/* 3. Barra de 3 controles [Línea ▾] [Relleno ▾] [1:1] */
+.apolo-estuche-popover .shape-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.apolo-estuche-popover .prop-bar {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 2px;
-  padding: 3px;
-  border-radius: 12px;
-  background: var(--cd);
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
   width: 100%;
   box-sizing: border-box;
 }
 
-.apolo-estuche-popover .pb,
-.pb {
+.apolo-estuche-popover .prop-bar button.prop-btn {
   all: unset;
   box-sizing: border-box;
   touch-action: manipulation;
-  height: 32px;
-  border-radius: 9px;
+  height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+  border-radius: 10px;
+  background: var(--apolo-card);
+  border: 1px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  color: var(--mu);
+  color: var(--apolo-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   position: relative;
-  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
 }
-.apolo-estuche-popover .pb::before,
-.pb::before {
-  content: '';
-  position: absolute;
-  inset: 0;
+.apolo-estuche-popover .prop-bar button.prop-btn:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
 }
-.apolo-estuche-popover .pb:hover,
-.pb:hover {
-  background: var(--ch);
-  color: var(--tx);
+.apolo-estuche-popover .prop-bar button.prop-btn:focus-visible {
+  outline: 2px solid var(--apolo-accent);
+  outline-offset: -2px;
 }
-.apolo-estuche-popover .pb.open,
-.pb.open {
-  background: var(--bg) !important;
-  color: var(--tx) !important;
-  box-shadow: var(--el) !important;
+/* Disparador abierto: superficie elevada neutra */
+.apolo-estuche-popover .prop-bar button.prop-btn.is-open {
+  background: var(--apolo-bg-elevated);
+  border-color: var(--apolo-border);
+  color: var(--apolo-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
-.apolo-estuche-popover .pb.tg.on,
-.pb.tg.on {
-  color: var(--ac) !important;
+/* Formas abiertas (línea, flecha): el relleno no aplica */
+.apolo-estuche-popover .prop-bar button.prop-btn.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
-
-.apolo-estuche-popover .pb.hf .fg,
-.pb.hf .fg {
-  color: var(--fc, var(--tx));
-  filter: drop-shadow(0 0 0.7px rgba(0, 0, 0, 0.3));
+.apolo-estuche-popover .prop-bar button.prop-btn.is-toggle {
+  font-weight: 700;
 }
-
-.apolo-estuche-popover .fg,
-.fg {
-  width: 22px;
-  height: 17px;
-  color: var(--mu);
-  display: block;
+.apolo-estuche-popover .prop-bar button.prop-btn.is-toggle.is-on {
+  background: var(--apolo-accent-subtle);
+  border-color: var(--apolo-accent-light);
+  color: var(--apolo-accent);
 }
 
-.apolo-estuche-popover .car-t,
-.car-t {
+.apolo-estuche-popover .prop-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.apolo-estuche-popover .prop-label {
+  white-space: nowrap;
+}
+.apolo-estuche-popover .fill-color-pip {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.4);
+}
+.apolo-estuche-popover .fill-color-pip[hidden] {
+  display: none;
+}
+.apolo-estuche-popover .prop-caret {
   width: 9px;
   height: 9px;
   opacity: 0.5;
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
-.apolo-estuche-popover .pb.open .car-t,
-.pb.open .car-t {
+.apolo-estuche-popover .prop-btn.is-open .prop-caret {
   transform: rotate(180deg);
   opacity: 1;
 }
-
-/* 4. Gavetas (Acordeón con transición de altura) */
-.apolo-estuche-popover .tray,
-.tray {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.2s ease;
-  width: 100%;
-}
-.apolo-estuche-popover .tray.open,
-.tray.open {
-  grid-template-rows: 1fr;
-}
-.apolo-estuche-popover .tray > div,
-.tray > div {
-  overflow: hidden;
-  min-height: 0;
+.apolo-estuche-popover .prop-btn.has-fill .fg {
+  color: var(--fc, var(--apolo-text));
 }
 
-.apolo-estuche-popover .box,
-.box {
-  margin-top: 6px;
-  padding: 8px;
-  border-radius: 12px;
-  background: var(--cd);
+.apolo-estuche-popover .fg {
+  width: 22px;
+  height: 17px;
+  color: var(--apolo-text-muted);
+  display: block;
+}
+
+/* 4. Bandeja contextual plegable (solo visible con una bandeja abierta) */
+.apolo-estuche-popover .context-tray {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--apolo-card);
   box-sizing: border-box;
+  width: 100%;
+}
+.apolo-estuche-popover .context-tray[hidden],
+.apolo-estuche-popover .tray-section[hidden],
+.apolo-estuche-popover .fill-detail[hidden],
+.apolo-estuche-popover .fill-density[hidden] {
+  display: none;
 }
 
-.apolo-estuche-popover .g3,
-.g3 {
+.apolo-estuche-popover .tray-section,
+.apolo-estuche-popover .fill-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apolo-estuche-popover .line-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   width: 100%;
 }
-.apolo-estuche-popover .g5,
-.g5 {
+.apolo-estuche-popover .tray-fill-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 5px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
   width: 100%;
 }
 
-.apolo-estuche-popover .cc,
-.cc {
+.apolo-estuche-popover .context-tray button.line-chip,
+.apolo-estuche-popover .context-tray button.fill-chip {
   all: unset;
   box-sizing: border-box;
   touch-action: manipulation;
-  height: 32px;
-  border-radius: 8px;
+  height: 34px;
+  min-width: 0;
+  border-radius: 9px;
+  border: 1px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--mu);
+  color: var(--apolo-text-muted);
   cursor: pointer;
   position: relative;
-  transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
-.apolo-estuche-popover .cc::before,
-.cc::before {
-  content: '';
-  position: absolute;
-  inset: 0;
+.apolo-estuche-popover .context-tray button.line-chip:hover,
+.apolo-estuche-popover .context-tray button.fill-chip:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
 }
-.apolo-estuche-popover .cc:hover,
-.cc:hover {
-  background: var(--ch);
-  color: var(--tx);
+.apolo-estuche-popover .context-tray button.line-chip.is-active,
+.apolo-estuche-popover .context-tray button.fill-chip.is-active {
+  background: var(--apolo-bg-elevated);
+  border-color: var(--apolo-border);
+  color: var(--apolo-text);
 }
-.apolo-estuche-popover .cc.on,
-.cc.on {
-  background: var(--bg) !important;
-  color: var(--tx);
-  box-shadow: var(--el) !important;
+.apolo-estuche-popover .context-tray button.fill-chip.is-active:not(.is-off) {
+  color: var(--fc, var(--apolo-text));
 }
-.apolo-estuche-popover .g5 .cc.on:not(.off),
-.g5 .cc.on:not(.off) {
-  color: var(--fc, var(--tx));
-}
-.apolo-estuche-popover .cc svg.ln,
-.cc svg.ln {
+.apolo-estuche-popover .context-tray button.line-chip svg.ln {
   width: 100%;
   height: 10px;
+  padding: 0 8px;
+  box-sizing: border-box;
   overflow: visible;
 }
-.apolo-estuche-popover .cc svg.ln line,
-.cc svg.ln line {
+.apolo-estuche-popover .context-tray button.line-chip svg.ln line {
   stroke: currentColor;
   stroke-width: 2.3;
   stroke-linecap: round;
 }
-.apolo-estuche-popover .cc .fg,
-.cc .fg {
+.apolo-estuche-popover .context-tray button.fill-chip .fg {
   color: inherit;
 }
 
-/* Densidad (animado dentro de gaveta de relleno) */
-.apolo-estuche-popover .dens,
-.dens {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.2s ease, margin 0.2s ease;
-  margin-top: -10px;
+.apolo-estuche-popover .fill-opacity-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.apolo-estuche-popover .dens.show,
-.dens.show {
-  grid-template-rows: 1fr;
-  margin-top: 0;
+.apolo-estuche-popover .tray-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--apolo-text-muted);
 }
-.apolo-estuche-popover .dens > div,
-.dens > div {
-  overflow: hidden;
-  min-height: 0;
+
+/* Muestras de color del relleno (secundarias, acotadas a la bandeja) */
+.apolo-estuche-popover .fill-swatch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.apolo-estuche-popover .fill-swatch-row button.fill-swatch {
+  all: unset;
+  box-sizing: border-box;
+  touch-action: manipulation;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+  cursor: pointer;
+  position: relative;
+}
+.apolo-estuche-popover .fill-swatch-row button.fill-swatch::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 28px;
+}
+.apolo-estuche-popover .fill-swatch-row button.fill-swatch.is-active {
+  outline: 2px solid var(--apolo-text-muted);
+  outline-offset: 2px;
+}
+.apolo-estuche-popover .fill-swatch-row button.fill-swatch-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--apolo-text-faint);
+  box-shadow: inset 0 0 0 1px var(--apolo-border);
+}
+.apolo-estuche-popover .fill-swatch-row button.fill-swatch-add:hover {
+  color: var(--apolo-text);
+  background: var(--apolo-card-hover);
 }
 
 /* 5. Fila de Colores */
@@ -5984,20 +6058,13 @@ button.apolo-profile-cancel-btn,
 
 /* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
-  .apolo-estuche-popover .tray,
-  .tray,
-  .apolo-estuche-popover .dens,
-  .dens,
-  .apolo-estuche-popover .car-t,
-  .car-t,
-  .apolo-estuche-popover .dot,
-  .dot,
-  .apolo-estuche-popover .sb,
-  .sb,
-  .apolo-estuche-popover .pb,
-  .pb,
-  .apolo-estuche-popover .cc,
-  .cc {
-    transition: none !important;
+  .apolo-estuche-popover .shape-page button.shape-btn,
+  .apolo-estuche-popover .shape-pager button.dot.shape-pager-btn,
+  .apolo-estuche-popover .prop-bar button.prop-btn,
+  .apolo-estuche-popover .prop-caret,
+  .apolo-estuche-popover .context-tray button.line-chip,
+  .apolo-estuche-popover .context-tray button.fill-chip,
+  .apolo-estuche-popover .dot {
+    transition: none;
   }
 }
