@@ -47,6 +47,7 @@ import {
     applyGeometryToShapeElement,
     getShapePlugin,
     mapShapeElementPoints,
+    refreshShapeElementBounds,
     shapeElementStyle,
     shapeElementToGeometry,
     type ShapeHandleKind,
@@ -55,7 +56,12 @@ import {
 } from './shapes/index.ts';
 import { SpatialGrid } from './spatial/SpatialGrid.ts';
 import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
-import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
+import {
+    HOLD_TO_SNAP_DWELL_MS,
+    HOLD_TO_SNAP_MOVE_TOLERANCE_PX,
+    ShapeRecognizer,
+    type RecognizedShape,
+} from '../tools/ShapeRecognizer.ts';
 import { Predictor } from './input/Predictor.ts';
 import { isConfirmedBarrelPress, isStylusBarrelButton, isStylusHoverBarrel, hasDeliberateStylusMovement } from './input/StylusCapabilities.ts';
 import { EngineEventBus } from '../core/events.ts';
@@ -334,6 +340,10 @@ export class CanvasController {
     private selection: CanvasElement[] = [];
     private handleDrag: ShapeHandleDragState | null = null;
     private moveSelectionSnapshot: HistorySnapshot | null = null;
+    // Hold-to-snap: dwell detection at the end of a freehand stroke
+    private dwellTimer: ReturnType<typeof setTimeout> | null = null;
+    private dwellAnchor: { x: number; y: number } | null = null;
+    private snapPreview: RecognizedShape | null = null;
     private lastShapeStyleEdit = { at: 0, key: '' };
     private suppressSelectionStyleSync = false;
     private activeStart: Point | null = null;
@@ -2785,6 +2795,7 @@ export class CanvasController {
         if (this.destroyed) return;
         this.destroyed = true;
 
+        this.clearHoldToSnap();
         this.strokeCache.clear();
         this.input?.destroy();
         if (this.scrollHandler) {
@@ -3165,6 +3176,10 @@ export class CanvasController {
         this.barrelActive = barrel;
 
         this.pushWorldPoint(rawPoint);
+        this.clearHoldToSnap();
+        if (this.isHoldToSnapActive()) {
+            this.trackHoldToSnap();
+        }
 
         if (this.tool === 'eraser' || barrel) {
             this.recordHistory();
@@ -3208,6 +3223,10 @@ export class CanvasController {
             this.hasPrediction = false;
         } else {
             for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
+        }
+
+        if (this.isHoldToSnapActive()) {
+            this.trackHoldToSnap();
         }
 
         if (this.tool === 'eraser' || barrel) {
@@ -3310,10 +3329,14 @@ export class CanvasController {
             if (this.tool === 'shape') {
                 this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
             } else {
-                const recognized = (this.shapeRecognition && !this.straightenLines) ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
+                // Hold-to-snap: the live dwell preview wins; otherwise a stationary hold right
+                // before release still converts the stroke
+                const recognized = this.snapPreview ?? (this.isHoldToSnapActive()
+                    ? this.recognizer.recognize(raw, releasedAt, lastMotionAt)
+                    : null);
                 if (recognized) {
-                    this.addShape(recognized.start, recognized.end, recognized.type);
-                    this.toast?.show(`Forma reconocida: ${recognized.type}`);
+                    this.addRecognizedShape(recognized);
+                    this.toast?.show(`Forma reconocida: ${getShapePlugin(recognized.type).name}`);
                 } else {
                     this.addStroke(raw);
                 }
@@ -3329,6 +3352,7 @@ export class CanvasController {
             }
         }
 
+        this.clearHoldToSnap();
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
@@ -3350,6 +3374,7 @@ export class CanvasController {
         if (this.handleDrag) {
             this.revertHandleDrag();
         }
+        this.clearHoldToSnap();
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
@@ -3495,7 +3520,99 @@ export class CanvasController {
         return false;
     }
 
-    private addShape(start: Point, end: Point, shapeType: ShapeElement['shapeType']): void {
+    /** Commits a hold-to-snap recognition as a parametric ShapeElement styled like the active pen. */
+    private addRecognizedShape(recognized: RecognizedShape): void {
+        this.addShape(recognized.start, recognized.end, recognized.type, {
+            style: { ...this.style, profile: undefined, isHighlighter: undefined },
+            regularize: recognized.regularize,
+            vertices: recognized.vertices,
+            fill: false,
+        });
+    }
+
+    private isHoldToSnapActive(): boolean {
+        return this.shapeRecognition &&
+            !this.straightenLines &&
+            !this.barrelActive &&
+            !this.movingSelection &&
+            (this.tool === 'pen' || this.tool === 'highlighter');
+    }
+
+    /**
+     * Restarts the dwell timer whenever the stylus travels more than HOLD_TO_SNAP_MOVE_TOLERANCE_PX
+     * (screen px). If it then stays put for HOLD_TO_SNAP_DWELL_MS the stroke is classified and, when
+     * confident, previewed as a perfect shape until pointerup commits it.
+     */
+    private trackHoldToSnap(): void {
+        if (this.points.size === 0) return;
+        const last = { x: this.points.getX(this.points.size - 1), y: this.points.getY(this.points.size - 1) };
+        const tolerance = HOLD_TO_SNAP_MOVE_TOLERANCE_PX / this.zoom;
+        const anchor = this.dwellAnchor;
+        if (anchor && Math.hypot(last.x - anchor.x, last.y - anchor.y) <= tolerance) return;
+
+        this.dwellAnchor = last;
+        if (this.snapPreview) {
+            // Drawing resumed: drop the preview and keep inking freehand
+            this.snapPreview = null;
+            this.schedulePaint();
+        }
+        if (this.dwellTimer !== null) clearTimeout(this.dwellTimer);
+        this.dwellTimer = setTimeout(() => this.onHoldToSnapDwell(), HOLD_TO_SNAP_DWELL_MS);
+    }
+
+    private onHoldToSnapDwell(): void {
+        this.dwellTimer = null;
+        if (this.destroyed || !this.activeStart || !this.isHoldToSnapActive()) return;
+        const recognized = this.recognizer.classify(this.readActivePoints());
+        if (!recognized) return;
+        this.snapPreview = recognized;
+        try {
+            (navigator as Navigator | undefined)?.vibrate?.(12);
+        } catch { /* haptics are best effort */ }
+        this.schedulePaint();
+    }
+
+    private clearHoldToSnap(): void {
+        if (this.dwellTimer !== null) {
+            clearTimeout(this.dwellTimer);
+            this.dwellTimer = null;
+        }
+        this.dwellAnchor = null;
+        this.snapPreview = null;
+    }
+
+    /** Wet-canvas preview of the recognized shape (with a faint accent halo) while the stylus is held. */
+    private paintSnapPreview(preview: RecognizedShape): void {
+        const plugin = getShapePlugin(preview.type);
+        const geom: ShapeRenderGeometry = {
+            x0: preview.start.x,
+            y0: preview.start.y,
+            x1: preview.end.x,
+            y1: preview.end.y,
+            regularize: preview.regularize,
+            ...(preview.vertices ? { vertices: preview.vertices.map(v => ({ x: v.x, y: v.y })) } : {}),
+        };
+        plugin.renderCanvas(this.context, geom, {
+            strokeColor: '#2F6BFF',
+            strokeWidth: this.style.width + 8 / this.zoom,
+            strokeOpacity: 0.18,
+            fillEnabled: false,
+        });
+        plugin.renderCanvas(this.context, geom, {
+            strokeColor: this.style.color,
+            strokeWidth: this.style.width,
+            strokePattern: this.style.pattern,
+            strokeOpacity: this.style.opacity,
+            fillEnabled: false,
+        });
+    }
+
+    private addShape(
+        start: Point,
+        end: Point,
+        shapeType: ShapeElement['shapeType'],
+        options: { style?: StrokeStyle; regularize?: boolean; vertices?: Point[]; fill?: boolean } = {},
+    ): void {
         const bounds = this.getDocumentContentBounds();
         const forbiddenY = bounds.contentTop > 0 ? bounds.contentTop - DEFAULT_INK_LIMITS.topMarginPx : -Infinity;
         if (bounds.contentTop > 0 && start.y < forbiddenY && end.y < forbiddenY) {
@@ -3510,7 +3627,7 @@ export class CanvasController {
         const isBoxSnap = spaceId ? (BoxRegistry.isSnapActive(spaceId) || !!this.document.boxes?.[spaceId]?.snapToGrid) : false;
         const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
 
-        const regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+        const regularize = options.regularize ?? Boolean(this.toolState.shape.regularize || this.isShiftDown);
         const plugin = getShapePlugin(shapeType);
         const normalizedGeom = plugin.normalizeGeometry({
             x0: start.x,
@@ -3518,6 +3635,7 @@ export class CanvasController {
             x1: end.x,
             y1: end.y,
             regularize,
+            ...(options.vertices ? { vertices: options.vertices.map(v => ({ x: v.x, y: v.y })) } : {}),
         });
 
         const rawStartU = (normalizedGeom.x0 - geom.originX) / geom.scaleWidth;
@@ -3552,7 +3670,7 @@ export class CanvasController {
             startY: startV,
             endX: endU,
             endY: endV,
-            style: {
+            style: options.style ? { ...options.style } : {
                 ...this.style,
                 color: this.toolState.shape.color || this.style.color,
                 width: this.toolState.shape.width || this.style.width,
@@ -3560,13 +3678,21 @@ export class CanvasController {
                 opacity: this.toolState.shape.opacity !== undefined ? this.toolState.shape.opacity : this.style.opacity,
             },
             regularize,
-            fillEnabled: this.toolState.shape.fillEnabled,
+            fillEnabled: options.fill === false ? false : this.toolState.shape.fillEnabled,
             fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
             fillOpacity: this.toolState.shape.fillOpacity,
             fillPattern: this.toolState.shape.fillPattern,
             fillDensity: this.toolState.shape.fillDensity,
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
+        if (normalizedGeom.vertices) {
+            element.vertices = normalizedGeom.vertices.map(v => {
+                const { u, v: vv } = sanitizeNormalizedPoint((v.x - geom.originX) / geom.scaleWidth, (v.y - geom.originY) / geom.scaleWidth, { isBoxStroke });
+                return { x: u, y: vv };
+            });
+            element.regularize = false;
+            refreshShapeElementBounds(element);
+        }
         this.document.elements.push(element);
         this.options.eventBus?.emit('snap:detected', shapeType, end.x, end.y);
     }
@@ -5339,6 +5465,11 @@ export class CanvasController {
     private paintActive(): void {
         if (this.tool === 'eraser' || this.barrelActive) {
             this.paintEraserReticle();
+            return;
+        }
+
+        if (this.snapPreview && (this.tool === 'pen' || this.tool === 'highlighter')) {
+            this.paintSnapPreview(this.snapPreview);
             return;
         }
 

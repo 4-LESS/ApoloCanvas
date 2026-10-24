@@ -1320,7 +1320,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Hold-to-snap (Formas automáticas)')
-            .setDesc('Líneas rectas y formas geométricas al mantener quieto 300 ms el trazo.')
+            .setDesc('Al mantener quieto el lápiz ~360 ms al final del trazo, se convierte en una forma editable (línea, flecha, rectángulo, elipse, triángulo o diamante).')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.shapeRecognition)
                 .onChange(async value => {
