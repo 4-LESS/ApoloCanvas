@@ -39,6 +39,13 @@ export interface ShapeHandle {
     readonly y: number;
 }
 
+/** Magnetic connection port (see ShapePortId in core/types.ts). */
+export interface ShapeSnapPort {
+    readonly id: string;
+    readonly x: number;
+    readonly y: number;
+}
+
 export interface ShapeStyleConfig {
     strokeColor?: string;
     strokeWidth?: number;
@@ -65,6 +72,8 @@ export interface ShapePlugin {
     getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[];
     /** Returns the geometry produced by dragging `handleId` to `newPoint`; `geom` itself is not mutated. */
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry;
+    /** Ports where connector endpoints can magnetically attach. */
+    getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[];
 }
 
 export type NormalizedPoint = [number, number];

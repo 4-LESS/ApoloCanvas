@@ -3,7 +3,13 @@ import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasEleme
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
 import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
-import { getShapePlugin, shapeElementStyle, shapeElementToGeometry } from '../engine/shapes/index.ts';
+import {
+    clearDanglingBindings,
+    getShapePlugin,
+    sanitizeLoadedShapeElement,
+    shapeElementStyle,
+    shapeElementToGeometry,
+} from '../engine/shapes/index.ts';
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -293,13 +299,20 @@ export class PersistenceQueue {
             }
         }
 
+        const elements = [...freehandElements, ...boxElements];
+        for (const el of elements) {
+            if (el.type === 'shape') sanitizeLoadedShapeElement(el);
+        }
+        // Connectors whose target shape was not loaded (e.g. an orphaned box) must not dangle
+        clearDanglingBindings(elements);
+
         const now = Date.now();
         const doc: PageDocument = {
             schemaVersion: 1,
             version: 1,
             id: file.path,
             notePath: file.path,
-            elements: [...freehandElements, ...boxElements],
+            elements,
             boxes: boxesMeta,
             layoutHint,
             createdAt: now,

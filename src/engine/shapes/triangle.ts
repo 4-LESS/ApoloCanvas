@@ -6,7 +6,7 @@
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeSnapPort, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
     applyCanvasFill,
     distToSegmentSquared,
@@ -194,5 +194,19 @@ export const triangleShapePlugin: ShapePlugin = {
             return resizeBoxByHandle(norm, handleId, newPoint, regularize ?? geom.regularize, EQUILATERAL_ASPECT);
         }
         return { ...norm };
+    },
+
+    /** Vertices 'v0' (top), 'v1' (right), 'v2' (left) and edge midpoints 'e' (v0–v1), 's' (v1–v2), 'w' (v2–v0). */
+    getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+        const [v0, v1, v2] = getTriangleVertices(this.normalizeGeometry(geom));
+        const mid = (a: [number, number], b: [number, number]) => ({ x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 });
+        return [
+            { id: 'v0', x: v0[0], y: v0[1] },
+            { id: 'v1', x: v1[0], y: v1[1] },
+            { id: 'v2', x: v2[0], y: v2[1] },
+            { id: 'e', ...mid(v0, v1) },
+            { id: 's', ...mid(v1, v2) },
+            { id: 'w', ...mid(v2, v0) },
+        ];
     },
 };

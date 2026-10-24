@@ -6,7 +6,7 @@
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeSnapPort, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
     distToSegmentSquared,
     getStrokeDashArray,
@@ -19,6 +19,7 @@ import {
     linearControlHandles,
     linearPathBounds,
     linearPathHit,
+    linearSnapPorts,
 } from './handles.ts';
 import { linearSvgPathData, traceLinearPath } from './line.ts';
 
@@ -129,5 +130,9 @@ export const arrowShapePlugin: ShapePlugin = {
 
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
         return applyLinearHandleDrag(this.normalizeGeometry(geom), handleId, newPoint, regularize ?? geom.regularize);
+    },
+
+    getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+        return linearSnapPorts(this.normalizeGeometry(geom));
     },
 };

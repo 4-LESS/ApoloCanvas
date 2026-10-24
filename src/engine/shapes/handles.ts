@@ -7,7 +7,7 @@
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapeHandle, ShapePoint, ShapeRenderGeometry } from './types.ts';
+import type { ShapeHandle, ShapePoint, ShapeRenderGeometry, ShapeSnapPort } from './types.ts';
 import { distToSegmentSquared } from './common.ts';
 
 export const BOX_CORNER_HANDLE_IDS = ['nw', 'ne', 'se', 'sw'] as const;
@@ -109,6 +109,30 @@ export function resizeBoxByHandle(
     const y0 = handleId === 'n' ? maxY : minY;
     const y1 = handleId === 'n' ? minY : maxY;
     return { ...geom, x0, y0, x1, y1, regularize };
+}
+
+/**
+ * Cardinal perimeter midpoints ('n', 'e', 's', 'w') plus 'center'. The bounding-box midpoints
+ * lie on the outline of every built-in closed shape (rectangle, ellipse, diamond, hexagon, cylinder).
+ */
+export function boxSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+    const { minX, minY, maxX, maxY } = getGeometryBox(geom);
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    return [
+        { id: 'n', x: midX, y: minY },
+        { id: 'e', x: maxX, y: midY },
+        { id: 's', x: midX, y: maxY },
+        { id: 'w', x: minX, y: midY },
+        { id: 'center', x: midX, y: midY },
+    ];
+}
+
+export function linearSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+    return [
+        { id: 'start', x: geom.x0, y: geom.y0 },
+        { id: 'end', x: geom.x1, y: geom.y1 },
+    ];
 }
 
 // ---------------------------------------------------------------------------

@@ -708,12 +708,23 @@ export interface ShapeElement extends InkElementBase {
     cornerRadius?: number;  // Rectangle corner radius, 0..min(w, h) / 2
     controlPoint?: NormalizedShapePoint; // Quadratic Bezier control point for curved 'line' / 'arrow'
     vertices?: NormalizedShapePoint[];   // Independent vertex overrides (e.g. 3 detached triangle vertices)
+    // Magnetic auto-connect ('line' / 'arrow' only): endpoint glued to a port of another shape
+    startBinding?: ShapeConnectorBinding | null;
+    endBinding?: ShapeConnectorBinding | null;
     bounds: BoundingBox;    // Normalized bounds: minU, minV, maxU, maxV
 }
 
 export interface NormalizedShapePoint {
     x: number;
     y: number;
+}
+
+/** Magnetic snap ports exposed by shapes ('start' / 'end' for linear shapes). */
+export type ShapePortId = 'n' | 's' | 'e' | 'w' | 'center' | 'v0' | 'v1' | 'v2' | 'start' | 'end';
+
+export interface ShapeConnectorBinding {
+    elementId: string;
+    portId: string;
 }
 
 export type CanvasElement = StrokeElement | ShapeElement;
@@ -772,6 +783,8 @@ export function cloneElements(elements: readonly CanvasElement[]): CanvasElement
             };
             if (el.controlPoint) shape.controlPoint = { ...el.controlPoint };
             if (el.vertices) shape.vertices = el.vertices.map(v => ({ ...v }));
+            if (el.startBinding) shape.startBinding = { ...el.startBinding };
+            if (el.endBinding) shape.endBinding = { ...el.endBinding };
             return shape;
         }
     });
