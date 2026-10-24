@@ -1,17 +1,38 @@
 /**
  * src/engine/shapes/line.ts
  *
- * 'line' shape plugin.
+ * 'line' shape plugin (straight or quadratic-curved via its 'curve' handle).
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapePlugin, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
-    distToSegmentSquared,
     getStrokeDashArray,
     getSvgStrokeAttributes,
     regularizeLinearGeometry,
 } from './common.ts';
+import {
+    applyLinearHandleDrag,
+    linearControlHandles,
+    linearPathBounds,
+    linearPathHit,
+} from './handles.ts';
+
+export function traceLinearPath(ctx: CanvasRenderingContext2D, norm: ShapeRenderGeometry): void {
+    ctx.moveTo(norm.x0, norm.y0);
+    if (norm.controlPoint && typeof ctx.quadraticCurveTo === 'function') {
+        ctx.quadraticCurveTo(norm.controlPoint.x, norm.controlPoint.y, norm.x1, norm.y1);
+    } else {
+        ctx.lineTo(norm.x1, norm.y1);
+    }
+}
+
+export function linearSvgPathData(norm: ShapeRenderGeometry): string {
+    if (norm.controlPoint) {
+        return `M ${norm.x0} ${norm.y0} Q ${norm.controlPoint.x} ${norm.controlPoint.y} ${norm.x1} ${norm.y1}`;
+    }
+    return `M ${norm.x0} ${norm.y0} L ${norm.x1} ${norm.y1}`;
+}
 
 export const lineShapePlugin: ShapePlugin = {
     id: 'line',
@@ -43,8 +64,7 @@ export const lineShapePlugin: ShapePlugin = {
         }
 
         ctx.beginPath();
-        ctx.moveTo(norm.x0, norm.y0);
-        ctx.lineTo(norm.x1, norm.y1);
+        traceLinearPath(ctx, norm);
         ctx.stroke();
 
         ctx.restore();
@@ -55,24 +75,31 @@ export const lineShapePlugin: ShapePlugin = {
         const strokeAttrs = getSvgStrokeAttributes(style);
         return {
             defs: {},
-            body: `<path d="M ${norm.x0} ${norm.y0} L ${norm.x1} ${norm.y1}" ${strokeAttrs} fill="none"/>`,
+            body: `<path d="${linearSvgPathData(norm)}" ${strokeAttrs} fill="none"/>`,
         };
     },
 
     computeBounds(geom: ShapeRenderGeometry, strokeWidth: number): BoundingBox {
         const norm = this.normalizeGeometry(geom);
         const halfWidth = (strokeWidth || 3) / 2;
+        const box = linearPathBounds(norm);
         return {
-            minX: Math.min(norm.x0, norm.x1) - halfWidth,
-            maxX: Math.max(norm.x0, norm.x1) + halfWidth,
-            minY: Math.min(norm.y0, norm.y1) - halfWidth,
-            maxY: Math.max(norm.y0, norm.y1) + halfWidth,
+            minX: box.minX - halfWidth,
+            maxX: box.maxX + halfWidth,
+            minY: box.minY - halfWidth,
+            maxY: box.maxY + halfWidth,
         };
     },
 
     hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean {
-        const norm = this.normalizeGeometry(geom);
-        const d2 = distToSegmentSquared(point.x, point.y, norm.x0, norm.y0, norm.x1, norm.y1);
-        return d2 <= tolerance * tolerance;
+        return linearPathHit(this.normalizeGeometry(geom), point, tolerance);
+    },
+
+    getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
+        return linearControlHandles(this.normalizeGeometry(geom));
+    },
+
+    applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
+        return applyLinearHandleDrag(this.normalizeGeometry(geom), handleId, newPoint, regularize ?? geom.regularize);
     },
 };

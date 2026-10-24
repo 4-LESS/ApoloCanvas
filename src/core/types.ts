@@ -704,7 +704,16 @@ export interface ShapeElement extends InkElementBase {
     fillDensity?: number;
     regularize?: boolean;
     rotation?: number;      // Radians
+    // Parametric edits (all normalized by column width, like startX..endY)
+    cornerRadius?: number;  // Rectangle corner radius, 0..min(w, h) / 2
+    controlPoint?: NormalizedShapePoint; // Quadratic Bezier control point for curved 'line' / 'arrow'
+    vertices?: NormalizedShapePoint[];   // Independent vertex overrides (e.g. 3 detached triangle vertices)
     bounds: BoundingBox;    // Normalized bounds: minU, minV, maxU, maxV
+}
+
+export interface NormalizedShapePoint {
+    x: number;
+    y: number;
 }
 
 export type CanvasElement = StrokeElement | ShapeElement;
@@ -756,11 +765,14 @@ export function cloneElements(elements: readonly CanvasElement[]): CanvasElement
                 bounds: { ...el.bounds },
             };
         } else {
-            return {
+            const shape: ShapeElement = {
                 ...el,
                 style: { ...el.style },
                 bounds: { ...el.bounds },
             };
+            if (el.controlPoint) shape.controlPoint = { ...el.controlPoint };
+            if (el.vertices) shape.vertices = el.vertices.map(v => ({ ...v }));
+            return shape;
         }
     });
 }

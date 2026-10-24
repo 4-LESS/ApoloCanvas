@@ -21,6 +21,8 @@ import {
 export * from './types.ts';
 export * from './common.ts';
 export * from './custom.ts';
+export * from './handles.ts';
+export * from './element.ts';
 export {
     lineShapePlugin,
     arrowShapePlugin,

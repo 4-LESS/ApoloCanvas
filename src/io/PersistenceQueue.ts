@@ -3,7 +3,7 @@ import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasEleme
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
 import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
-import { getShapePlugin, type ShapeRenderGeometry, type ShapeStyleConfig } from '../engine/shapes/index.ts';
+import { getShapePlugin, shapeElementStyle, shapeElementToGeometry } from '../engine/shapes/index.ts';
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -753,32 +753,9 @@ function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffset
         };
     }
 
-    const startX = element.startX * scale;
-    const startY = element.startY * scale + anchorOffsetY;
-    const endX = element.endX * scale;
-    const endY = element.endY * scale + anchorOffsetY;
-
     const plugin = getShapePlugin(element.shapeType);
-    const geom: ShapeRenderGeometry = {
-        x0: startX,
-        y0: startY,
-        x1: endX,
-        y1: endY,
-        regularize: element.regularize,
-    };
-    const styleConfig: ShapeStyleConfig = {
-        strokeColor: element.style.color,
-        strokeWidth: element.style.width,
-        strokePattern: element.style.pattern,
-        strokeOpacity: element.style.opacity,
-        fillEnabled: element.fillEnabled,
-        fillColor: element.fillColor,
-        fillOpacity: element.fillOpacity,
-        fillPattern: element.fillPattern,
-        fillDensity: element.fillDensity,
-    };
-
-    return plugin.renderSvg(geom, styleConfig);
+    const geom = shapeElementToGeometry(element, 0, anchorOffsetY, scale);
+    return plugin.renderSvg(geom, shapeElementStyle(element));
 }
 
 export function renderElement(element: CanvasElement, scale = 800): string {

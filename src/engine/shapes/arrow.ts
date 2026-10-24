@@ -1,22 +1,29 @@
 /**
  * src/engine/shapes/arrow.ts
  *
- * 'arrow' shape plugin with dynamic angle-aligned arrowhead.
+ * 'arrow' shape plugin with an arrowhead aligned to the path tangent at (x1, y1),
+ * so curved arrows (quadratic Bezier) point along the curve derivative.
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapePlugin, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
     distToSegmentSquared,
     getStrokeDashArray,
     getSvgStrokeAttributes,
     regularizeLinearGeometry,
 } from './common.ts';
+import {
+    applyLinearHandleDrag,
+    getEndTangentAngle,
+    linearControlHandles,
+    linearPathBounds,
+    linearPathHit,
+} from './handles.ts';
+import { linearSvgPathData, traceLinearPath } from './line.ts';
 
 function computeArrowHead(norm: ShapeRenderGeometry, headLength = 12): { ax1: number; ay1: number; ax2: number; ay2: number } {
-    const dx = norm.x1 - norm.x0;
-    const dy = norm.y1 - norm.y0;
-    const theta = Math.atan2(dy, dx);
+    const theta = getEndTangentAngle(norm);
     const alpha = Math.PI / 6; // 30 degrees
 
     const ax1 = norm.x1 - headLength * Math.cos(theta - alpha);
@@ -59,8 +66,7 @@ export const arrowShapePlugin: ShapePlugin = {
         const { ax1, ay1, ax2, ay2 } = computeArrowHead(norm);
 
         ctx.beginPath();
-        ctx.moveTo(norm.x0, norm.y0);
-        ctx.lineTo(norm.x1, norm.y1);
+        traceLinearPath(ctx, norm);
         ctx.stroke();
 
         // Arrow head is always drawn with solid lines
@@ -83,7 +89,7 @@ export const arrowShapePlugin: ShapePlugin = {
 
         return {
             defs: {},
-            body: `<path d="M ${norm.x0} ${norm.y0} L ${norm.x1} ${norm.y1} M ${ax1} ${ay1} L ${norm.x1} ${norm.y1} L ${ax2} ${ay2}" ${strokeAttrs} fill="none"/>`,
+            body: `<path d="${linearSvgPathData(norm)} M ${ax1} ${ay1} L ${norm.x1} ${norm.y1} L ${ax2} ${ay2}" ${strokeAttrs} fill="none"/>`,
         };
     },
 
@@ -91,24 +97,22 @@ export const arrowShapePlugin: ShapePlugin = {
         const norm = this.normalizeGeometry(geom);
         const halfWidth = (strokeWidth || 3) / 2;
         const { ax1, ay1, ax2, ay2 } = computeArrowHead(norm);
-
-        const allX = [norm.x0, norm.x1, ax1, ax2];
-        const allY = [norm.y0, norm.y1, ay1, ay2];
+        const path = linearPathBounds(norm);
 
         return {
-            minX: Math.min(...allX) - halfWidth,
-            maxX: Math.max(...allX) + halfWidth,
-            minY: Math.min(...allY) - halfWidth,
-            maxY: Math.max(...allY) + halfWidth,
+            minX: Math.min(path.minX, ax1, ax2) - halfWidth,
+            maxX: Math.max(path.maxX, ax1, ax2) + halfWidth,
+            minY: Math.min(path.minY, ay1, ay2) - halfWidth,
+            maxY: Math.max(path.maxY, ay1, ay2) + halfWidth,
         };
     },
 
     hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean {
         const norm = this.normalizeGeometry(geom);
-        const tol2 = tolerance * tolerance;
-        if (distToSegmentSquared(point.x, point.y, norm.x0, norm.y0, norm.x1, norm.y1) <= tol2) {
+        if (linearPathHit(norm, point, tolerance)) {
             return true;
         }
+        const tol2 = tolerance * tolerance;
         const { ax1, ay1, ax2, ay2 } = computeArrowHead(norm);
         if (distToSegmentSquared(point.x, point.y, ax1, ay1, norm.x1, norm.y1) <= tol2) {
             return true;
@@ -117,5 +121,13 @@ export const arrowShapePlugin: ShapePlugin = {
             return true;
         }
         return false;
+    },
+
+    getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
+        return linearControlHandles(this.normalizeGeometry(geom));
+    },
+
+    applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
+        return applyLinearHandleDrag(this.normalizeGeometry(geom), handleId, newPoint, regularize ?? geom.regularize);
     },
 };

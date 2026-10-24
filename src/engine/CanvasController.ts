@@ -43,7 +43,16 @@ import {
     snapLineAngle,
 } from './PatternedStrokeRenderer.ts';
 import { getPenPlugin } from './pens/index.ts';
-import { getShapePlugin, type ShapeRenderGeometry, type ShapeStyleConfig } from './shapes/index.ts';
+import {
+    applyGeometryToShapeElement,
+    getShapePlugin,
+    mapShapeElementPoints,
+    shapeElementStyle,
+    shapeElementToGeometry,
+    type ShapeHandleKind,
+    type ShapeRenderGeometry,
+    type ShapeStyleConfig,
+} from './shapes/index.ts';
 import { SpatialGrid } from './spatial/SpatialGrid.ts';
 import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
 import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
@@ -176,6 +185,40 @@ interface HistorySnapshot {
     boxHeights?: Record<string, number>;
 }
 
+/** Live drag of one parametric control handle of the selected ShapeElement. */
+interface ShapeHandleDragState {
+    elementId: string;
+    handleId: string;
+    kind: ShapeHandleKind;
+    /** Document-space geometry captured at pointerdown; every move re-applies from it. */
+    startGeom: ShapeRenderGeometry;
+    /** Handle position minus pointer position at grab time, so the handle does not jump. */
+    grabOffsetX: number;
+    grabOffsetY: number;
+    /** Pre-drag state, pushed to the undo stack on pointerup only if something changed. */
+    snapshot: HistorySnapshot;
+    changed: boolean;
+}
+
+/** Style fields of a selected shape that ToolEstuche / Toolbar edit reactively. */
+interface ShapeStylePatch {
+    color?: string;
+    width?: number;
+    pattern?: StrokePattern;
+    fillEnabled?: boolean;
+    fillColor?: string;
+    fillPattern?: ShapeElement['fillPattern'];
+    fillOpacity?: number;
+    fillDensity?: number;
+}
+
+/** Screen-space pick radius of shape control handles. */
+const SHAPE_HANDLE_HIT_RADIUS_PX = 12;
+/** Pointer travel (document px) below which a shape-tool gesture is a tap that selects. */
+const SHAPE_TAP_SLOP_PX = 4;
+/** Consecutive style edits on the same selection within this window share one undo step (slider drags). */
+const SHAPE_STYLE_HISTORY_COALESCE_MS = 700;
+
 /**
  * High-performance engineering canvas controller.
  * Manages the double-buffered rendering motor, 120Hz input loop, spatial indexing,
@@ -289,6 +332,10 @@ export class CanvasController {
 
     // Selection & Manipulation
     private selection: CanvasElement[] = [];
+    private handleDrag: ShapeHandleDragState | null = null;
+    private moveSelectionSnapshot: HistorySnapshot | null = null;
+    private lastShapeStyleEdit = { at: 0, key: '' };
+    private suppressSelectionStyleSync = false;
     private activeStart: Point | null = null;
 
     public get isDrawing(): boolean {
@@ -756,6 +803,7 @@ export class CanvasController {
                     } else if (this.tool === 'shape') {
                         this.toolState.shape.pattern = pattern;
                     }
+                    this.applyStyleToSelectedShapes({ pattern });
                     this.estuche?.updateState({ lineStyle: pattern, pattern });
                     this.options.eventBus?.emit('style:changed', { pattern });
                     this.syncEstucheFavoriteState();
@@ -819,30 +867,35 @@ export class CanvasController {
                 },
                 onToggleFillEnabled: (enabled) => {
                     this.toolState.shape.fillEnabled = enabled;
+                    this.applyStyleToSelectedShapes({ fillEnabled: enabled });
                     this.estuche?.updateState({ fillEnabled: enabled });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onChangeFillColor: (color) => {
                     this.toolState.shape.fillColor = color;
+                    this.applyStyleToSelectedShapes({ fillColor: color });
                     this.estuche?.updateState({ fillColor: color });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onChangeFillPattern: (pattern) => {
                     this.toolState.shape.fillPattern = pattern;
+                    this.applyStyleToSelectedShapes({ fillEnabled: true, fillPattern: pattern });
                     this.estuche?.updateState({ fillPattern: pattern });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onChangeFillDensity: (density) => {
                     this.toolState.shape.fillDensity = density;
+                    this.applyStyleToSelectedShapes({ fillDensity: density });
                     this.estuche?.updateState({ fillDensity: density });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onChangeFillOpacity: (opacity) => {
                     this.toolState.shape.fillOpacity = opacity;
+                    this.applyStyleToSelectedShapes({ fillOpacity: opacity });
                     this.estuche?.updateState({ fillOpacity: opacity });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
@@ -2057,6 +2110,16 @@ export class CanvasController {
     }
 
     public applyToolFavoritePreset(preset: ToolFavoritePreset): void {
+        // Arming a favorite configures the tool; it must not restyle a selected shape.
+        this.suppressSelectionStyleSync = true;
+        try {
+            this.applyToolFavoritePresetInner(preset);
+        } finally {
+            this.suppressSelectionStyleSync = false;
+        }
+    }
+
+    private applyToolFavoritePresetInner(preset: ToolFavoritePreset): void {
         if (this.tool !== preset.tool) this.setTool(preset.tool, false);
 
         if (preset.tool === 'pen' || preset.tool === 'highlighter') {
@@ -2095,6 +2158,9 @@ export class CanvasController {
             if (preset.fillEnabled !== undefined) this.toolState.shape.fillEnabled = preset.fillEnabled;
             if (preset.fillColor !== undefined) this.toolState.shape.fillColor = preset.fillColor;
             if (preset.fillOpacity !== undefined) this.toolState.shape.fillOpacity = preset.fillOpacity;
+            if (preset.fillPattern !== undefined) this.toolState.shape.fillPattern = preset.fillPattern;
+            if (preset.fillDensity !== undefined) this.toolState.shape.fillDensity = preset.fillDensity;
+            if (preset.regularize !== undefined) this.toolState.shape.regularize = preset.regularize;
         }
 
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
@@ -2107,6 +2173,14 @@ export class CanvasController {
             lineStyle: this.style.pattern,
             straightenLines: this.straightenLines,
             shapeType: this.shapeType,
+            ...(preset.tool === 'shape' ? {
+                regularize: this.toolState.shape.regularize,
+                fillEnabled: this.toolState.shape.fillEnabled,
+                fillColor: this.toolState.shape.fillColor,
+                fillPattern: this.toolState.shape.fillPattern,
+                fillDensity: this.toolState.shape.fillDensity,
+                fillOpacity: this.toolState.shape.fillOpacity,
+            } : {}),
         });
         this.syncEstucheFavoriteState();
         this.schedulePaint();
@@ -2363,6 +2437,7 @@ export class CanvasController {
         } else if (this.tool === 'shape') {
             this.toolState.shape.color = color;
         }
+        this.applyStyleToSelectedShapes({ color });
         this.toolbar?.setStyle(color, this.style.width, this.penProfileId);
         this.estuche?.updateState({ color });
         this.syncEstucheFavoriteState();
@@ -2380,6 +2455,7 @@ export class CanvasController {
         } else if (this.tool === 'shape') {
             this.toolState.shape.width = width;
         }
+        this.applyStyleToSelectedShapes({ width });
         this.toolbar?.setStyle(this.style.color, width, this.penProfileId);
         this.estuche?.updateState({ width });
         this.syncEstucheFavoriteState();
@@ -3041,6 +3117,12 @@ export class CanvasController {
         const docX = (rawPoint.x + this.currentScrollLeft) / this.zoom;
         const docY = (rawPoint.y + this.currentScrollTop) / this.zoom;
 
+        // Parametric control handles of the selected shape take priority over drawing / moving
+        if ((this.tool === 'lasso' || this.tool === 'shape') && !barrel && this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+            this.schedulePaint();
+            return;
+        }
+
         // 2. For ink drawing tools, forbid drawing above content top (properties / title)
         const isDrawingTool = this.tool === 'pen' || this.tool === 'highlighter' || this.tool === 'shape';
         if (isDrawingTool) {
@@ -3068,11 +3150,18 @@ export class CanvasController {
 
         this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
 
-        // Moving existing selection if tapped inside bounds
+        // Moving existing selection if tapped inside bounds (lasso, or a shape selected with the shape tool)
         const selectionBounds = this.getSelectionDocBounds();
-        this.movingSelection = this.tool === 'lasso' && Boolean(
+        const canMoveSelection = this.tool === 'lasso' || (this.tool === 'shape' && this.getSelectedShape() !== null);
+        this.movingSelection = canMoveSelection && !barrel && Boolean(
             selectionBounds && contains(selectionBounds, docX, docY, 12)
         );
+        this.moveSelectionSnapshot = this.movingSelection ? this.createHistorySnapshot() : null;
+        if (this.tool === 'shape' && !this.movingSelection && this.selection.length > 0) {
+            // Starting a new shape (or tapping elsewhere) drops the current shape selection
+            this.selection = [];
+            this.emitSelection();
+        }
         this.barrelActive = barrel;
 
         this.pushWorldPoint(rawPoint);
@@ -3091,6 +3180,16 @@ export class CanvasController {
     private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
         if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (this.handleDrag) {
+            const last = rawPoints[rawPoints.length - 1];
+            if (last) {
+                this.updateHandleDrag({
+                    x: (last.x + this.currentScrollLeft) / this.zoom,
+                    y: (last.y + this.currentScrollTop) / this.zoom,
+                });
+            }
+            return;
+        }
         this.barrelActive = barrel;
         if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const lastRaw = rawPoints[rawPoints.length - 1];
@@ -3131,7 +3230,7 @@ export class CanvasController {
             this.checkAutoGrowth(rawPoints);
         }
 
-        if (this.movingSelection && this.tool === 'lasso' && this.points.size > 1) {
+        if (this.movingSelection && this.points.size > 1) {
             const last = this.points.get(this.points.size - 1);
             const prev = this.points.get(this.points.size - 2);
             const dx = last.x - prev.x;
@@ -3145,6 +3244,15 @@ export class CanvasController {
     private end(rawPoint: Point, barrel: boolean, releasedAt: number, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
         if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (this.handleDrag) {
+            this.updateHandleDrag({
+                x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
+                y: (rawPoint.y + this.currentScrollTop) / this.zoom,
+            });
+            this.finishHandleDrag();
+            this.cancel();
+            return;
+        }
         const lastMotionAt = this.points.size > 0 ? this.points.getTime(this.points.size - 1) : releasedAt;
         if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const currentDocPt: Point = {
@@ -3165,15 +3273,23 @@ export class CanvasController {
         }
         const raw = this.readActivePoints();
 
-        if (this.movingSelection && this.tool === 'lasso') {
-            this.recordHistory();
+        if (this.movingSelection) {
             this.movingSelection = false;
-            this.reanchorSelection();
-            this.rebuildIndex();
-            this.emitSelection();
-            this.renderDirty = true;
-            this.persistSoon();
-            this.toast?.show('Selección reubicada');
+            const snapshot = this.moveSelectionSnapshot;
+            this.moveSelectionSnapshot = null;
+            if (this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
+                // No real displacement: keep the selection and leave the undo stack untouched
+                if (this.tool === 'shape') this.selectShapeAt(this.activeStart);
+            } else {
+                // The snapshot was taken at pointerdown, so undo restores the pre-move position
+                this.commitHistorySnapshot(snapshot ?? this.createHistorySnapshot());
+                this.reanchorSelection();
+                this.rebuildIndex();
+                this.emitSelection();
+                this.renderDirty = true;
+                this.persistSoon();
+                this.toast?.show('Selección reubicada');
+            }
         } else if (this.tool === 'lasso') {
             this.selectLasso(raw);
         } else if (this.tool === 'eraser' || barrel) {
@@ -3185,6 +3301,10 @@ export class CanvasController {
             this.rebuildIndex();
             this.renderDirty = true;
             this.persistSoon();
+        } else if (this.tool === 'shape' && this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
+            // Tapping with the shape tool selects an existing shape (exposing its handles) instead of
+            // creating a zero-size shape
+            this.selectShapeAt(this.activeStart);
         } else {
             this.recordHistory();
             if (this.tool === 'shape') {
@@ -3227,6 +3347,9 @@ export class CanvasController {
     }
 
     private cancel(): void {
+        if (this.handleDrag) {
+            this.revertHandleDrag();
+        }
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
@@ -3234,6 +3357,7 @@ export class CanvasController {
         this.activeStart = null;
         this.activeAnchor = null;
         this.movingSelection = false;
+        this.moveSelectionSnapshot = null;
         this.barrelActive = false;
         this.isShiftDown = false;
         this.lastPointerDownTime = 0;
@@ -3666,12 +3790,8 @@ export class CanvasController {
         const halfWidth = (element.style.width || 2) / 2;
         if (element.type === 'shape') {
             const plugin = getShapePlugin(element.shapeType);
-            const startX = geom.originX + element.startX * geom.scaleWidth;
-            const startY = geom.originY + element.startY * geom.scaleWidth;
-            const endX = geom.originX + element.endX * geom.scaleWidth;
-            const endY = geom.originY + element.endY * geom.scaleWidth;
             return plugin.computeBounds(
-                { x0: startX, y0: startY, x1: endX, y1: endY, regularize: element.regularize },
+                shapeElementToGeometry(element, geom.originX, geom.originY, geom.scaleWidth),
                 element.style.width || 2,
             );
         }
@@ -3847,17 +3967,7 @@ export class CanvasController {
     private selectAt(point: Point): void {
         const hit = [...this.document.elements].reverse().find(element => {
             if (element.type === 'shape') {
-                const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
-                const plugin = getShapePlugin(element.shapeType);
-                const startX = geom.originX + element.startX * geom.scaleWidth;
-                const startY = geom.originY + element.startY * geom.scaleWidth;
-                const endX = geom.originX + element.endX * geom.scaleWidth;
-                const endY = geom.originY + element.endY * geom.scaleWidth;
-                return plugin.hitTest(
-                    { x0: startX, y0: startY, x1: endX, y1: endY, regularize: element.regularize },
-                    point,
-                    14,
-                );
+                return this.hitTestShapeElement(element, point, 14);
             }
             return contains(this.getElementDocBounds(element), point.x, point.y, 14);
         });
@@ -3887,6 +3997,160 @@ export class CanvasController {
             };
         }
         return bounds;
+    }
+
+    // ---------------------------------------------------------------------
+    // Parametric shape editing (control handles + reactive style edits)
+    // ---------------------------------------------------------------------
+
+    /** The selected ShapeElement (live document reference) when the selection is exactly one shape. */
+    private getSelectedShape(): ShapeElement | null {
+        if (this.selection.length !== 1) return null;
+        const selected = this.selection[0];
+        if (selected.type !== 'shape') return null;
+        return this.document.elements.includes(selected) ? selected : null;
+    }
+
+    private getShapeDocGeometry(shape: ShapeElement): ShapeRenderGeometry {
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        return shapeElementToGeometry(shape, anchor.originX, anchor.originY, anchor.scaleWidth);
+    }
+
+    private hitTestShapeElement(shape: ShapeElement, point: Point, tolerance: number): boolean {
+        return getShapePlugin(shape.shapeType).hitTest(this.getShapeDocGeometry(shape), point, tolerance);
+    }
+
+    private isTapGesture(start: Point, end: Point | undefined): boolean {
+        if (!end) return true;
+        return Math.hypot(end.x - start.x, end.y - start.y) < SHAPE_TAP_SLOP_PX;
+    }
+
+    /** Selects the topmost ShapeElement under `point` (or clears the selection). */
+    private selectShapeAt(point: Point): void {
+        const hit = [...this.document.elements].reverse().find(
+            (el): el is ShapeElement => el.type === 'shape' && this.hitTestShapeElement(el, point, 14),
+        );
+        this.selection = hit ? [hit] : [];
+        this.emitSelection();
+    }
+
+    /** Starts dragging a control handle of the selected shape when (docX, docY) is within the pick radius. */
+    private tryBeginHandleDrag(docX: number, docY: number, rawPoint: Point): boolean {
+        const shape = this.getSelectedShape();
+        if (!shape) return false;
+        const geom = this.getShapeDocGeometry(shape);
+        const hitRadius = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+        let best: { id: string; kind: ShapeHandleKind; x: number; y: number } | null = null;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (const handle of getShapePlugin(shape.shapeType).getControlHandles(geom)) {
+            const distance = Math.hypot(handle.x - docX, handle.y - docY);
+            if (distance <= hitRadius && distance < bestDistance) {
+                best = handle;
+                bestDistance = distance;
+            }
+        }
+        if (!best) return false;
+
+        this.points.clear();
+        this.predictor.reset();
+        this.resetLiveBake();
+        this.movingSelection = false;
+        this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+        this.handleDrag = {
+            elementId: shape.id,
+            handleId: best.id,
+            kind: best.kind,
+            startGeom: geom,
+            grabOffsetX: best.x - docX,
+            grabOffsetY: best.y - docY,
+            snapshot: this.createHistorySnapshot(),
+            changed: false,
+        };
+        return true;
+    }
+
+    private updateHandleDrag(docPoint: { x: number; y: number }): void {
+        const drag = this.handleDrag;
+        if (!drag) return;
+        const shape = this.document.elements.find(el => el.id === drag.elementId);
+        if (!shape || shape.type !== 'shape') return;
+
+        const plugin = getShapePlugin(shape.shapeType);
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        const target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
+        const regularize = Boolean(shape.regularize || this.isShiftDown);
+        const next = plugin.applyHandleDrag(drag.startGeom, drag.handleId, target, regularize);
+        applyGeometryToShapeElement(shape, next, anchor.originX, anchor.originY, anchor.scaleWidth);
+
+        drag.changed = true;
+        this.strokeCache.delete(shape.id);
+        this.renderDirty = true;
+        this.schedulePaint();
+    }
+
+    private finishHandleDrag(): void {
+        const drag = this.handleDrag;
+        this.handleDrag = null;
+        if (!drag || !drag.changed) return;
+        this.commitHistorySnapshot(drag.snapshot);
+        this.rebuildIndex();
+        this.emitSelection();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        this.options.eventBus?.emit('canvas:dirty', this.pageId);
+    }
+
+    /** Pointer cancelled mid-drag: restore the pre-drag document and keep the shape selected. */
+    private revertHandleDrag(): void {
+        const drag = this.handleDrag;
+        this.handleDrag = null;
+        if (!drag || !drag.changed) return;
+        this.document.elements = cloneElements(drag.snapshot.elements);
+        const restored = this.document.elements.find(el => el.id === drag.elementId);
+        this.selection = restored ? [restored] : [];
+        this.strokeCache.delete(drag.elementId);
+        this.rebuildIndex();
+        this.emitSelection();
+    }
+
+    /**
+     * Reactive editing: style changes made in ToolEstuche / Toolbar while shapes are selected
+     * (shape or lasso tool) are applied to those shapes in place, with one undo step per burst.
+     */
+    private applyStyleToSelectedShapes(patch: ShapeStylePatch): boolean {
+        if (this.suppressSelectionStyleSync) return false;
+        if (this.tool !== 'shape' && this.tool !== 'lasso') return false;
+        const shapes = this.selection.filter((el): el is ShapeElement => el.type === 'shape');
+        if (shapes.length === 0) return false;
+
+        const now = Date.now();
+        const key = `${shapes.map(s => s.id).join(',')}|${Object.keys(patch).sort().join(',')}`;
+        if (now - this.lastShapeStyleEdit.at > SHAPE_STYLE_HISTORY_COALESCE_MS || this.lastShapeStyleEdit.key !== key) {
+            this.recordHistory();
+        }
+        this.lastShapeStyleEdit = { at: now, key };
+
+        for (const shape of shapes) {
+            if (patch.color !== undefined) shape.style.color = patch.color;
+            if (patch.width !== undefined) shape.style.width = patch.width;
+            if (patch.pattern !== undefined) shape.style.pattern = patch.pattern;
+            if (getShapePlugin(shape.shapeType).isClosed) {
+                if (patch.fillEnabled !== undefined) shape.fillEnabled = patch.fillEnabled;
+                if (patch.fillColor !== undefined) shape.fillColor = patch.fillColor;
+                if (patch.fillPattern !== undefined) shape.fillPattern = patch.fillPattern;
+                if (patch.fillOpacity !== undefined) shape.fillOpacity = patch.fillOpacity;
+                if (patch.fillDensity !== undefined) shape.fillDensity = patch.fillDensity;
+            }
+            this.strokeCache.delete(shape.id);
+        }
+
+        this.rebuildIndex();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        this.options.eventBus?.emit('canvas:dirty', this.pageId);
+        return true;
     }
 
     private emitSelection(): void {
@@ -3940,10 +4204,7 @@ export class CanvasController {
         element.bounds.minY += dv;
         element.bounds.maxY += dv;
         if (element.type === 'shape') {
-            element.startX += du;
-            element.endX += du;
-            element.startY += dv;
-            element.endY += dv;
+            mapShapeElementPoints(element, (u, v) => ({ x: u + du, y: v + dv }));
         } else {
             for (let i = 0; i < element.points.length; i += 4) {
                 element.points[i] += du;
@@ -4073,32 +4334,17 @@ export class CanvasController {
                     }
                     element.bounds = { minX: minU, maxX: maxU, minY: minV, maxY: maxV };
                 } else {
-                    const docStartX = oldGeom.originX + element.startX * oldGeom.scaleWidth;
-                    const docStartY = oldGeom.originY + element.startY * oldGeom.scaleWidth;
-                    const docEndX = oldGeom.originX + element.endX * oldGeom.scaleWidth;
-                    const docEndY = oldGeom.originY + element.endY * oldGeom.scaleWidth;
-
-                    let newStartX = (docStartX - newGeom.originX) / newGeom.scaleWidth;
-                    let newStartY = (docStartY - newGeom.originY) / newGeom.scaleWidth;
-                    let newEndX = (docEndX - newGeom.originX) / newGeom.scaleWidth;
-                    let newEndY = (docEndY - newGeom.originY) / newGeom.scaleWidth;
-
-                    if (newGeom.isBox) {
-                        newStartX = Math.max(0, Math.min(1, newStartX));
-                        newStartY = Math.max(0, newStartY);
-                        newEndX = Math.max(0, Math.min(1, newEndX));
-                        newEndY = Math.max(0, newEndY);
-                    }
-                    element.startX = newStartX;
-                    element.startY = newStartY;
-                    element.endX = newEndX;
-                    element.endY = newEndY;
-                    element.bounds = {
-                        minX: Math.min(newStartX, newEndX),
-                        maxX: Math.max(newStartX, newEndX),
-                        minY: Math.min(newStartY, newEndY),
-                        maxY: Math.max(newStartY, newEndY),
-                    };
+                    mapShapeElementPoints(element, (u, v) => {
+                        const docX = oldGeom.originX + u * oldGeom.scaleWidth;
+                        const docY = oldGeom.originY + v * oldGeom.scaleWidth;
+                        let newU = (docX - newGeom.originX) / newGeom.scaleWidth;
+                        let newV = (docY - newGeom.originY) / newGeom.scaleWidth;
+                        if (newGeom.isBox) {
+                            newU = Math.max(0, Math.min(1, newU));
+                            newV = Math.max(0, newV);
+                        }
+                        return { x: newU, y: newV };
+                    }, oldGeom.scaleWidth / newGeom.scaleWidth);
                 }
 
                 element.blockId = newAnchor.blockId;
@@ -4471,10 +4717,19 @@ export class CanvasController {
     }
 
     private recordHistory(): void {
-        this.history.push({
+        this.commitHistorySnapshot(this.createHistorySnapshot());
+    }
+
+    private createHistorySnapshot(): HistorySnapshot {
+        return {
             elements: cloneElements(this.document.elements),
             boxHeights: this.getBoxHeightsSnapshot(),
-        });
+        };
+    }
+
+    /** Pushes a snapshot captured earlier (e.g. at pointerdown) onto the undo stack. */
+    private commitHistorySnapshot(snapshot: HistorySnapshot): void {
+        this.history.push(snapshot);
         if (this.history.length > 30) this.history.shift();
         this.future.length = 0;
         this.toolbar?.setHistory(this.history.length > 0, false);
@@ -4612,8 +4867,7 @@ export class CanvasController {
                                 element.points[i] += deltaV;
                             }
                         } else {
-                            element.startY += deltaV;
-                            element.endY += deltaV;
+                            mapShapeElementPoints(element, (u, v) => ({ x: u, y: v + deltaV }));
                         }
                         changed = true;
                     }
@@ -4867,11 +5121,9 @@ export class CanvasController {
             -ratio * sTop,
         );
 
-        if (this.points.size > 0 && this.activeStart) {
+        if (this.points.size > 0 && this.activeStart && !this.movingSelection && !this.handleDrag) {
             if (this.tool === 'lasso') {
-                if (!this.movingSelection) {
-                    this.paintLasso();
-                }
+                this.paintLasso();
             } else {
                 this.paintActive();
             }
@@ -5079,32 +5331,9 @@ export class CanvasController {
         blockTop: number,
         styleOverride?: Partial<ShapeStyleConfig>,
     ): void {
-        const startX = contentLeft + shape.startX * contentWidth;
-        const startY = blockTop + shape.startY * contentWidth;
-        const endX = contentLeft + shape.endX * contentWidth;
-        const endY = blockTop + shape.endY * contentWidth;
-
         const plugin = getShapePlugin(shape.shapeType);
-        const geom: ShapeRenderGeometry = {
-            x0: startX,
-            y0: startY,
-            x1: endX,
-            y1: endY,
-            regularize: shape.regularize,
-        };
-        const styleConfig: ShapeStyleConfig = {
-            strokeColor: shape.style.color,
-            strokeWidth: shape.style.width,
-            strokePattern: shape.style.pattern,
-            strokeOpacity: shape.style.opacity,
-            fillEnabled: shape.fillEnabled,
-            fillColor: shape.fillColor,
-            fillOpacity: shape.fillOpacity,
-            fillPattern: shape.fillPattern,
-            fillDensity: shape.fillDensity,
-            ...styleOverride,
-        };
-        plugin.renderCanvas(context, geom, styleConfig);
+        const geom = shapeElementToGeometry(shape, contentLeft, blockTop, contentWidth);
+        plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
     }
 
     private paintActive(): void {
@@ -5374,6 +5603,11 @@ export class CanvasController {
     }
 
     private paintSelection(): void {
+        const selectedShape = this.getSelectedShape();
+        if (selectedShape) {
+            this.paintShapeSelection(selectedShape);
+            return;
+        }
         const bounds = this.getSelectionDocBounds();
         if (!bounds) return;
         const padding = 6;
@@ -5416,6 +5650,67 @@ export class CanvasController {
             this.context.stroke();
         }
         this.context.restore();
+    }
+
+    /** Selection chrome of a single shape: light outline plus its parametric control handles. */
+    private paintShapeSelection(shape: ShapeElement): void {
+        const plugin = getShapePlugin(shape.shapeType);
+        const geom = this.getShapeDocGeometry(shape);
+        const norm = plugin.normalizeGeometry(geom);
+        const bounds = this.getElementDocBounds(shape);
+        const ctx = this.context;
+        const accent = '#2F6BFF';
+        const padding = 6;
+
+        ctx.save();
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 1 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        ctx.strokeRect(
+            bounds.minX - padding,
+            bounds.minY - padding,
+            bounds.maxX - bounds.minX + padding * 2,
+            bounds.maxY - bounds.minY + padding * 2,
+        );
+
+        // Bezier guide: endpoints → control point
+        if (norm.controlPoint) {
+            ctx.beginPath();
+            ctx.moveTo(norm.x0, norm.y0);
+            ctx.lineTo(norm.controlPoint.x, norm.controlPoint.y);
+            ctx.lineTo(norm.x1, norm.y1);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+
+        const activeHandleId = this.handleDrag?.elementId === shape.id ? this.handleDrag.handleId : '';
+        const radius = 6 / this.zoom;
+        const diamond = 7 / this.zoom;
+        for (const handle of plugin.getControlHandles(geom)) {
+            const isActive = handle.id === activeHandleId;
+            ctx.beginPath();
+            if (handle.kind === 'curve' || handle.kind === 'radius') {
+                // Diamond accent handle for curvature / corner radius
+                ctx.moveTo(handle.x, handle.y - diamond);
+                ctx.lineTo(handle.x + diamond, handle.y);
+                ctx.lineTo(handle.x, handle.y + diamond);
+                ctx.lineTo(handle.x - diamond, handle.y);
+                ctx.closePath();
+                ctx.fillStyle = accent;
+                ctx.fill();
+                ctx.strokeStyle = '#FFFFFF';
+            } else {
+                ctx.arc(handle.x, handle.y, isActive ? radius * 1.3 : radius, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            }
+            ctx.lineWidth = 2 / this.zoom;
+            ctx.stroke();
+        }
+        ctx.restore();
     }
 
     // Touch gesture handling (Pinch-to-zoom & 2-finger navigation scroll with 1-finger palm rejection)

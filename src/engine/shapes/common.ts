@@ -20,11 +20,9 @@ export function regularizeClosedGeometry(geom: ShapeRenderGeometry): ShapeRender
     const signX = dx < 0 ? -1 : 1;
     const signY = dy < 0 ? -1 : 1;
     return {
-        x0: geom.x0,
-        y0: geom.y0,
+        ...geom,
         x1: geom.x0 + signX * s,
         y1: geom.y0 + signY * s,
-        regularize: geom.regularize,
     };
 }
 
@@ -43,11 +41,9 @@ export function regularizeLinearGeometry(geom: ShapeRenderGeometry): ShapeRender
     const step = Math.PI / 4; // 45 degrees
     const snappedTheta = Math.round(theta / step) * step;
     return {
-        x0: geom.x0,
-        y0: geom.y0,
+        ...geom,
         x1: geom.x0 + r * Math.cos(snappedTheta),
         y1: geom.y0 + r * Math.sin(snappedTheta),
-        regularize: geom.regularize,
     };
 }
 
