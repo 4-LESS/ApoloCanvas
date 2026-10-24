@@ -158,12 +158,10 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             // 1. Fill phase (for closed subpaths with isFilled !== false)
             if (isClosed && style.fillEnabled && w > 0 && h > 0) {
                 const fillSubpaths = subpaths.filter(sp => sp.isFilled !== false);
-                if (fillSubpaths.length > 0) {
+                for (const sp of fillSubpaths) {
                     ctx.beginPath();
-                    for (const sp of fillSubpaths) {
-                        renderCommandsToCanvas(ctx, sp.commands, minX, minY, w, h);
-                    }
-                    applyCanvasFill(ctx, style);
+                    renderCommandsToCanvas(ctx, sp.commands, minX, minY, w, h);
+                    applyCanvasFill(ctx, style, undefined, sp.fillOptions);
                 }
             }
 
@@ -197,19 +195,23 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             const h = Math.abs(norm.y1 - norm.y0);
 
             const strokeAttrs = getSvgStrokeAttributes(style);
-            const { fillAttr, defs } = getSvgFillAttributes(style);
 
             const fillSubpaths = subpaths.filter(sp => sp.isFilled !== false);
             const strokeSubpaths = subpaths.filter(sp => sp.isStroked !== false);
 
             const bodies: string[] = [];
+            const allDefs: Record<string, string> = {};
 
             // If filled and separate from stroke or unified
             if (isClosed && style.fillEnabled && fillSubpaths.length > 0) {
-                const fillD = fillSubpaths
-                    .map(sp => renderCommandsToSvgPath(sp.commands, minX, minY, w, h))
-                    .join(' ');
-                bodies.push(`<path d="${fillD}" stroke="none" ${fillAttr}/>`);
+                for (const sp of fillSubpaths) {
+                    const { fillAttr, defs } = getSvgFillAttributes(style, sp.fillOptions);
+                    if (defs) {
+                        Object.assign(allDefs, defs);
+                    }
+                    const fillD = renderCommandsToSvgPath(sp.commands, minX, minY, w, h);
+                    bodies.push(`<path d="${fillD}" stroke="none" ${fillAttr}/>`);
+                }
             }
 
             const strokeD = strokeSubpaths
@@ -218,7 +220,7 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             bodies.push(`<path d="${strokeD}" ${strokeAttrs} fill="none"/>`);
 
             return {
-                defs: defs ?? {},
+                defs: allDefs,
                 body: bodies.join('\n'),
             };
         },
@@ -291,8 +293,45 @@ export const cylinderShapePlugin: ShapePlugin = createCustomShapePlugin({
     name: 'Cilindro',
     isClosed: true,
     subpaths: [
+        // Face 1: Cylinder Lateral Body (Fill only, non-overlapping with top cap)
         {
-            // Full cylinder body for fill and outer boundary stroke
+            commands: [
+                { type: 'M', args: [0, 0.2] },
+                { type: 'C', args: [0, 0.31, 0.22, 0.4, 0.5, 0.4] },
+                { type: 'C', args: [0.78, 0.4, 1, 0.31, 1, 0.2] },
+                { type: 'L', args: [1, 0.8] },
+                { type: 'C', args: [1, 0.91, 0.78, 1, 0.5, 1] },
+                { type: 'C', args: [0.22, 1, 0, 0.91, 0, 0.8] },
+                { type: 'Z', args: [] },
+            ],
+            isClosed: true,
+            isFilled: true,
+            isStroked: false,
+            fillOptions: {
+                patternAngleOffsetDeg: 0,
+                opacityMultiplier: 1.0,
+            },
+        },
+        // Face 2: Top Elliptical Cap (Fill only, non-overlapping)
+        {
+            commands: [
+                { type: 'M', args: [0, 0.2] },
+                { type: 'C', args: [0, 0.09, 0.22, 0, 0.5, 0] },
+                { type: 'C', args: [0.78, 0, 1, 0.09, 1, 0.2] },
+                { type: 'C', args: [1, 0.31, 0.78, 0.4, 0.5, 0.4] },
+                { type: 'C', args: [0.22, 0.4, 0, 0.31, 0, 0.2] },
+                { type: 'Z', args: [] },
+            ],
+            isClosed: true,
+            isFilled: true,
+            isStroked: false,
+            fillOptions: {
+                patternAngleOffsetDeg: 90,
+                opacityMultiplier: 0.72,
+            },
+        },
+        // Outer Boundary Silhouette Stroke
+        {
             commands: [
                 { type: 'M', args: [0, 0.2] },
                 { type: 'L', args: [0, 0.8] },
@@ -304,11 +343,11 @@ export const cylinderShapePlugin: ShapePlugin = createCustomShapePlugin({
                 { type: 'Z', args: [] },
             ],
             isClosed: true,
-            isFilled: true,
+            isFilled: false,
             isStroked: true,
         },
+        // Front Top Rim Arc Stroke (interior 3D seam drawn on top of both fills)
         {
-            // Front top rim arc (for 3D effect stroke)
             commands: [
                 { type: 'M', args: [0, 0.2] },
                 { type: 'C', args: [0, 0.31, 0.22, 0.4, 0.5, 0.4] },

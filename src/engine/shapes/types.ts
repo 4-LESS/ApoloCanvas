@@ -44,6 +44,13 @@ export interface ShapePlugin {
 
 export type NormalizedPoint = [number, number];
 
+export interface ShapeFaceFillOptions {
+    /** Rotation offset in degrees for pattern fills ('hachure', 'cross-hatch', 'dots'), e.g. 0 for body, 90 for top cap */
+    readonly patternAngleOffsetDeg?: number;
+    /** Multiplier applied to base fillOpacity (e.g. 0.72 on top cap for natural 3D shading contrast in 'solid' mode) */
+    readonly opacityMultiplier?: number;
+}
+
 export interface CustomPathSegment {
     type: 'M' | 'L' | 'C' | 'Q' | 'Z';
     args: number[]; // normalized [0..1] coordinates
@@ -54,6 +61,7 @@ export interface CustomShapeSubpath {
     isClosed?: boolean;
     isFilled?: boolean;
     isStroked?: boolean;
+    fillOptions?: ShapeFaceFillOptions;
 }
 
 export interface CustomShapeDefinition {

@@ -764,4 +764,133 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             estuche.destroy();
         });
     });
+
+    describe('6. Multi-Face Fill Definitions & Pattern Orientation Contrast for 3D Shapes', () => {
+        test('cylinder with fillEnabled: true and fillPattern: "hachure" renders two distinct face fills with contrasting pattern orientations', () => {
+            const cylinderPlugin = getShapePlugin('cylinder');
+            assert.ok(cylinderPlugin);
+
+            const geom: ShapeRenderGeometry = { x0: 50, y0: 50, x1: 250, y1: 350 };
+            const style: ShapeStyleConfig = {
+                strokeColor: '#1F4FD8',
+                strokeWidth: 2,
+                fillEnabled: true,
+                fillColor: '#FF5722',
+                fillPattern: 'hachure',
+                fillOpacity: 0.5,
+            };
+
+            // Test SVG output
+            const svgOutput = cylinderPlugin.renderSvg(geom, style);
+            assert.ok(svgOutput.defs, 'Must contain defs');
+
+            // Should have both base 0 deg hachure and 90 deg rotated hachure defs
+            const defKeys = Object.keys(svgOutput.defs);
+            const hasBaseHachure = defKeys.some(k => k.includes('apolo-fill-hachure') && !k.includes('-rot'));
+            const hasRot90Hachure = defKeys.some(k => k.includes('apolo-fill-hachure') && k.includes('-rot90'));
+
+            assert.strictEqual(hasBaseHachure, true, 'Must include base hachure def');
+            assert.strictEqual(hasRot90Hachure, true, 'Must include rot90 hachure def for top cap');
+
+            // Must render two separate <path stroke="none" fill="url(#...)"/> elements in body
+            const bodyPaths = svgOutput.body.split('\n');
+            const fillPaths = bodyPaths.filter(p => p.startsWith('<path') && p.includes('stroke="none"'));
+            assert.strictEqual(fillPaths.length, 2, 'Cylinder must have 2 non-overlapping fill faces');
+
+            // One face uses base pattern and one uses rot90 pattern
+            assert.ok(fillPaths.some(p => p.includes('apolo-fill-hachure') && !p.includes('-rot90')));
+            assert.ok(fillPaths.some(p => p.includes('-rot90')));
+
+            // Test Canvas 2D calls
+            const fillOperations: any[] = [];
+            const mockCtx: any = {
+                save: () => {},
+                restore: () => {},
+                beginPath: () => {},
+                moveTo: () => {},
+                lineTo: () => {},
+                bezierCurveTo: () => {},
+                closePath: () => {},
+                fill: () => {
+                    fillOperations.push({ fillStyle: mockCtx.fillStyle, globalAlpha: mockCtx.globalAlpha });
+                },
+                stroke: () => {},
+                createPattern: (canvas: any, repetition: string) => ({ canvas, repetition }),
+            };
+
+            cylinderPlugin.renderCanvas(mockCtx, geom, style);
+            assert.strictEqual(fillOperations.length, 2, 'Must perform 2 fill passes on Canvas 2D for the two faces');
+        });
+
+        test('cylinder with fillEnabled: true and fillPattern: "solid" applies contrasted fill-opacity on top cap vs body', () => {
+            const cylinderPlugin = getShapePlugin('cylinder');
+
+            const geom: ShapeRenderGeometry = { x0: 50, y0: 50, x1: 250, y1: 350 };
+            const style: ShapeStyleConfig = {
+                strokeColor: '#1F4FD8',
+                strokeWidth: 2,
+                fillEnabled: true,
+                fillColor: '#2F6BFF',
+                fillPattern: 'solid',
+                fillOpacity: 0.5,
+            };
+
+            const svgOutput = cylinderPlugin.renderSvg(geom, style);
+            const bodyPaths = svgOutput.body.split('\n');
+            const fillPaths = bodyPaths.filter(p => p.startsWith('<path') && p.includes('stroke="none"'));
+            assert.strictEqual(fillPaths.length, 2);
+
+            // Face 1 (body): opacity = 0.5 * 1.0 = 0.5
+            // Face 2 (top cap): opacity = 0.5 * 0.72 = 0.36
+            assert.ok(fillPaths.some(p => p.includes('fill-opacity="0.5"')), 'Body face must have 0.5 fill-opacity');
+            assert.ok(fillPaths.some(p => p.includes('fill-opacity="0.36"')), 'Top cap face must have 0.36 fill-opacity');
+
+            // Test Canvas 2D globalAlpha
+            const alphas: number[] = [];
+            const mockCtx: any = {
+                save: () => {},
+                restore: () => {},
+                beginPath: () => {},
+                moveTo: () => {},
+                lineTo: () => {},
+                bezierCurveTo: () => {},
+                closePath: () => {},
+                fill: () => {
+                    alphas.push(mockCtx.globalAlpha);
+                },
+                stroke: () => {},
+            };
+
+            cylinderPlugin.renderCanvas(mockCtx, geom, style);
+            assert.strictEqual(alphas.length, 2);
+            assert.strictEqual(alphas[0], 0.5);
+            assert.strictEqual(alphas[1], 0.36);
+        });
+
+        test('FavoritesDrawer createShapePreview renders cylinder with two-face fill', async () => {
+            const { mockWindow, mockDocument } = createMockEngineEnv();
+            (globalThis as any).window = mockWindow;
+            (globalThis as any).document = mockDocument;
+
+            const { createShapePreview } = await import('../src/ui/favorites/FavoritesDrawer.ts');
+            const previewSvg = createShapePreview({
+                id: 'fav-cylinder-1',
+                name: 'Cilindro fav',
+                tool: 'shape',
+                shapeType: 'cylinder',
+                color: '#2F6BFF',
+                width: 3,
+                fillEnabled: true,
+                fillColor: '#FFA726',
+                fillPattern: 'hachure',
+                fillOpacity: 0.4,
+            });
+
+            assert.ok(previewSvg, 'Must produce SVG preview');
+            const paths = previewSvg.querySelectorAll('path');
+            assert.ok(paths.length >= 2, 'Must render cylinder paths in SVG preview');
+            const defs = previewSvg.querySelector('defs');
+            assert.ok(defs, 'Must contain defs for pattern preview');
+        });
+    });
 });

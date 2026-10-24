@@ -10,6 +10,7 @@ import {
     DEFAULT_SHAPE_FAVORITE_PROFILES,
 } from '../../core/types.ts';
 import { computeFavoriteFingerprint, inferTool } from './FavoritesStore.ts';
+import { getShapePlugin } from '../../engine/shapes/index.ts';
 import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark, setAccessibleTooltip } from '../theme.ts';
 
 export type DrawerDragState = 'idle' | 'dragging' | 'drag-out' | 'dropping' | 'cancelled';
@@ -165,6 +166,53 @@ export function createShapePreview(
                 points: isSquare ? '32,10 54,50 10,50' : `${width / 2},${padY} ${width - padX},${height - padY} ${padX},${height - padY}`,
             });
             break;
+        case 'cylinder':
+        case 'diamond':
+        case 'hexagon': {
+            const plugin = getShapePlugin(preset.shapeType);
+            const pad = isSquare ? 10 : 8;
+            const geom = {
+                x0: pad,
+                y0: pad,
+                x1: width - pad,
+                y1: height - pad,
+            };
+            const style = {
+                strokeColor,
+                strokeWidth,
+                strokeOpacity,
+                strokePattern: pattern as any,
+                fillEnabled: preset.fillEnabled,
+                fillColor: fill,
+                fillOpacity,
+                fillPattern: preset.fillPattern ?? 'solid',
+            };
+            const rendered = plugin.renderSvg(geom, style);
+            if (rendered.defs && Object.keys(rendered.defs).length > 0) {
+                let defsEl = svg.querySelector('defs');
+                if (!defsEl) {
+                    defsEl = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                    if (typeof svg.prepend === 'function') {
+                        svg.prepend(defsEl);
+                    } else if (typeof svg.insertBefore === 'function') {
+                        svg.insertBefore(defsEl, svg.firstChild);
+                    } else {
+                        svg.appendChild(defsEl);
+                    }
+                }
+                const defsContainer = createSvg(`<svg>${Object.values(rendered.defs).join('')}</svg>`);
+                for (const child of Array.from(defsContainer.children ?? [])) {
+                    defsEl.appendChild(child);
+                }
+            }
+            if (rendered.body) {
+                const bodyContainer = createSvg(`<svg>${rendered.body}</svg>`);
+                for (const child of Array.from(bodyContainer.children ?? [])) {
+                    svg.appendChild(child);
+                }
+            }
+            break;
+        }
         case 'rect':
         default:
             addWithCommon('rect', isSquare
