@@ -14,6 +14,7 @@ import type {
     ShapePlugin,
     ShapePoint,
     ShapeRenderGeometry,
+    ShapeSnapPort,
     ShapeStyleConfig,
     ShapeSvgOutput,
 } from './types.ts';
@@ -21,7 +22,9 @@ import {
     applyLinearHandleDrag,
     boxCornerHandles,
     boxEdgeHandles,
+    boxSnapPorts,
     linearControlHandles,
+    linearSnapPorts,
     resizeBoxByHandle,
 } from './handles.ts';
 import {
@@ -280,6 +283,11 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             return isClosed
                 ? resizeBoxByHandle(norm, handleId, newPoint, reg)
                 : applyLinearHandleDrag(norm, handleId, newPoint, reg);
+        },
+
+        getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+            const norm = this.normalizeGeometry(geom);
+            return isClosed ? boxSnapPorts(norm) : linearSnapPorts(norm);
         },
     };
 }

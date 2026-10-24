@@ -5,7 +5,7 @@
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeSnapPort, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
     getStrokeDashArray,
     getSvgStrokeAttributes,
@@ -16,6 +16,7 @@ import {
     linearControlHandles,
     linearPathBounds,
     linearPathHit,
+    linearSnapPorts,
 } from './handles.ts';
 
 export function traceLinearPath(ctx: CanvasRenderingContext2D, norm: ShapeRenderGeometry): void {
@@ -101,5 +102,9 @@ export const lineShapePlugin: ShapePlugin = {
 
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
         return applyLinearHandleDrag(this.normalizeGeometry(geom), handleId, newPoint, regularize ?? geom.regularize);
+    },
+
+    getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+        return linearSnapPorts(this.normalizeGeometry(geom));
     },
 };

@@ -6,7 +6,7 @@
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeSnapPort, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
     applyCanvasFill,
     getStrokeDashArray,
@@ -15,7 +15,7 @@ import {
     pointInBox,
     regularizeClosedGeometry,
 } from './common.ts';
-import { boxCornerHandles, getGeometryBox, resizeBoxByHandle } from './handles.ts';
+import { boxCornerHandles, boxSnapPorts, getGeometryBox, resizeBoxByHandle } from './handles.ts';
 
 /** Distance between the top-left corner and the radius handle when the radius is 0. */
 export const RADIUS_HANDLE_INSET = 10;
@@ -159,5 +159,9 @@ export const rectangleShapePlugin: ShapePlugin = {
             return next;
         }
         return resizeBoxByHandle(norm, handleId, newPoint, regularize ?? geom.regularize);
+    },
+
+    getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+        return boxSnapPorts(this.normalizeGeometry(geom));
     },
 };

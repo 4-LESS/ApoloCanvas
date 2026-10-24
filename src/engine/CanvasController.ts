@@ -44,7 +44,16 @@ import {
 } from './PatternedStrokeRenderer.ts';
 import { getPenPlugin } from './pens/index.ts';
 import {
+    MAGNETIC_SNAP_RADIUS_PX,
     applyGeometryToShapeElement,
+    clearDanglingBindings,
+    findNearestSnapPort,
+    followBoundConnectors,
+    isConnectorShape,
+    releaseDetachedBindings,
+    setBinding,
+    type ConnectorGeometryAdapter,
+    type SnapPortHit,
     getShapePlugin,
     mapShapeElementPoints,
     refreshShapeElementBounds,
@@ -204,6 +213,8 @@ interface ShapeHandleDragState {
     /** Pre-drag state, pushed to the undo stack on pointerup only if something changed. */
     snapshot: HistorySnapshot;
     changed: boolean;
+    /** Port the dragged connector endpoint is currently magnetized to (start / end handles only). */
+    snap: SnapPortHit | null;
 }
 
 /** Style fields of a selected shape that ToolEstuche / Toolbar edit reactively. */
@@ -346,6 +357,15 @@ export class CanvasController {
     private snapPreview: RecognizedShape | null = null;
     private lastShapeStyleEdit = { at: 0, key: '' };
     private suppressSelectionStyleSync = false;
+    /** Anchor-aware document geometry access for magnetic connectors. */
+    private readonly connectorAdapter: ConnectorGeometryAdapter = {
+        getGeometry: (element) => this.getShapeDocGeometry(element),
+        setGeometry: (element, geom) => {
+            const anchor = this.getElementAnchorGeometry(element.blockId, element.anchorText);
+            applyGeometryToShapeElement(element, geom, anchor.originX, anchor.originY, anchor.scaleWidth);
+            this.strokeCache.delete(element.id);
+        },
+    };
     private activeStart: Point | null = null;
 
     public get isDrawing(): boolean {
@@ -3128,8 +3148,16 @@ export class CanvasController {
         const docX = (rawPoint.x + this.currentScrollLeft) / this.zoom;
         const docY = (rawPoint.y + this.currentScrollTop) / this.zoom;
 
+        // With a line / arrow armed, pressing on a port of a closed shape starts a magnetic connector,
+        // even over a selected closed shape (whose edge handles / body would otherwise win)
+        const selectedForConnector = this.getSelectedShape();
+        const startsConnector = this.tool === 'shape' && !barrel &&
+            !getShapePlugin(this.shapeType).isClosed &&
+            (!selectedForConnector || getShapePlugin(selectedForConnector.shapeType).isClosed) &&
+            this.findSnapPort({ x: docX, y: docY }) !== null;
+
         // Parametric control handles of the selected shape take priority over drawing / moving
-        if ((this.tool === 'lasso' || this.tool === 'shape') && !barrel && this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+        if (!startsConnector && (this.tool === 'lasso' || this.tool === 'shape') && !barrel && this.tryBeginHandleDrag(docX, docY, rawPoint)) {
             this.schedulePaint();
             return;
         }
@@ -3164,7 +3192,7 @@ export class CanvasController {
         // Moving existing selection if tapped inside bounds (lasso, or a shape selected with the shape tool)
         const selectionBounds = this.getSelectionDocBounds();
         const canMoveSelection = this.tool === 'lasso' || (this.tool === 'shape' && this.getSelectedShape() !== null);
-        this.movingSelection = canMoveSelection && !barrel && Boolean(
+        this.movingSelection = canMoveSelection && !barrel && !startsConnector && Boolean(
             selectionBounds && contains(selectionBounds, docX, docY, 12)
         );
         this.moveSelectionSnapshot = this.movingSelection ? this.createHistorySnapshot() : null;
@@ -3303,6 +3331,7 @@ export class CanvasController {
                 // The snapshot was taken at pointerdown, so undo restores the pre-move position
                 this.commitHistorySnapshot(snapshot ?? this.createHistorySnapshot());
                 this.reanchorSelection();
+                this.followConnectors(new Set(this.selection.map(el => el.id)));
                 this.rebuildIndex();
                 this.emitSelection();
                 this.renderDirty = true;
@@ -3327,7 +3356,12 @@ export class CanvasController {
         } else {
             this.recordHistory();
             if (this.tool === 'shape') {
-                this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
+                const endPoint = raw[raw.length - 1];
+                const snaps = this.resolveConnectorSnaps(this.shapeType, this.activeStart, endPoint);
+                this.addShape(this.activeStart, endPoint, this.shapeType, {
+                    startSnap: snaps.start,
+                    endSnap: snaps.end,
+                });
             } else {
                 // Hold-to-snap: the live dwell preview wins; otherwise a stationary hold right
                 // before release still converts the stroke
@@ -3611,8 +3645,19 @@ export class CanvasController {
         start: Point,
         end: Point,
         shapeType: ShapeElement['shapeType'],
-        options: { style?: StrokeStyle; regularize?: boolean; vertices?: Point[]; fill?: boolean } = {},
+        options: {
+            style?: StrokeStyle;
+            regularize?: boolean;
+            vertices?: Point[];
+            fill?: boolean;
+            /** Magnetic ports the connector endpoints were snapped to (line / arrow only). */
+            startSnap?: SnapPortHit | null;
+            endSnap?: SnapPortHit | null;
+        } = {},
     ): void {
+        const isMagnetized = Boolean(options.startSnap || options.endSnap);
+        if (options.startSnap) start = { ...start, x: options.startSnap.x, y: options.startSnap.y };
+        if (options.endSnap) end = { ...end, x: options.endSnap.x, y: options.endSnap.y };
         const bounds = this.getDocumentContentBounds();
         const forbiddenY = bounds.contentTop > 0 ? bounds.contentTop - DEFAULT_INK_LIMITS.topMarginPx : -Infinity;
         if (bounds.contentTop > 0 && start.y < forbiddenY && end.y < forbiddenY) {
@@ -3627,7 +3672,8 @@ export class CanvasController {
         const isBoxSnap = spaceId ? (BoxRegistry.isSnapActive(spaceId) || !!this.document.boxes?.[spaceId]?.snapToGrid) : false;
         const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
 
-        const regularize = options.regularize ?? Boolean(this.toolState.shape.regularize || this.isShiftDown);
+        // Port positions win over 45° snapping and grid snapping
+        const regularize = isMagnetized ? false : (options.regularize ?? Boolean(this.toolState.shape.regularize || this.isShiftDown));
         const plugin = getShapePlugin(shapeType);
         const normalizedGeom = plugin.normalizeGeometry({
             x0: start.x,
@@ -3646,7 +3692,7 @@ export class CanvasController {
         let { u: startU, v: startV } = sanitizeNormalizedPoint(rawStartU, rawStartV, { isBoxStroke });
         let { u: endU, v: endV } = sanitizeNormalizedPoint(rawEndU, rawEndV, { isBoxStroke });
 
-        if (isBoxStroke && (this.snapGrid || isBoxSnap)) {
+        if (isBoxStroke && (this.snapGrid || isBoxSnap) && !isMagnetized) {
             const snStart = snapNormalizedPoint(startU, startV, boxGridDensity);
             const snEnd = snapNormalizedPoint(endU, endV, boxGridDensity);
             startU = snStart.u; startV = snStart.v;
@@ -3692,6 +3738,10 @@ export class CanvasController {
             });
             element.regularize = false;
             refreshShapeElementBounds(element);
+        }
+        if (!plugin.isClosed) {
+            if (options.startSnap) element.startBinding = { elementId: options.startSnap.elementId, portId: options.startSnap.portId };
+            if (options.endSnap) element.endBinding = { elementId: options.endSnap.elementId, portId: options.endSnap.portId };
         }
         this.document.elements.push(element);
         this.options.eventBus?.emit('snap:detected', shapeType, end.x, end.y);
@@ -4053,6 +4103,8 @@ export class CanvasController {
                 }
             }
             this.document.elements = kept;
+            // Erasing a connected shape leaves its connectors in place but unbound
+            clearDanglingBindings(this.document.elements);
             this.selection = [];
             this.lassoMenu?.hide();
             this.emitSelection();
@@ -4160,6 +4212,75 @@ export class CanvasController {
         this.emitSelection();
     }
 
+    /** Nearest magnetic port of a closed shape within MAGNETIC_SNAP_RADIUS_PX (screen) of `point`. */
+    private findSnapPort(point: { x: number; y: number }, excludeId?: string): SnapPortHit | null {
+        return findNearestSnapPort(
+            this.document.elements,
+            point,
+            MAGNETIC_SNAP_RADIUS_PX / this.zoom,
+            this.connectorAdapter,
+            excludeId,
+        );
+    }
+
+    /** Ports that a line / arrow being drawn from `start` to `end` snaps to (none for closed shapes). */
+    private resolveConnectorSnaps(
+        shapeType: ShapeType,
+        start: { x: number; y: number },
+        end: { x: number; y: number },
+    ): { start: SnapPortHit | null; end: SnapPortHit | null } {
+        if (getShapePlugin(shapeType).isClosed) return { start: null, end: null };
+        const startSnap = this.findSnapPort(start);
+        let endSnap = this.findSnapPort(end);
+        if (endSnap && startSnap && endSnap.elementId === startSnap.elementId && endSnap.portId === startSnap.portId) {
+            endSnap = null;
+        }
+        return { start: startSnap, end: endSnap };
+    }
+
+    /**
+     * Re-glues connectors bound to any of `changedIds` and releases bindings whose target vanished.
+     * Returns true when at least one connector moved.
+     */
+    private followConnectors(changedIds: ReadonlySet<string>): boolean {
+        if (changedIds.size === 0) return false;
+        const updated = followBoundConnectors(this.document.elements, changedIds, this.connectorAdapter);
+        if (updated.length > 0) this.renderDirty = true;
+        return updated.length > 0;
+    }
+
+    /** Magnetic feedback: the target shape's ports as dots plus a halo ring on the matched port. */
+    private paintSnapTargets(hits: Array<SnapPortHit | null | undefined>): void {
+        const ctx = this.context;
+        const accent = '#2F6BFF';
+        const painted = new Set<string>();
+        ctx.save();
+        ctx.setLineDash([]);
+        for (const hit of hits) {
+            if (!hit) continue;
+            if (!painted.has(hit.elementId)) {
+                painted.add(hit.elementId);
+                const target = this.document.elements.find(el => el.id === hit.elementId);
+                if (target && target.type === 'shape') {
+                    ctx.fillStyle = accent;
+                    ctx.globalAlpha = 0.45;
+                    for (const port of getShapePlugin(target.shapeType).getSnapPorts(this.getShapeDocGeometry(target))) {
+                        ctx.beginPath();
+                        ctx.arc(port.x, port.y, 2.5 / this.zoom, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = accent;
+            ctx.lineWidth = 2 / this.zoom;
+            ctx.beginPath();
+            ctx.arc(hit.x, hit.y, 6 / this.zoom, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
     /** Starts dragging a control handle of the selected shape when (docX, docY) is within the pick radius. */
     private tryBeginHandleDrag(docX: number, docY: number, rawPoint: Point): boolean {
         const shape = this.getSelectedShape();
@@ -4191,6 +4312,7 @@ export class CanvasController {
             grabOffsetY: best.y - docY,
             snapshot: this.createHistorySnapshot(),
             changed: false,
+            snap: null,
         };
         return true;
     }
@@ -4203,13 +4325,26 @@ export class CanvasController {
 
         const plugin = getShapePlugin(shape.shapeType);
         const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
-        const target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
-        const regularize = Boolean(shape.regularize || this.isShiftDown);
+        let target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
+        let regularize = Boolean(shape.regularize || this.isShiftDown);
+
+        // Connector endpoints magnetize to nearby ports; leaving the 14px radius releases them
+        if (isConnectorShape(shape) && (drag.handleId === 'start' || drag.handleId === 'end')) {
+            drag.snap = this.findSnapPort(target, shape.id);
+            if (drag.snap) {
+                target = { x: drag.snap.x, y: drag.snap.y };
+                regularize = false;
+            }
+        }
+
         const next = plugin.applyHandleDrag(drag.startGeom, drag.handleId, target, regularize);
         applyGeometryToShapeElement(shape, next, anchor.originX, anchor.originY, anchor.scaleWidth);
+        if (drag.snap) shape.regularize = false;
 
         drag.changed = true;
         this.strokeCache.delete(shape.id);
+        // Connectors glued to this shape follow the resize / reshape live
+        this.followConnectors(new Set([shape.id]));
         this.renderDirty = true;
         this.schedulePaint();
     }
@@ -4218,6 +4353,10 @@ export class CanvasController {
         const drag = this.handleDrag;
         this.handleDrag = null;
         if (!drag || !drag.changed) return;
+        const shape = this.document.elements.find(el => el.id === drag.elementId);
+        if (shape && isConnectorShape(shape) && (drag.handleId === 'start' || drag.handleId === 'end')) {
+            setBinding(shape, drag.handleId, drag.snap ? { elementId: drag.snap.elementId, portId: drag.snap.portId } : null);
+        }
         this.commitHistorySnapshot(drag.snapshot);
         this.rebuildIndex();
         this.emitSelection();
@@ -4348,11 +4487,24 @@ export class CanvasController {
         const { width: contentWidth } = this.getContentGeometry();
         const du = 20 / contentWidth;
         const dv = 20 / contentWidth;
+        const idMap = new Map<string, string>();
         for (let i = 0; i < copies.length; i++) {
-            copies[i].id = uuid();
+            const newId = uuid();
+            idMap.set(copies[i].id, newId);
+            copies[i].id = newId;
             copies[i].zIndex = offset + i;
             this.shiftElementNormalized(copies[i], du, dv);
             this.document.elements.push(copies[i]);
+        }
+        // Pasted connectors stay glued only to shapes pasted with them
+        for (const copy of copies) {
+            if (copy.type !== 'shape') continue;
+            for (const end of ['start', 'end'] as const) {
+                const binding = end === 'start' ? copy.startBinding : copy.endBinding;
+                if (!binding) continue;
+                const mapped = idMap.get(binding.elementId);
+                setBinding(copy, end, mapped ? { elementId: mapped, portId: binding.portId } : null);
+            }
         }
         this.selection = copies;
         this.rebuildIndex();
@@ -4370,6 +4522,7 @@ export class CanvasController {
             this.strokeCache.delete(id);
         }
         this.document.elements = this.document.elements.filter(element => !ids.has(element.id));
+        clearDanglingBindings(this.document.elements);
         this.selection = [];
         this.lassoMenu?.hide();
         this.rebuildIndex();
@@ -4417,6 +4570,9 @@ export class CanvasController {
             this.shiftElementNormalized(element, du, dv);
             this.strokeCache.delete(element.id);
         }
+        // Connectors dragged without their target let go; connectors glued to moved shapes follow
+        releaseDetachedBindings(this.selection);
+        this.followConnectors(new Set(this.selection.map(element => element.id)));
         this.rebuildIndex();
         this.emitSelection();
         this.renderDirty = true;
@@ -5497,14 +5653,16 @@ export class CanvasController {
                     y: this.points.getY(this.points.size - 1),
                 };
 
-                const regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+                const snaps = this.resolveConnectorSnaps(shapeType, this.activeStart, lastDocPt);
+                const regularize = !snaps.start && !snaps.end && Boolean(this.toolState.shape.regularize || this.isShiftDown);
                 const geom = shapePlugin.normalizeGeometry({
-                    x0: this.activeStart.x,
-                    y0: this.activeStart.y,
-                    x1: lastDocPt.x,
-                    y1: lastDocPt.y,
+                    x0: snaps.start?.x ?? this.activeStart.x,
+                    y0: snaps.start?.y ?? this.activeStart.y,
+                    x1: snaps.end?.x ?? lastDocPt.x,
+                    y1: snaps.end?.y ?? lastDocPt.y,
                     regularize,
                 });
+                this.paintSnapTargets([snaps.start, snaps.end]);
 
                 const styleConfig: ShapeStyleConfig = {
                     strokeColor: this.toolState.shape.color || this.style.color,
@@ -5842,6 +6000,10 @@ export class CanvasController {
             ctx.stroke();
         }
         ctx.restore();
+
+        if (this.handleDrag?.elementId === shape.id && this.handleDrag.snap) {
+            this.paintSnapTargets([this.handleDrag.snap]);
+        }
     }
 
     // Touch gesture handling (Pinch-to-zoom & 2-finger navigation scroll with 1-finger palm rejection)

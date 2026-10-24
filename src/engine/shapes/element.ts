@@ -131,6 +131,34 @@ export function mapShapeElementPoints(
     refreshShapeElementBounds(element);
 }
 
+/**
+ * Validates parametric / binding fields of a ShapeElement read from disk, dropping malformed
+ * values instead of letting them reach the renderer.
+ */
+export function sanitizeLoadedShapeElement(element: ShapeElement): void {
+    const isFiniteNumber = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+    const isPoint = (p: unknown): boolean =>
+        Boolean(p) && isFiniteNumber((p as NormalizedShapePoint).x) && isFiniteNumber((p as NormalizedShapePoint).y);
+    const isBinding = (b: unknown): boolean =>
+        Boolean(b) && typeof (b as { elementId?: unknown }).elementId === 'string' && typeof (b as { portId?: unknown }).portId === 'string';
+
+    if (element.cornerRadius !== undefined && !(isFiniteNumber(element.cornerRadius) && element.cornerRadius >= 0)) {
+        delete element.cornerRadius;
+    }
+    if (element.controlPoint !== undefined && !isPoint(element.controlPoint)) {
+        delete element.controlPoint;
+    }
+    if (element.vertices !== undefined && !(Array.isArray(element.vertices) && element.vertices.length === 3 && element.vertices.every(isPoint))) {
+        delete element.vertices;
+    }
+    if (element.startBinding !== undefined && element.startBinding !== null && !isBinding(element.startBinding)) {
+        element.startBinding = null;
+    }
+    if (element.endBinding !== undefined && element.endBinding !== null && !isBinding(element.endBinding)) {
+        element.endBinding = null;
+    }
+}
+
 /** Render style of a ShapeElement, with optional overrides (e.g. link halo). */
 export function shapeElementStyle(element: ShapeElement, override?: Partial<ShapeStyleConfig>): ShapeStyleConfig {
     return {
