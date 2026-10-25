@@ -3,6 +3,7 @@ import { ICONS, createSvg } from './theme.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { ThicknessPopover } from './popover/ThicknessPopover.ts';
 import { isStylusBarrelButton, isStylusHoverBarrel } from '../engine/input/StylusCapabilities.ts';
+import { getShapePlugin } from '../engine/shapes/index.ts';
 
 export interface ToolbarOptions {
     slot: ToolbarSlot;
@@ -547,6 +548,7 @@ export class Toolbar {
 
             if (def.tool === 'shape') {
                 this.shapeBtnIcon = iconContainer;
+                iconContainer.setAttribute('data-shape', this.options.activeShape);
             }
 
 
@@ -894,7 +896,12 @@ export class Toolbar {
         return div;
     }
 
+    /** Icon of the currently armed shape, taken from its registered plugin (diamond, cylinder, ...). */
     private getShapeIcon(shape: ShapeType): string {
+        const plugin = getShapePlugin(shape);
+        if (plugin.iconSvgPaths.length > 0) {
+            return plugin.iconSvgPaths.join(' ');
+        }
         return ICONS.shapes[shape] || ICONS.shapes.rect;
     }
 
@@ -1370,6 +1377,7 @@ export class Toolbar {
     setShape(shape: ShapeType): void {
         this.options.activeShape = shape;
         if (this.shapeBtnIcon) {
+            this.shapeBtnIcon.setAttribute('data-shape', shape);
             this.shapeBtnIcon.replaceChildren(createSvg(this.getShapeIcon(shape)));
         }
     }

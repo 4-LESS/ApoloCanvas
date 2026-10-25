@@ -339,7 +339,9 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             applyPopoverGeometry(popover as any, anchor as any, toolbar as any, 'bc', { fallbackWidth: 300, fallbackHeight: 260 });
 
             const left = Number.parseFloat(popover.style.left || '0');
-            const top = Number.parseFloat(popover.style.top || '0');
+            const top = popover.style.top && popover.style.top !== 'auto'
+                ? Number.parseFloat(popover.style.top)
+                : (600 - Number.parseFloat(popover.style.bottom || '0') - 260);
 
             assert.ok(left >= 24 + 16, 'Popover should not exceed the active visual viewport left edge');
             assert.ok(left + 300 <= 24 + 420 - 16, 'Popover should respect the active visual viewport width');

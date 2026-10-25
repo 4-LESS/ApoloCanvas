@@ -1,17 +1,73 @@
 /**
  * src/engine/shapes/line.ts
  *
- * 'line' shape plugin.
+ * 'line' shape plugin (straight, quadratic-curved, or multi-segment cubic Bezier path).
  */
 
 import type { BoundingBox } from '../../core/types.ts';
-import type { ShapePlugin, ShapeRenderGeometry, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
+import type { ShapeHandle, ShapePlugin, ShapePoint, ShapeRenderGeometry, ShapeSnapPort, ShapeStyleConfig, ShapeSvgOutput } from './types.ts';
 import {
-    distToSegmentSquared,
     getStrokeDashArray,
     getSvgStrokeAttributes,
     regularizeLinearGeometry,
 } from './common.ts';
+import {
+    applyLinearHandleDrag,
+    linearControlHandles,
+    linearPathBounds,
+    linearPathHit,
+    linearSnapPorts,
+} from './handles.ts';
+
+export function traceLinearPath(ctx: CanvasRenderingContext2D, norm: ShapeRenderGeometry): void {
+    if (norm.pathNodes && norm.pathNodes.length >= 2) {
+        const nodes = norm.pathNodes;
+        ctx.moveTo(nodes[0].x, nodes[0].y);
+        for (let i = 0; i < nodes.length - 1; i++) {
+            const p0 = nodes[i];
+            const p1 = nodes[i + 1];
+            if (!p0.handleOut && !p1.handleIn) {
+                ctx.lineTo(p1.x, p1.y);
+            } else {
+                const cp1 = p0.handleOut ?? { x: p0.x, y: p0.y };
+                const cp2 = p1.handleIn ?? { x: p1.x, y: p1.y };
+                ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, p1.x, p1.y);
+            }
+        }
+        return;
+    }
+
+    ctx.moveTo(norm.x0, norm.y0);
+    if (norm.controlPoint && typeof ctx.quadraticCurveTo === 'function') {
+        ctx.quadraticCurveTo(norm.controlPoint.x, norm.controlPoint.y, norm.x1, norm.y1);
+    } else {
+        ctx.lineTo(norm.x1, norm.y1);
+    }
+}
+
+export function linearSvgPathData(norm: ShapeRenderGeometry): string {
+    if (norm.pathNodes && norm.pathNodes.length >= 2) {
+        const nodes = norm.pathNodes;
+        const commands: string[] = [`M ${nodes[0].x} ${nodes[0].y}`];
+        for (let i = 0; i < nodes.length - 1; i++) {
+            const p0 = nodes[i];
+            const p1 = nodes[i + 1];
+            if (!p0.handleOut && !p1.handleIn) {
+                commands.push(`L ${p1.x} ${p1.y}`);
+            } else {
+                const cp1 = p0.handleOut ?? { x: p0.x, y: p0.y };
+                const cp2 = p1.handleIn ?? { x: p1.x, y: p1.y };
+                commands.push(`C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${p1.x} ${p1.y}`);
+            }
+        }
+        return commands.join(' ');
+    }
+
+    if (norm.controlPoint) {
+        return `M ${norm.x0} ${norm.y0} Q ${norm.controlPoint.x} ${norm.controlPoint.y} ${norm.x1} ${norm.y1}`;
+    }
+    return `M ${norm.x0} ${norm.y0} L ${norm.x1} ${norm.y1}`;
+}
 
 export const lineShapePlugin: ShapePlugin = {
     id: 'line',
@@ -43,8 +99,7 @@ export const lineShapePlugin: ShapePlugin = {
         }
 
         ctx.beginPath();
-        ctx.moveTo(norm.x0, norm.y0);
-        ctx.lineTo(norm.x1, norm.y1);
+        traceLinearPath(ctx, norm);
         ctx.stroke();
 
         ctx.restore();
@@ -55,24 +110,36 @@ export const lineShapePlugin: ShapePlugin = {
         const strokeAttrs = getSvgStrokeAttributes(style);
         return {
             defs: {},
-            body: `<path d="M ${norm.x0} ${norm.y0} L ${norm.x1} ${norm.y1}" ${strokeAttrs} fill="none"/>`,
+            body: `<path d="${linearSvgPathData(norm)}" ${strokeAttrs} fill="none"/>`,
         };
     },
 
     computeBounds(geom: ShapeRenderGeometry, strokeWidth: number): BoundingBox {
         const norm = this.normalizeGeometry(geom);
         const halfWidth = (strokeWidth || 3) / 2;
+        const box = linearPathBounds(norm);
         return {
-            minX: Math.min(norm.x0, norm.x1) - halfWidth,
-            maxX: Math.max(norm.x0, norm.x1) + halfWidth,
-            minY: Math.min(norm.y0, norm.y1) - halfWidth,
-            maxY: Math.max(norm.y0, norm.y1) + halfWidth,
+            minX: box.minX - halfWidth,
+            maxX: box.maxX + halfWidth,
+            minY: box.minY - halfWidth,
+            maxY: box.maxY + halfWidth,
         };
     },
 
     hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean {
-        const norm = this.normalizeGeometry(geom);
-        const d2 = distToSegmentSquared(point.x, point.y, norm.x0, norm.y0, norm.x1, norm.y1);
-        return d2 <= tolerance * tolerance;
+        return linearPathHit(this.normalizeGeometry(geom), point, tolerance);
+    },
+
+    getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
+        return linearControlHandles(this.normalizeGeometry(geom));
+    },
+
+    applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
+        const reg = regularize !== undefined ? regularize : Boolean(geom.regularize);
+        return applyLinearHandleDrag(this.normalizeGeometry({ ...geom, regularize: reg }), handleId, newPoint, reg);
+    },
+
+    getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
+        return linearSnapPorts(this.normalizeGeometry(geom));
     },
 };

@@ -43,10 +43,53 @@ import {
     snapLineAngle,
 } from './PatternedStrokeRenderer.ts';
 import { getPenPlugin } from './pens/index.ts';
-import { getShapePlugin, type ShapeRenderGeometry, type ShapeStyleConfig } from './shapes/index.ts';
+import {
+    MAGNETIC_SNAP_RADIUS_PX,
+    applyGeometryToShapeElement,
+    clearDanglingBindings,
+    findNearestSnapPort,
+    followBoundConnectors,
+    isConnectorShape,
+    releaseDetachedBindings,
+    setBinding,
+    type ConnectorGeometryAdapter,
+    type SnapPortHit,
+    getLinearPathNodes,
+    splitLinearSegment,
+    straightenLinearSegment,
+    toggleLinearNodeKind,
+    toggleNodeOrSegmentOrthogonal,
+    insertLinearNodeAtPoint,
+    linearPathHit,
+    snapAngleOrOrthogonal,
+    rotatePoint,
+    computeSmartAlignmentGuides,
+    computePointAlignmentGuides,
+    getShapeKeyPoints,
+    findClosestLinearSegment,
+    slideLinearSegment,
+    getPortNormal,
+    autoAlignConnectorTangents,
+    type AlignmentGuide,
+    type SnapTargetBounds,
+    type ReferencePoint,
+    getShapePlugin,
+    mapShapeElementPoints,
+    refreshShapeElementBounds,
+    shapeElementStyle,
+    shapeElementToGeometry,
+    type ShapeHandleKind,
+    type ShapeRenderGeometry,
+    type ShapeStyleConfig,
+} from './shapes/index.ts';
 import { SpatialGrid } from './spatial/SpatialGrid.ts';
 import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
-import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
+import {
+    HOLD_TO_SNAP_DWELL_MS,
+    HOLD_TO_SNAP_MOVE_TOLERANCE_PX,
+    ShapeRecognizer,
+    type RecognizedShape,
+} from '../tools/ShapeRecognizer.ts';
 import { Predictor } from './input/Predictor.ts';
 import { isConfirmedBarrelPress, isStylusBarrelButton, isStylusHoverBarrel, hasDeliberateStylusMovement } from './input/StylusCapabilities.ts';
 import { EngineEventBus } from '../core/events.ts';
@@ -87,6 +130,7 @@ import { PopoverController } from '../ui/kit/index.ts';
 import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
 import { smoothPressure } from './input/PressureCurve.ts';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser.ts';
+import { splitShapeDoc } from './eraser/ShapeEraser.ts';
 import {
     cleanAnchorText,
     findBestMatchingLine,
@@ -175,6 +219,43 @@ interface HistorySnapshot {
     elements: CanvasElement[];
     boxHeights?: Record<string, number>;
 }
+
+/** Live drag of one parametric control handle of the selected ShapeElement. */
+interface ShapeHandleDragState {
+    elementId: string;
+    handleId: string;
+    kind: ShapeHandleKind;
+    /** Document-space geometry captured at pointerdown; every move re-applies from it. */
+    startGeom: ShapeRenderGeometry;
+    /** Handle position minus pointer position at grab time, so the handle does not jump. */
+    grabOffsetX: number;
+    grabOffsetY: number;
+    /** Pre-drag state, pushed to the undo stack on pointerup only if something changed. */
+    snapshot: HistorySnapshot;
+    changed: boolean;
+    /** Port the dragged connector endpoint is currently magnetized to (start / end handles only). */
+    snap: SnapPortHit | null;
+}
+
+/** Style fields of a selected shape that ToolEstuche / Toolbar edit reactively. */
+interface ShapeStylePatch {
+    color?: string;
+    width?: number;
+    opacity?: number;
+    pattern?: StrokePattern;
+    fillEnabled?: boolean;
+    fillColor?: string;
+    fillPattern?: ShapeElement['fillPattern'];
+    fillOpacity?: number;
+    fillDensity?: number;
+}
+
+/** Screen-space pick radius of shape control handles. */
+const SHAPE_HANDLE_HIT_RADIUS_PX = 12;
+/** Pointer travel (document px) below which a shape-tool gesture is a tap that selects. */
+const SHAPE_TAP_SLOP_PX = 4;
+/** Consecutive style edits on the same selection within this window share one undo step (slider drags). */
+const SHAPE_STYLE_HISTORY_COALESCE_MS = 700;
 
 /**
  * High-performance engineering canvas controller.
@@ -265,6 +346,16 @@ export class CanvasController {
     private pointerDownStartPos: { x: number; y: number } | null = null;
     private strokeStartTime = 0;
     private isShiftDown = false;
+    private isCtrlDown = false;
+    private touchSlideState: {
+        pointerId: number;
+        elementId: string;
+        segIdx: number;
+        startGeom: ShapeRenderGeometry;
+        snapshot: HistorySnapshot;
+        changed: boolean;
+    } | null = null;
+    private penDwellTimer: number | null = null;
     private showSpenDebugHud = false;
     private debugInputHudEl: HTMLElement | null = null;
     private readonly debugHudLogs: string[] = [];
@@ -289,6 +380,29 @@ export class CanvasController {
 
     // Selection & Manipulation
     private selection: CanvasElement[] = [];
+    private lastHandleTap: { shapeId: string; handleId: string; time: number; x: number; y: number } | null = null;
+    private activeAlignmentGuides: AlignmentGuide[] = [];
+    private handleDrag: ShapeHandleDragState | null = null;
+    private moveSelectionSnapshot: HistorySnapshot | null = null;
+    private moveSelectionStartPt: { x: number; y: number } | null = null;
+    private moveSelectionInitialBounds: SnapTargetBounds | null = null;
+    private moveSelectionCurrentDx = 0;
+    private moveSelectionCurrentDy = 0;
+    // Hold-to-snap: dwell detection at the end of a freehand stroke
+    private dwellTimer: ReturnType<typeof setTimeout> | null = null;
+    private dwellAnchor: { x: number; y: number } | null = null;
+    private snapPreview: RecognizedShape | null = null;
+    private lastShapeStyleEdit = { at: 0, key: '' };
+    private suppressSelectionStyleSync = false;
+    /** Anchor-aware document geometry access for magnetic connectors. */
+    private readonly connectorAdapter: ConnectorGeometryAdapter = {
+        getGeometry: (element) => this.getShapeDocGeometry(element),
+        setGeometry: (element, geom) => {
+            const anchor = this.getElementAnchorGeometry(element.blockId, element.anchorText);
+            applyGeometryToShapeElement(element, geom, anchor.originX, anchor.originY, anchor.scaleWidth);
+            this.strokeCache.delete(element.id);
+        },
+    };
     private activeStart: Point | null = null;
 
     public get isDrawing(): boolean {
@@ -701,7 +815,7 @@ export class CanvasController {
             profileId: this.penProfileId,
             smoothing: this.smoothing,
             pressureSensitivity: this.pressureSensitivity,
-            opacity: this.style.opacity,
+            opacity: isFavTool && (this.toolState as any)[tool]?.opacity !== undefined ? (this.toolState as any)[tool].opacity : this.style.opacity,
             lineStyle: this.style.pattern,
             pattern: this.style.pattern,
             favorites: isFavTool ? this.getToolFavorites(tool) : this.favorites,
@@ -725,6 +839,8 @@ export class CanvasController {
             fillColor: this.toolState.shape.fillColor,
             fillPattern: this.toolState.shape.fillPattern,
             fillDensity: this.toolState.shape.fillDensity,
+            fillOpacity: this.toolState.shape.fillOpacity,
+            colorCarousels: this.toolState.colorCarousels,
         };
     }
 
@@ -734,7 +850,27 @@ export class CanvasController {
             {
                 onSelectProfile: (profileId) => this.applyPenProfile(profileId),
                 onChangeColor: (color) => this.setInkColor(color),
+                onUpdateColorCarousels: (carousels) => {
+                    this.toolState.colorCarousels = carousels;
+                    this.notifyToolStateChange();
+                },
                 onChangeWidth: (width) => this.setWidth(width),
+                onChangeOpacity: (opacity) => {
+                    const norm = opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity));
+                    this.style.opacity = norm;
+                    if (this.tool === 'pen') {
+                        this.toolState.pen.opacity = norm;
+                    } else if (this.tool === 'highlighter') {
+                        this.toolState.highlighter.opacity = norm;
+                    } else if (this.tool === 'shape') {
+                        this.toolState.shape.opacity = norm;
+                    }
+                    this.applyStyleToSelectedShapes({ opacity: norm });
+                    this.estuche?.updateState({ opacity: norm });
+                    this.renderDirty = true;
+                    this.schedulePaint();
+                    this.notifyToolStateChange();
+                },
                 onChangeSmoothing: (smoothing) => {
                     this.smoothing = smoothing;
                     this.toolState.pen.smoothing = smoothing;
@@ -755,6 +891,7 @@ export class CanvasController {
                     } else if (this.tool === 'shape') {
                         this.toolState.shape.pattern = pattern;
                     }
+                    this.applyStyleToSelectedShapes({ pattern });
                     this.estuche?.updateState({ lineStyle: pattern, pattern });
                     this.options.eventBus?.emit('style:changed', { pattern });
                     this.syncEstucheFavoriteState();
@@ -813,30 +950,53 @@ export class CanvasController {
                 onToggleRegularize: (enabled) => {
                     this.toolState.shape.regularize = enabled;
                     this.estuche?.updateState({ regularize: enabled });
+                    const selected = this.selection.filter((el): el is ShapeElement => el.type === 'shape');
+                    if (selected.length > 0) {
+                        this.recordHistory();
+                        for (const s of selected) {
+                            s.regularize = enabled;
+                            this.strokeCache.delete(s.id);
+                        }
+                        this.rebuildIndex();
+                        this.renderDirty = true;
+                        this.schedulePaint();
+                        this.persistSoon();
+                    }
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onToggleFillEnabled: (enabled) => {
                     this.toolState.shape.fillEnabled = enabled;
+                    this.applyStyleToSelectedShapes({ fillEnabled: enabled });
                     this.estuche?.updateState({ fillEnabled: enabled });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onChangeFillColor: (color) => {
                     this.toolState.shape.fillColor = color;
+                    this.applyStyleToSelectedShapes({ fillColor: color });
                     this.estuche?.updateState({ fillColor: color });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onChangeFillPattern: (pattern) => {
                     this.toolState.shape.fillPattern = pattern;
+                    this.applyStyleToSelectedShapes({ fillEnabled: true, fillPattern: pattern });
                     this.estuche?.updateState({ fillPattern: pattern });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
                 onChangeFillDensity: (density) => {
                     this.toolState.shape.fillDensity = density;
+                    this.applyStyleToSelectedShapes({ fillDensity: density });
                     this.estuche?.updateState({ fillDensity: density });
+                    this.syncEstucheFavoriteState();
+                    this.notifyToolStateChange();
+                },
+                onChangeFillOpacity: (opacity) => {
+                    this.toolState.shape.fillOpacity = opacity;
+                    this.applyStyleToSelectedShapes({ fillOpacity: opacity });
+                    this.estuche?.updateState({ fillOpacity: opacity });
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
@@ -1902,6 +2062,7 @@ export class CanvasController {
             const op = (this.toolPalettes.shape.opacities[index] ?? 100) / 100;
             this.style.opacity = op;
             this.toolState.shape.opacity = op;
+            this.applyStyleToSelectedShapes({ opacity: op, color });
         }
         this.setInkColor(color);
         // Note: strictly only changes ink color; does NOT alter current tool, profile, or width
@@ -1923,7 +2084,12 @@ export class CanvasController {
         this.toolState[toolKey].palette.opacities[slotIdx] = opacity;
         this.toolState[toolKey].activeSlotIndex = slotIdx;
         this.toolState[toolKey].color = newColor;
-        this.toolState[toolKey].opacity = opacity / 100;
+        const normOp = opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity));
+        this.toolState[toolKey].opacity = normOp;
+        this.style.opacity = normOp;
+        if (toolKey === 'shape') {
+            this.applyStyleToSelectedShapes({ opacity: normOp, color: newColor });
+        }
 
         // Keep favorites in sync if pen palette changed
         if (toolKey === 'pen' && this.favorites[slotIdx]) {
@@ -2050,6 +2216,16 @@ export class CanvasController {
     }
 
     public applyToolFavoritePreset(preset: ToolFavoritePreset): void {
+        // Arming a favorite configures the tool; it must not restyle a selected shape.
+        this.suppressSelectionStyleSync = true;
+        try {
+            this.applyToolFavoritePresetInner(preset);
+        } finally {
+            this.suppressSelectionStyleSync = false;
+        }
+    }
+
+    private applyToolFavoritePresetInner(preset: ToolFavoritePreset): void {
         if (this.tool !== preset.tool) this.setTool(preset.tool, false);
 
         if (preset.tool === 'pen' || preset.tool === 'highlighter') {
@@ -2088,6 +2264,9 @@ export class CanvasController {
             if (preset.fillEnabled !== undefined) this.toolState.shape.fillEnabled = preset.fillEnabled;
             if (preset.fillColor !== undefined) this.toolState.shape.fillColor = preset.fillColor;
             if (preset.fillOpacity !== undefined) this.toolState.shape.fillOpacity = preset.fillOpacity;
+            if (preset.fillPattern !== undefined) this.toolState.shape.fillPattern = preset.fillPattern;
+            if (preset.fillDensity !== undefined) this.toolState.shape.fillDensity = preset.fillDensity;
+            if (preset.regularize !== undefined) this.toolState.shape.regularize = preset.regularize;
         }
 
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
@@ -2100,6 +2279,14 @@ export class CanvasController {
             lineStyle: this.style.pattern,
             straightenLines: this.straightenLines,
             shapeType: this.shapeType,
+            ...(preset.tool === 'shape' ? {
+                regularize: this.toolState.shape.regularize,
+                fillEnabled: this.toolState.shape.fillEnabled,
+                fillColor: this.toolState.shape.fillColor,
+                fillPattern: this.toolState.shape.fillPattern,
+                fillDensity: this.toolState.shape.fillDensity,
+                fillOpacity: this.toolState.shape.fillOpacity,
+            } : {}),
         });
         this.syncEstucheFavoriteState();
         this.schedulePaint();
@@ -2356,6 +2543,7 @@ export class CanvasController {
         } else if (this.tool === 'shape') {
             this.toolState.shape.color = color;
         }
+        this.applyStyleToSelectedShapes({ color });
         this.toolbar?.setStyle(color, this.style.width, this.penProfileId);
         this.estuche?.updateState({ color });
         this.syncEstucheFavoriteState();
@@ -2373,6 +2561,7 @@ export class CanvasController {
         } else if (this.tool === 'shape') {
             this.toolState.shape.width = width;
         }
+        this.applyStyleToSelectedShapes({ width });
         this.toolbar?.setStyle(this.style.color, width, this.penProfileId);
         this.estuche?.updateState({ width });
         this.syncEstucheFavoriteState();
@@ -2702,6 +2891,7 @@ export class CanvasController {
         if (this.destroyed) return;
         this.destroyed = true;
 
+        this.clearHoldToSnap();
         this.strokeCache.clear();
         this.input?.destroy();
         if (this.scrollHandler) {
@@ -2870,6 +3060,9 @@ export class CanvasController {
                 this.schedulePaint();
             }
         }
+        if (event.key === 'Control' || event.key === 'Meta') {
+            this.isCtrlDown = true;
+        }
         if (event.key === 'Escape') {
             this.estuche?.close();
             this.boxMenu?.hide();
@@ -2883,6 +3076,9 @@ export class CanvasController {
             if (this.tool === 'shape' && this.activeStart) {
                 this.schedulePaint();
             }
+        }
+        if (event.key === 'Control' || event.key === 'Meta') {
+            this.isCtrlDown = false;
         }
     };
 
@@ -3001,9 +3197,38 @@ export class CanvasController {
         const isForbidden = !this.shouldAcceptDrawingPointer(event);
         if (isForbidden) {
             this.canvas.style.cursor = 'not-allowed';
-        } else {
-            this.canvas.style.cursor = 'crosshair';
+            return;
         }
+
+        if (event.ctrlKey || event.metaKey || this.isCtrlDown) {
+            const rect = this.canvas.getBoundingClientRect();
+            const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+            const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+            let shape = this.getSelectedShape();
+            if (!shape || (shape.shapeType !== 'line' && shape.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    shape = hit;
+                }
+            }
+            if (shape && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
+                const geom = this.getShapeDocGeometry(shape);
+                const hitRadius = (SHAPE_HANDLE_HIT_RADIUS_PX + 4) / this.zoom;
+                if (linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
+                    const nodes = getLinearPathNodes(geom);
+                    if (nodes.length >= 2) {
+                        const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                        const pA = nodes[segIdx];
+                        const pB = nodes[Math.min(segIdx + 1, nodes.length - 1)];
+                        const isHorizontal = Math.abs(pA.y - pB.y) <= Math.abs(pA.x - pB.x);
+                        this.canvas.style.cursor = isHorizontal ? 'row-resize' : 'col-resize';
+                        return;
+                    }
+                }
+            }
+        }
+
+        this.canvas.style.cursor = 'crosshair';
     }
 
     private resetCursor(): void {
@@ -3013,7 +3238,10 @@ export class CanvasController {
     // Drawing input lifecycle (normalized to content column width & anchor block)
     private begin(rawPoint: Point, barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.penEnabled) return;
-        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+        }
         if (rawEvent && rawEvent.pointerType === 'pen' && this.isPenBarrelEvent(rawEvent)) {
             return;
         }
@@ -3033,6 +3261,83 @@ export class CanvasController {
 
         const docX = (rawPoint.x + this.currentScrollLeft) / this.zoom;
         const docY = (rawPoint.y + this.currentScrollTop) / this.zoom;
+
+        // With a line / arrow armed, pressing on a port of a closed shape starts a magnetic connector,
+        // even over a selected closed shape (whose edge handles / body would otherwise win)
+        const selectedForConnector = this.getSelectedShape();
+        const startsConnector = this.tool === 'shape' && !barrel &&
+            !getShapePlugin(this.shapeType).isClosed &&
+            (!selectedForConnector || getShapePlugin(selectedForConnector.shapeType).isClosed) &&
+            this.findSnapPort({ x: docX, y: docY }) !== null;
+
+        // S-Pen Barrel button on a linear shape segment OR Ctrl key: activates segment sliding!
+        let activateSegmentSlide = this.isCtrlDown;
+        if (barrel && !activateSegmentSlide) {
+            let target = this.getSelectedShape();
+            if (!target || (target.shapeType !== 'line' && target.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 20 / this.zoom);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    target = hit;
+                }
+            }
+            if (target && (target.shapeType === 'line' || target.shapeType === 'arrow')) {
+                const geom = this.getShapeDocGeometry(target);
+                if (linearPathHit(geom, { x: docX, y: docY }, Math.max(16, 24 / this.zoom))) {
+                    activateSegmentSlide = true;
+                    barrel = false;
+                    this.barrelActive = false;
+                    this.isCtrlDown = true;
+                }
+            }
+        }
+
+        // Ctrl key active / S-Pen barrel on segment: blocks drawing new shapes, directly selects and slides linear/circuit segments
+        if (activateSegmentSlide && !barrel) {
+            let targetShape = this.getSelectedShape();
+            if (!targetShape || (targetShape.shapeType !== 'line' && targetShape.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    this.selection = [hit];
+                    this.emitSelection();
+                    targetShape = hit;
+                }
+            }
+            if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                if (this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+                    this.schedulePaint();
+                    return;
+                }
+            }
+            // Ctrl strictly blocks drawing new shapes
+            return;
+        }
+
+        // Parametric control handles of the selected shape take priority over drawing / moving
+        if (!startsConnector && (this.tool === 'lasso' || this.tool === 'shape') && !barrel && this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+            // S-Pen Long-press (Dwell ~200ms): holding on a linear segment converts drag to orthogonal slide
+            if (rawEvent?.pointerType === 'pen' && !this.isCtrlDown && !barrel) {
+                const targetShape = this.getSelectedShape();
+                if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                    const geom = this.getShapeDocGeometry(targetShape);
+                    if (linearPathHit(geom, { x: docX, y: docY }, Math.max(16, 24 / this.zoom))) {
+                        const startX = docX;
+                        const startY = docY;
+                        this.penDwellTimer = window.setTimeout(() => {
+                            this.penDwellTimer = null;
+                            if (this.handleDrag && this.handleDrag.elementId === targetShape.id) {
+                                const segIdx = findClosestLinearSegment(geom, { x: startX, y: startY });
+                                this.handleDrag.handleId = `seg-slide-${segIdx}`;
+                                try { navigator.vibrate?.(25); } catch {}
+                                this.renderDirty = true;
+                                this.schedulePaint();
+                            }
+                        }, 220);
+                    }
+                }
+            }
+            this.schedulePaint();
+            return;
+        }
 
         // 2. For ink drawing tools, forbid drawing above content top (properties / title)
         const isDrawingTool = this.tool === 'pen' || this.tool === 'highlighter' || this.tool === 'shape';
@@ -3061,14 +3366,36 @@ export class CanvasController {
 
         this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
 
-        // Moving existing selection if tapped inside bounds
+        // Moving existing selection if tapped inside bounds (lasso, or a shape selected with the shape tool)
         const selectionBounds = this.getSelectionDocBounds();
-        this.movingSelection = this.tool === 'lasso' && Boolean(
+        const canMoveSelection = this.tool === 'lasso' || (this.tool === 'shape' && this.getSelectedShape() !== null);
+        this.movingSelection = canMoveSelection && !barrel && !startsConnector && Boolean(
             selectionBounds && contains(selectionBounds, docX, docY, 12)
         );
+        this.moveSelectionSnapshot = this.movingSelection ? this.createHistorySnapshot() : null;
+        if (this.movingSelection) {
+            this.moveSelectionStartPt = { x: docX, y: docY };
+            this.moveSelectionInitialBounds = selectionBounds ? { ...selectionBounds } : null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+        } else {
+            this.moveSelectionStartPt = null;
+            this.moveSelectionInitialBounds = null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+        }
+        if (this.tool === 'shape' && !this.movingSelection && this.selection.length > 0) {
+            // Starting a new shape (or tapping elsewhere) drops the current shape selection
+            this.selection = [];
+            this.emitSelection();
+        }
         this.barrelActive = barrel;
 
         this.pushWorldPoint(rawPoint);
+        this.clearHoldToSnap();
+        if (this.isHoldToSnapActive()) {
+            this.trackHoldToSnap();
+        }
 
         if (this.tool === 'eraser' || barrel) {
             this.recordHistory();
@@ -3083,7 +3410,28 @@ export class CanvasController {
 
     private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
-        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+        }
+        if (this.penDwellTimer && this.activeStart) {
+            const lastRaw = rawPoints[rawPoints.length - 1];
+            if (lastRaw && Math.hypot(lastRaw.x - this.activeStart.x, lastRaw.y - this.activeStart.y) > 6) {
+                window.clearTimeout(this.penDwellTimer);
+                this.penDwellTimer = null;
+            }
+        }
+
+        if (this.handleDrag) {
+            const last = rawPoints[rawPoints.length - 1];
+            if (last) {
+                this.updateHandleDrag({
+                    x: (last.x + this.currentScrollLeft) / this.zoom,
+                    y: (last.y + this.currentScrollTop) / this.zoom,
+                });
+            }
+            return;
+        }
         this.barrelActive = barrel;
         if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const lastRaw = rawPoints[rawPoints.length - 1];
@@ -3102,6 +3450,10 @@ export class CanvasController {
             this.hasPrediction = false;
         } else {
             for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
+        }
+
+        if (this.isHoldToSnapActive()) {
+            this.trackHoldToSnap();
         }
 
         if (this.tool === 'eraser' || barrel) {
@@ -3124,20 +3476,71 @@ export class CanvasController {
             this.checkAutoGrowth(rawPoints);
         }
 
-        if (this.movingSelection && this.tool === 'lasso' && this.points.size > 1) {
-            const last = this.points.get(this.points.size - 1);
-            const prev = this.points.get(this.points.size - 2);
-            const dx = last.x - prev.x;
-            const dy = last.y - prev.y;
-            this.translateSelection(dx, dy, false);
+        if (this.movingSelection && this.moveSelectionStartPt && this.moveSelectionInitialBounds) {
+            const rawDocX = (rawPoints[rawPoints.length - 1].x + this.currentScrollLeft) / this.zoom;
+            const rawDocY = (rawPoints[rawPoints.length - 1].y + this.currentScrollTop) / this.zoom;
+            const totalDx = rawDocX - this.moveSelectionStartPt.x;
+            const totalDy = rawDocY - this.moveSelectionStartPt.y;
+
+            let effectiveTotalDx = totalDx;
+            let effectiveTotalDy = totalDy;
+
+            const isSnapBypassed = Boolean(rawEvent?.altKey || rawEvent?.ctrlKey);
+            if (!isSnapBypassed) {
+                const tol = 6 / this.zoom;
+                const otherBounds: SnapTargetBounds[] = [];
+                const selSet = new Set(this.selection.map(el => el.id));
+                for (const el of this.document.elements) {
+                    if (selSet.has(el.id)) continue;
+                    if (el.type === 'shape') {
+                        otherBounds.push(this.getElementDocBounds(el));
+                    }
+                }
+                const activePredicted = {
+                    minX: this.moveSelectionInitialBounds.minX + totalDx,
+                    maxX: this.moveSelectionInitialBounds.maxX + totalDx,
+                    minY: this.moveSelectionInitialBounds.minY + totalDy,
+                    maxY: this.moveSelectionInitialBounds.maxY + totalDy,
+                };
+                const smart = computeSmartAlignmentGuides(activePredicted, otherBounds, tol);
+                effectiveTotalDx += smart.deltaX;
+                effectiveTotalDy += smart.deltaY;
+                this.activeAlignmentGuides = smart.guides;
+            } else {
+                this.activeAlignmentGuides = [];
+            }
+
+            const stepDx = effectiveTotalDx - this.moveSelectionCurrentDx;
+            const stepDy = effectiveTotalDy - this.moveSelectionCurrentDy;
+            if (stepDx !== 0 || stepDy !== 0) {
+                this.translateSelection(stepDx, stepDy, false);
+                this.moveSelectionCurrentDx = effectiveTotalDx;
+                this.moveSelectionCurrentDy = effectiveTotalDy;
+            }
         }
 
         this.schedulePaint();
     }
 
     private end(rawPoint: Point, barrel: boolean, releasedAt: number, rawEvent?: PointerEvent): void {
+        if (this.penDwellTimer) {
+            window.clearTimeout(this.penDwellTimer);
+            this.penDwellTimer = null;
+        }
         if (!this.activeStart) return;
-        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+        }
+        if (this.handleDrag) {
+            this.updateHandleDrag({
+                x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
+                y: (rawPoint.y + this.currentScrollTop) / this.zoom,
+            });
+            this.finishHandleDrag();
+            this.cancel();
+            return;
+        }
         const lastMotionAt = this.points.size > 0 ? this.points.getTime(this.points.size - 1) : releasedAt;
         if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const currentDocPt: Point = {
@@ -3158,15 +3561,29 @@ export class CanvasController {
         }
         const raw = this.readActivePoints();
 
-        if (this.movingSelection && this.tool === 'lasso') {
-            this.recordHistory();
+        if (this.movingSelection) {
             this.movingSelection = false;
-            this.reanchorSelection();
-            this.rebuildIndex();
-            this.emitSelection();
-            this.renderDirty = true;
-            this.persistSoon();
-            this.toast?.show('Selección reubicada');
+            this.activeAlignmentGuides = [];
+            this.moveSelectionStartPt = null;
+            this.moveSelectionInitialBounds = null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+            const snapshot = this.moveSelectionSnapshot;
+            this.moveSelectionSnapshot = null;
+            if (this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
+                // No real displacement: keep the selection and leave the undo stack untouched
+                if (this.tool === 'shape') this.selectShapeAt(this.activeStart);
+            } else {
+                // The snapshot was taken at pointerdown, so undo restores the pre-move position
+                this.commitHistorySnapshot(snapshot ?? this.createHistorySnapshot());
+                this.reanchorSelection();
+                this.followConnectors(new Set(this.selection.map(el => el.id)));
+                this.rebuildIndex();
+                this.emitSelection();
+                this.renderDirty = true;
+                this.persistSoon();
+                this.toast?.show('Selección reubicada');
+            }
         } else if (this.tool === 'lasso') {
             this.selectLasso(raw);
         } else if (this.tool === 'eraser' || barrel) {
@@ -3178,15 +3595,37 @@ export class CanvasController {
             this.rebuildIndex();
             this.renderDirty = true;
             this.persistSoon();
+        } else if (this.tool === 'shape' && this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
+            // Tapping with the shape tool selects an existing shape (exposing its handles) instead of
+            // creating a zero-size shape
+            this.selectShapeAt(this.activeStart);
         } else {
             this.recordHistory();
             if (this.tool === 'shape') {
-                this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
+                const rawEndPoint = raw[raw.length - 1];
+                let endPt = { x: rawEndPoint.x, y: rawEndPoint.y };
+                const snaps = this.resolveConnectorSnaps(this.shapeType, this.activeStart, endPt);
+                if (!snaps.end && !this.isShiftDown) {
+                    const tol = 6 / this.zoom;
+                    const refPoints = this.getAllReferencePoints();
+                    refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
+                    const ptGuide = computePointAlignmentGuides(endPt, refPoints, tol);
+                    if (ptGuide.deltaY !== 0) endPt.y = ptGuide.snappedPoint.y;
+                    if (ptGuide.deltaX !== 0) endPt.x = ptGuide.snappedPoint.x;
+                }
+                this.addShape(this.activeStart, endPt, this.shapeType, {
+                    startSnap: snaps.start,
+                    endSnap: snaps.end,
+                });
             } else {
-                const recognized = (this.shapeRecognition && !this.straightenLines) ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
+                // Hold-to-snap: the live dwell preview wins; otherwise a stationary hold right
+                // before release still converts the stroke
+                const recognized = this.snapPreview ?? (this.isHoldToSnapActive()
+                    ? this.recognizer.recognize(raw, releasedAt, lastMotionAt)
+                    : null);
                 if (recognized) {
-                    this.addShape(recognized.start, recognized.end, recognized.type);
-                    this.toast?.show(`Forma reconocida: ${recognized.type}`);
+                    this.addRecognizedShape(recognized);
+                    this.toast?.show(`Forma reconocida: ${getShapePlugin(recognized.type).name}`);
                 } else {
                     this.addStroke(raw);
                 }
@@ -3202,6 +3641,7 @@ export class CanvasController {
             }
         }
 
+        this.clearHoldToSnap();
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
@@ -3209,6 +3649,7 @@ export class CanvasController {
         this.activeStart = null;
         this.activeAnchor = null;
         this.barrelActive = false;
+        this.activeAlignmentGuides = [];
         this.isShiftDown = false;
         this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
@@ -3220,6 +3661,11 @@ export class CanvasController {
     }
 
     private cancel(): void {
+        this.activeAlignmentGuides = [];
+        if (this.handleDrag) {
+            this.revertHandleDrag();
+        }
+        this.clearHoldToSnap();
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
@@ -3227,6 +3673,11 @@ export class CanvasController {
         this.activeStart = null;
         this.activeAnchor = null;
         this.movingSelection = false;
+        this.moveSelectionSnapshot = null;
+        this.moveSelectionStartPt = null;
+        this.moveSelectionInitialBounds = null;
+        this.moveSelectionCurrentDx = 0;
+        this.moveSelectionCurrentDy = 0;
         this.barrelActive = false;
         this.isShiftDown = false;
         this.lastPointerDownTime = 0;
@@ -3364,7 +3815,110 @@ export class CanvasController {
         return false;
     }
 
-    private addShape(start: Point, end: Point, shapeType: ShapeElement['shapeType']): void {
+    /** Commits a hold-to-snap recognition as a parametric ShapeElement styled like the active pen. */
+    private addRecognizedShape(recognized: RecognizedShape): void {
+        this.addShape(recognized.start, recognized.end, recognized.type, {
+            style: { ...this.style, profile: undefined, isHighlighter: undefined },
+            regularize: recognized.regularize,
+            vertices: recognized.vertices,
+            fill: false,
+        });
+    }
+
+    private isHoldToSnapActive(): boolean {
+        return this.shapeRecognition &&
+            !this.straightenLines &&
+            !this.barrelActive &&
+            !this.movingSelection &&
+            (this.tool === 'pen' || this.tool === 'highlighter');
+    }
+
+    /**
+     * Restarts the dwell timer whenever the stylus travels more than HOLD_TO_SNAP_MOVE_TOLERANCE_PX
+     * (screen px). If it then stays put for HOLD_TO_SNAP_DWELL_MS the stroke is classified and, when
+     * confident, previewed as a perfect shape until pointerup commits it.
+     */
+    private trackHoldToSnap(): void {
+        if (this.points.size === 0) return;
+        const last = { x: this.points.getX(this.points.size - 1), y: this.points.getY(this.points.size - 1) };
+        const tolerance = HOLD_TO_SNAP_MOVE_TOLERANCE_PX / this.zoom;
+        const anchor = this.dwellAnchor;
+        if (anchor && Math.hypot(last.x - anchor.x, last.y - anchor.y) <= tolerance) return;
+
+        this.dwellAnchor = last;
+        if (this.snapPreview) {
+            // Drawing resumed: drop the preview and keep inking freehand
+            this.snapPreview = null;
+            this.schedulePaint();
+        }
+        if (this.dwellTimer !== null) clearTimeout(this.dwellTimer);
+        this.dwellTimer = setTimeout(() => this.onHoldToSnapDwell(), HOLD_TO_SNAP_DWELL_MS);
+    }
+
+    private onHoldToSnapDwell(): void {
+        this.dwellTimer = null;
+        if (this.destroyed || !this.activeStart || !this.isHoldToSnapActive()) return;
+        const recognized = this.recognizer.classify(this.readActivePoints());
+        if (!recognized) return;
+        this.snapPreview = recognized;
+        try {
+            (navigator as Navigator | undefined)?.vibrate?.(12);
+        } catch { /* haptics are best effort */ }
+        this.schedulePaint();
+    }
+
+    private clearHoldToSnap(): void {
+        if (this.dwellTimer !== null) {
+            clearTimeout(this.dwellTimer);
+            this.dwellTimer = null;
+        }
+        this.dwellAnchor = null;
+        this.snapPreview = null;
+    }
+
+    /** Wet-canvas preview of the recognized shape (with a faint accent halo) while the stylus is held. */
+    private paintSnapPreview(preview: RecognizedShape): void {
+        const plugin = getShapePlugin(preview.type);
+        const geom: ShapeRenderGeometry = {
+            x0: preview.start.x,
+            y0: preview.start.y,
+            x1: preview.end.x,
+            y1: preview.end.y,
+            regularize: preview.regularize,
+            ...(preview.vertices ? { vertices: preview.vertices.map(v => ({ x: v.x, y: v.y })) } : {}),
+        };
+        plugin.renderCanvas(this.context, geom, {
+            strokeColor: '#2F6BFF',
+            strokeWidth: this.style.width + 8 / this.zoom,
+            strokeOpacity: 0.18,
+            fillEnabled: false,
+        });
+        plugin.renderCanvas(this.context, geom, {
+            strokeColor: this.style.color,
+            strokeWidth: this.style.width,
+            strokePattern: this.style.pattern,
+            strokeOpacity: this.style.opacity,
+            fillEnabled: false,
+        });
+    }
+
+    private addShape(
+        start: Point,
+        end: Point,
+        shapeType: ShapeElement['shapeType'],
+        options: {
+            style?: StrokeStyle;
+            regularize?: boolean;
+            vertices?: Point[];
+            fill?: boolean;
+            /** Magnetic ports the connector endpoints were snapped to (line / arrow only). */
+            startSnap?: SnapPortHit | null;
+            endSnap?: SnapPortHit | null;
+        } = {},
+    ): void {
+        const isMagnetized = Boolean(options.startSnap || options.endSnap);
+        if (options.startSnap) start = { ...start, x: options.startSnap.x, y: options.startSnap.y };
+        if (options.endSnap) end = { ...end, x: options.endSnap.x, y: options.endSnap.y };
         const bounds = this.getDocumentContentBounds();
         const forbiddenY = bounds.contentTop > 0 ? bounds.contentTop - DEFAULT_INK_LIMITS.topMarginPx : -Infinity;
         if (bounds.contentTop > 0 && start.y < forbiddenY && end.y < forbiddenY) {
@@ -3379,7 +3933,8 @@ export class CanvasController {
         const isBoxSnap = spaceId ? (BoxRegistry.isSnapActive(spaceId) || !!this.document.boxes?.[spaceId]?.snapToGrid) : false;
         const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
 
-        const regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+        // Port positions win over 45° snapping and grid snapping
+        const regularize = isMagnetized ? false : (options.regularize ?? Boolean(this.toolState.shape.regularize || this.isShiftDown));
         const plugin = getShapePlugin(shapeType);
         const normalizedGeom = plugin.normalizeGeometry({
             x0: start.x,
@@ -3387,6 +3942,7 @@ export class CanvasController {
             x1: end.x,
             y1: end.y,
             regularize,
+            ...(options.vertices ? { vertices: options.vertices.map(v => ({ x: v.x, y: v.y })) } : {}),
         });
 
         const rawStartU = (normalizedGeom.x0 - geom.originX) / geom.scaleWidth;
@@ -3397,7 +3953,7 @@ export class CanvasController {
         let { u: startU, v: startV } = sanitizeNormalizedPoint(rawStartU, rawStartV, { isBoxStroke });
         let { u: endU, v: endV } = sanitizeNormalizedPoint(rawEndU, rawEndV, { isBoxStroke });
 
-        if (isBoxStroke && (this.snapGrid || isBoxSnap)) {
+        if (isBoxStroke && (this.snapGrid || isBoxSnap) && !isMagnetized) {
             const snStart = snapNormalizedPoint(startU, startV, boxGridDensity);
             const snEnd = snapNormalizedPoint(endU, endV, boxGridDensity);
             startU = snStart.u; startV = snStart.v;
@@ -3421,7 +3977,7 @@ export class CanvasController {
             startY: startV,
             endX: endU,
             endY: endV,
-            style: {
+            style: options.style ? { ...options.style } : {
                 ...this.style,
                 color: this.toolState.shape.color || this.style.color,
                 width: this.toolState.shape.width || this.style.width,
@@ -3429,13 +3985,25 @@ export class CanvasController {
                 opacity: this.toolState.shape.opacity !== undefined ? this.toolState.shape.opacity : this.style.opacity,
             },
             regularize,
-            fillEnabled: this.toolState.shape.fillEnabled,
+            fillEnabled: options.fill === false ? false : this.toolState.shape.fillEnabled,
             fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
             fillOpacity: this.toolState.shape.fillOpacity,
             fillPattern: this.toolState.shape.fillPattern,
             fillDensity: this.toolState.shape.fillDensity,
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
+        if (normalizedGeom.vertices) {
+            element.vertices = normalizedGeom.vertices.map(v => {
+                const { u, v: vv } = sanitizeNormalizedPoint((v.x - geom.originX) / geom.scaleWidth, (v.y - geom.originY) / geom.scaleWidth, { isBoxStroke });
+                return { x: u, y: vv };
+            });
+            element.regularize = false;
+            refreshShapeElementBounds(element);
+        }
+        if (!plugin.isClosed) {
+            if (options.startSnap) element.startBinding = { elementId: options.startSnap.elementId, portId: options.startSnap.portId };
+            if (options.endSnap) element.endBinding = { elementId: options.endSnap.elementId, portId: options.endSnap.portId };
+        }
         this.document.elements.push(element);
         this.options.eventBus?.emit('snap:detected', shapeType, end.x, end.y);
     }
@@ -3659,12 +4227,8 @@ export class CanvasController {
         const halfWidth = (element.style.width || 2) / 2;
         if (element.type === 'shape') {
             const plugin = getShapePlugin(element.shapeType);
-            const startX = geom.originX + element.startX * geom.scaleWidth;
-            const startY = geom.originY + element.startY * geom.scaleWidth;
-            const endX = geom.originX + element.endX * geom.scaleWidth;
-            const endY = geom.originY + element.endY * geom.scaleWidth;
             return plugin.computeBounds(
-                { x0: startX, y0: startY, x1: endX, y1: endY, regularize: element.regularize },
+                shapeElementToGeometry(element, geom.originX, geom.originY, geom.scaleWidth),
                 element.style.width || 2,
             );
         }
@@ -3784,10 +4348,20 @@ export class CanvasController {
                     }
                 }
             } else {
-                if (shapeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
-                    modified = true;
+                if (this.eraserMode === 'reticle') {
+                    const fragments = splitShapeDoc(element, points, radius, contentLeft, contentWidth, blockTop, uuid);
+                    if (fragments) {
+                        kept.push(...fragments);
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
                 } else {
-                    kept.push(element);
+                    if (shapeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
                 }
             }
         }
@@ -3800,6 +4374,8 @@ export class CanvasController {
                 }
             }
             this.document.elements = kept;
+            // Erasing a connected shape leaves its connectors in place but unbound
+            clearDanglingBindings(this.document.elements);
             this.selection = [];
             this.lassoMenu?.hide();
             this.emitSelection();
@@ -3840,17 +4416,7 @@ export class CanvasController {
     private selectAt(point: Point): void {
         const hit = [...this.document.elements].reverse().find(element => {
             if (element.type === 'shape') {
-                const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
-                const plugin = getShapePlugin(element.shapeType);
-                const startX = geom.originX + element.startX * geom.scaleWidth;
-                const startY = geom.originY + element.startY * geom.scaleWidth;
-                const endX = geom.originX + element.endX * geom.scaleWidth;
-                const endY = geom.originY + element.endY * geom.scaleWidth;
-                return plugin.hitTest(
-                    { x0: startX, y0: startY, x1: endX, y1: endY, regularize: element.regularize },
-                    point,
-                    14,
-                );
+                return this.hitTestShapeElement(element, point, 14);
             }
             return contains(this.getElementDocBounds(element), point.x, point.y, 14);
         });
@@ -3880,6 +4446,415 @@ export class CanvasController {
             };
         }
         return bounds;
+    }
+
+    // ---------------------------------------------------------------------
+    // Parametric shape editing (control handles + reactive style edits)
+    // ---------------------------------------------------------------------
+
+    /** The selected ShapeElement (live document reference) when the selection is exactly one shape. */
+    private getSelectedShape(): ShapeElement | null {
+        if (this.selection.length !== 1) return null;
+        const selected = this.selection[0];
+        if (selected.type !== 'shape') return null;
+        return this.document.elements.includes(selected) ? selected : null;
+    }
+
+
+    private getAllReferencePoints(excludeElementId?: string): ReferencePoint[] {
+        const points: ReferencePoint[] = [];
+        const selSet = new Set(this.selection.map(el => el.id));
+        for (const el of this.document.elements) {
+            if (el.id === excludeElementId || selSet.has(el.id)) continue;
+            if (el.type === 'shape') {
+                const geom = this.getShapeDocGeometry(el);
+                points.push(...getShapeKeyPoints(geom));
+            }
+        }
+        return points;
+    }
+
+    private getShapeDocGeometry(shape: ShapeElement): ShapeRenderGeometry {
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        return shapeElementToGeometry(shape, anchor.originX, anchor.originY, anchor.scaleWidth);
+    }
+
+    private hitTestShapeElement(shape: ShapeElement, point: Point, tolerance: number): boolean {
+        const geom = this.getShapeDocGeometry(shape);
+        const rot = geom.rotation ?? shape.rotation ?? 0;
+        if (rot !== 0) {
+            const plugin = getShapePlugin(shape.shapeType);
+            const norm = plugin.normalizeGeometry(geom);
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            const inv = rotatePoint(point.x, point.y, cx, cy, -rot);
+            return plugin.hitTest(geom, inv, tolerance);
+        }
+        return getShapePlugin(shape.shapeType).hitTest(geom, point, tolerance);
+    }
+
+    private isTapGesture(start: Point, end: Point | undefined): boolean {
+        if (!end) return true;
+        return Math.hypot(end.x - start.x, end.y - start.y) < SHAPE_TAP_SLOP_PX;
+    }
+
+    /** Finds the topmost ShapeElement under `point` (or null). */
+    private findShapeAtDocPoint(point: Point, tolerance = 14): ShapeElement | null {
+        return [...this.document.elements].reverse().find(
+            (el): el is ShapeElement => el.type === 'shape' && this.hitTestShapeElement(el, point, tolerance),
+        ) ?? null;
+    }
+
+    /** Selects the topmost ShapeElement under `point` (or clears the selection). */
+    private selectShapeAt(point: Point): void {
+        const hit = this.findShapeAtDocPoint(point, 14);
+        this.selection = hit ? [hit] : [];
+        this.emitSelection();
+    }
+
+    /** Nearest magnetic port of a closed shape within MAGNETIC_SNAP_RADIUS_PX (screen) of `point`. */
+    private findSnapPort(point: { x: number; y: number }, excludeId?: string): SnapPortHit | null {
+        return findNearestSnapPort(
+            this.document.elements,
+            point,
+            MAGNETIC_SNAP_RADIUS_PX / this.zoom,
+            this.connectorAdapter,
+            excludeId,
+        );
+    }
+
+    /** Ports that a line / arrow being drawn from `start` to `end` snaps to (none for closed shapes). */
+    private resolveConnectorSnaps(
+        shapeType: ShapeType,
+        start: { x: number; y: number },
+        end: { x: number; y: number },
+    ): { start: SnapPortHit | null; end: SnapPortHit | null } {
+        if (getShapePlugin(shapeType).isClosed) return { start: null, end: null };
+        const startSnap = this.findSnapPort(start);
+        let endSnap = this.findSnapPort(end);
+        if (endSnap && startSnap && endSnap.elementId === startSnap.elementId && endSnap.portId === startSnap.portId) {
+            endSnap = null;
+        }
+        return { start: startSnap, end: endSnap };
+    }
+
+    /**
+     * Re-glues connectors bound to any of `changedIds` and releases bindings whose target vanished.
+     * Returns true when at least one connector moved.
+     */
+    private followConnectors(changedIds: ReadonlySet<string>): boolean {
+        if (changedIds.size === 0) return false;
+        const updated = followBoundConnectors(this.document.elements, changedIds, this.connectorAdapter);
+        if (updated.length > 0) this.renderDirty = true;
+        return updated.length > 0;
+    }
+
+    /** Magnetic feedback: the target shape's ports as dots plus a halo ring on the matched port. */
+    private paintSnapTargets(hits: Array<SnapPortHit | null | undefined>): void {
+        const ctx = this.context;
+        const accent = '#2F6BFF';
+        const painted = new Set<string>();
+        ctx.save();
+        ctx.setLineDash([]);
+        for (const hit of hits) {
+            if (!hit) continue;
+            if (!painted.has(hit.elementId)) {
+                painted.add(hit.elementId);
+                const target = this.document.elements.find(el => el.id === hit.elementId);
+                if (target && target.type === 'shape') {
+                    ctx.fillStyle = accent;
+                    ctx.globalAlpha = 0.45;
+                    for (const port of getShapePlugin(target.shapeType).getSnapPorts(this.getShapeDocGeometry(target))) {
+                        ctx.beginPath();
+                        ctx.arc(port.x, port.y, 2.5 / this.zoom, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = accent;
+            ctx.lineWidth = 2 / this.zoom;
+            ctx.beginPath();
+            ctx.arc(hit.x, hit.y, 6 / this.zoom, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    /** Starts dragging a control handle of the selected shape when (docX, docY) is within the pick radius. */
+    private tryBeginHandleDrag(docX: number, docY: number, rawPoint: Point): boolean {
+        const shape = this.getSelectedShape();
+        if (!shape) return false;
+        const geom = this.getShapeDocGeometry(shape);
+        const hitRadius = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+
+        // When Ctrl is held on a linear shape: ALWAYS prioritize segment sliding over handles!
+        if (this.isCtrlDown && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
+            if (linearPathHit(geom, { x: docX, y: docY }, hitRadius * 2.5)) {
+                const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                this.points.clear();
+                this.predictor.reset();
+                this.resetLiveBake();
+                this.movingSelection = false;
+                this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+                this.handleDrag = {
+                    elementId: shape.id,
+                    handleId: `seg-slide-${segIdx}`,
+                    kind: 'segment-mid',
+                    startGeom: geom,
+                    grabOffsetX: 0,
+                    grabOffsetY: 0,
+                    snapshot: this.createHistorySnapshot(),
+                    changed: false,
+                    snap: null,
+                };
+                return true;
+            }
+        }
+
+        let best: { id: string; kind: ShapeHandleKind; x: number; y: number } | null = null;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (const handle of getShapePlugin(shape.shapeType).getControlHandles(geom)) {
+            const distance = Math.hypot(handle.x - docX, handle.y - docY);
+            if (distance <= hitRadius && distance < bestDistance) {
+                best = handle;
+                bestDistance = distance;
+            }
+        }
+        if (!best) {
+            if ((shape.shapeType === 'line' || shape.shapeType === 'arrow') && linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
+                const inserted = insertLinearNodeAtPoint(geom, { x: docX, y: docY });
+                if (inserted) {
+                    const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+                    this.recordHistory();
+                    applyGeometryToShapeElement(shape, inserted.geom, anchor.originX, anchor.originY, anchor.scaleWidth);
+                    this.strokeCache.delete(shape.id);
+                    this.rebuildIndex();
+                    this.renderDirty = true;
+                    this.schedulePaint();
+                    this.persistSoon();
+
+                    this.points.clear();
+                    this.predictor.reset();
+                    this.resetLiveBake();
+                    this.movingSelection = false;
+                    this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+                    this.handleDrag = {
+                        elementId: shape.id,
+                        handleId: inserted.handleId,
+                        kind: 'vertex',
+                        startGeom: inserted.geom,
+                        grabOffsetX: 0,
+                        grabOffsetY: 0,
+                        snapshot: this.createHistorySnapshot(),
+                        changed: false,
+                        snap: null,
+                    };
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        const now = performance.now();
+        const hitRadiusPx = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+        const isDoubleTap = Boolean(
+            this.lastHandleTap &&
+            this.lastHandleTap.shapeId === shape.id &&
+            this.lastHandleTap.handleId === best.id &&
+            (now - this.lastHandleTap.time < 350) &&
+            Math.hypot(best.x - this.lastHandleTap.x, best.y - this.lastHandleTap.y) < hitRadiusPx * 2
+        );
+        this.lastHandleTap = { shapeId: shape.id, handleId: best.id, time: now, x: best.x, y: best.y };
+
+        if (isDoubleTap) {
+            let nextGeom: ShapeRenderGeometry | null = null;
+            if (best.id.startsWith('seg-mid-') || best.id === 'curve') {
+                const segIdx = best.id.startsWith('seg-mid-') ? parseInt(best.id.slice('seg-mid-'.length), 10) : 0;
+                const nodes = getLinearPathNodes(geom);
+                const n0 = nodes[segIdx];
+                const n1 = nodes[segIdx + 1];
+                const isCurved = Boolean(n0?.handleOut || n1?.handleIn);
+                nextGeom = isCurved
+                    ? straightenLinearSegment(geom, segIdx)
+                    : splitLinearSegment(geom, segIdx);
+            } else if (best.id === 'start' || best.id === 'end' || best.id.startsWith('node-')) {
+                const nodes = getLinearPathNodes(geom);
+                const nodeIdx = best.id === 'start' ? 0 : best.id === 'end' ? nodes.length - 1 : parseInt(best.id.slice('node-'.length), 10);
+                nextGeom = toggleLinearNodeKind(geom, nodeIdx);
+            }
+            if (nextGeom) {
+                const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+                this.recordHistory();
+                applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
+                this.strokeCache.delete(shape.id);
+                this.rebuildIndex();
+                this.renderDirty = true;
+                this.schedulePaint();
+                this.persistSoon();
+                this.options.eventBus?.emit('canvas:dirty', this.pageId);
+                return true;
+            }
+        }
+
+        this.points.clear();
+        this.predictor.reset();
+        this.resetLiveBake();
+        this.movingSelection = false;
+        this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+        this.handleDrag = {
+            elementId: shape.id,
+            handleId: best.id,
+            kind: best.kind,
+            startGeom: geom,
+            grabOffsetX: best.x - docX,
+            grabOffsetY: best.y - docY,
+            snapshot: this.createHistorySnapshot(),
+            changed: false,
+            snap: null,
+        };
+        return true;
+    }
+
+    private updateHandleDrag(docPoint: { x: number; y: number }): void {
+        const drag = this.handleDrag;
+        if (!drag) return;
+        const shape = this.document.elements.find(el => el.id === drag.elementId);
+        if (!shape || shape.type !== 'shape') return;
+
+        const plugin = getShapePlugin(shape.shapeType);
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        let target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
+        let regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+
+        // Inverse rotate target point for local slider handles (radius / parametric 3D)
+        if (drag.handleId === 'radius' || drag.handleId.startsWith('param-')) {
+            if (drag.startGeom.rotation) {
+                const norm = plugin.normalizeGeometry(drag.startGeom);
+                const cx = (norm.x0 + norm.x1) / 2;
+                const cy = (norm.y0 + norm.y1) / 2;
+                target = rotatePoint(target.x, target.y, cx, cy, -drag.startGeom.rotation);
+            }
+        }
+
+        // Connector endpoints magnetize to nearby ports; leaving the 14px radius releases them
+        if (isConnectorShape(shape) && (drag.handleId === 'start' || drag.handleId === 'end')) {
+            drag.snap = this.findSnapPort(target, shape.id);
+            if (drag.snap) {
+                target = { x: drag.snap.x, y: drag.snap.y };
+                regularize = false;
+            }
+        }
+
+        // Fusion 360 style CAD point alignment guides ("a la altura" & vertical columns)
+        const isGuideBypassed = Boolean(this.isShiftDown);
+        if (!isGuideBypassed && !drag.snap && drag.handleId !== 'rotate') {
+            const tol = 6 / this.zoom;
+            const refPoints = this.getAllReferencePoints(shape.id);
+            if (shape.pathNodes && shape.pathNodes.length > 1) {
+                const geom = this.getShapeDocGeometry(shape);
+                const nodes = getLinearPathNodes(geom);
+                for (let i = 0; i < nodes.length; i++) {
+                    const nodeHandleId = i === 0 ? 'start' : i === nodes.length - 1 ? 'end' : `node-${i}`;
+                    if (drag.handleId !== nodeHandleId) {
+                        refPoints.push({ x: nodes[i].x, y: nodes[i].y });
+                    }
+                }
+            }
+            const pointGuide = computePointAlignmentGuides(target, refPoints, tol);
+            if (pointGuide.deltaY !== 0) {
+                target.y = pointGuide.snappedPoint.y;
+            }
+            if (pointGuide.deltaX !== 0) {
+                target.x = pointGuide.snappedPoint.x;
+            }
+            this.activeAlignmentGuides = pointGuide.guides;
+        } else if (drag.handleId === 'rotate') {
+            this.activeAlignmentGuides = [];
+        }
+
+        const next = plugin.applyHandleDrag(drag.startGeom, drag.handleId, target, regularize);
+        applyGeometryToShapeElement(shape, next, anchor.originX, anchor.originY, anchor.scaleWidth);
+        shape.regularize = regularize && !drag.snap;
+
+        drag.changed = true;
+        this.strokeCache.delete(shape.id);
+        // Connectors glued to this shape follow the resize / reshape live
+        this.followConnectors(new Set([shape.id]));
+        this.renderDirty = true;
+        this.schedulePaint();
+    }
+
+    private finishHandleDrag(): void {
+        this.activeAlignmentGuides = [];
+        const drag = this.handleDrag;
+        this.handleDrag = null;
+        if (!drag || !drag.changed) return;
+        const shape = this.document.elements.find(el => el.id === drag.elementId);
+        if (shape && isConnectorShape(shape) && (drag.handleId === 'start' || drag.handleId === 'end')) {
+            setBinding(shape, drag.handleId, drag.snap ? { elementId: drag.snap.elementId, portId: drag.snap.portId } : null);
+        }
+        this.commitHistorySnapshot(drag.snapshot);
+        this.rebuildIndex();
+        this.emitSelection();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        this.options.eventBus?.emit('canvas:dirty', this.pageId);
+    }
+
+    /** Pointer cancelled mid-drag: restore the pre-drag document and keep the shape selected. */
+    private revertHandleDrag(): void {
+        this.activeAlignmentGuides = [];
+        const drag = this.handleDrag;
+        this.handleDrag = null;
+        if (!drag || !drag.changed) return;
+        this.document.elements = cloneElements(drag.snapshot.elements);
+        const restored = this.document.elements.find(el => el.id === drag.elementId);
+        this.selection = restored ? [restored] : [];
+        this.strokeCache.delete(drag.elementId);
+        this.rebuildIndex();
+        this.emitSelection();
+    }
+
+    /**
+     * Reactive editing: style changes made in ToolEstuche / Toolbar while shapes are selected
+     * (shape or lasso tool) are applied to those shapes in place, with one undo step per burst.
+     */
+    private applyStyleToSelectedShapes(patch: ShapeStylePatch): boolean {
+        if (this.suppressSelectionStyleSync) return false;
+        if (this.tool !== 'shape' && this.tool !== 'lasso') return false;
+        const shapes = this.selection.filter((el): el is ShapeElement => el.type === 'shape');
+        if (shapes.length === 0) return false;
+
+        const now = Date.now();
+        const key = `${shapes.map(s => s.id).join(',')}|${Object.keys(patch).sort().join(',')}`;
+        if (now - this.lastShapeStyleEdit.at > SHAPE_STYLE_HISTORY_COALESCE_MS || this.lastShapeStyleEdit.key !== key) {
+            this.recordHistory();
+        }
+        this.lastShapeStyleEdit = { at: now, key };
+
+        for (const shape of shapes) {
+            if (patch.color !== undefined) shape.style.color = patch.color;
+            if (patch.width !== undefined) shape.style.width = patch.width;
+            if (patch.opacity !== undefined) shape.style.opacity = patch.opacity;
+            if (patch.pattern !== undefined) shape.style.pattern = patch.pattern;
+            if (getShapePlugin(shape.shapeType).isClosed) {
+                if (patch.fillEnabled !== undefined) shape.fillEnabled = patch.fillEnabled;
+                if (patch.fillColor !== undefined) shape.fillColor = patch.fillColor;
+                if (patch.fillPattern !== undefined) shape.fillPattern = patch.fillPattern;
+                if (patch.fillOpacity !== undefined) shape.fillOpacity = patch.fillOpacity;
+                if (patch.fillDensity !== undefined) shape.fillDensity = patch.fillDensity;
+            }
+            this.strokeCache.delete(shape.id);
+        }
+
+        this.rebuildIndex();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        this.options.eventBus?.emit('canvas:dirty', this.pageId);
+        return true;
     }
 
     private emitSelection(): void {
@@ -3933,10 +4908,7 @@ export class CanvasController {
         element.bounds.minY += dv;
         element.bounds.maxY += dv;
         if (element.type === 'shape') {
-            element.startX += du;
-            element.endX += du;
-            element.startY += dv;
-            element.endY += dv;
+            mapShapeElementPoints(element, (u, v) => ({ x: u + du, y: v + dv }));
         } else {
             for (let i = 0; i < element.points.length; i += 4) {
                 element.points[i] += du;
@@ -3954,11 +4926,24 @@ export class CanvasController {
         const { width: contentWidth } = this.getContentGeometry();
         const du = 20 / contentWidth;
         const dv = 20 / contentWidth;
+        const idMap = new Map<string, string>();
         for (let i = 0; i < copies.length; i++) {
-            copies[i].id = uuid();
+            const newId = uuid();
+            idMap.set(copies[i].id, newId);
+            copies[i].id = newId;
             copies[i].zIndex = offset + i;
             this.shiftElementNormalized(copies[i], du, dv);
             this.document.elements.push(copies[i]);
+        }
+        // Pasted connectors stay glued only to shapes pasted with them
+        for (const copy of copies) {
+            if (copy.type !== 'shape') continue;
+            for (const end of ['start', 'end'] as const) {
+                const binding = end === 'start' ? copy.startBinding : copy.endBinding;
+                if (!binding) continue;
+                const mapped = idMap.get(binding.elementId);
+                setBinding(copy, end, mapped ? { elementId: mapped, portId: binding.portId } : null);
+            }
         }
         this.selection = copies;
         this.rebuildIndex();
@@ -3976,6 +4961,7 @@ export class CanvasController {
             this.strokeCache.delete(id);
         }
         this.document.elements = this.document.elements.filter(element => !ids.has(element.id));
+        clearDanglingBindings(this.document.elements);
         this.selection = [];
         this.lassoMenu?.hide();
         this.rebuildIndex();
@@ -4023,6 +5009,9 @@ export class CanvasController {
             this.shiftElementNormalized(element, du, dv);
             this.strokeCache.delete(element.id);
         }
+        // Connectors dragged without their target let go; connectors glued to moved shapes follow
+        releaseDetachedBindings(this.selection);
+        this.followConnectors(new Set(this.selection.map(element => element.id)));
         this.rebuildIndex();
         this.emitSelection();
         this.renderDirty = true;
@@ -4066,32 +5055,17 @@ export class CanvasController {
                     }
                     element.bounds = { minX: minU, maxX: maxU, minY: minV, maxY: maxV };
                 } else {
-                    const docStartX = oldGeom.originX + element.startX * oldGeom.scaleWidth;
-                    const docStartY = oldGeom.originY + element.startY * oldGeom.scaleWidth;
-                    const docEndX = oldGeom.originX + element.endX * oldGeom.scaleWidth;
-                    const docEndY = oldGeom.originY + element.endY * oldGeom.scaleWidth;
-
-                    let newStartX = (docStartX - newGeom.originX) / newGeom.scaleWidth;
-                    let newStartY = (docStartY - newGeom.originY) / newGeom.scaleWidth;
-                    let newEndX = (docEndX - newGeom.originX) / newGeom.scaleWidth;
-                    let newEndY = (docEndY - newGeom.originY) / newGeom.scaleWidth;
-
-                    if (newGeom.isBox) {
-                        newStartX = Math.max(0, Math.min(1, newStartX));
-                        newStartY = Math.max(0, newStartY);
-                        newEndX = Math.max(0, Math.min(1, newEndX));
-                        newEndY = Math.max(0, newEndY);
-                    }
-                    element.startX = newStartX;
-                    element.startY = newStartY;
-                    element.endX = newEndX;
-                    element.endY = newEndY;
-                    element.bounds = {
-                        minX: Math.min(newStartX, newEndX),
-                        maxX: Math.max(newStartX, newEndX),
-                        minY: Math.min(newStartY, newEndY),
-                        maxY: Math.max(newStartY, newEndY),
-                    };
+                    mapShapeElementPoints(element, (u, v) => {
+                        const docX = oldGeom.originX + u * oldGeom.scaleWidth;
+                        const docY = oldGeom.originY + v * oldGeom.scaleWidth;
+                        let newU = (docX - newGeom.originX) / newGeom.scaleWidth;
+                        let newV = (docY - newGeom.originY) / newGeom.scaleWidth;
+                        if (newGeom.isBox) {
+                            newU = Math.max(0, Math.min(1, newU));
+                            newV = Math.max(0, newV);
+                        }
+                        return { x: newU, y: newV };
+                    }, oldGeom.scaleWidth / newGeom.scaleWidth);
                 }
 
                 element.blockId = newAnchor.blockId;
@@ -4464,10 +5438,19 @@ export class CanvasController {
     }
 
     private recordHistory(): void {
-        this.history.push({
+        this.commitHistorySnapshot(this.createHistorySnapshot());
+    }
+
+    private createHistorySnapshot(): HistorySnapshot {
+        return {
             elements: cloneElements(this.document.elements),
             boxHeights: this.getBoxHeightsSnapshot(),
-        });
+        };
+    }
+
+    /** Pushes a snapshot captured earlier (e.g. at pointerdown) onto the undo stack. */
+    private commitHistorySnapshot(snapshot: HistorySnapshot): void {
+        this.history.push(snapshot);
         if (this.history.length > 30) this.history.shift();
         this.future.length = 0;
         this.toolbar?.setHistory(this.history.length > 0, false);
@@ -4605,8 +5588,7 @@ export class CanvasController {
                                 element.points[i] += deltaV;
                             }
                         } else {
-                            element.startY += deltaV;
-                            element.endY += deltaV;
+                            mapShapeElementPoints(element, (u, v) => ({ x: u, y: v + deltaV }));
                         }
                         changed = true;
                     }
@@ -4860,17 +5842,16 @@ export class CanvasController {
             -ratio * sTop,
         );
 
-        if (this.points.size > 0 && this.activeStart) {
+        if (this.points.size > 0 && this.activeStart && !this.movingSelection && !this.handleDrag) {
             if (this.tool === 'lasso') {
-                if (!this.movingSelection) {
-                    this.paintLasso();
-                }
+                this.paintLasso();
             } else {
                 this.paintActive();
             }
         }
 
         if (this.selection.length) this.paintSelection();
+        this.paintAlignmentGuides();
         this.context.setTransform(1, 0, 0, 1, 0, 0);
     }
 
@@ -5072,37 +6053,32 @@ export class CanvasController {
         blockTop: number,
         styleOverride?: Partial<ShapeStyleConfig>,
     ): void {
-        const startX = contentLeft + shape.startX * contentWidth;
-        const startY = blockTop + shape.startY * contentWidth;
-        const endX = contentLeft + shape.endX * contentWidth;
-        const endY = blockTop + shape.endY * contentWidth;
-
         const plugin = getShapePlugin(shape.shapeType);
-        const geom: ShapeRenderGeometry = {
-            x0: startX,
-            y0: startY,
-            x1: endX,
-            y1: endY,
-            regularize: shape.regularize,
-        };
-        const styleConfig: ShapeStyleConfig = {
-            strokeColor: shape.style.color,
-            strokeWidth: shape.style.width,
-            strokePattern: shape.style.pattern,
-            strokeOpacity: shape.style.opacity,
-            fillEnabled: shape.fillEnabled,
-            fillColor: shape.fillColor,
-            fillOpacity: shape.fillOpacity,
-            fillPattern: shape.fillPattern,
-            fillDensity: shape.fillDensity,
-            ...styleOverride,
-        };
-        plugin.renderCanvas(context, geom, styleConfig);
+        const geom = shapeElementToGeometry(shape, contentLeft, blockTop, contentWidth);
+        const rot = geom.rotation ?? shape.rotation ?? 0;
+        if (rot !== 0) {
+            const norm = plugin.normalizeGeometry(geom);
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            context.save();
+            context.translate(cx, cy);
+            context.rotate(rot);
+            context.translate(-cx, -cy);
+            plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
+            context.restore();
+        } else {
+            plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
+        }
     }
 
     private paintActive(): void {
         if (this.tool === 'eraser' || this.barrelActive) {
             this.paintEraserReticle();
+            return;
+        }
+
+        if (this.snapPreview && (this.tool === 'pen' || this.tool === 'highlighter')) {
+            this.paintSnapPreview(this.snapPreview);
             return;
         }
 
@@ -5130,14 +6106,30 @@ export class CanvasController {
                     y: this.points.getY(this.points.size - 1),
                 };
 
-                const regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+                const snaps = this.resolveConnectorSnaps(shapeType, this.activeStart, lastDocPt);
+                let endPtX = snaps.end?.x ?? lastDocPt.x;
+                let endPtY = snaps.end?.y ?? lastDocPt.y;
+                if (!snaps.end && !this.isShiftDown) {
+                    const tol = 6 / this.zoom;
+                    const refPoints = this.getAllReferencePoints();
+                    refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
+                    const ptGuide = computePointAlignmentGuides({ x: endPtX, y: endPtY }, refPoints, tol);
+                    if (ptGuide.deltaY !== 0) endPtY = ptGuide.snappedPoint.y;
+                    if (ptGuide.deltaX !== 0) endPtX = ptGuide.snappedPoint.x;
+                    this.activeAlignmentGuides = ptGuide.guides;
+                } else if (snaps.end) {
+                    this.activeAlignmentGuides = [];
+                }
+
+                const regularize = !snaps.start && !snaps.end && Boolean(this.toolState.shape.regularize || this.isShiftDown);
                 const geom = shapePlugin.normalizeGeometry({
-                    x0: this.activeStart.x,
-                    y0: this.activeStart.y,
-                    x1: lastDocPt.x,
-                    y1: lastDocPt.y,
+                    x0: snaps.start?.x ?? this.activeStart.x,
+                    y0: snaps.start?.y ?? this.activeStart.y,
+                    x1: endPtX,
+                    y1: endPtY,
                     regularize,
                 });
+                this.paintSnapTargets([snaps.start, snaps.end]);
 
                 const styleConfig: ShapeStyleConfig = {
                     strokeColor: this.toolState.shape.color || this.style.color,
@@ -5366,7 +6358,48 @@ export class CanvasController {
         this.context.restore();
     }
 
+    private paintAlignmentGuides(): void {
+        if (!this.activeAlignmentGuides || this.activeAlignmentGuides.length === 0) return;
+        const ctx = this.context;
+        ctx.save();
+        ctx.strokeStyle = '#00C8FF';
+        ctx.lineWidth = 1.25 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        ctx.beginPath();
+        for (const g of this.activeAlignmentGuides) {
+            if (g.axis === 'x') {
+                ctx.moveTo(g.position, g.from);
+                ctx.lineTo(g.position, g.to);
+            } else {
+                ctx.moveTo(g.from, g.position);
+                ctx.lineTo(g.to, g.position);
+            }
+        }
+        ctx.stroke();
+
+        // Render reference point indicator dots (Fusion 360 style)
+        for (const g of this.activeAlignmentGuides) {
+            if (g.refPoint) {
+                const r = 3 / this.zoom;
+                ctx.beginPath();
+                ctx.arc(g.refPoint.x, g.refPoint.y, r, 0, Math.PI * 2);
+                ctx.fillStyle = '#00C8FF';
+                ctx.fill();
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 1 / this.zoom;
+                ctx.setLineDash([]);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    }
+
     private paintSelection(): void {
+        const selectedShape = this.getSelectedShape();
+        if (selectedShape) {
+            this.paintShapeSelection(selectedShape);
+            return;
+        }
         const bounds = this.getSelectionDocBounds();
         if (!bounds) return;
         const padding = 6;
@@ -5411,6 +6444,153 @@ export class CanvasController {
         this.context.restore();
     }
 
+    /** Selection chrome of a single shape: light outline plus its parametric control handles. */
+    private paintShapeSelection(shape: ShapeElement): void {
+        const plugin = getShapePlugin(shape.shapeType);
+        const geom = this.getShapeDocGeometry(shape);
+        const norm = plugin.normalizeGeometry(geom);
+        const bounds = this.getElementDocBounds(shape);
+        const ctx = this.context;
+        const accent = '#2F6BFF';
+        const padding = 6;
+
+        ctx.save();
+        const rot = norm.rotation || shape.rotation || 0;
+        if (rot !== 0) {
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate(rot);
+            ctx.translate(-cx, -cy);
+        }
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 1 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        const rMinX = Math.min(norm.x0, norm.x1);
+        const rMaxX = Math.max(norm.x0, norm.x1);
+        const rMinY = Math.min(norm.y0, norm.y1);
+        const rMaxY = Math.max(norm.y0, norm.y1);
+        if (shape.shapeType !== 'line' && shape.shapeType !== 'arrow') {
+            ctx.strokeRect(
+                rMinX - padding,
+                rMinY - padding,
+                rMaxX - rMinX + padding * 2,
+                rMaxY - rMinY + padding * 2,
+            );
+        }
+        ctx.restore();
+        ctx.save();
+
+        // Bezier guides: endpoints / nodes → control points
+        if (shape.shapeType === 'line' || shape.shapeType === 'arrow') {
+            const nodes = getLinearPathNodes(geom);
+            ctx.save();
+            ctx.strokeStyle = '#00A3FF';
+            ctx.globalAlpha = 0.65;
+            ctx.lineWidth = 1 / this.zoom;
+            ctx.setLineDash([3 / this.zoom, 3 / this.zoom]);
+            for (const node of nodes) {
+                if (node.handleIn) {
+                    ctx.beginPath();
+                    ctx.moveTo(node.x, node.y);
+                    ctx.lineTo(node.handleIn.x, node.handleIn.y);
+                    ctx.stroke();
+                }
+                if (node.handleOut) {
+                    ctx.beginPath();
+                    ctx.moveTo(node.x, node.y);
+                    ctx.lineTo(node.handleOut.x, node.handleOut.y);
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        } else if (norm.controlPoint) {
+            ctx.beginPath();
+            ctx.moveTo(norm.x0, norm.y0);
+            ctx.lineTo(norm.controlPoint.x, norm.controlPoint.y);
+            ctx.lineTo(norm.x1, norm.y1);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+
+        const activeHandleId = this.handleDrag?.elementId === shape.id ? this.handleDrag.handleId : '';
+        const radius = 6 / this.zoom;
+        const diamond = 7 / this.zoom;
+        const handles = plugin.getControlHandles(geom);
+
+        // Rotation stem line if 'rotate' handle exists
+        const rotHandle = handles.find(h => h.kind === 'rotate');
+        if (rotHandle) {
+            const minX = Math.min(norm.x0, norm.x1);
+            const maxX = Math.max(norm.x0, norm.x1);
+            const minY = Math.min(norm.y0, norm.y1);
+            const midX = (minX + maxX) / 2;
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            const stemStart = rot !== 0
+                ? rotatePoint(midX, minY, cx, cy, rot)
+                : { x: midX, y: minY };
+
+            ctx.save();
+            ctx.strokeStyle = accent;
+            ctx.lineWidth = 1.5 / this.zoom;
+            ctx.setLineDash([2 / this.zoom, 2 / this.zoom]);
+            ctx.beginPath();
+            ctx.moveTo(stemStart.x, stemStart.y);
+            ctx.lineTo(rotHandle.x, rotHandle.y);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        for (const handle of handles) {
+            const isActive = handle.id === activeHandleId;
+            ctx.beginPath();
+            if (handle.kind === 'curve' || handle.kind === 'radius' || handle.kind === 'param') {
+                // Diamond accent handle for curvature / corner radius / 3D params
+                ctx.moveTo(handle.x, handle.y - diamond);
+                ctx.lineTo(handle.x + diamond, handle.y);
+                ctx.lineTo(handle.x, handle.y + diamond);
+                ctx.lineTo(handle.x - diamond, handle.y);
+                ctx.closePath();
+                ctx.fillStyle = isActive ? '#FFFFFF' : accent;
+                ctx.fill();
+                ctx.strokeStyle = isActive ? accent : '#FFFFFF';
+            } else if (handle.kind === 'bezier-in' || handle.kind === 'bezier-out') {
+                const rBez = 4.5 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rBez * 1.3 : rBez, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? '#00A3FF' : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = '#00A3FF';
+            } else if (handle.kind === 'segment-mid') {
+                const rMid = 4 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rMid * 1.3 : rMid, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            } else if (handle.kind === 'rotate') {
+                const rRot = 6.5 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rRot * 1.3 : rRot, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            } else {
+                ctx.arc(handle.x, handle.y, isActive ? radius * 1.3 : radius, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            }
+            ctx.lineWidth = 2 / this.zoom;
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        if (this.handleDrag?.elementId === shape.id && this.handleDrag.snap) {
+            this.paintSnapTargets([this.handleDrag.snap]);
+        }
+    }
+
     // Touch gesture handling (Pinch-to-zoom & 2-finger navigation scroll with 1-finger palm rejection)
     private readonly onTouchDown = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch') return;
@@ -5438,6 +6618,41 @@ export class CanvasController {
                 this.lastSingleTouch = null;
                 this.singleTouchPanned = false;
             } else {
+                // Finger input for orthogonal segment sliding: touching a segment directly slides it
+                const rect = this.canvas.getBoundingClientRect();
+                const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+                const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+                let targetShape = this.getSelectedShape();
+                if (!targetShape || (targetShape.shapeType !== 'line' && targetShape.shapeType !== 'arrow')) {
+                    const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 24 / this.zoom);
+                    if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                        this.selection = [hit];
+                        this.emitSelection();
+                        targetShape = hit;
+                    }
+                }
+
+                if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                    const geom = this.getShapeDocGeometry(targetShape);
+                    if (linearPathHit(geom, { x: docX, y: docY }, Math.max(18, 28 / this.zoom))) {
+                        const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                        this.touchSlideState = {
+                            pointerId: event.pointerId,
+                            elementId: targetShape.id,
+                            segIdx,
+                            startGeom: geom,
+                            snapshot: this.createHistorySnapshot(),
+                            changed: false,
+                        };
+                        try { navigator.vibrate?.(20); } catch {}
+                        event.preventDefault();
+                        event.stopPropagation();
+                        try { this.canvas.setPointerCapture(event.pointerId); } catch {}
+                        this.schedulePaint();
+                        return;
+                    }
+                }
+
                 this.palmRejectedSingleTouch = false;
                 this.singleTouchStartCoords = { x: event.clientX, y: event.clientY, time: Date.now() };
                 this.lastSingleTouch = { x: event.clientX, y: event.clientY };
@@ -5458,6 +6673,25 @@ export class CanvasController {
     private readonly onTouchMove = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch' || !this.touches.has(event.pointerId)) return;
         this.touches.set(event.pointerId, this.localTouch(event));
+
+        if (this.touchSlideState && event.pointerId === this.touchSlideState.pointerId) {
+            const rect = this.canvas.getBoundingClientRect();
+            const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+            const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+            const shape = this.document.elements.find(el => el.id === this.touchSlideState!.elementId) as ShapeElement | undefined;
+            if (shape) {
+                const nextGeom = slideLinearSegment(this.touchSlideState.startGeom, this.touchSlideState.segIdx, { x: docX, y: docY });
+                const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+                applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
+                this.touchSlideState.changed = true;
+                this.strokeCache.delete(shape.id);
+                this.rebuildIndex();
+                this.renderDirty = true;
+                this.schedulePaint();
+            }
+            event.preventDefault();
+            return;
+        }
 
         if (this.touches.size === 1) {
             if (this.palmRejectedSingleTouch) {
@@ -5501,6 +6735,17 @@ export class CanvasController {
 
     private readonly onTouchEnd = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch') return;
+        if (this.touchSlideState && event.pointerId === this.touchSlideState.pointerId) {
+            if (this.touchSlideState.changed) {
+                this.recordHistory();
+                this.persistSoon();
+                this.options.eventBus?.emit('canvas:dirty', this.pageId);
+            }
+            this.touchSlideState = null;
+            this.touches.delete(event.pointerId);
+            event.preventDefault();
+            return;
+        }
         this.lastTouchEndTime = Date.now();
         this.lastTouchEndPos = { x: event.clientX, y: event.clientY };
 

@@ -718,24 +718,47 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
 
             estuche.open(undefined, mockDocument.createElement('button') as any);
 
-            // 1. Verify Carousel & base shapes
-            const car = estuche.container.querySelector('.car');
-            assert.ok(car, 'Must render .car carousel');
+            // Pointer tap (bypasses the 400ms click de-duplication of bindTapOrClick)
+            const tap = (el: any) => {
+                const ev = (type: string) => ({ type, button: 0, pointerType: 'pen', clientX: 1, clientY: 1, preventDefault: () => {}, stopPropagation: () => {} });
+                el.dispatchEvent(ev('pointerdown'));
+                el.dispatchEvent(ev('pointerup'));
+            };
+
+            // 1. Verify paginated 5-column carousel: page 1 = base shapes, page 2 = extended shapes
+            const car = estuche.container.querySelector('.shape-carousel');
+            assert.ok(car, 'Must render .shape-carousel');
 
             const baseSelector = estuche.container.querySelector('.shape-grid-selector');
             assert.ok(baseSelector, 'Must render .shape-grid-selector');
-            const baseButtons = baseSelector.querySelectorAll('.sb');
+            const baseButtons = baseSelector.querySelectorAll('.shape-btn');
             assert.strictEqual(baseButtons.length, 5, 'Must render 5 base shape buttons');
 
-            // Custom shapes page exists in carousel
-            const pages = car.querySelectorAll('.pgs');
+            const pages = car.querySelectorAll('.shape-page');
             assert.ok(pages.length >= 2, 'Must have at least 2 pages for base and custom shapes');
-            const customPageButtons = pages[1].querySelectorAll('.sb');
-            assert.ok(customPageButtons.length >= 1, 'Must render custom shape items in the second page');
+            const customPageButtons = pages[1].querySelectorAll('.shape-btn');
+            const customTypes = customPageButtons.map((b: any) => b.getAttribute('data-s'));
+            assert.deepStrictEqual(customTypes.slice(0, 3), ['diamond', 'hexagon', 'cylinder'], 'Page 2 holds the extended shapes');
 
-            // Click custom shape (e.g. first custom button on page 2)
+            const activeButtons = car.querySelectorAll('.shape-btn.is-active');
+            assert.strictEqual(activeButtons.length, 1, 'Only the active shape is highlighted');
+            assert.strictEqual(activeButtons[0].getAttribute('data-s'), 'rect');
+            assert.strictEqual(activeButtons[0].getAttribute('aria-pressed'), 'true');
+
+            // Pager: arrows + dots synced with the page index
+            const pager = estuche.container.querySelector('.shape-pager');
+            assert.ok(pager, 'Must render .shape-pager when there is more than one page');
+            assert.strictEqual(pager.querySelectorAll('.dot').length, pages.length, 'One dot per page');
+            const nextArrow = pager.querySelector('.shape-pager-next') as HTMLElement;
+            nextArrow.click();
+            const activeDot = estuche.container.querySelector('.shape-pager').querySelectorAll('.dot')[1];
+            assert.ok(activeDot.classList.contains('is-active'), 'Next arrow activates the second page dot');
+
+            // Click custom shape (first custom button on page 2)
             (customPageButtons[0] as HTMLElement).click();
-            assert.ok(selectedShape, 'Selecting custom shape button triggers onSelectShapeType');
+            assert.strictEqual(selectedShape, 'diamond', 'Selecting custom shape button triggers onSelectShapeType');
+            assert.ok(customPageButtons[0].classList.contains('is-active'));
+            assert.ok(!baseButtons[2].classList.contains('is-active'), 'Previous shape is no longer active');
 
             // 2. Verify Thickness Slider (1-12)
             const slider = estuche.container.querySelector('.sl:not(.sm)');
@@ -743,16 +766,21 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             const track = slider.querySelector('.trk');
             assert.ok(track, 'Must render slider track .trk');
 
-            // 3. Verify Property Bar [Línea ▾] [Relleno ▾] [1:1]
-            const bar = estuche.container.querySelector('.bar');
-            assert.ok(bar, 'Must render control bar .bar');
+            // 3. Verify 3-control property bar [Línea ▾] [Relleno ▾] [1:1]
+            const bar = estuche.container.querySelector('.prop-bar');
+            assert.ok(bar, 'Must render .prop-bar');
+            assert.strictEqual(bar.querySelectorAll('.prop-btn').length, 3, 'Property bar has exactly 3 controls');
+
+            const tray = estuche.container.querySelector('.context-tray') as HTMLElement;
+            assert.ok(tray, 'Must render .context-tray');
+            assert.strictEqual(tray.hidden, true, 'Context tray is hidden while both trays are closed');
 
             // 3.1 1:1 Toggle
-            const ratioBtn = bar.querySelector('.pb.tg') as HTMLElement;
-            assert.ok(ratioBtn, 'Must render 1:1 ratio button .pb.tg');
+            const ratioBtn = bar.querySelector('.prop-btn.is-toggle') as HTMLElement;
+            assert.ok(ratioBtn, 'Must render 1:1 toggle .prop-btn.is-toggle');
             ratioBtn.click();
-            assert.strictEqual(toggledRegularize, true, 'Clicking 1:1 ratio button triggers onToggleRegularize');
-            assert.ok(ratioBtn.classList.contains('on'), '1:1 ratio button has class .on when active');
+            assert.strictEqual(toggledRegularize, true, 'Clicking 1:1 toggle triggers onToggleRegularize');
+            assert.ok(ratioBtn.classList.contains('is-on'), '1:1 toggle has class .is-on when active');
 
             // 3.2 Línea Tray
             const lineBtn = bar.querySelector('[data-tb="line"]') as HTMLElement;
@@ -760,49 +788,77 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             const lineTray = estuche.container.querySelector('[data-t="line"]') as HTMLElement;
             assert.ok(lineTray, 'Must render line tray');
 
-            // Open line tray
             lineBtn.click();
-            assert.ok(lineTray.classList.contains('open'), 'Line tray opens on click');
-            const lineOptions = lineTray.querySelectorAll('.cc');
+            assert.ok(lineTray.classList.contains('is-open'), 'Line tray opens on click');
+            assert.strictEqual(tray.hidden, false, 'Context tray becomes visible');
+            const lineOptions = lineTray.querySelectorAll('.line-chip');
             assert.strictEqual(lineOptions.length, 3, 'Line tray has 3 options (solid, dashed, dotted)');
+            (lineOptions[1] as HTMLElement).click();
+            assert.ok(!lineTray.classList.contains('is-open'), 'Selecting a line pattern auto-closes the tray');
+            assert.strictEqual(tray.hidden, true, 'Context tray hides again');
 
             // 3.3 Relleno Tray
             const fillBtn = bar.querySelector('[data-tb="fill"]') as HTMLElement;
             assert.ok(fillBtn, 'Must render fill button');
+            assert.ok((fillBtn.getAttribute('aria-label') || fillBtn.title || '').includes('Relleno'), 'Fill trigger is accessible with "Relleno" tooltip');
             const fillTray = estuche.container.querySelector('[data-t="fill"]') as HTMLElement;
             assert.ok(fillTray, 'Must render fill tray');
 
-            // Open fill tray (line tray should close due to accordion behavior)
+            // Open line tray then fill tray (accordion behavior)
+            tap(lineBtn);
             fillBtn.click();
-            assert.ok(fillTray.classList.contains('open'), 'Fill tray opens on click');
-            assert.ok(!lineTray.classList.contains('open'), 'Line tray closes when fill tray opens (accordion)');
+            assert.ok(fillTray.classList.contains('is-open'), 'Fill tray opens on click');
+            assert.ok(!lineTray.classList.contains('is-open'), 'Line tray closes when fill tray opens (accordion)');
 
-            // Verify 5 fill pattern chips
-            const g5 = fillTray.querySelector('.g5');
-            assert.ok(g5, 'Must render .g5 container');
-            const patternChips = g5.querySelectorAll('.cc');
-            assert.strictEqual(patternChips.length, 5, 'Must render 5 fill pattern chips');
+            // 5 fill mode chips in a single row
+            const fillGrid = fillTray.querySelector('.tray-fill-grid');
+            assert.ok(fillGrid, 'Must render .tray-fill-grid');
+            const patternChips = fillGrid.querySelectorAll('.fill-chip');
+            assert.strictEqual(patternChips.length, 5, 'Must render 5 fill mode chips');
+            assert.deepStrictEqual(
+                patternChips.map((c: any) => c.getAttribute('data-fill')),
+                ['off', 'solid', 'hachure', 'cross-hatch', 'dots'],
+            );
 
-            // Click hachure pattern chip (index 2: off, solid, hachure, cross-hatch, dots)
+            // Fill detail (opacity + colors) hidden while fill is off
+            const detail = fillTray.querySelector('.fill-detail') as HTMLElement;
+            assert.strictEqual(detail.hidden, true, 'Fill detail row hidden while fill is off');
+            assert.strictEqual(fillBtn.classList.contains('has-fill'), false, 'Fill trigger has-fill is false while fill is off');
+
+
+            // Click hachure pattern chip (index 2)
             (patternChips[2] as HTMLElement).click();
             assert.strictEqual(changedFillPattern, 'hachure', 'Clicking hachure pattern chip selects hachure');
             assert.strictEqual(toggledFill, true, 'Selecting a pattern enables fill');
+            assert.strictEqual(detail.hidden, false, 'Fill detail row shown once fill is enabled');
+            assert.strictEqual(fillBtn.classList.contains('has-fill'), true, 'Fill trigger has-fill is true once fill is enabled');
 
-            // Verify density slider is visible for hachure
-            const dens = fillTray.querySelector('.dens');
-            assert.ok(dens?.classList.contains('show'), 'Density slider is shown for hachure');
+            // Density slider shown for hachure, fill opacity slider present
+            const dens = fillTray.querySelector('.fill-density') as HTMLElement;
+            assert.ok(dens?.classList.contains('is-shown'), 'Density slider is shown for hachure');
+            assert.strictEqual(fillTray.querySelector('.fill-opacity-row'), null, 'Fill opacity slider is omitted from fill tray');
 
-            // Verify subordinate fill color swatches
-            const subFillRow = fillTray.querySelector('.pf');
-            assert.ok(subFillRow, 'Must render subordinate fill color row .pf');
-            const fillSwatches = subFillRow.querySelectorAll('.sw');
+            // Subordinate fill color swatches (scoped inside the fill tray)
+            const subFillRow = fillTray.querySelector('.fill-swatch-row');
+            assert.ok(subFillRow, 'Must render fill color row .fill-swatch-row');
+            const fillSwatches = subFillRow.querySelectorAll('.fill-swatch:not(.fill-swatch-add)');
             assert.ok(fillSwatches.length >= 4, 'Must render fill color swatches');
             (fillSwatches[0] as HTMLElement).click();
             assert.ok(changedFillColor, 'Clicking fill swatch triggers onChangeFillColor');
 
+            // Open shapes disable the fill trigger and close the fill tray
+            const lineShapeBtn = baseButtons[0] as HTMLElement;
+            lineShapeBtn.click();
+            assert.strictEqual(selectedShape, 'line');
+            assert.ok(fillBtn.classList.contains('is-disabled'), 'Fill trigger is disabled for open shapes');
+            assert.ok(!fillTray.classList.contains('is-open'), 'Fill tray closes when an open shape is armed');
+            tap(fillBtn);
+            assert.ok(!fillTray.classList.contains('is-open'), 'Disabled fill trigger does not open the tray');
+
             estuche.destroy();
         });
     });
+
 
     describe('6. Multi-Face Fill Definitions & Pattern Orientation Contrast for 3D Shapes', () => {
         test('cylinder with fillEnabled: true and fillPattern: "hachure" renders two distinct face fills with contrasting pattern orientations', () => {

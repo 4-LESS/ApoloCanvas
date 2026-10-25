@@ -3,7 +3,13 @@ import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasEleme
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
 import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
-import { getShapePlugin, type ShapeRenderGeometry, type ShapeStyleConfig } from '../engine/shapes/index.ts';
+import {
+    clearDanglingBindings,
+    getShapePlugin,
+    sanitizeLoadedShapeElement,
+    shapeElementStyle,
+    shapeElementToGeometry,
+} from '../engine/shapes/index.ts';
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -293,13 +299,20 @@ export class PersistenceQueue {
             }
         }
 
+        const elements = [...freehandElements, ...boxElements];
+        for (const el of elements) {
+            if (el.type === 'shape') sanitizeLoadedShapeElement(el);
+        }
+        // Connectors whose target shape was not loaded (e.g. an orphaned box) must not dangle
+        clearDanglingBindings(elements);
+
         const now = Date.now();
         const doc: PageDocument = {
             schemaVersion: 1,
             version: 1,
             id: file.path,
             notePath: file.path,
-            elements: [...freehandElements, ...boxElements],
+            elements,
             boxes: boxesMeta,
             layoutHint,
             createdAt: now,
@@ -753,32 +766,24 @@ function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffset
         };
     }
 
-    const startX = element.startX * scale;
-    const startY = element.startY * scale + anchorOffsetY;
-    const endX = element.endX * scale;
-    const endY = element.endY * scale + anchorOffsetY;
-
     const plugin = getShapePlugin(element.shapeType);
-    const geom: ShapeRenderGeometry = {
-        x0: startX,
-        y0: startY,
-        x1: endX,
-        y1: endY,
-        regularize: element.regularize,
-    };
-    const styleConfig: ShapeStyleConfig = {
-        strokeColor: element.style.color,
-        strokeWidth: element.style.width,
-        strokePattern: element.style.pattern,
-        strokeOpacity: element.style.opacity,
-        fillEnabled: element.fillEnabled,
-        fillColor: element.fillColor,
-        fillOpacity: element.fillOpacity,
-        fillPattern: element.fillPattern,
-        fillDensity: element.fillDensity,
-    };
-
-    return plugin.renderSvg(geom, styleConfig);
+    const geom = shapeElementToGeometry(element, 0, anchorOffsetY, scale);
+    const rotDeg = geom.rotation ? (geom.rotation * 180 / Math.PI) : 0;
+    const svgOut = plugin.renderSvg(geom, {
+        ...shapeElementStyle(element),
+        ...(rotDeg !== 0 ? { shapeRotationDeg: rotDeg } as any : {}),
+    });
+    if (geom.rotation) {
+        const norm = plugin.normalizeGeometry(geom);
+        const cx = (norm.x0 + norm.x1) / 2;
+        const cy = (norm.y0 + norm.y1) / 2;
+        const deg = (geom.rotation * 180 / Math.PI).toFixed(2);
+        return {
+            defs: svgOut.defs,
+            body: `<g transform="rotate(${deg} ${cx.toFixed(1)} ${cy.toFixed(1)})">\n  ${svgOut.body}\n</g>`,
+        };
+    }
+    return svgOut;
 }
 
 export function renderElement(element: CanvasElement, scale = 800): string {

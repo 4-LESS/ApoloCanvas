@@ -20,11 +20,9 @@ export function regularizeClosedGeometry(geom: ShapeRenderGeometry): ShapeRender
     const signX = dx < 0 ? -1 : 1;
     const signY = dy < 0 ? -1 : 1;
     return {
-        x0: geom.x0,
-        y0: geom.y0,
+        ...geom,
         x1: geom.x0 + signX * s,
         y1: geom.y0 + signY * s,
-        regularize: geom.regularize,
     };
 }
 
@@ -43,11 +41,9 @@ export function regularizeLinearGeometry(geom: ShapeRenderGeometry): ShapeRender
     const step = Math.PI / 4; // 45 degrees
     const snappedTheta = Math.round(theta / step) * step;
     return {
-        x0: geom.x0,
-        y0: geom.y0,
+        ...geom,
         x1: geom.x0 + r * Math.cos(snappedTheta),
         y1: geom.y0 + r * Math.sin(snappedTheta),
-        regularize: geom.regularize,
     };
 }
 
@@ -243,6 +239,18 @@ export function applyCanvasFill(
     ctx.globalAlpha = effectiveOpacity * (style.strokeOpacity ?? 1);
 
     const pattern = getCanvasPattern(ctx, fillColor, fillPattern, angleOffset, density);
+    if (pattern && typeof (pattern as any).setTransform === 'function' && typeof DOMMatrix !== 'undefined') {
+        let rotDeg = faceOptions?.shapeRotationDeg;
+        if (rotDeg === undefined && typeof (ctx as any).getTransform === 'function') {
+            const mat = (ctx as any).getTransform();
+            rotDeg = Math.atan2(mat.b, mat.a) * 180 / Math.PI;
+        }
+        if (rotDeg && Math.abs(rotDeg) > 0.001) {
+            (pattern as any).setTransform(new DOMMatrix().rotate(-rotDeg));
+        } else {
+            (pattern as any).setTransform(new DOMMatrix());
+        }
+    }
     ctx.fillStyle = pattern ?? fillColor;
 
     if (fillPathFn) {
@@ -276,7 +284,9 @@ export function getSvgFillAttributes(
     const opacityMultiplier = faceOptions?.opacityMultiplier !== undefined ? faceOptions.opacityMultiplier : 1;
     const effectiveOpacity = Math.max(0.05, Math.min(1, baseOpacity * opacityMultiplier));
     const angleOffset = faceOptions?.patternAngleOffsetDeg ?? 0;
-    const normAngle = ((Math.round(angleOffset) % 360) + 360) % 360;
+    const shapeRot = faceOptions?.shapeRotationDeg ?? 0;
+    const netAngle = angleOffset - shapeRot;
+    const normAngle = ((Math.round(netAngle) % 360) + 360) % 360;
     const cleanColor = fillColor.replace(/[^a-zA-Z0-9]/g, '');
 
     if (fillPattern === 'solid') {
@@ -290,10 +300,10 @@ export function getSvgFillAttributes(
     let patternSvg = '';
 
     if (fillPattern === 'hachure') {
-        const totalRot = 45 + normAngle;
+        const totalRot = (45 + normAngle) % 360;
         patternSvg = `<pattern id="${patternId}" width="${s}" height="${s}" patternUnits="userSpaceOnUse" patternTransform="rotate(${totalRot})"><line x1="0" y1="0" x2="0" y2="${s}" stroke="${escapeXml(fillColor)}" stroke-width="${lineW}"/></pattern>`;
     } else if (fillPattern === 'cross-hatch') {
-        const totalRot = 45 + normAngle;
+        const totalRot = (45 + normAngle) % 360;
         patternSvg = `<pattern id="${patternId}" width="${s}" height="${s}" patternUnits="userSpaceOnUse" patternTransform="rotate(${totalRot})"><line x1="0" y1="0" x2="0" y2="${s}" stroke="${escapeXml(fillColor)}" stroke-width="${lineW}"/><line x1="0" y1="0" x2="${s}" y2="0" stroke="${escapeXml(fillColor)}" stroke-width="${lineW}"/></pattern>`;
     } else if (fillPattern === 'dots') {
         const transformAttr = normAngle !== 0 ? ` patternTransform="rotate(${normAngle})"` : '';
