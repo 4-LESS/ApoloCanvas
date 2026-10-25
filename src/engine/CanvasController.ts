@@ -64,8 +64,11 @@ import {
     snapAngleOrOrthogonal,
     rotatePoint,
     computeSmartAlignmentGuides,
+    computePointAlignmentGuides,
+    getShapeKeyPoints,
     type AlignmentGuide,
     type SnapTargetBounds,
+    type ReferencePoint,
     getShapePlugin,
     mapShapeElementPoints,
     refreshShapeElementBounds,
@@ -366,6 +369,10 @@ export class CanvasController {
     private activeAlignmentGuides: AlignmentGuide[] = [];
     private handleDrag: ShapeHandleDragState | null = null;
     private moveSelectionSnapshot: HistorySnapshot | null = null;
+    private moveSelectionStartPt: { x: number; y: number } | null = null;
+    private moveSelectionInitialBounds: SnapTargetBounds | null = null;
+    private moveSelectionCurrentDx = 0;
+    private moveSelectionCurrentDy = 0;
     // Hold-to-snap: dwell detection at the end of a freehand stroke
     private dwellTimer: ReturnType<typeof setTimeout> | null = null;
     private dwellAnchor: { x: number; y: number } | null = null;
@@ -3250,6 +3257,17 @@ export class CanvasController {
             selectionBounds && contains(selectionBounds, docX, docY, 12)
         );
         this.moveSelectionSnapshot = this.movingSelection ? this.createHistorySnapshot() : null;
+        if (this.movingSelection) {
+            this.moveSelectionStartPt = { x: docX, y: docY };
+            this.moveSelectionInitialBounds = selectionBounds ? { ...selectionBounds } : null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+        } else {
+            this.moveSelectionStartPt = null;
+            this.moveSelectionInitialBounds = null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+        }
         if (this.tool === 'shape' && !this.movingSelection && this.selection.length > 0) {
             // Starting a new shape (or tapping elsewhere) drops the current shape selection
             this.selection = [];
@@ -3331,15 +3349,18 @@ export class CanvasController {
             this.checkAutoGrowth(rawPoints);
         }
 
-        if (this.movingSelection && this.points.size > 1) {
-            const last = this.points.get(this.points.size - 1);
-            const prev = this.points.get(this.points.size - 2);
-            let dx = last.x - prev.x;
-            let dy = last.y - prev.y;
+        if (this.movingSelection && this.moveSelectionStartPt && this.moveSelectionInitialBounds) {
+            const rawDocX = (rawPoints[rawPoints.length - 1].x + this.currentScrollLeft) / this.zoom;
+            const rawDocY = (rawPoints[rawPoints.length - 1].y + this.currentScrollTop) / this.zoom;
+            const totalDx = rawDocX - this.moveSelectionStartPt.x;
+            const totalDy = rawDocY - this.moveSelectionStartPt.y;
 
-            const selBounds = this.getSelectionDocBounds();
-            if (selBounds) {
-                const tol = 5 / this.zoom;
+            let effectiveTotalDx = totalDx;
+            let effectiveTotalDy = totalDy;
+
+            const isSnapBypassed = Boolean(rawEvent?.altKey || rawEvent?.ctrlKey);
+            if (!isSnapBypassed) {
+                const tol = 6 / this.zoom;
                 const otherBounds: SnapTargetBounds[] = [];
                 const selSet = new Set(this.selection.map(el => el.id));
                 for (const el of this.document.elements) {
@@ -3349,18 +3370,26 @@ export class CanvasController {
                     }
                 }
                 const activePredicted = {
-                    minX: selBounds.minX + dx,
-                    maxX: selBounds.maxX + dx,
-                    minY: selBounds.minY + dy,
-                    maxY: selBounds.maxY + dy,
+                    minX: this.moveSelectionInitialBounds.minX + totalDx,
+                    maxX: this.moveSelectionInitialBounds.maxX + totalDx,
+                    minY: this.moveSelectionInitialBounds.minY + totalDy,
+                    maxY: this.moveSelectionInitialBounds.maxY + totalDy,
                 };
                 const smart = computeSmartAlignmentGuides(activePredicted, otherBounds, tol);
-                dx += smart.deltaX;
-                dy += smart.deltaY;
+                effectiveTotalDx += smart.deltaX;
+                effectiveTotalDy += smart.deltaY;
                 this.activeAlignmentGuides = smart.guides;
+            } else {
+                this.activeAlignmentGuides = [];
             }
 
-            this.translateSelection(dx, dy, false);
+            const stepDx = effectiveTotalDx - this.moveSelectionCurrentDx;
+            const stepDy = effectiveTotalDy - this.moveSelectionCurrentDy;
+            if (stepDx !== 0 || stepDy !== 0) {
+                this.translateSelection(stepDx, stepDy, false);
+                this.moveSelectionCurrentDx = effectiveTotalDx;
+                this.moveSelectionCurrentDy = effectiveTotalDy;
+            }
         }
 
         this.schedulePaint();
@@ -3401,6 +3430,10 @@ export class CanvasController {
         if (this.movingSelection) {
             this.movingSelection = false;
             this.activeAlignmentGuides = [];
+            this.moveSelectionStartPt = null;
+            this.moveSelectionInitialBounds = null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
             const snapshot = this.moveSelectionSnapshot;
             this.moveSelectionSnapshot = null;
             if (this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
@@ -3435,9 +3468,18 @@ export class CanvasController {
         } else {
             this.recordHistory();
             if (this.tool === 'shape') {
-                const endPoint = raw[raw.length - 1];
-                const snaps = this.resolveConnectorSnaps(this.shapeType, this.activeStart, endPoint);
-                this.addShape(this.activeStart, endPoint, this.shapeType, {
+                const rawEndPoint = raw[raw.length - 1];
+                let endPt = { x: rawEndPoint.x, y: rawEndPoint.y };
+                const snaps = this.resolveConnectorSnaps(this.shapeType, this.activeStart, endPt);
+                if (!snaps.end && !this.isShiftDown) {
+                    const tol = 6 / this.zoom;
+                    const refPoints = this.getAllReferencePoints();
+                    refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
+                    const ptGuide = computePointAlignmentGuides(endPt, refPoints, tol);
+                    if (ptGuide.deltaY !== 0) endPt.y = ptGuide.snappedPoint.y;
+                    if (ptGuide.deltaX !== 0) endPt.x = ptGuide.snappedPoint.x;
+                }
+                this.addShape(this.activeStart, endPt, this.shapeType, {
                     startSnap: snaps.start,
                     endSnap: snaps.end,
                 });
@@ -3473,6 +3515,7 @@ export class CanvasController {
         this.activeStart = null;
         this.activeAnchor = null;
         this.barrelActive = false;
+        this.activeAlignmentGuides = [];
         this.isShiftDown = false;
         this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
@@ -3497,6 +3540,10 @@ export class CanvasController {
         this.activeAnchor = null;
         this.movingSelection = false;
         this.moveSelectionSnapshot = null;
+        this.moveSelectionStartPt = null;
+        this.moveSelectionInitialBounds = null;
+        this.moveSelectionCurrentDx = 0;
+        this.moveSelectionCurrentDy = 0;
         this.barrelActive = false;
         this.isShiftDown = false;
         this.lastPointerDownTime = 0;
@@ -4269,6 +4316,20 @@ export class CanvasController {
         return this.document.elements.includes(selected) ? selected : null;
     }
 
+
+    private getAllReferencePoints(excludeElementId?: string): ReferencePoint[] {
+        const points: ReferencePoint[] = [];
+        const selSet = new Set(this.selection.map(el => el.id));
+        for (const el of this.document.elements) {
+            if (el.id === excludeElementId || selSet.has(el.id)) continue;
+            if (el.type === 'shape') {
+                const geom = this.getShapeDocGeometry(el);
+                points.push(...getShapeKeyPoints(geom));
+            }
+        }
+        return points;
+    }
+
     private getShapeDocGeometry(shape: ShapeElement): ShapeRenderGeometry {
         const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
         return shapeElementToGeometry(shape, anchor.originX, anchor.originY, anchor.scaleWidth);
@@ -4510,6 +4571,33 @@ export class CanvasController {
             }
         }
 
+        // Fusion 360 style CAD point alignment guides ("a la altura" & vertical columns)
+        const isGuideBypassed = Boolean(this.isShiftDown);
+        if (!isGuideBypassed && !drag.snap && drag.handleId !== 'rotate') {
+            const tol = 6 / this.zoom;
+            const refPoints = this.getAllReferencePoints(shape.id);
+            if (shape.pathNodes && shape.pathNodes.length > 1) {
+                const geom = this.getShapeDocGeometry(shape);
+                const nodes = getLinearPathNodes(geom);
+                for (let i = 0; i < nodes.length; i++) {
+                    const nodeHandleId = i === 0 ? 'start' : i === nodes.length - 1 ? 'end' : `node-${i}`;
+                    if (drag.handleId !== nodeHandleId) {
+                        refPoints.push({ x: nodes[i].x, y: nodes[i].y });
+                    }
+                }
+            }
+            const pointGuide = computePointAlignmentGuides(target, refPoints, tol);
+            if (pointGuide.deltaY !== 0) {
+                target.y = pointGuide.snappedPoint.y;
+            }
+            if (pointGuide.deltaX !== 0) {
+                target.x = pointGuide.snappedPoint.x;
+            }
+            this.activeAlignmentGuides = pointGuide.guides;
+        } else if (drag.handleId === 'rotate') {
+            this.activeAlignmentGuides = [];
+        }
+
         const next = plugin.applyHandleDrag(drag.startGeom, drag.handleId, target, regularize);
         applyGeometryToShapeElement(shape, next, anchor.originX, anchor.originY, anchor.scaleWidth);
         shape.regularize = regularize && !drag.snap;
@@ -4523,6 +4611,7 @@ export class CanvasController {
     }
 
     private finishHandleDrag(): void {
+        this.activeAlignmentGuides = [];
         const drag = this.handleDrag;
         this.handleDrag = null;
         if (!drag || !drag.changed) return;
@@ -4541,6 +4630,7 @@ export class CanvasController {
 
     /** Pointer cancelled mid-drag: restore the pre-drag document and keep the shape selected. */
     private revertHandleDrag(): void {
+        this.activeAlignmentGuides = [];
         const drag = this.handleDrag;
         this.handleDrag = null;
         if (!drag || !drag.changed) return;
@@ -5842,12 +5932,26 @@ export class CanvasController {
                 };
 
                 const snaps = this.resolveConnectorSnaps(shapeType, this.activeStart, lastDocPt);
+                let endPtX = snaps.end?.x ?? lastDocPt.x;
+                let endPtY = snaps.end?.y ?? lastDocPt.y;
+                if (!snaps.end && !this.isShiftDown) {
+                    const tol = 6 / this.zoom;
+                    const refPoints = this.getAllReferencePoints();
+                    refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
+                    const ptGuide = computePointAlignmentGuides({ x: endPtX, y: endPtY }, refPoints, tol);
+                    if (ptGuide.deltaY !== 0) endPtY = ptGuide.snappedPoint.y;
+                    if (ptGuide.deltaX !== 0) endPtX = ptGuide.snappedPoint.x;
+                    this.activeAlignmentGuides = ptGuide.guides;
+                } else if (snaps.end) {
+                    this.activeAlignmentGuides = [];
+                }
+
                 const regularize = !snaps.start && !snaps.end && Boolean(this.toolState.shape.regularize || this.isShiftDown);
                 const geom = shapePlugin.normalizeGeometry({
                     x0: snaps.start?.x ?? this.activeStart.x,
                     y0: snaps.start?.y ?? this.activeStart.y,
-                    x1: snaps.end?.x ?? lastDocPt.x,
-                    y1: snaps.end?.y ?? lastDocPt.y,
+                    x1: endPtX,
+                    y1: endPtY,
                     regularize,
                 });
                 this.paintSnapTargets([snaps.start, snaps.end]);
@@ -6083,8 +6187,8 @@ export class CanvasController {
         if (!this.activeAlignmentGuides || this.activeAlignmentGuides.length === 0) return;
         const ctx = this.context;
         ctx.save();
-        ctx.strokeStyle = '#FF2D78';
-        ctx.lineWidth = 1 / this.zoom;
+        ctx.strokeStyle = '#00C8FF';
+        ctx.lineWidth = 1.25 / this.zoom;
         ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
         ctx.beginPath();
         for (const g of this.activeAlignmentGuides) {
@@ -6097,6 +6201,21 @@ export class CanvasController {
             }
         }
         ctx.stroke();
+
+        // Render reference point indicator dots (Fusion 360 style)
+        for (const g of this.activeAlignmentGuides) {
+            if (g.refPoint) {
+                const r = 3 / this.zoom;
+                ctx.beginPath();
+                ctx.arc(g.refPoint.x, g.refPoint.y, r, 0, Math.PI * 2);
+                ctx.fillStyle = '#00C8FF';
+                ctx.fill();
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 1 / this.zoom;
+                ctx.setLineDash([]);
+                ctx.stroke();
+            }
+        }
         ctx.restore();
     }
 
