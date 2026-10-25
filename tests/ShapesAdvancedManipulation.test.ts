@@ -699,16 +699,18 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
 
             // Drag first segment, middle segment, and last segment
             const slid0 = slideLinearSegment(geom, 0, { x: 50, y: 95 });
+            const last0 = slid0.pathNodes![slid0.pathNodes!.length - 1];
             assert.equal(slid0.pathNodes![0].x, 10, 'Start anchor unchanged on seg 0 drag');
             assert.equal(slid0.pathNodes![0].y, 20);
-            assert.equal(slid0.pathNodes![3].x, 300, 'End anchor unchanged on seg 0 drag');
-            assert.equal(slid0.pathNodes![3].y, 150);
+            assert.equal(last0.x, 300, 'End anchor unchanged on seg 0 drag');
+            assert.equal(last0.y, 150);
 
             const slid1 = slideLinearSegment(geom, 1, { x: 150, y: 120 });
+            const last1 = slid1.pathNodes![slid1.pathNodes!.length - 1];
             assert.equal(slid1.pathNodes![0].x, 10, 'Start anchor unchanged on seg 1 drag');
             assert.equal(slid1.pathNodes![0].y, 20);
-            assert.equal(slid1.pathNodes![3].x, 300, 'End anchor unchanged on seg 1 drag');
-            assert.equal(slid1.pathNodes![3].y, 150);
+            assert.equal(last1.x, 300, 'End anchor unchanged on seg 1 drag');
+            assert.equal(last1.y, 150);
         });
 
         test('slideLinearSegment slides existing orthogonal segment in parallel preserving 90-degree corners', () => {
@@ -761,6 +763,65 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
             // Click near first vertical segment (x = 2, y = 25)
             const segFirst = findClosestLinearSegment(geom, { x: 2, y: 25 });
             assert.equal(segFirst, 0, 'Correctly identifies first vertical segment');
+        });
+
+        test('slideLinearSegment supports sequential multi-point orthogonal sliding between any two points', () => {
+            // Initial 2-node horizontal line
+            const initialGeom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 200,
+                y1: 0,
+            };
+
+            // Interaction 1: Slide middle segment downwards to y = 100 (creates 4-node U-shape)
+            const step1 = slideLinearSegment(initialGeom, 0, { x: 100, y: 100 });
+            assert.equal(step1.pathNodes?.length, 4, 'Step 1 produces 4 nodes');
+            assert.deepEqual(
+                step1.pathNodes?.map(n => ({ x: Math.round(n.x), y: Math.round(n.y) })),
+                [
+                    { x: 0, y: 0 },
+                    { x: 0, y: 100 },
+                    { x: 200, y: 100 },
+                    { x: 200, y: 0 },
+                ],
+                'Step 1 creates strict 90-degree U-step with stationary endpoints'
+            );
+
+            // Interaction 2 (User's reported bug): Holding Ctrl, slide segment 2 (vertical segment (200,100)->(200,0)) inwards to x = 150
+            const step2 = slideLinearSegment(step1, 2, { x: 150, y: 50 });
+            assert.equal(step2.pathNodes?.length, 5, 'Step 2 inserts corner to keep terminal end stationary');
+            assert.deepEqual(
+                step2.pathNodes?.map(n => ({ x: Math.round(n.x), y: Math.round(n.y) })),
+                [
+                    { x: 0, y: 0 },
+                    { x: 0, y: 100 },
+                    { x: 150, y: 100 },
+                    { x: 150, y: 0 },
+                    { x: 200, y: 0 },
+                ],
+                'Step 2 slides vertical segment orthogonally to x=150 without moving (200, 0) end anchor'
+            );
+
+            // Interaction 3: Slide the horizontal bridge (segment 1: (0, 100) -> (150, 100)) downwards to y = 140
+            const step3 = slideLinearSegment(step2, 1, { x: 75, y: 140 });
+            assert.deepEqual(
+                step3.pathNodes?.map(n => ({ x: Math.round(n.x), y: Math.round(n.y) })),
+                [
+                    { x: 0, y: 0 },
+                    { x: 0, y: 140 },
+                    { x: 150, y: 140 },
+                    { x: 150, y: 0 },
+                    { x: 200, y: 0 },
+                ],
+                'Step 3 moves intermediate bridge segment vertically while preserving attached orthogonal segments'
+            );
+
+            // Verify endpoints never moved
+            assert.equal(step3.pathNodes![0].x, 0);
+            assert.equal(step3.pathNodes![0].y, 0);
+            assert.equal(step3.pathNodes![step3.pathNodes!.length - 1].x, 200);
+            assert.equal(step3.pathNodes![step3.pathNodes!.length - 1].y, 0);
         });
 
         test('autoAlignConnectorTangents sets perpendicular tangents matching cardinal port normals (Miro style)', () => {

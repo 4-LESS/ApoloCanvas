@@ -1109,8 +1109,9 @@ export function slideLinearSegment(
     segIdx: number,
     point: ShapePoint,
 ): ShapeRenderGeometry {
-    const nodes = getLinearPathNodes(geom);
-    if (nodes.length < 2) return geom;
+    const rawNodes = getLinearPathNodes(geom);
+    if (rawNodes.length < 2) return geom;
+    const nodes = rawNodes.map(n => ({ ...n, nodeKind: 'sharp' as const }));
 
     const p0 = nodes[0];
     const p1 = nodes[nodes.length - 1];
@@ -1123,11 +1124,6 @@ export function slideLinearSegment(
         const isHorizontal = Math.abs(dx) >= Math.abs(dy);
 
         if (isHorizontal) {
-            // Horizontal line dragged vertically:
-            // Node 0: (x0, y0) [fixed anchor]
-            // Node 1: (x0, point.y) [90-deg vertical drop/rise from start]
-            // Node 2: (x1, point.y) [full horizontal span at point.y]
-            // Node 3: (x1, y1) [90-deg vertical drop/rise to end anchor]
             const newNodes: ShapePathNode[] = [
                 { x: p0.x, y: p0.y, nodeKind: 'sharp' },
                 { x: p0.x, y: point.y, nodeKind: 'sharp' },
@@ -1143,11 +1139,6 @@ export function slideLinearSegment(
                 pathNodes: newNodes,
             };
         } else {
-            // Vertical line dragged horizontally:
-            // Node 0: (x0, y0) [fixed anchor]
-            // Node 1: (point.x, y0) [90-deg horizontal span from start]
-            // Node 2: (point.x, y1) [full vertical span at point.x]
-            // Node 3: (x1, y1) [90-deg horizontal span to end anchor]
             const newNodes: ShapePathNode[] = [
                 { x: p0.x, y: p0.y, nodeKind: 'sharp' },
                 { x: point.x, y: p0.y, nodeKind: 'sharp' },
@@ -1165,66 +1156,83 @@ export function slideLinearSegment(
         }
     }
 
-    // Case 2: Multi-segment path
+    // Case 2: Multi-segment path between ANY two points
     // Terminal anchors (nodes[0] and nodes[last]) are strictly invariant and never moved.
     const safeIdx = Math.max(0, Math.min(segIdx, nodes.length - 2));
-    const nextNodes = nodes.map(n => ({ ...n, nodeKind: 'sharp' as const }));
+    const A = nodes[safeIdx];
+    const B = nodes[safeIdx + 1];
+    const isHorizontal = Math.abs(A.y - B.y) <= Math.abs(A.x - B.x);
 
     const isFirstSeg = safeIdx === 0;
-    const isLastSeg = safeIdx === nextNodes.length - 2;
+    const isLastSeg = safeIdx === nodes.length - 2;
 
-    const nA = nextNodes[safeIdx];
-    const nB = nextNodes[safeIdx + 1];
-    const isHorizontal = Math.abs(nA.y - nB.y) <= Math.abs(nA.x - nB.x);
+    const result: ShapePathNode[] = [];
+    for (let i = 0; i < safeIdx; i++) {
+        result.push(nodes[i]);
+    }
 
-    if (isFirstSeg && nextNodes.length >= 4) {
-        // Dragging first segment: preserve anchor node 0 stationary, slide corner node 1
-        if (isHorizontal) {
-            nextNodes[1].y = point.y;
-            if (nextNodes.length > 2) nextNodes[2].y = point.y;
+    if (isHorizontal) {
+        // Dragging horizontal segment vertically to point.y
+        if (isFirstSeg) {
+            result.push(A);
+            result.push({ x: A.x, y: point.y, nodeKind: 'sharp' });
+            if (isLastSeg) {
+                result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
+                result.push(B);
+            } else {
+                result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
+            }
+        } else if (isLastSeg) {
+            result.push({ x: A.x, y: point.y, nodeKind: 'sharp' });
+            result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
+            result.push(B);
         } else {
-            nextNodes[1].x = point.x;
-            if (nextNodes.length > 2) nextNodes[2].x = point.x;
-        }
-    } else if (isLastSeg && nextNodes.length >= 4) {
-        // Dragging last segment: preserve end anchor stationary, slide preceding corner
-        const lastCornerIdx = nextNodes.length - 2;
-        if (isHorizontal) {
-            nextNodes[lastCornerIdx].y = point.y;
-            if (lastCornerIdx - 1 > 0) nextNodes[lastCornerIdx - 1].y = point.y;
-        } else {
-            nextNodes[lastCornerIdx].x = point.x;
-            if (lastCornerIdx - 1 > 0) nextNodes[lastCornerIdx - 1].x = point.x;
+            result.push({ x: A.x, y: point.y, nodeKind: 'sharp' });
+            result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
         }
     } else {
-        // Middle segment: slide both corners in parallel without touching terminal anchors
-        if (isHorizontal) {
-            nA.y = point.y;
-            nB.y = point.y;
+        // Dragging vertical segment horizontally to point.x
+        if (isFirstSeg) {
+            result.push(A);
+            result.push({ x: point.x, y: A.y, nodeKind: 'sharp' });
+            if (isLastSeg) {
+                result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
+                result.push(B);
+            } else {
+                result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
+            }
+        } else if (isLastSeg) {
+            result.push({ x: point.x, y: A.y, nodeKind: 'sharp' });
+            result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
+            result.push(B);
         } else {
-            nA.x = point.x;
-            nB.x = point.x;
+            result.push({ x: point.x, y: A.y, nodeKind: 'sharp' });
+            result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
         }
     }
 
-    // Ensure start and end anchors remain 100% stationary
-    nextNodes[0].x = nodes[0].x;
-    nextNodes[0].y = nodes[0].y;
-    nextNodes[nextNodes.length - 1].x = nodes[nodes.length - 1].x;
-    nextNodes[nextNodes.length - 1].y = nodes[nodes.length - 1].y;
+    for (let i = safeIdx + 2; i < nodes.length; i++) {
+        result.push(nodes[i]);
+    }
 
-    // Clear any bezier tangent handles so segments stay crisp, straight, and strictly 90 degrees
-    for (const n of nextNodes) {
+    // Ensure terminal anchors remain 100% stationary
+    result[0].x = rawNodes[0].x;
+    result[0].y = rawNodes[0].y;
+    result[result.length - 1].x = rawNodes[rawNodes.length - 1].x;
+    result[result.length - 1].y = rawNodes[rawNodes.length - 1].y;
+
+    // Clear any bezier handles so all segments stay strictly crisp and 90 degrees
+    for (const n of result) {
         delete n.handleIn;
         delete n.handleOut;
     }
 
     return {
         ...geom,
-        x0: nextNodes[0].x,
-        y0: nextNodes[0].y,
-        x1: nextNodes[nextNodes.length - 1].x,
-        y1: nextNodes[nextNodes.length - 1].y,
-        pathNodes: nextNodes,
+        x0: result[0].x,
+        y0: result[0].y,
+        x1: result[result.length - 1].x,
+        y1: result[result.length - 1].y,
+        pathNodes: result,
     };
 }

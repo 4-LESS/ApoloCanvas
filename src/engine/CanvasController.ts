@@ -4513,6 +4513,31 @@ export class CanvasController {
         if (!shape) return false;
         const geom = this.getShapeDocGeometry(shape);
         const hitRadius = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+
+        // When Ctrl is held on a linear shape: ALWAYS prioritize segment sliding over handles!
+        if (this.isCtrlDown && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
+            if (linearPathHit(geom, { x: docX, y: docY }, hitRadius * 2.5)) {
+                const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                this.points.clear();
+                this.predictor.reset();
+                this.resetLiveBake();
+                this.movingSelection = false;
+                this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+                this.handleDrag = {
+                    elementId: shape.id,
+                    handleId: `seg-slide-${segIdx}`,
+                    kind: 'segment-mid',
+                    startGeom: geom,
+                    grabOffsetX: 0,
+                    grabOffsetY: 0,
+                    snapshot: this.createHistorySnapshot(),
+                    changed: false,
+                    snap: null,
+                };
+                return true;
+            }
+        }
+
         let best: { id: string; kind: ShapeHandleKind; x: number; y: number } | null = null;
         let bestDistance = Number.POSITIVE_INFINITY;
         for (const handle of getShapePlugin(shape.shapeType).getControlHandles(geom)) {
@@ -4524,27 +4549,6 @@ export class CanvasController {
         }
         if (!best) {
             if ((shape.shapeType === 'line' || shape.shapeType === 'arrow') && linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
-                if (this.isCtrlDown) {
-                    const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
-                    this.points.clear();
-                    this.predictor.reset();
-                    this.resetLiveBake();
-                    this.movingSelection = false;
-                    this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
-                    this.handleDrag = {
-                        elementId: shape.id,
-                        handleId: `seg-slide-${segIdx}`,
-                        kind: 'segment-mid',
-                        startGeom: geom,
-                        grabOffsetX: 0,
-                        grabOffsetY: 0,
-                        snapshot: this.createHistorySnapshot(),
-                        changed: false,
-                        snap: null,
-                    };
-                    return true;
-                }
-
                 const inserted = insertLinearNodeAtPoint(geom, { x: docX, y: docY });
                 if (inserted) {
                     const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
