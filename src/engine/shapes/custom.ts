@@ -43,16 +43,27 @@ import {
     regularizeLinearGeometry,
 } from './common.ts';
 
-function buildSubpaths(def: CustomShapeDefinition): CustomShapeSubpath[] {
+function getDefinitionPolygon(def: CustomShapeDefinition, geom: ShapeRenderGeometry): Array<[number, number]> | undefined {
+    if (typeof def.polygon === 'function') {
+        return (def.polygon as any)(geom);
+    }
+    return def.polygon;
+}
+
+function getDefinitionSubpaths(def: CustomShapeDefinition, geom: ShapeRenderGeometry): CustomShapeSubpath[] {
+    if (typeof def.subpaths === 'function') {
+        return def.subpaths(geom);
+    }
     if (def.subpaths && def.subpaths.length > 0) {
         return def.subpaths;
     }
 
-    if (def.polygon && def.polygon.length >= 3) {
+    const poly = getDefinitionPolygon(def, geom);
+    if (poly && poly.length >= 3) {
         const commands: CustomPathSegment[] = [];
-        commands.push({ type: 'M', args: [def.polygon[0][0], def.polygon[0][1]] });
-        for (let i = 1; i < def.polygon.length; i++) {
-            commands.push({ type: 'L', args: [def.polygon[i][0], def.polygon[i][1]] });
+        commands.push({ type: 'M', args: [poly[0][0], poly[0][1]] });
+        for (let i = 1; i < poly.length; i++) {
+            commands.push({ type: 'L', args: [poly[i][0], poly[i][1]] });
         }
         commands.push({ type: 'Z', args: [] });
         return [{ commands, isClosed: true, isFilled: true, isStroked: true }];
@@ -145,7 +156,6 @@ function renderCommandsToSvgPath(
 
 export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin {
     const isClosed = def.isClosed !== undefined ? def.isClosed : true;
-    const subpaths = buildSubpaths(def);
 
     return {
         id: def.id,
@@ -160,6 +170,7 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
 
         renderCanvas(ctx: CanvasRenderingContext2D, geom: ShapeRenderGeometry, style: ShapeStyleConfig): void {
             const norm = this.normalizeGeometry(geom);
+            const subpaths: CustomShapeSubpath[] = getDefinitionSubpaths(def, norm);
             const minX = Math.min(norm.x0, norm.x1);
             const minY = Math.min(norm.y0, norm.y1);
             const w = Math.abs(norm.x1 - norm.x0);
@@ -206,6 +217,7 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
 
         renderSvg(geom: ShapeRenderGeometry, style: ShapeStyleConfig): ShapeSvgOutput {
             const norm = this.normalizeGeometry(geom);
+            const subpaths: CustomShapeSubpath[] = getDefinitionSubpaths(def, norm);
             const minX = Math.min(norm.x0, norm.x1);
             const minY = Math.min(norm.y0, norm.y1);
             const w = Math.abs(norm.x1 - norm.x0);
@@ -274,8 +286,9 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
                 p = rotatePoint(point.x, point.y, cx, cy, -norm.rotation);
             }
 
-            if (def.polygon && def.polygon.length >= 3) {
-                const mapped: Array<[number, number]> = def.polygon.map(([u, v]) => [
+            const poly = getDefinitionPolygon(def, norm);
+            if (poly && poly.length >= 3) {
+                const mapped: Array<[number, number]> = poly.map(([u, v]: [number, number]) => [
                     minX + u * w,
                     minY + v * h,
                 ]);
@@ -292,10 +305,12 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             if (!isClosed) {
                 return linearControlHandles(norm).filter(h => h.kind === 'endpoint');
             }
+            const extra = def.extraControlHandles ? def.extraControlHandles(norm) : [];
             const handles: ShapeHandle[] = [
                 ...boxCornerHandles(norm),
                 ...boxEdgeHandles(norm),
                 rotationHandle(norm),
+                ...extra,
             ];
             if (norm.rotation) {
                 const cx = (norm.x0 + norm.x1) / 2;
@@ -308,6 +323,10 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
         applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
             const norm = this.normalizeGeometry(geom);
             const reg = regularize ?? geom.regularize;
+            if (def.applyParamDrag) {
+                const handled = def.applyParamDrag(norm, handleId, newPoint);
+                if (handled) return handled;
+            }
             if (isClosed && handleId === 'rotate') {
                 return applyRotationDrag(norm, newPoint, reg);
             }

@@ -126,7 +126,9 @@ export interface CustomShapeDefinition {
     name: string;
     isClosed?: boolean;
     iconSvgPaths?: readonly string[];
-    polygon?: NormalizedPoint[];
+    polygon?: NormalizedPoint[] | ((geom: ShapeRenderGeometry) => NormalizedPoint[]);
     commands?: CustomPathSegment[];
-    subpaths?: CustomShapeSubpath[];
+    subpaths?: CustomShapeSubpath[] | ((geom: ShapeRenderGeometry) => CustomShapeSubpath[]);
+    extraControlHandles?: (geom: ShapeRenderGeometry) => ShapeHandle[];
+    applyParamDrag?: (geom: ShapeRenderGeometry, handleId: string, point: ShapePoint) => ShapeRenderGeometry | null;
 }
