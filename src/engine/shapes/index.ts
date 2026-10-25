@@ -24,6 +24,7 @@ export * from './custom.ts';
 export * from './handles.ts';
 export * from './element.ts';
 export * from './connectors.ts';
+export * from './guides.ts';
 export {
     lineShapePlugin,
     arrowShapePlugin,
