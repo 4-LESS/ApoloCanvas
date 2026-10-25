@@ -4491,12 +4491,14 @@ export class CanvasController {
         let target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
         let regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
 
-        // Inverse rotate target point for non-rotate handles when shape is rotated
-        if (drag.handleId !== 'rotate' && drag.startGeom.rotation) {
-            const norm = plugin.normalizeGeometry(drag.startGeom);
-            const cx = (norm.x0 + norm.x1) / 2;
-            const cy = (norm.y0 + norm.y1) / 2;
-            target = rotatePoint(target.x, target.y, cx, cy, -drag.startGeom.rotation);
+        // Inverse rotate target point for local slider handles (radius / parametric 3D)
+        if (drag.handleId === 'radius' || drag.handleId.startsWith('param-')) {
+            if (drag.startGeom.rotation) {
+                const norm = plugin.normalizeGeometry(drag.startGeom);
+                const cx = (norm.x0 + norm.x1) / 2;
+                const cy = (norm.y0 + norm.y1) / 2;
+                target = rotatePoint(target.x, target.y, cx, cy, -drag.startGeom.rotation);
+            }
         }
 
         // Connector endpoints magnetize to nearby ports; leaving the 14px radius releases them
@@ -6225,8 +6227,16 @@ export class CanvasController {
         // Rotation stem line if 'rotate' handle exists
         const rotHandle = handles.find(h => h.kind === 'rotate');
         if (rotHandle) {
-            const northHandle = handles.find(h => h.id === 'n');
-            const stemStart = northHandle ? { x: northHandle.x, y: northHandle.y } : { x: (norm.x0 + norm.x1) / 2, y: Math.min(norm.y0, norm.y1) };
+            const minX = Math.min(norm.x0, norm.x1);
+            const maxX = Math.max(norm.x0, norm.x1);
+            const minY = Math.min(norm.y0, norm.y1);
+            const midX = (minX + maxX) / 2;
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            const stemStart = rot !== 0
+                ? rotatePoint(midX, minY, cx, cy, rot)
+                : { x: midX, y: minY };
+
             ctx.save();
             ctx.strokeStyle = accent;
             ctx.lineWidth = 1.5 / this.zoom;

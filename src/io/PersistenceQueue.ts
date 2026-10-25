@@ -768,7 +768,11 @@ function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffset
 
     const plugin = getShapePlugin(element.shapeType);
     const geom = shapeElementToGeometry(element, 0, anchorOffsetY, scale);
-    const svgOut = plugin.renderSvg(geom, shapeElementStyle(element));
+    const rotDeg = geom.rotation ? (geom.rotation * 180 / Math.PI) : 0;
+    const svgOut = plugin.renderSvg(geom, {
+        ...shapeElementStyle(element),
+        ...(rotDeg !== 0 ? { shapeRotationDeg: rotDeg } as any : {}),
+    });
     if (geom.rotation) {
         const norm = plugin.normalizeGeometry(geom);
         const cx = (norm.x0 + norm.x1) / 2;

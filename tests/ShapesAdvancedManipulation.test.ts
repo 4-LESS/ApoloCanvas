@@ -15,6 +15,7 @@ import {
     rotatePoint,
     boxSnapPorts,
     computeSmartAlignmentGuides,
+    getSvgFillAttributes,
     type ShapeRenderGeometry,
     type ShapePathNode,
 } from '../src/engine/shapes/index.ts';
@@ -340,6 +341,112 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
             // Rotated rect is 50 wide x 200 high, covering x in [75, 125], y in [0, 200].
             assert.ok(rect.hitTest(geom, { x: 100, y: 150 }, 5), 'Point in rotated vertical rectangle is hit');
             assert.ok(!rect.hitTest(geom, { x: 180, y: 100 }, 5), 'Old horizontal edge point is NOT hit');
+        });
+
+        test('rotated box resize keeps opposite anchor stationary in world coordinates (zero translation drift)', () => {
+            const rect = getShapePlugin('rectangle');
+            // Rotated 30 degrees around center
+            const rot = 30 * Math.PI / 180;
+            const geom: ShapeRenderGeometry = { x0: 100, y0: 100, x1: 300, y1: 200, rotation: rot };
+            const cx = 200;
+            const cy = 150;
+
+            // 1. Test corner resize: handle 'se' (anchor is 'nw' corner at unrotated (100, 100))
+            const worldAnchorNW = rotatePoint(100, 100, cx, cy, rot);
+            const resizedSE = rect.applyHandleDrag(geom, 'se', { x: 350, y: 250 }, false);
+            const newCxSE = (resizedSE.x0 + resizedSE.x1) / 2;
+            const newCySE = (resizedSE.y0 + resizedSE.y1) / 2;
+            const newWorldAnchorNW = rotatePoint(
+                Math.min(resizedSE.x0, resizedSE.x1),
+                Math.min(resizedSE.y0, resizedSE.y1),
+                newCxSE,
+                newCySE,
+                rot
+            );
+            const driftNW = Math.hypot(worldAnchorNW.x - newWorldAnchorNW.x, worldAnchorNW.y - newWorldAnchorNW.y);
+            assert.ok(driftNW < 1e-4, `Opposite anchor NW stayed strictly invariant (drift = ${driftNW})`);
+
+            // 2. Test corner resize: handle 'nw' (anchor is 'se' corner at unrotated (300, 200))
+            const worldAnchorSE = rotatePoint(300, 200, cx, cy, rot);
+            const resizedNW = rect.applyHandleDrag(geom, 'nw', { x: 50, y: 50 }, false);
+            const newCxNW = (resizedNW.x0 + resizedNW.x1) / 2;
+            const newCyNW = (resizedNW.y0 + resizedNW.y1) / 2;
+            const newWorldAnchorSE = rotatePoint(
+                Math.max(resizedNW.x0, resizedNW.x1),
+                Math.max(resizedNW.y0, resizedNW.y1),
+                newCxNW,
+                newCyNW,
+                rot
+            );
+            const driftSE = Math.hypot(worldAnchorSE.x - newWorldAnchorSE.x, worldAnchorSE.y - newWorldAnchorSE.y);
+            assert.ok(driftSE < 1e-4, `Opposite anchor SE stayed strictly invariant (drift = ${driftSE})`);
+
+            // 3. Test edge resize: handle 'e' (anchor is west edge at unrotated x=100, y=cy)
+            const worldAnchorW = rotatePoint(100, cy, cx, cy, rot);
+            const resizedE = rect.applyHandleDrag(geom, 'e', { x: 380, y: 150 }, false);
+            const newCxE = (resizedE.x0 + resizedE.x1) / 2;
+            const newCyE = (resizedE.y0 + resizedE.y1) / 2;
+            const newWorldAnchorW = rotatePoint(
+                Math.min(resizedE.x0, resizedE.x1),
+                newCyE,
+                newCxE,
+                newCyE,
+                rot
+            );
+            const driftW = Math.hypot(worldAnchorW.x - newWorldAnchorW.x, worldAnchorW.y - newWorldAnchorW.y);
+            assert.ok(driftW < 1e-4, `Opposite edge W stayed strictly invariant (drift = ${driftW})`);
+        });
+
+        test('rotation stem line connects directly from rotated shape top edge to rotation handle', () => {
+            const rect = getShapePlugin('rectangle');
+            const rot = 45 * Math.PI / 180;
+            const geom: ShapeRenderGeometry = { x0: 100, y0: 100, x1: 300, y1: 200, rotation: rot };
+            const handles = rect.getControlHandles(geom);
+            const rotHandle = handles.find(h => h.kind === 'rotate')!;
+            assert.ok(rotHandle !== undefined, 'Rotation handle exists');
+
+            const cx = 200;
+            const cy = 150;
+            const midX = 200;
+            const minY = 100;
+            // The top-center edge point rotated by 45 degrees
+            const stemStart = rotatePoint(midX, minY, cx, cy, rot);
+
+            // Vector from stemStart to rotHandle should have length 24px and angle matching the shape's orientation
+            const stemLength = Math.hypot(rotHandle.x - stemStart.x, rotHandle.y - stemStart.y);
+            assert.ok(Math.abs(stemLength - 24) < 1e-4, `Stem length is exactly 24px (got ${stemLength})`);
+
+            // Both points lie along the rotated upward normal (-90 deg from horizontal + rot)
+            const expectedRotHandle = rotatePoint(midX, minY - 24, cx, cy, rot);
+            assert.ok(Math.hypot(rotHandle.x - expectedRotHandle.x, rotHandle.y - expectedRotHandle.y) < 1e-4);
+        });
+
+        test('pattern fills counter-rotate to maintain global orientation in SVG and Canvas', () => {
+            // Test SVG output counter-rotates the pattern so lines maintain global angle
+            const style = {
+                fillEnabled: true,
+                fillPattern: 'hachure' as const,
+                fillColor: '#FF0000',
+                fillDensity: 3,
+            };
+
+            // Unrotated: 45 degree hatch
+            const unrotSvg = getSvgFillAttributes(style);
+            assert.ok(unrotSvg.defs && unrotSvg.defs['apolo-fill-hachure-FF0000-d3']);
+            assert.ok(unrotSvg.defs['apolo-fill-hachure-FF0000-d3'].includes('patternTransform="rotate(45)"'));
+
+            // Shape rotated by 30 degrees: pattern is counter-rotated by 30 deg (net angle 45 - 30 = 15 deg in local coordinates)
+            // When the shape's <g> rotates by +30 deg, world angle is 15 + 30 = 45 deg (globally constant!)
+            const rot30Svg = getSvgFillAttributes(style, { shapeRotationDeg: 30 });
+            const patternDefKey = Object.keys(rot30Svg.defs!)[0];
+            assert.ok(rot30Svg.defs![patternDefKey].includes('patternTransform="rotate(15)"'));
+
+            // Similarly for cross-hatch
+            const crossStyle = { ...style, fillPattern: 'cross-hatch' as const };
+            const rot45Cross = getSvgFillAttributes(crossStyle, { shapeRotationDeg: 45 });
+            const crossKey = Object.keys(rot45Cross.defs!)[0];
+            // 45 - 45 = 0 degrees in patternTransform
+            assert.ok(rot45Cross.defs![crossKey].includes('patternTransform="rotate(0)"'));
         });
     });
 
