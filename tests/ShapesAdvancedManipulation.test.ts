@@ -271,6 +271,30 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
             assert.equal(Number(snapped90.rotation?.toFixed(4)), Number((Math.PI / 2).toFixed(4)), 'Snaps to cardinal 90 degrees');
         });
 
+        
+        test('regularize deactivates on drag when Formas Perfectas is off and Shift is not pressed', () => {
+            const rect = getShapePlugin('rectangle');
+            // Shape originally created with regularize: true (a square)
+            const squareGeom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 100, y1: 100, regularize: true };
+
+            // When regularize is explicitly false (button off and no Shift):
+            // dragging 'se' handle to (200, 150) should freely produce a non-square 200x150 rectangle, NOT locked to 1:1!
+            const freeRect = rect.applyHandleDrag(squareGeom, 'se', { x: 200, y: 150 }, false);
+            assert.equal(freeRect.x1, 200);
+            assert.equal(freeRect.y1, 150);
+            assert.equal(Math.abs(freeRect.x1 - freeRect.x0), 200);
+            assert.equal(Math.abs(freeRect.y1 - freeRect.y0), 150);
+            assert.equal(freeRect.regularize, false, 'Attribute regularize is cleared to false');
+
+            // Similarly for ellipse
+            const ellipse = getShapePlugin('ellipse');
+            const circleGeom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 100, y1: 100, regularize: true };
+            const freeEllipse = ellipse.applyHandleDrag(circleGeom, 'se', { x: 250, y: 120 }, false);
+            assert.equal(freeEllipse.x1, 250);
+            assert.equal(freeEllipse.y1, 120);
+            assert.equal(freeEllipse.regularize, false, 'Attribute regularize on ellipse is cleared to false');
+        });
+
         test('regularize snaps rotation to 15-degree increments (PI / 12)', () => {
             const geom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 100, y1: 100 };
             // Drag to 38 degrees

@@ -141,7 +141,8 @@ export const arrowShapePlugin: ShapePlugin = {
     },
 
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
-        return applyLinearHandleDrag(this.normalizeGeometry(geom), handleId, newPoint, regularize ?? geom.regularize);
+        const reg = regularize !== undefined ? regularize : Boolean(geom.regularize);
+        return applyLinearHandleDrag(this.normalizeGeometry({ ...geom, regularize: reg }), handleId, newPoint, reg);
     },
 
     getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
