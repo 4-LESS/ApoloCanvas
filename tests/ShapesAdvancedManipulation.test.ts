@@ -655,21 +655,60 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
     // 5. Tinkercad Segment Slide & Miro Auto-Bézier Connectors
     // =======================================================================
     describe('5. Tinkercad Segment Slide & Miro Auto-Bézier Connectors', () => {
-        test('slideLinearSegment splits 2-node line into 3 orthogonal segments and slides middle bus trace', () => {
-            const geom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 200, y1: 100 };
-            // Drag middle at point (100, 60)
-            const slid = slideLinearSegment(geom, 0, { x: 100, y: 60 });
+        test('slideLinearSegment splits 2-node line into strictly 90-degree orthogonal U-step with no slanted arms', () => {
+            // Horizontal arrow from (0, 0) to (200, 0) as shown in user screenshot
+            const geom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 200, y1: 0 };
+            // Drag middle down to y = 80
+            const slid = slideLinearSegment(geom, 0, { x: 100, y: 80 });
             assert.ok(slid.pathNodes && slid.pathNodes.length === 4, 'Converted to 4-node orthogonal stepped trace');
+
+            // Node 0: fixed start anchor at (0, 0)
             assert.equal(slid.pathNodes[0].x, 0);
             assert.equal(slid.pathNodes[0].y, 0);
-            assert.equal(slid.pathNodes[3].x, 200);
-            assert.equal(slid.pathNodes[3].y, 100);
 
-            // Middle segment (nodes 1 and 2) sits at y = 60
-            assert.equal(slid.pathNodes[1].y, 60);
-            assert.equal(slid.pathNodes[2].y, 60);
+            // Node 1: straight vertical drop down to (0, 80) - ZERO horizontal slant (dx = 0)
+            assert.equal(slid.pathNodes[1].x, 0, 'Vertical drop has dx = 0');
+            assert.equal(slid.pathNodes[1].y, 80);
+
+            // Node 2: straight horizontal span across to (200, 80) - ZERO vertical slant (dy = 0)
+            assert.equal(slid.pathNodes[2].x, 200);
+            assert.equal(slid.pathNodes[2].y, 80, 'Horizontal span has dy = 0');
+
+            // Node 3: fixed end anchor at (200, 0) - vertical rise from Node 2 with dx = 0
+            assert.equal(slid.pathNodes[3].x, 200);
+            assert.equal(slid.pathNodes[3].y, 0);
+
+            // All nodes are sharp 90-degree corners
             assert.equal(slid.pathNodes[1].nodeKind, 'sharp');
             assert.equal(slid.pathNodes[2].nodeKind, 'sharp');
+        });
+
+        test('slideLinearSegment preserves anchored endpoints strictly stationary across multiple segment slides', () => {
+            const geom: ShapeRenderGeometry = {
+                x0: 10,
+                y0: 20,
+                x1: 300,
+                y1: 150,
+                pathNodes: [
+                    { x: 10, y: 20, nodeKind: 'sharp' },
+                    { x: 10, y: 80, nodeKind: 'sharp' },
+                    { x: 300, y: 80, nodeKind: 'sharp' },
+                    { x: 300, y: 150, nodeKind: 'sharp' },
+                ],
+            };
+
+            // Drag first segment, middle segment, and last segment
+            const slid0 = slideLinearSegment(geom, 0, { x: 50, y: 95 });
+            assert.equal(slid0.pathNodes![0].x, 10, 'Start anchor unchanged on seg 0 drag');
+            assert.equal(slid0.pathNodes![0].y, 20);
+            assert.equal(slid0.pathNodes![3].x, 300, 'End anchor unchanged on seg 0 drag');
+            assert.equal(slid0.pathNodes![3].y, 150);
+
+            const slid1 = slideLinearSegment(geom, 1, { x: 150, y: 120 });
+            assert.equal(slid1.pathNodes![0].x, 10, 'Start anchor unchanged on seg 1 drag');
+            assert.equal(slid1.pathNodes![0].y, 20);
+            assert.equal(slid1.pathNodes![3].x, 300, 'End anchor unchanged on seg 1 drag');
+            assert.equal(slid1.pathNodes![3].y, 150);
         });
 
         test('slideLinearSegment slides existing orthogonal segment in parallel preserving 90-degree corners', () => {

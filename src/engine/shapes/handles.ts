@@ -1112,22 +1112,26 @@ export function slideLinearSegment(
     const nodes = getLinearPathNodes(geom);
     if (nodes.length < 2) return geom;
 
-    // 1. Simple 2-node line: convert into 3 orthogonal segments (4 nodes) with a middle sliding bus
+    const p0 = nodes[0];
+    const p1 = nodes[nodes.length - 1];
+
+    // Case 1: Simple 2-node line -> converts into a clean 3-segment orthogonal U-step (4 nodes)
+    // Never generates slanted / half-inclination arms; all angles are strictly 90 degrees.
     if (nodes.length === 2) {
-        const p0 = nodes[0];
-        const p1 = nodes[1];
         const dx = p1.x - p0.x;
         const dy = p1.y - p0.y;
-
         const isHorizontal = Math.abs(dx) >= Math.abs(dy);
+
         if (isHorizontal) {
-            // Horizontal line dragged vertically: middle horizontal segment at point.y
-            const splitX1 = p0.x + dx * 0.35;
-            const splitX2 = p0.x + dx * 0.65;
+            // Horizontal line dragged vertically:
+            // Node 0: (x0, y0) [fixed anchor]
+            // Node 1: (x0, point.y) [90-deg vertical drop/rise from start]
+            // Node 2: (x1, point.y) [full horizontal span at point.y]
+            // Node 3: (x1, y1) [90-deg vertical drop/rise to end anchor]
             const newNodes: ShapePathNode[] = [
                 { x: p0.x, y: p0.y, nodeKind: 'sharp' },
-                { x: splitX1, y: point.y, nodeKind: 'sharp' },
-                { x: splitX2, y: point.y, nodeKind: 'sharp' },
+                { x: p0.x, y: point.y, nodeKind: 'sharp' },
+                { x: p1.x, y: point.y, nodeKind: 'sharp' },
                 { x: p1.x, y: p1.y, nodeKind: 'sharp' },
             ];
             return {
@@ -1139,13 +1143,15 @@ export function slideLinearSegment(
                 pathNodes: newNodes,
             };
         } else {
-            // Vertical line dragged horizontally: middle vertical segment at point.x
-            const splitY1 = p0.y + dy * 0.35;
-            const splitY2 = p0.y + dy * 0.65;
+            // Vertical line dragged horizontally:
+            // Node 0: (x0, y0) [fixed anchor]
+            // Node 1: (point.x, y0) [90-deg horizontal span from start]
+            // Node 2: (point.x, y1) [full vertical span at point.x]
+            // Node 3: (x1, y1) [90-deg horizontal span to end anchor]
             const newNodes: ShapePathNode[] = [
                 { x: p0.x, y: p0.y, nodeKind: 'sharp' },
-                { x: point.x, y: splitY1, nodeKind: 'sharp' },
-                { x: point.x, y: splitY2, nodeKind: 'sharp' },
+                { x: point.x, y: p0.y, nodeKind: 'sharp' },
+                { x: point.x, y: p1.y, nodeKind: 'sharp' },
                 { x: p1.x, y: p1.y, nodeKind: 'sharp' },
             ];
             return {
@@ -1159,28 +1165,59 @@ export function slideLinearSegment(
         }
     }
 
-    // 2. Multi-node path: slide the specified segment [segIdx, segIdx + 1] in parallel
+    // Case 2: Multi-segment path
+    // Terminal anchors (nodes[0] and nodes[last]) are strictly invariant and never moved.
     const safeIdx = Math.max(0, Math.min(segIdx, nodes.length - 2));
-    const nextNodes = nodes.map(n => ({ ...n }));
-    const pA = nextNodes[safeIdx];
-    const pB = nextNodes[safeIdx + 1];
+    const nextNodes = nodes.map(n => ({ ...n, nodeKind: 'sharp' as const }));
 
-    const isHorizontal = Math.abs(pA.y - pB.y) <= Math.abs(pA.x - pB.x);
+    const isFirstSeg = safeIdx === 0;
+    const isLastSeg = safeIdx === nextNodes.length - 2;
 
-    if (isHorizontal) {
-        // Slide horizontal segment vertically to point.y
-        pA.y = point.y;
-        pB.y = point.y;
+    const nA = nextNodes[safeIdx];
+    const nB = nextNodes[safeIdx + 1];
+    const isHorizontal = Math.abs(nA.y - nB.y) <= Math.abs(nA.x - nB.x);
+
+    if (isFirstSeg && nextNodes.length >= 4) {
+        // Dragging first segment: preserve anchor node 0 stationary, slide corner node 1
+        if (isHorizontal) {
+            nextNodes[1].y = point.y;
+            if (nextNodes.length > 2) nextNodes[2].y = point.y;
+        } else {
+            nextNodes[1].x = point.x;
+            if (nextNodes.length > 2) nextNodes[2].x = point.x;
+        }
+    } else if (isLastSeg && nextNodes.length >= 4) {
+        // Dragging last segment: preserve end anchor stationary, slide preceding corner
+        const lastCornerIdx = nextNodes.length - 2;
+        if (isHorizontal) {
+            nextNodes[lastCornerIdx].y = point.y;
+            if (lastCornerIdx - 1 > 0) nextNodes[lastCornerIdx - 1].y = point.y;
+        } else {
+            nextNodes[lastCornerIdx].x = point.x;
+            if (lastCornerIdx - 1 > 0) nextNodes[lastCornerIdx - 1].x = point.x;
+        }
     } else {
-        // Slide vertical segment horizontally to point.x
-        pA.x = point.x;
-        pB.x = point.x;
+        // Middle segment: slide both corners in parallel without touching terminal anchors
+        if (isHorizontal) {
+            nA.y = point.y;
+            nB.y = point.y;
+        } else {
+            nA.x = point.x;
+            nB.x = point.x;
+        }
     }
 
-    pA.nodeKind = 'sharp';
-    pB.nodeKind = 'sharp';
-    delete pA.handleOut;
-    delete pB.handleIn;
+    // Ensure start and end anchors remain 100% stationary
+    nextNodes[0].x = nodes[0].x;
+    nextNodes[0].y = nodes[0].y;
+    nextNodes[nextNodes.length - 1].x = nodes[nodes.length - 1].x;
+    nextNodes[nextNodes.length - 1].y = nodes[nodes.length - 1].y;
+
+    // Clear any bezier tangent handles so segments stay crisp, straight, and strictly 90 degrees
+    for (const n of nextNodes) {
+        delete n.handleIn;
+        delete n.handleOut;
+    }
 
     return {
         ...geom,

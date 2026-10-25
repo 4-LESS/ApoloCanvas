@@ -3191,13 +3191,19 @@ export class CanvasController {
         }
 
         if (event.ctrlKey || event.metaKey || this.isCtrlDown) {
-            const shape = this.getSelectedShape();
+            const rect = this.canvas.getBoundingClientRect();
+            const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+            const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+            let shape = this.getSelectedShape();
+            if (!shape || (shape.shapeType !== 'line' && shape.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    shape = hit;
+                }
+            }
             if (shape && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
-                const rect = this.canvas.getBoundingClientRect();
-                const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
-                const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
                 const geom = this.getShapeDocGeometry(shape);
-                const hitRadius = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+                const hitRadius = (SHAPE_HANDLE_HIT_RADIUS_PX + 4) / this.zoom;
                 if (linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
                     const nodes = getLinearPathNodes(geom);
                     if (nodes.length >= 2) {
@@ -3253,6 +3259,27 @@ export class CanvasController {
             !getShapePlugin(this.shapeType).isClosed &&
             (!selectedForConnector || getShapePlugin(selectedForConnector.shapeType).isClosed) &&
             this.findSnapPort({ x: docX, y: docY }) !== null;
+
+        // Ctrl key active: blocks drawing new shapes, directly selects and slides linear/circuit segments
+        if (this.isCtrlDown && !barrel) {
+            let targetShape = this.getSelectedShape();
+            if (!targetShape || (targetShape.shapeType !== 'line' && targetShape.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    this.selection = [hit];
+                    this.emitSelection();
+                    targetShape = hit;
+                }
+            }
+            if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                if (this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+                    this.schedulePaint();
+                    return;
+                }
+            }
+            // Ctrl strictly blocks drawing new shapes
+            return;
+        }
 
         // Parametric control handles of the selected shape take priority over drawing / moving
         if (!startsConnector && (this.tool === 'lasso' || this.tool === 'shape') && !barrel && this.tryBeginHandleDrag(docX, docY, rawPoint)) {
@@ -4397,11 +4424,16 @@ export class CanvasController {
         return Math.hypot(end.x - start.x, end.y - start.y) < SHAPE_TAP_SLOP_PX;
     }
 
+    /** Finds the topmost ShapeElement under `point` (or null). */
+    private findShapeAtDocPoint(point: Point, tolerance = 14): ShapeElement | null {
+        return [...this.document.elements].reverse().find(
+            (el): el is ShapeElement => el.type === 'shape' && this.hitTestShapeElement(el, point, tolerance),
+        ) ?? null;
+    }
+
     /** Selects the topmost ShapeElement under `point` (or clears the selection). */
     private selectShapeAt(point: Point): void {
-        const hit = [...this.document.elements].reverse().find(
-            (el): el is ShapeElement => el.type === 'shape' && this.hitTestShapeElement(el, point, 14),
-        );
+        const hit = this.findShapeAtDocPoint(point, 14);
         this.selection = hit ? [hit] : [];
         this.emitSelection();
     }
