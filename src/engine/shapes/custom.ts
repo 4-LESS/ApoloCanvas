@@ -31,6 +31,7 @@ import {
     applyRotationDrag,
     rotatedBoxBounds,
     rotatePoint,
+    getGeometryBox,
 } from './handles.ts';
 import {
     applyCanvasFill,
@@ -359,14 +360,38 @@ export const hexagonShapePlugin: ShapePlugin = createCustomShapePlugin({
     id: 'hexagon',
     name: 'Hexágono',
     isClosed: true,
-    polygon: [
-        [0.25, 0],
-        [0.75, 0],
-        [1, 0.5],
-        [0.75, 1],
-        [0.25, 1],
-        [0, 0.5],
-    ],
+    polygon: (geom: ShapeRenderGeometry) => {
+        const b = Math.max(0.08, Math.min(0.50, geom.shapeParams?.bevelRatio ?? 0.25));
+        return [
+            [b, 0],
+            [1 - b, 0],
+            [1, 0.5],
+            [1 - b, 1],
+            [b, 1],
+            [0, 0.5],
+        ];
+    },
+    extraControlHandles: (geom: ShapeRenderGeometry) => {
+        const { minX, minY, maxX } = getGeometryBox(geom);
+        const w = maxX - minX;
+        const b = Math.max(0.08, Math.min(0.50, geom.shapeParams?.bevelRatio ?? 0.25));
+        return [
+            { id: 'param-bevel', kind: 'param', x: minX + w * b, y: minY },
+        ];
+    },
+    applyParamDrag: (geom: ShapeRenderGeometry, handleId: string, point: ShapePoint) => {
+        if (handleId === 'param-bevel') {
+            const { minX, maxX } = getGeometryBox(geom);
+            const w = maxX - minX;
+            if (w <= 0) return { ...geom };
+            const b = Math.max(0.08, Math.min(0.50, (point.x - minX) / w));
+            return {
+                ...geom,
+                shapeParams: { ...geom.shapeParams, bevelRatio: Number(b.toFixed(3)) },
+            };
+        }
+        return null;
+    },
     iconSvgPaths: ['M 6 3 H 18 L 23 12 L 18 21 H 6 L 1 12 Z'],
 });
 
@@ -374,72 +399,106 @@ export const cylinderShapePlugin: ShapePlugin = createCustomShapePlugin({
     id: 'cylinder',
     name: 'Cilindro',
     isClosed: true,
-    subpaths: [
-        // Face 1: Cylinder Lateral Body (Fill only, non-overlapping with top cap)
-        {
-            commands: [
-                { type: 'M', args: [0, 0.2] },
-                { type: 'C', args: [0, 0.31, 0.22, 0.4, 0.5, 0.4] },
-                { type: 'C', args: [0.78, 0.4, 1, 0.31, 1, 0.2] },
-                { type: 'L', args: [1, 0.8] },
-                { type: 'C', args: [1, 0.91, 0.78, 1, 0.5, 1] },
-                { type: 'C', args: [0.22, 1, 0, 0.91, 0, 0.8] },
-                { type: 'Z', args: [] },
-            ],
-            isClosed: true,
-            isFilled: true,
-            isStroked: false,
-            fillOptions: {
-                patternAngleOffsetDeg: 0,
-                opacityMultiplier: 1.0,
+    subpaths: (geom: ShapeRenderGeometry) => {
+        const c = Math.max(0.08, Math.min(0.48, geom.shapeParams?.capRatio ?? 0.22));
+        const k = 0.55228475;
+        const c_top = Number((c * (1 - k)).toFixed(3));
+        const c_bot = Number((c * (1 + k)).toFixed(3));
+        const c2 = Number((2 * c).toFixed(3));
+        const x_k0 = Number((0.5 * (1 - k)).toFixed(3));
+        const x_k1 = Number((0.5 * (1 + k)).toFixed(3));
+        const y_low_mid = Number((1 - c).toFixed(3));
+        const y_low_ctrl = Number((1 - c + k * c).toFixed(3));
+
+        return [
+            // Face 1: Cylinder Lateral Body (Fill only, non-overlapping with top cap)
+            {
+                commands: [
+                    { type: 'M', args: [0, c] },
+                    { type: 'C', args: [0, c_bot, x_k0, c2, 0.5, c2] },
+                    { type: 'C', args: [x_k1, c2, 1, c_bot, 1, c] },
+                    { type: 'L', args: [1, y_low_mid] },
+                    { type: 'C', args: [1, y_low_ctrl, x_k1, 1, 0.5, 1] },
+                    { type: 'C', args: [x_k0, 1, 0, y_low_ctrl, 0, y_low_mid] },
+                    { type: 'Z', args: [] },
+                ],
+                isClosed: true,
+                isFilled: true,
+                isStroked: false,
+                fillOptions: {
+                    patternAngleOffsetDeg: 0,
+                    opacityMultiplier: 1.0,
+                },
             },
-        },
-        // Face 2: Top Elliptical Cap (Fill only, non-overlapping)
-        {
-            commands: [
-                { type: 'M', args: [0, 0.2] },
-                { type: 'C', args: [0, 0.09, 0.22, 0, 0.5, 0] },
-                { type: 'C', args: [0.78, 0, 1, 0.09, 1, 0.2] },
-                { type: 'C', args: [1, 0.31, 0.78, 0.4, 0.5, 0.4] },
-                { type: 'C', args: [0.22, 0.4, 0, 0.31, 0, 0.2] },
-                { type: 'Z', args: [] },
-            ],
-            isClosed: true,
-            isFilled: true,
-            isStroked: false,
-            fillOptions: {
-                patternAngleOffsetDeg: 90,
-                opacityMultiplier: 0.72,
+            // Face 2: Top Elliptical Cap (Fill only, non-overlapping)
+            {
+                commands: [
+                    { type: 'M', args: [0, c] },
+                    { type: 'C', args: [0, c_top, x_k0, 0, 0.5, 0] },
+                    { type: 'C', args: [x_k1, 0, 1, c_top, 1, c] },
+                    { type: 'C', args: [1, c_bot, x_k1, c2, 0.5, c2] },
+                    { type: 'C', args: [x_k0, c2, 0, c_bot, 0, c] },
+                    { type: 'Z', args: [] },
+                ],
+                isClosed: true,
+                isFilled: true,
+                isStroked: false,
+                fillOptions: {
+                    patternAngleOffsetDeg: 90,
+                    opacityMultiplier: 0.72,
+                },
             },
-        },
-        // Outer Boundary Silhouette Stroke
-        {
-            commands: [
-                { type: 'M', args: [0, 0.2] },
-                { type: 'L', args: [0, 0.8] },
-                { type: 'C', args: [0, 0.91, 0.22, 1, 0.5, 1] },
-                { type: 'C', args: [0.78, 1, 1, 0.91, 1, 0.8] },
-                { type: 'L', args: [1, 0.2] },
-                { type: 'C', args: [1, 0.09, 0.78, 0, 0.5, 0] },
-                { type: 'C', args: [0.22, 0, 0, 0.09, 0, 0.2] },
-                { type: 'Z', args: [] },
-            ],
-            isClosed: true,
-            isFilled: false,
-            isStroked: true,
-        },
-        // Front Top Rim Arc Stroke (interior 3D seam drawn on top of both fills)
-        {
-            commands: [
-                { type: 'M', args: [0, 0.2] },
-                { type: 'C', args: [0, 0.31, 0.22, 0.4, 0.5, 0.4] },
-                { type: 'C', args: [0.78, 0.4, 1, 0.31, 1, 0.2] },
-            ],
-            isClosed: false,
-            isFilled: false,
-            isStroked: true,
-        },
-    ],
+            // Outer Boundary Silhouette Stroke
+            {
+                commands: [
+                    { type: 'M', args: [0, c] },
+                    { type: 'L', args: [0, y_low_mid] },
+                    { type: 'C', args: [0, y_low_ctrl, x_k0, 1, 0.5, 1] },
+                    { type: 'C', args: [x_k1, 1, 1, y_low_ctrl, 1, y_low_mid] },
+                    { type: 'L', args: [1, c] },
+                    { type: 'C', args: [1, c_top, x_k1, 0, 0.5, 0] },
+                    { type: 'C', args: [x_k0, 0, 0, c_top, 0, c] },
+                    { type: 'Z', args: [] },
+                ],
+                isClosed: true,
+                isFilled: false,
+                isStroked: true,
+            },
+            // Front Top Rim Arc Stroke (interior 3D seam drawn on top of both fills)
+            {
+                commands: [
+                    { type: 'M', args: [0, c] },
+                    { type: 'C', args: [0, c_bot, x_k0, c2, 0.5, c2] },
+                    { type: 'C', args: [x_k1, c2, 1, c_bot, 1, c] },
+                ],
+                isClosed: false,
+                isFilled: false,
+                isStroked: true,
+            },
+        ];
+    },
+    extraControlHandles: (geom: ShapeRenderGeometry) => {
+        const { minX, minY, maxX, maxY } = getGeometryBox(geom);
+        const cx = (minX + maxX) / 2;
+        const h = maxY - minY;
+        const c = Math.max(0.08, Math.min(0.48, geom.shapeParams?.capRatio ?? 0.22));
+        return [
+            { id: 'param-cap', kind: 'param', x: cx, y: minY + 2 * c * h },
+        ];
+    },
+    applyParamDrag: (geom: ShapeRenderGeometry, handleId: string, point: ShapePoint) => {
+        if (handleId === 'param-cap') {
+            const { minY, maxY } = getGeometryBox(geom);
+            const h = maxY - minY;
+            if (h <= 0) return { ...geom };
+            const c = Math.max(0.08, Math.min(0.48, (point.y - minY) / (2 * h)));
+            return {
+                ...geom,
+                shapeParams: { ...geom.shapeParams, capRatio: Number(c.toFixed(3)) },
+            };
+        }
+        return null;
+    },
     iconSvgPaths: [
         'M 4 6 C 4 3.8 7.6 2 12 2 S 20 3.8 20 6 V 18 C 20 20.2 16.4 22 12 22 S 4 20.2 4 18 Z',
         'M 4 6 C 4 8.2 7.6 10 12 10 S 20 8.2 20 6',
