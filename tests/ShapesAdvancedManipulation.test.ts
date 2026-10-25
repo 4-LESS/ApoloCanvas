@@ -134,9 +134,9 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
         });
 
         
-        test('start and end points expose control handles bezier-out-0 and bezier-in-last to modify curve directly', () => {
+        test('start and end points expose control handles bezier-out-0 and bezier-in-last to modify curve directly when smooth or curved', () => {
             const line = getShapePlugin('line');
-            const geom: ShapeRenderGeometry = {
+            const sharpGeom: ShapeRenderGeometry = {
                 x0: 0,
                 y0: 0,
                 x1: 200,
@@ -147,13 +147,33 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
                 ],
             };
 
-            const handles = line.getControlHandles(geom);
+            // Sharp line only exposes active elements (endpoints and midpoint), zero dummy tangents cluttering the line
+            const sharpHandles = line.getControlHandles(sharpGeom);
+            const sharpIds = sharpHandles.map(h => h.id);
+            assert.ok(!sharpIds.includes('bezier-out-0'), 'Sharp line hides unused bezier-out-0');
+            assert.ok(!sharpIds.includes('bezier-in-1'), 'Sharp line hides unused bezier-in-1');
+            assert.ok(sharpIds.includes('start'), 'Contains start endpoint');
+            assert.ok(sharpIds.includes('end'), 'Contains end endpoint');
+            assert.ok(sharpIds.includes('seg-mid-0'), 'Contains midpoint handle');
+
+            const smoothGeom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 200,
+                y1: 0,
+                pathNodes: [
+                    { x: 0, y: 0, nodeKind: 'smooth' },
+                    { x: 200, y: 0, nodeKind: 'smooth' },
+                ],
+            };
+
+            const handles = line.getControlHandles(smoothGeom);
             const ids = handles.map(h => h.id);
-            assert.ok(ids.includes('bezier-out-0'), 'Start point exposes outgoing control handle');
-            assert.ok(ids.includes('bezier-in-1'), 'End point exposes incoming control handle');
+            assert.ok(ids.includes('bezier-out-0'), 'Start point exposes outgoing control handle when smooth');
+            assert.ok(ids.includes('bezier-in-1'), 'End point exposes incoming control handle when smooth');
 
             // Dragging start control handle curves the path from the start point
-            const curvedFromStart = line.applyHandleDrag(geom, 'bezier-out-0', { x: 50, y: 50 });
+            const curvedFromStart = line.applyHandleDrag(smoothGeom, 'bezier-out-0', { x: 50, y: 50 });
             assert.deepEqual(curvedFromStart.pathNodes![0].handleOut, { x: 50, y: 50 });
 
             // Dragging end control handle curves the path into the end point
@@ -822,6 +842,61 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
             assert.equal(step3.pathNodes![0].y, 0);
             assert.equal(step3.pathNodes![step3.pathNodes!.length - 1].x, 200);
             assert.equal(step3.pathNodes![step3.pathNodes!.length - 1].y, 0);
+        });
+
+        test('slideLinearSegment preserves existing curved Bezier segments and their tangents intact without deforming them', () => {
+            // Setup matching user's shape: straight -> curved arc -> vertical -> curved arc -> straight
+            const curvedPathGeom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 400,
+                y1: 0,
+                pathNodes: [
+                    { x: 0, y: 0, nodeKind: 'sharp' },
+                    { x: 100, y: 0, nodeKind: 'smooth', handleOut: { x: 120, y: -20 } },
+                    { x: 150, y: -50, nodeKind: 'smooth', handleIn: { x: 130, y: -50 } },
+                    { x: 150, y: -100, nodeKind: 'smooth', handleOut: { x: 170, y: -100 } },
+                    { x: 200, y: 0, nodeKind: 'smooth', handleIn: { x: 200, y: -30 } },
+                    { x: 400, y: 0, nodeKind: 'sharp' },
+                ],
+            };
+
+            // Slide first horizontal segment (segIdx = 0) downwards to y = 40 with Ctrl
+            const slid = slideLinearSegment(curvedPathGeom, 0, { x: 50, y: 40 });
+
+            // 1. Initial terminal anchor remains stationary at (0, 0)
+            assert.equal(slid.pathNodes![0].x, 0);
+            assert.equal(slid.pathNodes![0].y, 0);
+
+            // 2. Slid segment creates clean orthogonal 90-degree step down to y = 40 and connects back to node 1 at (100, 0)
+            assert.equal(slid.pathNodes![1].x, 0);
+            assert.equal(slid.pathNodes![1].y, 40);
+            assert.equal(slid.pathNodes![2].x, 100);
+            assert.equal(slid.pathNodes![2].y, 40);
+
+            // 3. Node 1 is preserved and retains its handleOut tangent
+            const node1 = slid.pathNodes![3];
+            assert.equal(node1.x, 100);
+            assert.equal(node1.y, 0);
+            assert.ok(node1.handleOut !== undefined, 'Node 1 keeps handleOut');
+            assert.deepEqual(node1.handleOut, { x: 120, y: -20 }, 'handleOut tangent is untouched');
+
+            // 4. Arc 1 endpoint retains handleIn tangent
+            const arc1End = slid.pathNodes![4];
+            assert.equal(arc1End.x, 150);
+            assert.equal(arc1End.y, -50);
+            assert.deepEqual(arc1End.handleIn, { x: 130, y: -50 }, 'Curve 1 handleIn is untouched');
+
+            // 5. Arc 2 start and end retain their tangents
+            const arc2Start = slid.pathNodes![5];
+            assert.deepEqual(arc2Start.handleOut, { x: 170, y: -100 }, 'Curve 2 handleOut is untouched');
+            const arc2End = slid.pathNodes![6];
+            assert.deepEqual(arc2End.handleIn, { x: 200, y: -30 }, 'Curve 2 handleIn is untouched');
+
+            // 6. Terminal end anchor remains stationary at (400, 0)
+            const lastNode = slid.pathNodes![slid.pathNodes!.length - 1];
+            assert.equal(lastNode.x, 400);
+            assert.equal(lastNode.y, 0);
         });
 
         test('autoAlignConnectorTangents sets perpendicular tangents matching cardinal port normals (Miro style)', () => {

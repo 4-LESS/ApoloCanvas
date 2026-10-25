@@ -467,15 +467,18 @@ export function linearControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
         });
     }
 
-    // 2. Segment midpoint handles (suggestion at center)
+    // 2. Segment midpoint handles: emit for segments with length >= 18px (prevents clutter on short steps)
     for (let i = 0; i < nodes.length - 1; i++) {
-        const mid = getSegmentMidpoint(nodes[i], nodes[i + 1]);
-        handles.push({
-            id: `seg-mid-${i}`,
-            kind: 'segment-mid',
-            x: mid.x,
-            y: mid.y,
-        });
+        const segLen = Math.hypot(nodes[i + 1].x - nodes[i].x, nodes[i + 1].y - nodes[i].y);
+        if (segLen >= 18) {
+            const mid = getSegmentMidpoint(nodes[i], nodes[i + 1]);
+            handles.push({
+                id: `seg-mid-${i}`,
+                kind: 'segment-mid',
+                x: mid.x,
+                y: mid.y,
+            });
+        }
     }
 
     // Legacy 'curve' handle for 2-node shapes for backward compatibility
@@ -486,12 +489,12 @@ export function linearControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
         handles.push({ id: 'curve', kind: 'curve', x: mid.x, y: mid.y });
     }
 
-    // 3. Tangent control handles for each segment (start, end, and intermediate)
-    // The start and end points must also be control handles (tangents appear to modify)
+    // 3. Tangent control handles: ONLY emit for nodes that actually have tangents,
+    // or are explicitly marked smooth/symmetric!
     for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
-        if (i > 0) {
-            // Incoming control handle (into node i from segment i-1)
+        const isSmooth = n.nodeKind === 'smooth' || n.nodeKind === 'symmetric';
+        if (n.handleIn || (isSmooth && i > 0)) {
             const prev = nodes[i - 1];
             const inPt = n.handleIn ?? {
                 x: prev.x + (2 * (n.x - prev.x)) / 3,
@@ -504,8 +507,7 @@ export function linearControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
                 y: inPt.y,
             });
         }
-        if (i < nodes.length - 1) {
-            // Outgoing control handle (out from node i into segment i)
+        if (n.handleOut || (isSmooth && i < nodes.length - 1)) {
             const next = nodes[i + 1];
             const outPt = n.handleOut ?? {
                 x: n.x + (next.x - n.x) / 3,
@@ -1046,18 +1048,37 @@ export function toggleLinearNodeKind(geom: ShapeRenderGeometry, nodeIndex: numbe
     const node = nodes[nodeIndex];
     node.nodeKind = node.nodeKind === 'sharp' ? 'smooth' : 'sharp';
 
-    if (node.nodeKind === 'smooth' && node.handleIn && node.handleOut) {
-        // Collinearly align handleOut opposite to handleIn
-        const inVx = node.handleIn.x - node.x;
-        const inVy = node.handleIn.y - node.y;
-        const inLen = Math.hypot(inVx, inVy);
-        const outLen = Math.hypot(node.handleOut.x - node.x, node.handleOut.y - node.y);
-        if (inLen > 1e-6 && outLen > 1e-6) {
-            node.handleOut = {
-                x: node.x - (inVx / inLen) * outLen,
-                y: node.y - (inVy / inLen) * outLen,
+    if (node.nodeKind === 'smooth') {
+        if (nodeIndex > 0 && !node.handleIn) {
+            const prev = nodes[nodeIndex - 1];
+            node.handleIn = {
+                x: node.x - (node.x - prev.x) / 3,
+                y: node.y - (node.y - prev.y) / 3,
             };
         }
+        if (nodeIndex < nodes.length - 1 && !node.handleOut) {
+            const next = nodes[nodeIndex + 1];
+            node.handleOut = {
+                x: node.x + (next.x - node.x) / 3,
+                y: node.y + (next.y - node.y) / 3,
+            };
+        }
+        if (node.handleIn && node.handleOut) {
+            // Collinearly align handleOut opposite to handleIn
+            const inVx = node.handleIn.x - node.x;
+            const inVy = node.handleIn.y - node.y;
+            const inLen = Math.hypot(inVx, inVy);
+            const outLen = Math.hypot(node.handleOut.x - node.x, node.handleOut.y - node.y);
+            if (inLen > 1e-6 && outLen > 1e-6) {
+                node.handleOut = {
+                    x: node.x - (inVx / inLen) * outLen,
+                    y: node.y - (inVy / inLen) * outLen,
+                };
+            }
+        }
+    } else {
+        delete node.handleIn;
+        delete node.handleOut;
     }
 
     const next: ShapeRenderGeometry = { ...geom, pathNodes: nodes };
@@ -1104,6 +1125,12 @@ export function findClosestLinearSegment(geom: ShapeRenderGeometry, point: Shape
  * If the path already has orthogonal segments, slides the segment parallel to itself,
  * preserving 90-degree corners.
  */
+/**
+ * Tinkercad-style orthogonal segment sliding:
+ * Holding Ctrl and dragging ANY linear segment between two nodes slides that segment
+ * orthogonally without destroying curves or moving terminal anchors.
+ * Existing curved segments and their Bézier tangents are 100% preserved.
+ */
 export function slideLinearSegment(
     geom: ShapeRenderGeometry,
     segIdx: number,
@@ -1111,106 +1138,77 @@ export function slideLinearSegment(
 ): ShapeRenderGeometry {
     const rawNodes = getLinearPathNodes(geom);
     if (rawNodes.length < 2) return geom;
-    const nodes = rawNodes.map(n => ({ ...n, nodeKind: 'sharp' as const }));
 
-    const p0 = nodes[0];
-    const p1 = nodes[nodes.length - 1];
+    // Preserve existing nodes and their tangents
+    const nodes = rawNodes.map(n => ({
+        ...n,
+        handleIn: n.handleIn ? { ...n.handleIn } : undefined,
+        handleOut: n.handleOut ? { ...n.handleOut } : undefined,
+    }));
 
-    // Case 1: Simple 2-node line -> converts into a clean 3-segment orthogonal U-step (4 nodes)
-    // Never generates slanted / half-inclination arms; all angles are strictly 90 degrees.
-    if (nodes.length === 2) {
-        const dx = p1.x - p0.x;
-        const dy = p1.y - p0.y;
-        const isHorizontal = Math.abs(dx) >= Math.abs(dy);
-
-        if (isHorizontal) {
-            const newNodes: ShapePathNode[] = [
-                { x: p0.x, y: p0.y, nodeKind: 'sharp' },
-                { x: p0.x, y: point.y, nodeKind: 'sharp' },
-                { x: p1.x, y: point.y, nodeKind: 'sharp' },
-                { x: p1.x, y: p1.y, nodeKind: 'sharp' },
-            ];
-            return {
-                ...geom,
-                x0: p0.x,
-                y0: p0.y,
-                x1: p1.x,
-                y1: p1.y,
-                pathNodes: newNodes,
-            };
-        } else {
-            const newNodes: ShapePathNode[] = [
-                { x: p0.x, y: p0.y, nodeKind: 'sharp' },
-                { x: point.x, y: p0.y, nodeKind: 'sharp' },
-                { x: point.x, y: p1.y, nodeKind: 'sharp' },
-                { x: p1.x, y: p1.y, nodeKind: 'sharp' },
-            ];
-            return {
-                ...geom,
-                x0: p0.x,
-                y0: p0.y,
-                x1: p1.x,
-                y1: p1.y,
-                pathNodes: newNodes,
-            };
-        }
-    }
-
-    // Case 2: Multi-segment path between ANY two points
-    // Terminal anchors (nodes[0] and nodes[last]) are strictly invariant and never moved.
     const safeIdx = Math.max(0, Math.min(segIdx, nodes.length - 2));
-    const A = nodes[safeIdx];
-    const B = nodes[safeIdx + 1];
+    const A = { ...nodes[safeIdx] };
+    const B = { ...nodes[safeIdx + 1] };
     const isHorizontal = Math.abs(A.y - B.y) <= Math.abs(A.x - B.x);
 
-    const isFirstSeg = safeIdx === 0;
-    const isLastSeg = safeIdx === nodes.length - 2;
+    // Check if segment before A is straight and perpendicular (can absorb delta without creating a new corner)
+    let aCanMove = false;
+    if (safeIdx > 0) {
+        const prev = nodes[safeIdx - 1];
+        const prevPerp = isHorizontal
+            ? Math.abs(prev.x - A.x) <= Math.abs(prev.y - A.y) // prev is vertical
+            : Math.abs(prev.y - A.y) <= Math.abs(prev.x - A.x); // prev is horizontal
+        const prevClean = !A.handleIn && !A.handleOut && !prev.handleOut;
+        aCanMove = prevPerp && prevClean;
+    }
+
+    // Check if segment after B is straight and perpendicular (can absorb delta without creating a new corner)
+    let bCanMove = false;
+    if (safeIdx + 1 < nodes.length - 1) {
+        const next = nodes[safeIdx + 2];
+        const nextPerp = isHorizontal
+            ? Math.abs(B.x - next.x) <= Math.abs(B.y - next.y) // next is vertical
+            : Math.abs(B.y - next.y) <= Math.abs(B.x - next.x); // next is horizontal
+        const nextClean = !B.handleIn && !B.handleOut && !next.handleIn;
+        bCanMove = nextPerp && nextClean;
+    }
 
     const result: ShapePathNode[] = [];
+
+    // 1. All nodes before safeIdx (completely untouched)
     for (let i = 0; i < safeIdx; i++) {
         result.push(nodes[i]);
     }
 
-    if (isHorizontal) {
-        // Dragging horizontal segment vertically to point.y
-        if (isFirstSeg) {
-            result.push(A);
-            result.push({ x: A.x, y: point.y, nodeKind: 'sharp' });
-            if (isLastSeg) {
-                result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
-                result.push(B);
-            } else {
-                result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
-            }
-        } else if (isLastSeg) {
-            result.push({ x: A.x, y: point.y, nodeKind: 'sharp' });
-            result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
-            result.push(B);
-        } else {
-            result.push({ x: A.x, y: point.y, nodeKind: 'sharp' });
-            result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
-        }
+    // 2. Connection at A
+    if (aCanMove) {
+        if (isHorizontal) A.y = point.y;
+        else A.x = point.x;
+        result.push(A);
     } else {
-        // Dragging vertical segment horizontally to point.x
-        if (isFirstSeg) {
-            result.push(A);
-            result.push({ x: point.x, y: A.y, nodeKind: 'sharp' });
-            if (isLastSeg) {
-                result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
-                result.push(B);
-            } else {
-                result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
-            }
-        } else if (isLastSeg) {
-            result.push({ x: point.x, y: A.y, nodeKind: 'sharp' });
-            result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
-            result.push(B);
+        result.push(nodes[safeIdx]);
+        if (isHorizontal) {
+            result.push({ x: A.x, y: point.y, nodeKind: 'sharp' });
         } else {
             result.push({ x: point.x, y: A.y, nodeKind: 'sharp' });
-            result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
         }
     }
 
+    // 3. Connection at B
+    if (bCanMove) {
+        if (isHorizontal) B.y = point.y;
+        else B.x = point.x;
+        result.push(B);
+    } else {
+        if (isHorizontal) {
+            result.push({ x: B.x, y: point.y, nodeKind: 'sharp' });
+        } else {
+            result.push({ x: point.x, y: B.y, nodeKind: 'sharp' });
+        }
+        result.push(nodes[safeIdx + 1]);
+    }
+
+    // 4. All nodes after safeIdx + 1 (completely untouched)
     for (let i = safeIdx + 2; i < nodes.length; i++) {
         result.push(nodes[i]);
     }
@@ -1220,12 +1218,6 @@ export function slideLinearSegment(
     result[0].y = rawNodes[0].y;
     result[result.length - 1].x = rawNodes[rawNodes.length - 1].x;
     result[result.length - 1].y = rawNodes[rawNodes.length - 1].y;
-
-    // Clear any bezier handles so all segments stay strictly crisp and 90 degrees
-    for (const n of result) {
-        delete n.handleIn;
-        delete n.handleOut;
-    }
 
     return {
         ...geom,
