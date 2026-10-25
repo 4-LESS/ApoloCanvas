@@ -221,6 +221,7 @@ interface ShapeHandleDragState {
 interface ShapeStylePatch {
     color?: string;
     width?: number;
+    opacity?: number;
     pattern?: StrokePattern;
     fillEnabled?: boolean;
     fillColor?: string;
@@ -778,7 +779,7 @@ export class CanvasController {
             profileId: this.penProfileId,
             smoothing: this.smoothing,
             pressureSensitivity: this.pressureSensitivity,
-            opacity: this.style.opacity,
+            opacity: isFavTool && (this.toolState as any)[tool]?.opacity !== undefined ? (this.toolState as any)[tool].opacity : this.style.opacity,
             lineStyle: this.style.pattern,
             pattern: this.style.pattern,
             favorites: isFavTool ? this.getToolFavorites(tool) : this.favorites,
@@ -803,6 +804,7 @@ export class CanvasController {
             fillPattern: this.toolState.shape.fillPattern,
             fillDensity: this.toolState.shape.fillDensity,
             fillOpacity: this.toolState.shape.fillOpacity,
+            colorCarousels: this.toolState.colorCarousels,
         };
     }
 
@@ -812,7 +814,27 @@ export class CanvasController {
             {
                 onSelectProfile: (profileId) => this.applyPenProfile(profileId),
                 onChangeColor: (color) => this.setInkColor(color),
+                onUpdateColorCarousels: (carousels) => {
+                    this.toolState.colorCarousels = carousels;
+                    this.notifyToolStateChange();
+                },
                 onChangeWidth: (width) => this.setWidth(width),
+                onChangeOpacity: (opacity) => {
+                    const norm = opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity));
+                    this.style.opacity = norm;
+                    if (this.tool === 'pen') {
+                        this.toolState.pen.opacity = norm;
+                    } else if (this.tool === 'highlighter') {
+                        this.toolState.highlighter.opacity = norm;
+                    } else if (this.tool === 'shape') {
+                        this.toolState.shape.opacity = norm;
+                    }
+                    this.applyStyleToSelectedShapes({ opacity: norm });
+                    this.estuche?.updateState({ opacity: norm });
+                    this.renderDirty = true;
+                    this.schedulePaint();
+                    this.notifyToolStateChange();
+                },
                 onChangeSmoothing: (smoothing) => {
                     this.smoothing = smoothing;
                     this.toolState.pen.smoothing = smoothing;
@@ -1992,6 +2014,7 @@ export class CanvasController {
             const op = (this.toolPalettes.shape.opacities[index] ?? 100) / 100;
             this.style.opacity = op;
             this.toolState.shape.opacity = op;
+            this.applyStyleToSelectedShapes({ opacity: op, color });
         }
         this.setInkColor(color);
         // Note: strictly only changes ink color; does NOT alter current tool, profile, or width
@@ -2013,7 +2036,12 @@ export class CanvasController {
         this.toolState[toolKey].palette.opacities[slotIdx] = opacity;
         this.toolState[toolKey].activeSlotIndex = slotIdx;
         this.toolState[toolKey].color = newColor;
-        this.toolState[toolKey].opacity = opacity / 100;
+        const normOp = opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity));
+        this.toolState[toolKey].opacity = normOp;
+        this.style.opacity = normOp;
+        if (toolKey === 'shape') {
+            this.applyStyleToSelectedShapes({ opacity: normOp, color: newColor });
+        }
 
         // Keep favorites in sync if pen palette changed
         if (toolKey === 'pen' && this.favorites[slotIdx]) {
@@ -4399,6 +4427,7 @@ export class CanvasController {
         for (const shape of shapes) {
             if (patch.color !== undefined) shape.style.color = patch.color;
             if (patch.width !== undefined) shape.style.width = patch.width;
+            if (patch.opacity !== undefined) shape.style.opacity = patch.opacity;
             if (patch.pattern !== undefined) shape.style.pattern = patch.pattern;
             if (getShapePlugin(shape.shapeType).isClosed) {
                 if (patch.fillEnabled !== undefined) shape.fillEnabled = patch.fillEnabled;

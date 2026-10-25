@@ -3920,6 +3920,14 @@ button.apolo-box-menu-swatch,
   box-sizing: border-box;
 }
 
+.apolo-estuche-popover .swatch-row.is-centered,
+.apolo-estuche-popover .popover-swatches-row.is-centered,
+.swatch-row.is-centered,
+.popover-swatches-row.is-centered {
+  justify-content: center !important;
+  gap: 12px !important;
+}
+
 .apolo-estuche-popover button.swatch,
 .apolo-estuche-popover button.popover-swatch-circle,
 .apolo-color-picker-popover button.swatch,
@@ -3984,6 +3992,35 @@ button.apolo-box-menu-swatch,
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--muted);
   transform: none;
 }
+.apolo-estuche-popover button.popover-swatch-circle.is-dashed-empty,
+.popover-swatch-circle.is-dashed-empty {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 1.5px dashed var(--muted) !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  transition: border-color .12s, transform .12s;
+}
+
+.apolo-estuche-popover button.popover-swatch-circle.is-dashed-empty:hover,
+.popover-swatch-circle.is-dashed-empty:hover {
+  border-color: var(--text) !important;
+  transform: scale(1.08);
+}
+
+.apolo-estuche-popover button.popover-swatch-circle.has-transparency,
+.popover-swatch-circle.has-transparency,
+.apolo-estuche-popover .fill-swatch-row button.fill-swatch.has-transparency,
+.fill-swatch.has-transparency {
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.3) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.3) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.3) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.3) 75%) !important;
+  background-size: 8px 8px !important;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0 !important;
+}
+
 
 .popover-swatch-inner {
   display: block;
@@ -4137,6 +4174,35 @@ button.apolo-box-menu-swatch,
 .popover-dot-inner {
   display: none !important;
 }
+.popover-pag-dot.is-new-page-dot {
+  all: unset !important;
+  box-sizing: border-box !important;
+  width: 7px !important;
+  height: 7px !important;
+  min-width: 7px !important;
+  min-height: 7px !important;
+  border-radius: 50% !important;
+  border: 1px dashed var(--muted) !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+  transition: border-color .15s ease, background .15s ease, width .15s ease !important;
+}
+.popover-pag-dot.is-new-page-dot:hover {
+  border-color: var(--text) !important;
+}
+.popover-pag-dot.is-new-page-dot.is-active {
+  width: 16px !important;
+  min-width: 16px !important;
+  height: 7px !important;
+  min-height: 7px !important;
+  border-radius: 4px !important;
+  border: 1.5px dashed var(--text) !important;
+  background: transparent !important;
+}
+
 
 /* 6. Borrador */
 .eraser-modes-list {
@@ -4247,7 +4313,7 @@ button.apolo-box-menu-swatch,
 .apolo-ui .color-picker-popover,
 .color-picker-popover {
   position: fixed;
-  z-index: calc(var(--apolo-layer-popover, 30) + 5);
+  z-index: 9999;
   width: 320px;
   background: var(--apolo-bg);
   color: var(--apolo-text);
@@ -5404,6 +5470,8 @@ button.apolo-profile-cancel-btn,
   flex-direction: column;
   gap: 6px;
   width: 100%;
+  position: relative;
+  z-index: 2;
 }
 
 .apolo-estuche-popover .shape-carousel {
@@ -5454,6 +5522,7 @@ button.apolo-profile-cancel-btn,
   justify-content: center;
   cursor: pointer;
   position: relative;
+  z-index: 2;
   transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .apolo-estuche-popover .shape-page button.shape-btn:hover {
@@ -5585,45 +5654,49 @@ button.apolo-profile-cancel-btn,
 }
 
 /* 2. Sliders (reutilizable: grosor y densidad) */
-.apolo-estuche-popover .sl,
-.sl {
+.apolo-estuche-popover .sl {
   display: grid;
   grid-template-columns: 24px 1fr 24px;
   align-items: center;
   gap: 8px;
   height: 26px;
   width: 100%;
+  position: relative;
+  box-sizing: border-box;
 }
 
-.apolo-estuche-popover .st,
-.st {
+.apolo-estuche-popover .shape-width-row {
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 1;
+}
+
+.apolo-estuche-popover .st {
   all: unset;
   box-sizing: border-box;
   touch-action: manipulation;
   width: 24px;
   height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
   border-radius: 6px;
   display: grid;
   place-items: center;
   color: var(--mu);
   cursor: pointer;
-  position: relative;
+  position: relative !important;
+  overflow: hidden;
   transition: background-color 0.12s ease, color 0.12s ease;
 }
-.apolo-estuche-popover .st::before,
-.st::before {
-  content: '';
-  position: absolute;
-  inset: -2px;
-}
-.apolo-estuche-popover .st:hover,
-.st:hover {
+.apolo-estuche-popover .st:hover {
   background: var(--ch);
   color: var(--tx);
 }
 
-.apolo-estuche-popover .trk,
-.trk {
+.apolo-estuche-popover .trk {
   position: relative;
   height: 8px;
   border-radius: 999px;
@@ -5631,18 +5704,17 @@ button.apolo-profile-cancel-btn,
   cursor: pointer;
   touch-action: none;
 }
-.apolo-estuche-popover .trk::before,
-.trk::before {
+.apolo-estuche-popover .trk::before {
   content: '';
   position: absolute;
   top: -4px;
   bottom: -4px;
   left: 0;
   right: 0;
+  pointer-events: none;
 }
 
-.apolo-estuche-popover .th,
-.th {
+.apolo-estuche-popover .th {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
@@ -5660,16 +5732,13 @@ button.apolo-profile-cancel-btn,
   pointer-events: none;
 }
 
-.apolo-estuche-popover .sl.sm,
-.sl.sm {
+.apolo-estuche-popover .sl.sm {
   height: 22px;
 }
-.apolo-estuche-popover .sl.sm .trk,
-.sl.sm .trk {
+.apolo-estuche-popover .sl.sm .trk {
   height: 6px;
 }
-.apolo-estuche-popover .sl.sm .th,
-.sl.sm .th {
+.apolo-estuche-popover .sl.sm .th {
   width: 16px;
   height: 16px;
 }
@@ -5684,7 +5753,7 @@ button.apolo-profile-cancel-btn,
 
 .apolo-estuche-popover .prop-bar {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   align-items: center;
   width: 100%;
@@ -5695,20 +5764,16 @@ button.apolo-profile-cancel-btn,
   all: unset;
   box-sizing: border-box;
   touch-action: manipulation;
-  height: 36px;
+  height: 40px;
   min-width: 0;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 10px;
   background: var(--apolo-card);
   border: 1px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   color: var(--apolo-text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
   cursor: pointer;
   position: relative;
   transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
@@ -5747,6 +5812,22 @@ button.apolo-profile-cancel-btn,
   align-items: center;
   justify-content: center;
 }
+.apolo-estuche-popover .prop-line-preview {
+  width: 44px;
+  height: 3px;
+  border-radius: 999px;
+  background-color: currentColor;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  display: block;
+}
+.apolo-estuche-popover .prop-line-preview.is-dashed {
+  background: none;
+  border-top: 3px dashed currentColor;
+}
+.apolo-estuche-popover .prop-line-preview.is-dotted {
+  background: radial-gradient(circle, currentColor 1.5px, transparent 1.8px) left center / 7px 3px repeat-x;
+  height: 3px;
+}
 .apolo-estuche-popover .prop-label {
   white-space: nowrap;
 }
@@ -5760,43 +5841,93 @@ button.apolo-profile-cancel-btn,
 .apolo-estuche-popover .fill-color-pip[hidden] {
   display: none;
 }
-.apolo-estuche-popover .prop-caret {
-  width: 9px;
-  height: 9px;
-  opacity: 0.5;
-  transition: transform 0.15s ease, opacity 0.15s ease;
-}
-.apolo-estuche-popover .prop-btn.is-open .prop-caret {
-  transform: rotate(180deg);
-  opacity: 1;
-}
 .apolo-estuche-popover .prop-btn.has-fill .fg {
   color: var(--fc, var(--apolo-text));
 }
 
 .apolo-estuche-popover .fg {
-  width: 22px;
-  height: 17px;
+  width: 24px;
+  height: 18px;
   color: var(--apolo-text-muted);
   display: block;
 }
 
-/* 4. Bandeja contextual plegable (solo visible con una bandeja abierta) */
-.apolo-estuche-popover .context-tray {
+/* 4. Separadores y bandeja contextual plegable (animación de acordeón CSS Grid) */
+.apolo-estuche-popover .shape-controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 12px;
-  background: var(--apolo-card);
+  width: 100%;
+}
+
+.apolo-estuche-popover .shape-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--apolo-border, rgba(255, 255, 255, 0.1));
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+.apolo-estuche-popover .shape-divider-top {
+  margin: 10px 0;
+}
+.apolo-estuche-popover .shape-divider-bottom {
+  margin: 10px 0 2px 0;
+}
+
+.apolo-estuche-popover .context-tray {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+  transition: grid-template-rows 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.18s ease;
+  overflow: hidden;
+  background: transparent;
   box-sizing: border-box;
   width: 100%;
 }
-.apolo-estuche-popover .context-tray[hidden],
+.apolo-estuche-popover .context-tray.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  pointer-events: auto;
+}
+.apolo-estuche-popover .context-tray[hidden] {
+  display: grid;
+}
+.apolo-estuche-popover .context-tray-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  box-sizing: border-box;
+  width: 100%;
+}
 .apolo-estuche-popover .tray-section[hidden],
-.apolo-estuche-popover .fill-detail[hidden],
+.apolo-estuche-popover .fill-detail[hidden] {
+  display: none !important;
+}
+
+.apolo-estuche-popover .fill-density {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+  transition: grid-template-rows 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease;
+  overflow: hidden;
+}
+.apolo-estuche-popover .fill-density.is-shown {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  pointer-events: auto;
+}
 .apolo-estuche-popover .fill-density[hidden] {
-  display: none;
+  display: grid;
+}
+.apolo-estuche-popover .density-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .apolo-estuche-popover .tray-section,
@@ -5819,14 +5950,14 @@ button.apolo-profile-cancel-btn,
   width: 100%;
 }
 
-.apolo-estuche-popover .context-tray button.line-chip,
 .apolo-estuche-popover .context-tray button.fill-chip {
   all: unset;
   box-sizing: border-box;
   touch-action: manipulation;
-  height: 34px;
+  height: 38px;
   min-width: 0;
-  border-radius: 9px;
+  border-radius: 10px;
+  background: var(--apolo-card);
   border: 1px solid transparent;
   display: flex;
   align-items: center;
@@ -5834,87 +5965,155 @@ button.apolo-profile-cancel-btn,
   color: var(--apolo-text-muted);
   cursor: pointer;
   position: relative;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
-.apolo-estuche-popover .context-tray button.line-chip:hover,
 .apolo-estuche-popover .context-tray button.fill-chip:hover {
   background: var(--apolo-card-hover);
   color: var(--apolo-text);
 }
-.apolo-estuche-popover .context-tray button.line-chip.is-active,
 .apolo-estuche-popover .context-tray button.fill-chip.is-active {
   background: var(--apolo-bg-elevated);
   border-color: var(--apolo-border);
   color: var(--apolo-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .apolo-estuche-popover .context-tray button.fill-chip.is-active:not(.is-off) {
   color: var(--fc, var(--apolo-text));
-}
-.apolo-estuche-popover .context-tray button.line-chip svg.ln {
-  width: 100%;
-  height: 10px;
-  padding: 0 8px;
-  box-sizing: border-box;
-  overflow: visible;
-}
-.apolo-estuche-popover .context-tray button.line-chip svg.ln line {
-  stroke: currentColor;
-  stroke-width: 2.3;
-  stroke-linecap: round;
 }
 .apolo-estuche-popover .context-tray button.fill-chip .fg {
   color: inherit;
 }
 
-.apolo-estuche-popover .fill-opacity-row {
+.apolo-estuche-popover .context-tray button.line-chip {
+  all: unset;
+  box-sizing: border-box;
+  touch-action: manipulation;
+  height: 38px;
+  min-width: 0;
+  border-radius: 10px;
+  background: var(--apolo-card);
+  border: 1px solid transparent;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  color: var(--apolo-text-muted);
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
+.apolo-estuche-popover .context-tray button.line-chip:hover {
+  background: var(--apolo-card-hover);
+  color: var(--apolo-text);
+}
+.apolo-estuche-popover .context-tray button.line-chip.is-active {
+  background: var(--apolo-bg-elevated) !important;
+  border-color: var(--apolo-border) !important;
+  color: var(--apolo-text, #ffffff) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+}
+.apolo-estuche-popover .context-tray button.line-chip .popover-line-chip-pill {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.apolo-estuche-popover .context-tray button.line-chip .popover-line-bar {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  background-color: currentColor;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.apolo-estuche-popover .context-tray button.line-chip .popover-line-bar.is-dashed {
+  background: none;
+  border-top: 3px dashed currentColor;
+}
+.apolo-estuche-popover .context-tray button.line-chip .popover-line-bar.is-dotted {
+  background: radial-gradient(circle, currentColor 1.5px, transparent 1.8px) left center / 7px 3px repeat-x;
+  height: 3px;
+}
+.apolo-estuche-popover .context-tray button.line-chip.is-active .popover-line-bar {
+  background-color: var(--apolo-text, #ffffff) !important;
+  color: var(--apolo-text, #ffffff) !important;
+}
+.apolo-estuche-popover .context-tray button.line-chip.is-active .popover-line-bar.is-dashed {
+  background: none !important;
+  border-top: 3px dashed var(--apolo-text, #ffffff) !important;
+}
+.apolo-estuche-popover .context-tray button.line-chip.is-active .popover-line-bar.is-dotted {
+  background: radial-gradient(circle, var(--apolo-text, #ffffff) 1.5px, transparent 1.8px) left center / 7px 3px repeat-x !important;
+}
+
 .apolo-estuche-popover .tray-label {
   font-size: 11px;
   font-weight: 600;
   color: var(--apolo-text-muted);
 }
 
-/* Muestras de color del relleno (secundarias, acotadas a la bandeja) */
+/* Muestras de color del relleno (mismo tamaño y distribución que la fila de color principal) */
 .apolo-estuche-popover .fill-swatch-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .apolo-estuche-popover .fill-swatch-row button.fill-swatch {
   all: unset;
-  box-sizing: border-box;
-  touch-action: manipulation;
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
-  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
   position: relative;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  flex: 0 0 26px;
+  flex-shrink: 0;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
-.apolo-estuche-popover .fill-swatch-row button.fill-swatch::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 28px;
-  height: 28px;
+.apolo-estuche-popover .fill-swatch-row button.fill-swatch:hover {
+  transform: scale(1.08);
 }
 .apolo-estuche-popover .fill-swatch-row button.fill-swatch.is-active {
-  outline: 2px solid var(--apolo-text-muted);
-  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--bg, #111), 0 0 0 4px var(--muted, rgba(255, 255, 255, 0.4));
+  transform: none;
 }
 .apolo-estuche-popover .fill-swatch-row button.fill-swatch-add {
+  all: unset;
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--apolo-text-faint);
-  box-shadow: inset 0 0 0 1px var(--apolo-border);
+  cursor: pointer;
+  color: var(--apolo-text-faint, #6e7681);
+  box-shadow: inset 0 0 0 1px var(--apolo-border, rgba(255, 255, 255, 0.15));
+  transition: color 0.12s ease, background-color 0.12s ease;
 }
 .apolo-estuche-popover .fill-swatch-row button.fill-swatch-add:hover {
   color: var(--apolo-text);
@@ -6058,13 +6257,214 @@ button.apolo-profile-cancel-btn,
 
 /* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
+  .apolo-estuche-popover,
+  .apolo-estuche-popover .context-tray,
+  .apolo-estuche-popover .fill-density,
   .apolo-estuche-popover .shape-page button.shape-btn,
   .apolo-estuche-popover .shape-pager button.dot.shape-pager-btn,
   .apolo-estuche-popover .prop-bar button.prop-btn,
-  .apolo-estuche-popover .prop-caret,
   .apolo-estuche-popover .context-tray button.line-chip,
   .apolo-estuche-popover .context-tray button.fill-chip,
   .apolo-estuche-popover .dot {
-    transition: none;
+    transition: none !important;
   }
+}
+
+/* Color Palette & History Manager in Settings */
+.apolo-color-palette-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  margin-bottom: 24px;
+  width: 100%;
+}
+
+.apolo-manager-section-desc {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* Collapsible Section Details & Summary */
+.apolo-settings-collapse {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--background-secondary-alt);
+  overflow: hidden;
+}
+
+.apolo-settings-collapse summary.apolo-settings-summary {
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.95em;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--background-secondary);
+  transition: background-color 0.15s ease;
+  list-style: none;
+}
+
+.apolo-settings-collapse summary.apolo-settings-summary::-webkit-details-marker {
+  display: none;
+}
+
+.apolo-settings-collapse summary.apolo-settings-summary:hover {
+  background: var(--background-modifier-hover);
+}
+
+.apolo-settings-collapse[open] summary.apolo-settings-summary {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.apolo-collapse-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apolo-collapse-arrow {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  display: inline-block;
+  color: var(--text-muted);
+}
+
+.apolo-settings-collapse[open] .apolo-collapse-arrow {
+  transform: rotate(90deg);
+}
+
+.apolo-collapse-badge {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.apolo-settings-collapse-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* History List & Row */
+.apolo-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apolo-history-row-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.apolo-history-tool-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 130px;
+  font-weight: 500;
+  font-size: 0.9em;
+}
+
+/* Palette Card */
+.apolo-settings-palette-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.apolo-settings-palette-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.apolo-palette-name-input {
+  flex: 1 1 140px;
+  font-size: 0.9em;
+  font-weight: 600;
+  padding: 4px 8px;
+}
+
+.apolo-settings-palette-card-header .dropdown {
+  font-size: 0.85em;
+  padding: 4px 8px;
+}
+
+/* Reused Swatches Row in Settings */
+.apolo-settings-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+  padding: 2px 0;
+}
+
+.apolo-settings-palette-row.is-centered {
+  justify-content: center !important;
+}
+
+/* Swatch Circle Wrapper with subtle delete badge */
+.apolo-slot-circle-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.apolo-slot-del-badge {
+  all: unset;
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-error, #f44336);
+  color: #ffffff;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.12s ease;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.apolo-slot-circle-wrapper:hover .apolo-slot-del-badge,
+.apolo-slot-circle-wrapper:focus-within .apolo-slot-del-badge {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.is-mobile .apolo-slot-circle-wrapper .apolo-slot-del-badge,
+.is-tablet .apolo-slot-circle-wrapper .apolo-slot-del-badge {
+  opacity: 0.7;
+  pointer-events: auto;
 }

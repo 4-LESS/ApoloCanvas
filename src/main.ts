@@ -32,6 +32,7 @@ import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue.ts';
 import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
+import { ColorPaletteManager } from './ui/settings/ColorPaletteManager.ts';
 
 export interface ApoloCanvasSettings {
     defaultPenColor: string;
@@ -1207,10 +1208,17 @@ export default class ApoloCanvasPlugin extends Plugin {
 
 class ApoloCanvasSettingsTab extends PluginSettingTab {
     private readonly plugin: ApoloCanvasPlugin;
+    private colorPaletteManager?: ColorPaletteManager;
 
     constructor(app: App, plugin: ApoloCanvasPlugin) {
         super(app, plugin);
         this.plugin = plugin;
+    }
+
+    override hide(): void {
+        super.hide();
+        this.colorPaletteManager?.destroy();
+        this.colorPaletteManager = undefined;
     }
 
     display(): void {
@@ -1392,6 +1400,11 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
             (id) => this.plugin.deleteShapeProfile(id),
             (name) => this.plugin.createShapeProfile(name),
         );
+
+        this.colorPaletteManager?.destroy();
+        this.colorPaletteManager = new ColorPaletteManager(this.plugin);
+        const paletteContainer = containerEl.createDiv();
+        this.colorPaletteManager.render(paletteContainer);
 
         containerEl.createEl('h3', { text: 'Cajas de Dibujo (Canvas)' });
 

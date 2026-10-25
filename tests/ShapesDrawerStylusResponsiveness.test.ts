@@ -376,6 +376,358 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
 
         assert.strictEqual(fillPatternState, 'hachure', 'Stylus tap should select hachure pattern');
 
+        // 7. Verify width slider is attached directly to body and NOT nested in .slider-row
+        const widthSliderEl = estuche.container.querySelector('.sl.shape-width-row') as HTMLElement;
+        assert.ok(widthSliderEl, 'Width slider with .shape-width-row class should exist');
+        assert.strictEqual(
+            widthSliderEl.parentElement?.classList.contains('apolo-popover-body'),
+            true,
+            'Width slider must be a direct child of bodyEl, not cramped into .slider-row'
+        );
+        assert.strictEqual(
+            estuche.container.querySelector('.slider-row.shape-width-row'),
+            null,
+            '.slider-row wrapper must not exist around width slider'
+        );
+
+        estuche.destroy();
+    });
+
+    test('SliderControl step percentage correctly covers entire track across fractional steps (1–12, step 0.5)', () => {
+        setupMockDom();
+        const slider = new SliderControl({
+            min: 1,
+            max: 12,
+            step: 0.5,
+            value: 1,
+        });
+
+        const thumb = slider.element.querySelector('.th') as HTMLElement;
+        assert.ok(thumb, 'Thumb must exist');
+
+        // At min (1): ~2.17% (first cell center)
+        const leftMin = parseFloat(thumb.style.left);
+        assert.ok(leftMin >= 0 && leftMin < 5, `Min value thumb should be near 2%, got ${leftMin}%`);
+
+        // At midpoint (6.5): 50%
+        slider.setValue(6.5, false);
+        const leftMid = parseFloat(thumb.style.left);
+        assert.strictEqual(Math.round(leftMid), 50, `Mid value thumb should be 50%, got ${leftMid}%`);
+
+        // At max (12): ~97.8% (last cell center, NOT stuck at 50%)
+        slider.setValue(12, false);
+        const leftMax = parseFloat(thumb.style.left);
+        assert.ok(leftMax > 90, `Max value thumb should be near 98%, got ${leftMax}%`);
+    });
+
+    test('Shape carousel distinguishes horizontal swipe from tap on shapes', () => {
+        setupMockDom();
+        const parent = document.createElement('div');
+        let selectedShape = '';
+
+        const estuche = new ToolEstuche(
+            {
+                tool: 'shape',
+                slot: 'top',
+                color: '#2f6bff',
+                width: 2,
+                shapeType: 'rect',
+            },
+            {
+                onSelectProfile: () => {},
+                onChangeColor: () => {},
+                onChangeWidth: () => {},
+                onChangeSmoothing: () => {},
+                onChangePressure: () => {},
+                onSelectEraserMode: () => {},
+                onChangeEraserRadius: () => {},
+                onSelectLassoMode: () => {},
+                onSelectShapeType: (st) => {
+                    selectedShape = st;
+                },
+            },
+            parent
+        );
+        estuche.open();
+
+        const arrowBtn = estuche.container.querySelector('button[data-s="arrow"]') as HTMLElement;
+        assert.ok(arrowBtn, 'Arrow button should exist');
+
+        // 1. Simulate horizontal swipe across the arrow button (>24px)
+        arrowBtn.dispatchEvent({
+            type: 'pointerdown',
+            pointerType: 'pen',
+            button: 0,
+            clientX: 100,
+            clientY: 50,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+        arrowBtn.dispatchEvent({
+            type: 'pointermove',
+            pointerType: 'pen',
+            clientX: 60, // 40px drag
+            clientY: 50,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+        arrowBtn.dispatchEvent({
+            type: 'pointerup',
+            pointerType: 'pen',
+            button: 0,
+            clientX: 60,
+            clientY: 50,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+
+        assert.strictEqual(selectedShape, '', 'Horizontal swipe should NOT trigger shape selection');
+
+        // 2. Simulate clean tap on the arrow button (1px jitter)
+        arrowBtn.dispatchEvent({
+            type: 'pointerdown',
+            pointerType: 'pen',
+            button: 0,
+            clientX: 100,
+            clientY: 50,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+        arrowBtn.dispatchEvent({
+            type: 'pointerup',
+            pointerType: 'pen',
+            button: 0,
+            clientX: 101,
+            clientY: 51,
+            preventDefault: () => {},
+            stopPropagation: () => {},
+        });
+
+        assert.strictEqual(selectedShape, 'arrow', 'Clean stylus tap should select arrow shape');
+
+        estuche.destroy();
+    });
+
+    test('Vertical positioning anchors lower-half elements to bottom, extending upwards towards center without jumping', () => {
+        setupMockDom();
+        (globalThis as any).window = {
+            innerWidth: 1280,
+            innerHeight: 800,
+            visualViewport: {
+                width: 1280,
+                height: 800,
+                offsetLeft: 0,
+                offsetTop: 0,
+            },
+        };
+
+        const anchor = document.createElement('button');
+        anchor.getBoundingClientRect = () => ({
+            top: 540,
+            bottom: 580,
+            left: 20,
+            right: 60,
+            width: 40,
+            height: 40,
+        } as any);
+
+        const estuche = new ToolEstuche(
+            {
+                tool: 'shape',
+                shapeType: 'rectangle',
+                color: '#2f6bff',
+                width: 3,
+                slot: 'ml',
+            },
+            {
+                onSelectShapeType: () => {},
+                onChangeWidth: () => {},
+                onChangeSmoothing: () => {},
+                onChangePressure: () => {},
+                onUseFavorite: () => {},
+                onSaveFavorite: () => {},
+                onSelectEraserMode: () => {},
+                onChangeEraserRadius: () => {},
+                onToggleScribble: () => {},
+                onSelectLassoMode: () => {},
+                onToggleSnapGrid: () => {},
+            }
+        );
+
+        // Mock base closed dimensions for container
+        estuche.container.getBoundingClientRect = () => ({
+            top: 0,
+            bottom: 352,
+            left: 0,
+            right: 330,
+            width: 330,
+            height: 352,
+        } as any);
+
+        estuche.open(undefined, anchor);
+
+        // In lower half of screen (anchorCenterY = 560 >= vpCenterY = 400):
+        // Global rule: anchors to bottom, top is 'auto'
+        assert.strictEqual(estuche.container.style.top, 'auto', 'Top is auto when bottom-anchored');
+        const initialBottom = parseFloat(estuche.container.style.bottom);
+        assert.ok(!isNaN(initialBottom), 'Bottom coordinate must be set');
+        assert.ok(initialBottom >= 16, 'Bottom coordinate respects viewport margin');
+
+        // Tap Relleno button to expand tray
+        const tap = (el: any) => {
+            const ev = (type: string) => ({ type, button: 0, pointerType: 'pen', clientX: 1, clientY: 1, preventDefault: () => {}, stopPropagation: () => {} });
+            el.dispatchEvent(ev('pointerdown'));
+            el.dispatchEvent(ev('pointerup'));
+        };
+
+        const fillBtn = estuche.container.querySelector('button[data-tb="fill"]') as HTMLElement;
+        assert.ok(fillBtn, 'Fill trigger button must exist');
+        tap(fillBtn);
+
+        // The bottom remains 100% stationary! No jumpiness; element extends upwards towards center.
+        const openBottom = parseFloat(estuche.container.style.bottom);
+        assert.strictEqual(openBottom, initialBottom, 'Bottom coordinate remains 100% stationary so elements expand upwards towards center without jumping');
+
+        // Verify context-tray has inner wrapper for smooth CSS grid animation
+        const contextTray = estuche.container.querySelector('.context-tray') as HTMLElement;
+        assert.ok(contextTray, 'Context tray must exist');
+        assert.ok(contextTray.classList.contains('is-open'), 'Context tray has .is-open class');
+        const trayInner = contextTray.querySelector('.context-tray-inner');
+        assert.ok(trayInner, 'Context tray must wrap contents in .context-tray-inner for 0fr->1fr accordion');
+
+        // Close tray: bottom still remains 100% stationary
+        tap(fillBtn);
+        const closedBottom = parseFloat(estuche.container.style.bottom);
+        assert.strictEqual(closedBottom, initialBottom, 'Bottom coordinate remains stationary when collapsing');
+
+        estuche.destroy();
+    });
+
+    test('Vertical positioning anchors upper-half elements to top, extending downwards towards center', () => {
+        setupMockDom();
+        (globalThis as any).window = {
+            innerWidth: 1280,
+            innerHeight: 800,
+            visualViewport: {
+                width: 1280,
+                height: 800,
+                offsetLeft: 0,
+                offsetTop: 0,
+            },
+        };
+
+        // Anchor near top of viewport: Y = 100 (in 800px viewport, 100 < 400)
+        const anchor = document.createElement('button');
+        anchor.getBoundingClientRect = () => ({
+            top: 80,
+            bottom: 120,
+            left: 20,
+            right: 60,
+            width: 40,
+            height: 40,
+        } as any);
+
+        const estuche = new ToolEstuche(
+            {
+                tool: 'shape',
+                shapeType: 'rectangle',
+                color: '#2f6bff',
+                width: 3,
+                slot: 'ml',
+            },
+            {
+                onSelectShapeType: () => {},
+                onChangeWidth: () => {},
+                onChangeSmoothing: () => {},
+                onChangePressure: () => {},
+                onUseFavorite: () => {},
+                onSaveFavorite: () => {},
+                onSelectEraserMode: () => {},
+                onChangeEraserRadius: () => {},
+                onToggleScribble: () => {},
+                onSelectLassoMode: () => {},
+                onToggleSnapGrid: () => {},
+            }
+        );
+
+        estuche.container.getBoundingClientRect = () => ({
+            top: 0,
+            bottom: 352,
+            left: 0,
+            right: 330,
+            width: 330,
+            height: 352,
+        } as any);
+
+        estuche.open(undefined, anchor);
+
+        // In upper half: global rule anchors to top, bottom is 'auto'
+        assert.strictEqual(estuche.container.style.bottom, 'auto', 'Bottom is auto when top-anchored');
+        const initialTop = parseFloat(estuche.container.style.top);
+        assert.ok(!isNaN(initialTop), 'Top coordinate must be set');
+        assert.ok(initialTop >= 16, 'Top coordinate respects viewport margin');
+
+        estuche.destroy();
+    });
+
+    test('Constrained viewport sets maxHeight and overflow-y: auto on vertical drawer', () => {
+        setupMockDom();
+        // Constrained viewport: only 420px height
+        (globalThis as any).window = {
+            innerWidth: 800,
+            innerHeight: 420,
+            visualViewport: {
+                width: 800,
+                height: 420,
+                offsetLeft: 0,
+                offsetTop: 0,
+            },
+            clearTimeout: () => {},
+            setTimeout: (fn: Function) => fn(),
+        };
+
+        const anchor = document.createElement('button');
+        anchor.getBoundingClientRect = () => ({
+            top: 200,
+            bottom: 240,
+            left: 20,
+            right: 60,
+            width: 40,
+            height: 40,
+        } as any);
+
+        const estuche = new ToolEstuche(
+            {
+                tool: 'shape',
+                shapeType: 'rectangle',
+                color: '#2f6bff',
+                width: 3,
+                slot: 'ml',
+            },
+            {
+                onSelectShapeType: () => {},
+                onChangeWidth: () => {},
+                onChangeSmoothing: () => {},
+                onChangePressure: () => {},
+                onUseFavorite: () => {},
+                onSaveFavorite: () => {},
+                onSelectEraserMode: () => {},
+                onChangeEraserRadius: () => {},
+                onToggleScribble: () => {},
+                onSelectLassoMode: () => {},
+                onToggleSnapGrid: () => {},
+            }
+        );
+
+        estuche.open(undefined, anchor);
+
+        const fillBtn = estuche.container.querySelector('button[data-tb="fill"]') as HTMLElement;
+        fillBtn.click();
+
+        // When target height (530px) exceeds available height (420 - 32 = 388px):
+        assert.ok(estuche.container.style.maxHeight !== '', 'maxHeight must be set when viewport height is constrained');
+        assert.strictEqual(estuche.container.style.overflowY, 'auto', 'overflowY must be auto when viewport height is constrained');
+
         estuche.destroy();
     });
 });

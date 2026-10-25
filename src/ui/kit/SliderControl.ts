@@ -49,18 +49,28 @@ export class SliderControl {
         // Minus button: .st
         this.minusBtn = document.createElement('button');
         this.minusBtn.type = 'button';
-        this.minusBtn.className = 'st';
+        this.minusBtn.className = 'st slider-step popover-step-btn';
         this.minusBtn.style.touchAction = 'manipulation';
+        this.minusBtn.style.position = 'relative';
+        this.minusBtn.style.overflow = 'hidden';
+        this.minusBtn.style.width = '24px';
+        this.minusBtn.style.height = '24px';
+        this.minusBtn.style.minWidth = '24px';
+        this.minusBtn.style.maxWidth = '24px';
+        this.minusBtn.style.minHeight = '24px';
+        this.minusBtn.style.maxHeight = '24px';
         setAccessibleTooltip(this.minusBtn, 'Disminuir');
         this.minusBtn.appendChild(createSvg(ICONS.minus, { size: 14, strokeWidth: 2 }));
         bindTapOrClick(this.minusBtn, (e) => {
             e?.stopPropagation();
             this.setValue(this.value - this.step, true);
+            try { this.minusBtn.blur(); } catch {}
         });
 
         // Track: .trk
         this.trackEl = document.createElement('div');
         this.trackEl.className = 'trk';
+        this.trackEl.style.position = 'relative';
         this.trackEl.setAttribute('role', 'slider');
         this.trackEl.setAttribute('aria-valuemin', String(this.min));
         this.trackEl.setAttribute('aria-valuemax', String(this.max));
@@ -78,13 +88,22 @@ export class SliderControl {
         // Plus button: .st
         this.plusBtn = document.createElement('button');
         this.plusBtn.type = 'button';
-        this.plusBtn.className = 'st';
+        this.plusBtn.className = 'st slider-step popover-step-btn';
         this.plusBtn.style.touchAction = 'manipulation';
+        this.plusBtn.style.position = 'relative';
+        this.plusBtn.style.overflow = 'hidden';
+        this.plusBtn.style.width = '24px';
+        this.plusBtn.style.height = '24px';
+        this.plusBtn.style.minWidth = '24px';
+        this.plusBtn.style.maxWidth = '24px';
+        this.plusBtn.style.minHeight = '24px';
+        this.plusBtn.style.maxHeight = '24px';
         setAccessibleTooltip(this.plusBtn, 'Aumentar');
         this.plusBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
         bindTapOrClick(this.plusBtn, (e) => {
             e?.stopPropagation();
             this.setValue(this.value + this.step, true);
+            try { this.plusBtn.blur(); } catch {}
         });
 
         // Setup pointer event handling on track with pointer capture
@@ -135,6 +154,9 @@ export class SliderControl {
                 } catch {
                     // Ignore in mock environments
                 }
+                try {
+                    this.trackEl.blur();
+                } catch {}
             }
         };
 
@@ -164,8 +186,8 @@ export class SliderControl {
         const count = Math.max(1, Math.round((this.max - this.min) / this.step) + 1);
         this.trackEl.style.setProperty('--n', String(count));
 
-        const span = this.max - this.min;
-        const percent = span > 0 ? ((this.value - this.min + 0.5) / count) * 100 : 50;
+        const stepIndex = Math.round((this.value - this.min) / this.step);
+        const percent = count > 1 ? ((stepIndex + 0.5) / count) * 100 : 50;
         this.thumbEl.style.left = `${Math.max(0, Math.min(100, percent))}%`;
 
         if (this.showValueText) {
