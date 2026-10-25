@@ -127,6 +127,21 @@ export function rotatedBoxBounds(
         maxY: rMaxY + halfWidth,
     };
 }
+export function boxControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
+    const handles: ShapeHandle[] = [
+        ...boxCornerHandles(geom),
+        ...boxEdgeHandles(geom),
+        rotationHandle(geom),
+    ];
+    if (geom.rotation) {
+        const { minX, minY, maxX, maxY } = getGeometryBox(geom);
+        const midX = (minX + maxX) / 2;
+        const midY = (minY + maxY) / 2;
+        return rotateHandles(handles, midX, midY, geom.rotation);
+    }
+    return handles;
+}
+
 export function boxCornerHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
     const { minX, minY, maxX, maxY } = getGeometryBox(geom);
     return [
@@ -220,13 +235,20 @@ export function boxSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
     const { minX, minY, maxX, maxY } = getGeometryBox(geom);
     const midX = (minX + maxX) / 2;
     const midY = (minY + maxY) / 2;
-    return [
+    const ports: ShapeSnapPort[] = [
         { id: 'n', x: midX, y: minY },
         { id: 'e', x: maxX, y: midY },
         { id: 's', x: midX, y: maxY },
         { id: 'w', x: minX, y: midY },
         { id: 'center', x: midX, y: midY },
     ];
+    if (geom.rotation) {
+        return ports.map(p => {
+            const rot = rotatePoint(p.x, p.y, midX, midY, geom.rotation!);
+            return { id: p.id, x: rot.x, y: rot.y };
+        });
+    }
+    return ports;
 }
 
 export function linearSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {

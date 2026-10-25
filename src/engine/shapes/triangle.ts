@@ -15,7 +15,7 @@ import {
     getSvgStrokeAttributes,
     pointInPolygon,
 } from './common.ts';
-import { boxCornerHandles, isBoxHandleId, resizeBoxByHandle } from './handles.ts';
+import { boxCornerHandles, isBoxHandleId, resizeBoxByHandle, rotationHandle, rotateHandles, applyRotationDrag, rotatedBoxBounds, rotatePoint } from './handles.ts';
 
 const EQUILATERAL_ASPECT = Math.sqrt(3) / 2;
 
@@ -143,26 +143,31 @@ export const triangleShapePlugin: ShapePlugin = {
         const vertices = getTriangleVertices(norm);
         const xs = vertices.map(v => v[0]);
         const ys = vertices.map(v => v[1]);
-        return {
-            minX: Math.min(...xs) - halfWidth,
-            maxX: Math.max(...xs) + halfWidth,
-            minY: Math.min(...ys) - halfWidth,
-            maxY: Math.max(...ys) + halfWidth,
-        };
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        return rotatedBoxBounds(minX, minY, maxX, maxY, norm.rotation, halfWidth);
     },
 
     hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean {
         const norm = this.normalizeGeometry(geom);
+        let p = point;
+        if (norm.rotation) {
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            p = rotatePoint(point.x, point.y, cx, cy, -norm.rotation);
+        }
         const vertices = getTriangleVertices(norm);
-        if (pointInPolygon(point.x, point.y, vertices)) {
+        if (pointInPolygon(p.x, p.y, vertices)) {
             return true;
         }
 
         const tol2 = tolerance * tolerance;
         if (
-            distToSegmentSquared(point.x, point.y, vertices[0][0], vertices[0][1], vertices[1][0], vertices[1][1]) <= tol2 ||
-            distToSegmentSquared(point.x, point.y, vertices[1][0], vertices[1][1], vertices[2][0], vertices[2][1]) <= tol2 ||
-            distToSegmentSquared(point.x, point.y, vertices[2][0], vertices[2][1], vertices[0][0], vertices[0][1]) <= tol2
+            distToSegmentSquared(p.x, p.y, vertices[0][0], vertices[0][1], vertices[1][0], vertices[1][1]) <= tol2 ||
+            distToSegmentSquared(p.x, p.y, vertices[1][0], vertices[1][1], vertices[2][0], vertices[2][1]) <= tol2 ||
+            distToSegmentSquared(p.x, p.y, vertices[2][0], vertices[2][1], vertices[0][0], vertices[0][1]) <= tol2
         ) {
             return true;
         }
@@ -178,12 +183,22 @@ export const triangleShapePlugin: ShapePlugin = {
             x,
             y,
         }));
-        // Bounding corners only while the vertices still derive from the box
-        return hasDetachedVertices(norm) ? vertexHandles : [...vertexHandles, ...boxCornerHandles(norm)];
+        const handles: ShapeHandle[] = hasDetachedVertices(norm) ? vertexHandles
+            : [...vertexHandles, ...boxCornerHandles(norm), rotationHandle(norm)];
+        if (norm.rotation) {
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            return rotateHandles(handles, cx, cy, norm.rotation);
+        }
+        return handles;
     },
 
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
         const norm = this.normalizeGeometry(geom);
+        const reg = regularize ?? geom.regularize;
+        if (handleId === 'rotate') {
+            return applyRotationDrag(norm, newPoint, reg);
+        }
         const vertexIndex = handleId === 'v0' ? 0 : handleId === 'v1' ? 1 : handleId === 'v2' ? 2 : -1;
         if (vertexIndex >= 0) {
             const vertices = getTriangleVertices(norm).map(([x, y]) => ({ x, y }));
@@ -191,16 +206,17 @@ export const triangleShapePlugin: ShapePlugin = {
             return withVertices(norm, vertices);
         }
         if (isBoxHandleId(handleId) && !hasDetachedVertices(norm)) {
-            return resizeBoxByHandle(norm, handleId, newPoint, regularize ?? geom.regularize, EQUILATERAL_ASPECT);
+            return resizeBoxByHandle(norm, handleId, newPoint, reg, EQUILATERAL_ASPECT);
         }
         return { ...norm };
     },
 
     /** Vertices 'v0' (top), 'v1' (right), 'v2' (left) and edge midpoints 'e' (v0–v1), 's' (v1–v2), 'w' (v2–v0). */
     getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
-        const [v0, v1, v2] = getTriangleVertices(this.normalizeGeometry(geom));
+        const norm = this.normalizeGeometry(geom);
+        const [v0, v1, v2] = getTriangleVertices(norm);
         const mid = (a: [number, number], b: [number, number]) => ({ x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 });
-        return [
+        const ports: ShapeSnapPort[] = [
             { id: 'v0', x: v0[0], y: v0[1] },
             { id: 'v1', x: v1[0], y: v1[1] },
             { id: 'v2', x: v2[0], y: v2[1] },
@@ -208,5 +224,14 @@ export const triangleShapePlugin: ShapePlugin = {
             { id: 's', ...mid(v1, v2) },
             { id: 'w', ...mid(v2, v0) },
         ];
+        if (norm.rotation) {
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            return ports.map(p => {
+                const rot = rotatePoint(p.x, p.y, cx, cy, norm.rotation!);
+                return { id: p.id, x: rot.x, y: rot.y };
+            });
+        }
+        return ports;
     },
 };

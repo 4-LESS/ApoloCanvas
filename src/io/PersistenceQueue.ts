@@ -768,7 +768,18 @@ function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffset
 
     const plugin = getShapePlugin(element.shapeType);
     const geom = shapeElementToGeometry(element, 0, anchorOffsetY, scale);
-    return plugin.renderSvg(geom, shapeElementStyle(element));
+    const svgOut = plugin.renderSvg(geom, shapeElementStyle(element));
+    if (geom.rotation) {
+        const norm = plugin.normalizeGeometry(geom);
+        const cx = (norm.x0 + norm.x1) / 2;
+        const cy = (norm.y0 + norm.y1) / 2;
+        const deg = (geom.rotation * 180 / Math.PI).toFixed(2);
+        return {
+            defs: svgOut.defs,
+            body: `<g transform="rotate(${deg} ${cx.toFixed(1)} ${cy.toFixed(1)})">\n  ${svgOut.body}\n</g>`,
+        };
+    }
+    return svgOut;
 }
 
 export function renderElement(element: CanvasElement, scale = 800): string {

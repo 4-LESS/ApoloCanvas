@@ -26,6 +26,11 @@ import {
     linearControlHandles,
     linearSnapPorts,
     resizeBoxByHandle,
+    rotationHandle,
+    rotateHandles,
+    applyRotationDrag,
+    rotatedBoxBounds,
+    rotatePoint,
 } from './handles.ts';
 import {
     applyCanvasFill,
@@ -240,12 +245,18 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
         computeBounds(geom: ShapeRenderGeometry, strokeWidth: number): BoundingBox {
             const norm = this.normalizeGeometry(geom);
             const halfWidth = (strokeWidth || 3) / 2;
-            return {
-                minX: Math.min(norm.x0, norm.x1) - halfWidth,
-                maxX: Math.max(norm.x0, norm.x1) + halfWidth,
-                minY: Math.min(norm.y0, norm.y1) - halfWidth,
-                maxY: Math.max(norm.y0, norm.y1) + halfWidth,
-            };
+            const minX = Math.min(norm.x0, norm.x1);
+            const maxX = Math.max(norm.x0, norm.x1);
+            const minY = Math.min(norm.y0, norm.y1);
+            const maxY = Math.max(norm.y0, norm.y1);
+            return isClosed
+                ? rotatedBoxBounds(minX, minY, maxX, maxY, norm.rotation, halfWidth)
+                : {
+                    minX: minX - halfWidth,
+                    maxX: maxX + halfWidth,
+                    minY: minY - halfWidth,
+                    maxY: maxY + halfWidth,
+                };
         },
 
         hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean {
@@ -256,30 +267,50 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             const maxY = Math.max(norm.y0, norm.y1);
             const w = maxX - minX;
             const h = maxY - minY;
+            let p = point;
+            if (isClosed && norm.rotation) {
+                const cx = (minX + maxX) / 2;
+                const cy = (minY + maxY) / 2;
+                p = rotatePoint(point.x, point.y, cx, cy, -norm.rotation);
+            }
 
             if (def.polygon && def.polygon.length >= 3) {
                 const mapped: Array<[number, number]> = def.polygon.map(([u, v]) => [
                     minX + u * w,
                     minY + v * h,
                 ]);
-                if (pointInPolygon(point.x, point.y, mapped)) {
+                if (pointInPolygon(p.x, p.y, mapped)) {
                     return true;
                 }
             }
 
-            return pointInBox(point.x, point.y, minX, minY, maxX, maxY, tolerance);
+            return pointInBox(p.x, p.y, minX, minY, maxX, maxY, tolerance);
         },
 
         getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
             const norm = this.normalizeGeometry(geom);
-            return isClosed
-                ? [...boxCornerHandles(norm), ...boxEdgeHandles(norm)]
-                : linearControlHandles(norm).filter(h => h.kind === 'endpoint');
+            if (!isClosed) {
+                return linearControlHandles(norm).filter(h => h.kind === 'endpoint');
+            }
+            const handles: ShapeHandle[] = [
+                ...boxCornerHandles(norm),
+                ...boxEdgeHandles(norm),
+                rotationHandle(norm),
+            ];
+            if (norm.rotation) {
+                const cx = (norm.x0 + norm.x1) / 2;
+                const cy = (norm.y0 + norm.y1) / 2;
+                return rotateHandles(handles, cx, cy, norm.rotation);
+            }
+            return handles;
         },
 
         applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
             const norm = this.normalizeGeometry(geom);
             const reg = regularize ?? geom.regularize;
+            if (isClosed && handleId === 'rotate') {
+                return applyRotationDrag(norm, newPoint, reg);
+            }
             return isClosed
                 ? resizeBoxByHandle(norm, handleId, newPoint, reg)
                 : applyLinearHandleDrag(norm, handleId, newPoint, reg);

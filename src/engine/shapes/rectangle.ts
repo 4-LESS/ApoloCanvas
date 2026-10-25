@@ -15,7 +15,7 @@ import {
     pointInBox,
     regularizeClosedGeometry,
 } from './common.ts';
-import { boxCornerHandles, boxSnapPorts, getGeometryBox, resizeBoxByHandle } from './handles.ts';
+import { boxCornerHandles, boxSnapPorts, getGeometryBox, resizeBoxByHandle, rotationHandle, rotateHandles, applyRotationDrag, rotatedBoxBounds, rotatePoint } from './handles.ts';
 
 /** Distance between the top-left corner and the radius handle when the radius is 0. */
 export const RADIUS_HANDLE_INSET = 10;
@@ -119,12 +119,11 @@ export const rectangleShapePlugin: ShapePlugin = {
     computeBounds(geom: ShapeRenderGeometry, strokeWidth: number): BoundingBox {
         const norm = this.normalizeGeometry(geom);
         const halfWidth = (strokeWidth || 3) / 2;
-        return {
-            minX: Math.min(norm.x0, norm.x1) - halfWidth,
-            maxX: Math.max(norm.x0, norm.x1) + halfWidth,
-            minY: Math.min(norm.y0, norm.y1) - halfWidth,
-            maxY: Math.max(norm.y0, norm.y1) + halfWidth,
-        };
+        const minX = Math.min(norm.x0, norm.x1);
+        const maxX = Math.max(norm.x0, norm.x1);
+        const minY = Math.min(norm.y0, norm.y1);
+        const maxY = Math.max(norm.y0, norm.y1);
+        return rotatedBoxBounds(minX, minY, maxX, maxY, norm.rotation, halfWidth);
     },
 
     hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean {
@@ -133,7 +132,13 @@ export const rectangleShapePlugin: ShapePlugin = {
         const maxX = Math.max(norm.x0, norm.x1);
         const minY = Math.min(norm.y0, norm.y1);
         const maxY = Math.max(norm.y0, norm.y1);
-        return pointInBox(point.x, point.y, minX, minY, maxX, maxY, tolerance);
+        let p = point;
+        if (norm.rotation) {
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
+            p = rotatePoint(point.x, point.y, cx, cy, -norm.rotation);
+        }
+        return pointInBox(p.x, p.y, minX, minY, maxX, maxY, tolerance);
     },
 
     getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
@@ -141,14 +146,25 @@ export const rectangleShapePlugin: ShapePlugin = {
         const { minX, minY, maxX, maxY } = getGeometryBox(norm);
         const radius = clampCornerRadius(norm.cornerRadius, maxX - minX, maxY - minY);
         const inset = radius + RADIUS_HANDLE_INSET;
-        return [
+        const handles: ShapeHandle[] = [
             ...boxCornerHandles(norm),
+            rotationHandle(norm),
             { id: 'radius', kind: 'radius', x: minX + inset, y: minY + inset },
         ];
+        if (norm.rotation) {
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
+            return rotateHandles(handles, cx, cy, norm.rotation);
+        }
+        return handles;
     },
 
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
         const norm = this.normalizeGeometry(geom);
+        const reg = regularize ?? geom.regularize;
+        if (handleId === 'rotate') {
+            return applyRotationDrag(norm, newPoint, reg);
+        }
         if (handleId === 'radius') {
             const { minX, minY, maxX, maxY } = getGeometryBox(norm);
             const diagonal = ((newPoint.x - minX) + (newPoint.y - minY)) / 2;
@@ -158,7 +174,7 @@ export const rectangleShapePlugin: ShapePlugin = {
             else delete next.cornerRadius;
             return next;
         }
-        return resizeBoxByHandle(norm, handleId, newPoint, regularize ?? geom.regularize);
+        return resizeBoxByHandle(norm, handleId, newPoint, reg);
     },
 
     getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
