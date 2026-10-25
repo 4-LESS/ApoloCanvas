@@ -18,6 +18,10 @@ import {
     computePointAlignmentGuides,
     getShapeKeyPoints,
     getSvgFillAttributes,
+    slideLinearSegment,
+    findClosestLinearSegment,
+    getPortNormal,
+    autoAlignConnectorTangents,
     type ShapeRenderGeometry,
     type ShapePathNode,
 } from '../src/engine/shapes/index.ts';
@@ -644,6 +648,182 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
             assert.equal(snap2.deltaX, 0, 'Snapping releases completely');
             const effectiveDx2 = 58 + snap2.deltaX;
             assert.equal(effectiveDx2, 58, 'Effective displacement is 58px (cursor-tracked without resistance)');
+        });
+    });
+
+    // =======================================================================
+    // 5. Tinkercad Segment Slide & Miro Auto-Bézier Connectors
+    // =======================================================================
+    describe('5. Tinkercad Segment Slide & Miro Auto-Bézier Connectors', () => {
+        test('slideLinearSegment splits 2-node line into 3 orthogonal segments and slides middle bus trace', () => {
+            const geom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 200, y1: 100 };
+            // Drag middle at point (100, 60)
+            const slid = slideLinearSegment(geom, 0, { x: 100, y: 60 });
+            assert.ok(slid.pathNodes && slid.pathNodes.length === 4, 'Converted to 4-node orthogonal stepped trace');
+            assert.equal(slid.pathNodes[0].x, 0);
+            assert.equal(slid.pathNodes[0].y, 0);
+            assert.equal(slid.pathNodes[3].x, 200);
+            assert.equal(slid.pathNodes[3].y, 100);
+
+            // Middle segment (nodes 1 and 2) sits at y = 60
+            assert.equal(slid.pathNodes[1].y, 60);
+            assert.equal(slid.pathNodes[2].y, 60);
+            assert.equal(slid.pathNodes[1].nodeKind, 'sharp');
+            assert.equal(slid.pathNodes[2].nodeKind, 'sharp');
+        });
+
+        test('slideLinearSegment slides existing orthogonal segment in parallel preserving 90-degree corners', () => {
+            // Stepped trace: (0, 0) -> (0, 50) -> (200, 50) -> (200, 100)
+            const geom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 200,
+                y1: 100,
+                pathNodes: [
+                    { x: 0, y: 0, nodeKind: 'sharp' },
+                    { x: 0, y: 50, nodeKind: 'sharp' },
+                    { x: 200, y: 50, nodeKind: 'sharp' },
+                    { x: 200, y: 100, nodeKind: 'sharp' },
+                ],
+            };
+
+            // Slide middle horizontal segment (segIdx = 1) from y = 50 down to y = 80
+            const slid = slideLinearSegment(geom, 1, { x: 100, y: 80 });
+            assert.equal(slid.pathNodes![0].x, 0, 'Start anchor stays at (0, 0)');
+            assert.equal(slid.pathNodes![0].y, 0);
+            assert.equal(slid.pathNodes![3].x, 200, 'End anchor stays at (200, 100)');
+            assert.equal(slid.pathNodes![3].y, 100);
+
+            // Middle segment slid to y = 80
+            assert.equal(slid.pathNodes![1].x, 0);
+            assert.equal(slid.pathNodes![1].y, 80);
+            assert.equal(slid.pathNodes![2].x, 200);
+            assert.equal(slid.pathNodes![2].y, 80);
+        });
+
+        test('findClosestLinearSegment finds closest segment index to mouse coordinate', () => {
+            const geom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 200,
+                y1: 100,
+                pathNodes: [
+                    { x: 0, y: 0 },
+                    { x: 0, y: 50 },
+                    { x: 200, y: 50 },
+                    { x: 200, y: 100 },
+                ],
+            };
+
+            // Click near middle segment (x = 100, y = 52)
+            const segMid = findClosestLinearSegment(geom, { x: 100, y: 52 });
+            assert.equal(segMid, 1, 'Correctly identifies middle horizontal segment');
+
+            // Click near first vertical segment (x = 2, y = 25)
+            const segFirst = findClosestLinearSegment(geom, { x: 2, y: 25 });
+            assert.equal(segFirst, 0, 'Correctly identifies first vertical segment');
+        });
+
+        test('autoAlignConnectorTangents sets perpendicular tangents matching cardinal port normals (Miro style)', () => {
+            const shapeA: ShapeElement = {
+                id: 'shape-a',
+                type: 'shape',
+                shapeType: 'rectangle',
+                blockId: 'b1',
+                startX: 0,
+                startY: 0,
+                endX: 100,
+                endY: 100,
+                style: { width: 2, color: '#000000' },
+                bounds: { minX: 0, minY: 0, maxX: 100, maxY: 100 },
+            };
+
+            const shapeB: ShapeElement = {
+                id: 'shape-b',
+                type: 'shape',
+                shapeType: 'rectangle',
+                blockId: 'b1',
+                startX: 300,
+                startY: 0,
+                endX: 400,
+                endY: 100,
+                style: { width: 2, color: '#000000' },
+                bounds: { minX: 300, minY: 0, maxX: 400, maxY: 100 },
+            };
+
+            const connector: ShapeElement = {
+                id: 'conn-1',
+                type: 'shape',
+                shapeType: 'arrow',
+                blockId: 'b1',
+                startX: 100,
+                startY: 50,
+                endX: 300,
+                endY: 50,
+                startBinding: { elementId: 'shape-a', portId: 'e' },
+                endBinding: { elementId: 'shape-b', portId: 'w' },
+                style: { width: 2, color: '#000000' },
+                bounds: { minX: 100, minY: 50, maxX: 300, maxY: 50 },
+            };
+
+            const elements = [shapeA, shapeB, connector];
+            const adapter = {
+                getGeometry: (el: ShapeElement) => ({
+                    x0: el.startX,
+                    y0: el.startY,
+                    x1: el.endX,
+                    y1: el.endY,
+                    rotation: el.rotation ?? 0,
+                }),
+                setGeometry: () => {},
+            };
+
+            const curvedGeom: ShapeRenderGeometry = {
+                x0: 100,
+                y0: 50,
+                x1: 300,
+                y1: 50,
+                pathNodes: [
+                    { x: 100, y: 50, nodeKind: 'smooth' },
+                    { x: 300, y: 50, nodeKind: 'smooth' },
+                ],
+            };
+
+            const aligned = autoAlignConnectorTangents(curvedGeom, connector, elements, adapter);
+            const n0 = aligned.pathNodes![0];
+            const n1 = aligned.pathNodes![1];
+
+            // Port 'e' on shape A has normal (1, 0) pointing East -> handleOut.x > 100, handleOut.y == 50
+            assert.ok(n0.handleOut !== undefined, 'Start node has handleOut');
+            assert.ok(n0.handleOut.x > 100, 'handleOut points East (+X)');
+            assert.equal(Math.round(n0.handleOut.y), 50, 'handleOut is strictly horizontal');
+
+            // Port 'w' on shape B has normal (-1, 0) pointing West -> handleIn.x < 300, handleIn.y == 50
+            assert.ok(n1.handleIn !== undefined, 'End node has handleIn');
+            assert.ok(n1.handleIn.x < 300, 'handleIn points West (-X)');
+            assert.equal(Math.round(n1.handleIn.y), 50, 'handleIn is strictly horizontal');
+        });
+
+        test('autoAlignConnectorTangents rotates port normals with rotated shapes', () => {
+            // Shape B rotated by 90 degrees
+            const shapeB: ShapeElement = {
+                id: 'shape-b',
+                type: 'shape',
+                shapeType: 'rectangle',
+                blockId: 'b1',
+                startX: 300,
+                startY: 0,
+                endX: 400,
+                endY: 100,
+                rotation: Math.PI / 2, // 90 deg
+                style: { width: 2, color: '#000000' },
+                bounds: { minX: 300, minY: 0, maxX: 400, maxY: 100 },
+            };
+
+            const normal = getPortNormal('e', Math.PI / 2);
+            // East (1, 0) rotated 90 deg clockwise points South (0, 1)
+            assert.ok(Math.abs(normal.nx) < 1e-4, 'nx is 0');
+            assert.ok(Math.abs(normal.ny - 1) < 1e-4, 'ny is 1 (South)');
         });
     });
 });

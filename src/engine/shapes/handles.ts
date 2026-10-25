@@ -580,6 +580,12 @@ export function applyLinearHandleDrag(
     point: ShapePoint,
     regularize = false,
 ): ShapeRenderGeometry {
+    // Segment sliding (Tinkercad / Lucidchart style)
+    if (handleId.startsWith('seg-slide-')) {
+        const segIdx = parseInt(handleId.slice('seg-slide-'.length), 10);
+        return slideLinearSegment(geom, isNaN(segIdx) ? 0 : segIdx, point);
+    }
+
     // Legacy 2-node line / arrow support (single quadratic controlPoint)
     if (!geom.pathNodes && !handleId.startsWith('bezier-in-') && !handleId.startsWith('bezier-out-')) {
         if (handleId === 'curve') {
@@ -1068,5 +1074,120 @@ export function linearPathBounds(geom: ShapeRenderGeometry): BoundingBox {
         minY: Math.min(...ys),
         maxX: Math.max(...xs),
         maxY: Math.max(...ys),
+    };
+}
+
+/**
+ * Finds the index of the segment on a linear path closest to the given point.
+ */
+export function findClosestLinearSegment(geom: ShapeRenderGeometry, point: ShapePoint): number {
+    const nodes = getLinearPathNodes(geom);
+    if (nodes.length < 2) return 0;
+    let bestDistSq = Infinity;
+    let bestSeg = 0;
+    for (let i = 0; i < nodes.length - 1; i++) {
+        const p0 = nodes[i];
+        const p1 = nodes[i + 1];
+        const d2 = distToSegmentSquared(point.x, point.y, p0.x, p0.y, p1.x, p1.y);
+        if (d2 < bestDistSq) {
+            bestDistSq = d2;
+            bestSeg = i;
+        }
+    }
+    return bestSeg;
+}
+
+/**
+ * Slides a linear path segment in parallel (Tinkercad / Lucidchart style).
+ * If the path is a 2-node chord, splits it into 3 orthogonal segments (4 nodes)
+ * with a sliding middle bus trace.
+ * If the path already has orthogonal segments, slides the segment parallel to itself,
+ * preserving 90-degree corners.
+ */
+export function slideLinearSegment(
+    geom: ShapeRenderGeometry,
+    segIdx: number,
+    point: ShapePoint,
+): ShapeRenderGeometry {
+    const nodes = getLinearPathNodes(geom);
+    if (nodes.length < 2) return geom;
+
+    // 1. Simple 2-node line: convert into 3 orthogonal segments (4 nodes) with a middle sliding bus
+    if (nodes.length === 2) {
+        const p0 = nodes[0];
+        const p1 = nodes[1];
+        const dx = p1.x - p0.x;
+        const dy = p1.y - p0.y;
+
+        const isHorizontal = Math.abs(dx) >= Math.abs(dy);
+        if (isHorizontal) {
+            // Horizontal line dragged vertically: middle horizontal segment at point.y
+            const splitX1 = p0.x + dx * 0.35;
+            const splitX2 = p0.x + dx * 0.65;
+            const newNodes: ShapePathNode[] = [
+                { x: p0.x, y: p0.y, nodeKind: 'sharp' },
+                { x: splitX1, y: point.y, nodeKind: 'sharp' },
+                { x: splitX2, y: point.y, nodeKind: 'sharp' },
+                { x: p1.x, y: p1.y, nodeKind: 'sharp' },
+            ];
+            return {
+                ...geom,
+                x0: p0.x,
+                y0: p0.y,
+                x1: p1.x,
+                y1: p1.y,
+                pathNodes: newNodes,
+            };
+        } else {
+            // Vertical line dragged horizontally: middle vertical segment at point.x
+            const splitY1 = p0.y + dy * 0.35;
+            const splitY2 = p0.y + dy * 0.65;
+            const newNodes: ShapePathNode[] = [
+                { x: p0.x, y: p0.y, nodeKind: 'sharp' },
+                { x: point.x, y: splitY1, nodeKind: 'sharp' },
+                { x: point.x, y: splitY2, nodeKind: 'sharp' },
+                { x: p1.x, y: p1.y, nodeKind: 'sharp' },
+            ];
+            return {
+                ...geom,
+                x0: p0.x,
+                y0: p0.y,
+                x1: p1.x,
+                y1: p1.y,
+                pathNodes: newNodes,
+            };
+        }
+    }
+
+    // 2. Multi-node path: slide the specified segment [segIdx, segIdx + 1] in parallel
+    const safeIdx = Math.max(0, Math.min(segIdx, nodes.length - 2));
+    const nextNodes = nodes.map(n => ({ ...n }));
+    const pA = nextNodes[safeIdx];
+    const pB = nextNodes[safeIdx + 1];
+
+    const isHorizontal = Math.abs(pA.y - pB.y) <= Math.abs(pA.x - pB.x);
+
+    if (isHorizontal) {
+        // Slide horizontal segment vertically to point.y
+        pA.y = point.y;
+        pB.y = point.y;
+    } else {
+        // Slide vertical segment horizontally to point.x
+        pA.x = point.x;
+        pB.x = point.x;
+    }
+
+    pA.nodeKind = 'sharp';
+    pB.nodeKind = 'sharp';
+    delete pA.handleOut;
+    delete pB.handleIn;
+
+    return {
+        ...geom,
+        x0: nextNodes[0].x,
+        y0: nextNodes[0].y,
+        x1: nextNodes[nextNodes.length - 1].x,
+        y1: nextNodes[nextNodes.length - 1].y,
+        pathNodes: nextNodes,
     };
 }

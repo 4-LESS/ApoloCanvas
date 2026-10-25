@@ -66,6 +66,10 @@ import {
     computeSmartAlignmentGuides,
     computePointAlignmentGuides,
     getShapeKeyPoints,
+    findClosestLinearSegment,
+    slideLinearSegment,
+    getPortNormal,
+    autoAlignConnectorTangents,
     type AlignmentGuide,
     type SnapTargetBounds,
     type ReferencePoint,
@@ -341,6 +345,7 @@ export class CanvasController {
     private pointerDownStartPos: { x: number; y: number } | null = null;
     private strokeStartTime = 0;
     private isShiftDown = false;
+    private isCtrlDown = false;
     private showSpenDebugHud = false;
     private debugInputHudEl: HTMLElement | null = null;
     private readonly debugHudLogs: string[] = [];
@@ -3045,6 +3050,9 @@ export class CanvasController {
                 this.schedulePaint();
             }
         }
+        if (event.key === 'Control' || event.key === 'Meta') {
+            this.isCtrlDown = true;
+        }
         if (event.key === 'Escape') {
             this.estuche?.close();
             this.boxMenu?.hide();
@@ -3058,6 +3066,9 @@ export class CanvasController {
             if (this.tool === 'shape' && this.activeStart) {
                 this.schedulePaint();
             }
+        }
+        if (event.key === 'Control' || event.key === 'Meta') {
+            this.isCtrlDown = false;
         }
     };
 
@@ -3176,9 +3187,32 @@ export class CanvasController {
         const isForbidden = !this.shouldAcceptDrawingPointer(event);
         if (isForbidden) {
             this.canvas.style.cursor = 'not-allowed';
-        } else {
-            this.canvas.style.cursor = 'crosshair';
+            return;
         }
+
+        if (event.ctrlKey || event.metaKey || this.isCtrlDown) {
+            const shape = this.getSelectedShape();
+            if (shape && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
+                const rect = this.canvas.getBoundingClientRect();
+                const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+                const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+                const geom = this.getShapeDocGeometry(shape);
+                const hitRadius = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+                if (linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
+                    const nodes = getLinearPathNodes(geom);
+                    if (nodes.length >= 2) {
+                        const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                        const pA = nodes[segIdx];
+                        const pB = nodes[Math.min(segIdx + 1, nodes.length - 1)];
+                        const isHorizontal = Math.abs(pA.y - pB.y) <= Math.abs(pA.x - pB.x);
+                        this.canvas.style.cursor = isHorizontal ? 'row-resize' : 'col-resize';
+                        return;
+                    }
+                }
+            }
+        }
+
+        this.canvas.style.cursor = 'crosshair';
     }
 
     private resetCursor(): void {
@@ -3188,7 +3222,10 @@ export class CanvasController {
     // Drawing input lifecycle (normalized to content column width & anchor block)
     private begin(rawPoint: Point, barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.penEnabled) return;
-        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+        }
         if (rawEvent && rawEvent.pointerType === 'pen' && this.isPenBarrelEvent(rawEvent)) {
             return;
         }
@@ -3294,7 +3331,10 @@ export class CanvasController {
 
     private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
-        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+        }
         if (this.handleDrag) {
             const last = rawPoints[rawPoints.length - 1];
             if (last) {
@@ -3397,7 +3437,10 @@ export class CanvasController {
 
     private end(rawPoint: Point, barrel: boolean, releasedAt: number, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
-        if (rawEvent) this.isShiftDown = Boolean(rawEvent.shiftKey);
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+        }
         if (this.handleDrag) {
             this.updateHandleDrag({
                 x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
@@ -4449,6 +4492,27 @@ export class CanvasController {
         }
         if (!best) {
             if ((shape.shapeType === 'line' || shape.shapeType === 'arrow') && linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
+                if (this.isCtrlDown) {
+                    const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                    this.points.clear();
+                    this.predictor.reset();
+                    this.resetLiveBake();
+                    this.movingSelection = false;
+                    this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+                    this.handleDrag = {
+                        elementId: shape.id,
+                        handleId: `seg-slide-${segIdx}`,
+                        kind: 'segment-mid',
+                        startGeom: geom,
+                        grabOffsetX: 0,
+                        grabOffsetY: 0,
+                        snapshot: this.createHistorySnapshot(),
+                        changed: false,
+                        snap: null,
+                    };
+                    return true;
+                }
+
                 const inserted = insertLinearNodeAtPoint(geom, { x: docX, y: docY });
                 if (inserted) {
                     const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
