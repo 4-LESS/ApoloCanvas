@@ -936,6 +936,27 @@ export interface StrokeElement extends InkElementBase {
     cacheCanvas?: HTMLCanvasElement;
 }
 
+export type PathNodeKind = 'sharp' | 'smooth' | 'symmetric';
+
+export interface ShapePathNode {
+    /** Anchor point in world/normalized coordinates */
+    x: number;
+    y: number;
+    /** Optional incoming cubic Bezier tangent control point (absolute coords) */
+    handleIn?: { x: number; y: number } | null;
+    /** Optional outgoing cubic Bezier tangent control point (absolute coords) */
+    handleOut?: { x: number; y: number } | null;
+    /** Node continuity mode: 'sharp' (cusp/corner), 'smooth' (collinear tangents), 'symmetric' (equal length collinear tangents) */
+    nodeKind?: PathNodeKind;
+}
+
+export interface ShapeCustomParams {
+    /** Cylinder top-cap vertical aspect ratio (default 0.22, range 0.08..0.48) */
+    capRatio?: number;
+    /** Hexagon horizontal bevel inset ratio (default 0.25, range 0.10..0.50) */
+    bevelRatio?: number;
+}
+
 export interface ShapeElement extends InkElementBase {
     type: 'shape';
     shapeType: ShapeType;
@@ -950,11 +971,13 @@ export interface ShapeElement extends InkElementBase {
     fillPattern?: ShapeFillPattern;
     fillDensity?: number;
     regularize?: boolean;
-    rotation?: number;      // Radians
+    rotation?: number;      // Radians clockwise around center
     // Parametric edits (all normalized by column width, like startX..endY)
     cornerRadius?: number;  // Rectangle corner radius, 0..min(w, h) / 2
     controlPoint?: NormalizedShapePoint; // Quadratic Bezier control point for curved 'line' / 'arrow'
     vertices?: NormalizedShapePoint[];   // Independent vertex overrides (e.g. 3 detached triangle vertices)
+    pathNodes?: ShapePathNode[];        // Multi-segment straight/curved Bezier path nodes (normalized)
+    shapeParams?: ShapeCustomParams;    // Custom shape parametric modifiers (capRatio, bevelRatio)
     // Magnetic auto-connect ('line' / 'arrow' only): endpoint glued to a port of another shape
     startBinding?: ShapeConnectorBinding | null;
     endBinding?: ShapeConnectorBinding | null;
@@ -1030,6 +1053,14 @@ export function cloneElements(elements: readonly CanvasElement[]): CanvasElement
             };
             if (el.controlPoint) shape.controlPoint = { ...el.controlPoint };
             if (el.vertices) shape.vertices = el.vertices.map(v => ({ ...v }));
+            if (el.shapeParams) shape.shapeParams = { ...el.shapeParams };
+            if (el.pathNodes) {
+                shape.pathNodes = el.pathNodes.map(n => ({
+                    ...n,
+                    handleIn: n.handleIn ? { ...n.handleIn } : n.handleIn,
+                    handleOut: n.handleOut ? { ...n.handleOut } : n.handleOut,
+                }));
+            }
             if (el.startBinding) shape.startBinding = { ...el.startBinding };
             if (el.endBinding) shape.endBinding = { ...el.endBinding };
             return shape;

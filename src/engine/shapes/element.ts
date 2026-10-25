@@ -5,7 +5,7 @@
  * an anchor origin) and ShapeRenderGeometry in document / export space.
  */
 
-import type { NormalizedShapePoint, ShapeElement } from '../../core/types.ts';
+import type { NormalizedShapePoint, ShapeElement, ShapePathNode } from '../../core/types.ts';
 import type { ShapeRenderGeometry, ShapeStyleConfig } from './types.ts';
 import { getShapePlugin } from './index.ts';
 import { linearPathBounds } from './handles.ts';
@@ -24,6 +24,9 @@ export function shapeElementToGeometry(
         y1: originY + element.endY * scale,
         regularize: element.regularize,
     };
+    if (element.rotation !== undefined) {
+        geom.rotation = element.rotation;
+    }
     if (element.cornerRadius !== undefined && element.cornerRadius > 0) {
         geom.cornerRadius = element.cornerRadius * scale;
     }
@@ -35,6 +38,18 @@ export function shapeElementToGeometry(
     }
     if (element.vertices && element.vertices.length > 0) {
         geom.vertices = element.vertices.map(v => ({ x: originX + v.x * scale, y: originY + v.y * scale }));
+    }
+    if (element.shapeParams) {
+        geom.shapeParams = { ...element.shapeParams };
+    }
+    if (element.pathNodes && element.pathNodes.length >= 2) {
+        geom.pathNodes = element.pathNodes.map(n => ({
+            x: originX + n.x * scale,
+            y: originY + n.y * scale,
+            handleIn: n.handleIn ? { x: originX + n.handleIn.x * scale, y: originY + n.handleIn.y * scale } : undefined,
+            handleOut: n.handleOut ? { x: originX + n.handleOut.x * scale, y: originY + n.handleOut.y * scale } : undefined,
+            nodeKind: n.nodeKind,
+        }));
     }
     return geom;
 }
@@ -59,6 +74,12 @@ export function applyGeometryToShapeElement(
     element.endX = toU(geom.x1);
     element.endY = toV(geom.y1);
 
+    if (geom.rotation !== undefined && Number.isFinite(geom.rotation)) {
+        element.rotation = geom.rotation;
+    } else {
+        delete element.rotation;
+    }
+
     if (geom.cornerRadius !== undefined && geom.cornerRadius > 0) {
         element.cornerRadius = geom.cornerRadius / safeScale;
     } else {
@@ -75,6 +96,26 @@ export function applyGeometryToShapeElement(
         element.regularize = false;
     } else {
         delete element.vertices;
+    }
+    if (geom.shapeParams) {
+        element.shapeParams = { ...geom.shapeParams };
+    } else {
+        delete element.shapeParams;
+    }
+    if (geom.pathNodes && geom.pathNodes.length >= 2) {
+        element.pathNodes = geom.pathNodes.map(n => ({
+            x: toU(n.x),
+            y: toV(n.y),
+            handleIn: n.handleIn ? { x: toU(n.handleIn.x), y: toV(n.handleIn.y) } : undefined,
+            handleOut: n.handleOut ? { x: toU(n.handleOut.x), y: toV(n.handleOut.y) } : undefined,
+            nodeKind: n.nodeKind,
+        }));
+        element.startX = element.pathNodes[0].x;
+        element.startY = element.pathNodes[0].y;
+        element.endX = element.pathNodes[element.pathNodes.length - 1].x;
+        element.endY = element.pathNodes[element.pathNodes.length - 1].y;
+    } else {
+        delete element.pathNodes;
     }
 
     refreshShapeElementBounds(element);
@@ -94,7 +135,7 @@ export function refreshShapeElementBounds(element: ShapeElement): void {
             ys.push(v.y);
         }
     }
-    if (geom.controlPoint) {
+    if (geom.controlPoint || geom.pathNodes) {
         const curve = linearPathBounds(geom);
         xs.push(curve.minX, curve.maxX);
         ys.push(curve.minY, curve.maxY);
@@ -107,7 +148,7 @@ export function refreshShapeElementBounds(element: ShapeElement): void {
     };
 }
 
-/** Applies `map` to every normalized point of the element (start, end, control point, vertices). */
+/** Applies `map` to every normalized point of the element (start, end, control point, vertices, pathNodes). */
 export function mapShapeElementPoints(
     element: ShapeElement,
     map: (u: number, v: number) => NormalizedShapePoint,
@@ -128,6 +169,20 @@ export function mapShapeElementPoints(
     if (element.cornerRadius !== undefined) {
         element.cornerRadius *= radiusScale;
     }
+    if (element.pathNodes) {
+        element.pathNodes = element.pathNodes.map(n => {
+            const pt = map(n.x, n.y);
+            const inPt = n.handleIn ? map(n.handleIn.x, n.handleIn.y) : undefined;
+            const outPt = n.handleOut ? map(n.handleOut.x, n.handleOut.y) : undefined;
+            return {
+                x: pt.x,
+                y: pt.y,
+                handleIn: inPt,
+                handleOut: outPt,
+                nodeKind: n.nodeKind,
+            };
+        });
+    }
     refreshShapeElementBounds(element);
 }
 
@@ -142,6 +197,9 @@ export function sanitizeLoadedShapeElement(element: ShapeElement): void {
     const isBinding = (b: unknown): boolean =>
         Boolean(b) && typeof (b as { elementId?: unknown }).elementId === 'string' && typeof (b as { portId?: unknown }).portId === 'string';
 
+    if (element.rotation !== undefined && !isFiniteNumber(element.rotation)) {
+        delete element.rotation;
+    }
     if (element.cornerRadius !== undefined && !(isFiniteNumber(element.cornerRadius) && element.cornerRadius >= 0)) {
         delete element.cornerRadius;
     }
@@ -150,6 +208,16 @@ export function sanitizeLoadedShapeElement(element: ShapeElement): void {
     }
     if (element.vertices !== undefined && !(Array.isArray(element.vertices) && element.vertices.length === 3 && element.vertices.every(isPoint))) {
         delete element.vertices;
+    }
+    if (element.pathNodes !== undefined) {
+        if (!Array.isArray(element.pathNodes) || element.pathNodes.length < 2 || !element.pathNodes.every(isPoint)) {
+            delete element.pathNodes;
+        }
+    }
+    if (element.shapeParams !== undefined) {
+        if (typeof element.shapeParams !== 'object' || element.shapeParams === null) {
+            delete element.shapeParams;
+        }
     }
     if (element.startBinding !== undefined && element.startBinding !== null && !isBinding(element.startBinding)) {
         element.startBinding = null;

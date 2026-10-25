@@ -4,7 +4,15 @@
  * Core type definitions for the modular shape engine of Apolo Canvas 2.0.
  */
 
-import type { BoundingBox, ShapeFillPattern, ShapeType, StrokePattern } from '../../core/types.ts';
+import type {
+    BoundingBox,
+    PathNodeKind,
+    ShapeCustomParams,
+    ShapeFillPattern,
+    ShapePathNode,
+    ShapeType,
+    StrokePattern,
+} from '../../core/types.ts';
 
 export interface ShapeSvgOutput {
     defs?: Record<string, string>;
@@ -22,15 +30,30 @@ export interface ShapeRenderGeometry {
     x1: number;
     y1: number;
     regularize?: boolean;
+    rotation?: number;
     /** Rectangle corner radius in the same space as x0..y1. */
     cornerRadius?: number;
     /** Quadratic Bezier control point for curved lines / arrows. */
     controlPoint?: ShapePoint;
     /** Independent vertex overrides (e.g. a free triangle). */
     vertices?: ShapePoint[];
+    /** Multi-segment straight/curved Bezier path nodes (world/doc space). */
+    pathNodes?: ShapePathNode[];
+    /** Custom shape parametric modifiers (capRatio, bevelRatio). */
+    shapeParams?: ShapeCustomParams;
 }
 
-export type ShapeHandleKind = 'endpoint' | 'corner' | 'curve' | 'radius' | 'vertex';
+export type ShapeHandleKind =
+    | 'endpoint'
+    | 'corner'
+    | 'curve'
+    | 'radius'
+    | 'vertex'
+    | 'rotate'
+    | 'bezier-in'
+    | 'bezier-out'
+    | 'segment-mid'
+    | 'param';
 
 export interface ShapeHandle {
     readonly id: string;

@@ -54,6 +54,11 @@ import {
     setBinding,
     type ConnectorGeometryAdapter,
     type SnapPortHit,
+    getLinearPathNodes,
+    splitLinearSegment,
+    straightenLinearSegment,
+    toggleLinearNodeKind,
+    rotatePoint,
     getShapePlugin,
     mapShapeElementPoints,
     refreshShapeElementBounds,
@@ -350,6 +355,7 @@ export class CanvasController {
 
     // Selection & Manipulation
     private selection: CanvasElement[] = [];
+    private lastHandleTap: { shapeId: string; handleId: string; time: number; x: number; y: number } | null = null;
     private handleDrag: ShapeHandleDragState | null = null;
     private moveSelectionSnapshot: HistorySnapshot | null = null;
     // Hold-to-snap: dwell detection at the end of a freehand stroke
@@ -4326,6 +4332,46 @@ export class CanvasController {
         }
         if (!best) return false;
 
+        const now = performance.now();
+        const hitRadiusPx = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+        const isDoubleTap = Boolean(
+            this.lastHandleTap &&
+            this.lastHandleTap.shapeId === shape.id &&
+            this.lastHandleTap.handleId === best.id &&
+            (now - this.lastHandleTap.time < 350) &&
+            Math.hypot(best.x - this.lastHandleTap.x, best.y - this.lastHandleTap.y) < hitRadiusPx * 2
+        );
+        this.lastHandleTap = { shapeId: shape.id, handleId: best.id, time: now, x: best.x, y: best.y };
+
+        if (isDoubleTap) {
+            let nextGeom: ShapeRenderGeometry | null = null;
+            if (best.id.startsWith('seg-mid-') || best.id === 'curve') {
+                const segIdx = best.id.startsWith('seg-mid-') ? parseInt(best.id.slice('seg-mid-'.length), 10) : 0;
+                const nodes = getLinearPathNodes(geom);
+                const n0 = nodes[segIdx];
+                const n1 = nodes[segIdx + 1];
+                const isCurved = Boolean(n0?.handleOut || n1?.handleIn);
+                nextGeom = isCurved
+                    ? straightenLinearSegment(geom, segIdx)
+                    : splitLinearSegment(geom, segIdx);
+            } else if (best.id.startsWith('node-')) {
+                const nodeIdx = parseInt(best.id.slice('node-'.length), 10);
+                nextGeom = toggleLinearNodeKind(geom, nodeIdx);
+            }
+            if (nextGeom) {
+                const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+                this.recordHistory();
+                applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
+                this.strokeCache.delete(shape.id);
+                this.rebuildIndex();
+                this.renderDirty = true;
+                this.schedulePaint();
+                this.persistSoon();
+                this.options.eventBus?.emit('canvas:dirty', this.pageId);
+                return true;
+            }
+        }
+
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
@@ -5992,8 +6038,30 @@ export class CanvasController {
             bounds.maxY - bounds.minY + padding * 2,
         );
 
-        // Bezier guide: endpoints → control point
-        if (norm.controlPoint) {
+        // Bezier guides: endpoints / nodes → control points
+        if (shape.shapeType === 'line' || shape.shapeType === 'arrow') {
+            const nodes = getLinearPathNodes(geom);
+            ctx.save();
+            ctx.strokeStyle = '#00A3FF';
+            ctx.globalAlpha = 0.65;
+            ctx.lineWidth = 1 / this.zoom;
+            ctx.setLineDash([3 / this.zoom, 3 / this.zoom]);
+            for (const node of nodes) {
+                if (node.handleIn) {
+                    ctx.beginPath();
+                    ctx.moveTo(node.x, node.y);
+                    ctx.lineTo(node.handleIn.x, node.handleIn.y);
+                    ctx.stroke();
+                }
+                if (node.handleOut) {
+                    ctx.beginPath();
+                    ctx.moveTo(node.x, node.y);
+                    ctx.lineTo(node.handleOut.x, node.handleOut.y);
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        } else if (norm.controlPoint) {
             ctx.beginPath();
             ctx.moveTo(norm.x0, norm.y0);
             ctx.lineTo(norm.controlPoint.x, norm.controlPoint.y);
@@ -6006,19 +6074,55 @@ export class CanvasController {
         const activeHandleId = this.handleDrag?.elementId === shape.id ? this.handleDrag.handleId : '';
         const radius = 6 / this.zoom;
         const diamond = 7 / this.zoom;
-        for (const handle of plugin.getControlHandles(geom)) {
+        const handles = plugin.getControlHandles(geom);
+
+        // Rotation stem line if 'rotate' handle exists
+        const rotHandle = handles.find(h => h.kind === 'rotate');
+        if (rotHandle) {
+            const northHandle = handles.find(h => h.id === 'n');
+            const stemStart = northHandle ? { x: northHandle.x, y: northHandle.y } : { x: (norm.x0 + norm.x1) / 2, y: Math.min(norm.y0, norm.y1) };
+            ctx.save();
+            ctx.strokeStyle = accent;
+            ctx.lineWidth = 1.5 / this.zoom;
+            ctx.setLineDash([2 / this.zoom, 2 / this.zoom]);
+            ctx.beginPath();
+            ctx.moveTo(stemStart.x, stemStart.y);
+            ctx.lineTo(rotHandle.x, rotHandle.y);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        for (const handle of handles) {
             const isActive = handle.id === activeHandleId;
             ctx.beginPath();
-            if (handle.kind === 'curve' || handle.kind === 'radius') {
-                // Diamond accent handle for curvature / corner radius
+            if (handle.kind === 'curve' || handle.kind === 'radius' || handle.kind === 'param') {
+                // Diamond accent handle for curvature / corner radius / 3D params
                 ctx.moveTo(handle.x, handle.y - diamond);
                 ctx.lineTo(handle.x + diamond, handle.y);
                 ctx.lineTo(handle.x, handle.y + diamond);
                 ctx.lineTo(handle.x - diamond, handle.y);
                 ctx.closePath();
-                ctx.fillStyle = accent;
+                ctx.fillStyle = isActive ? '#FFFFFF' : accent;
                 ctx.fill();
-                ctx.strokeStyle = '#FFFFFF';
+                ctx.strokeStyle = isActive ? accent : '#FFFFFF';
+            } else if (handle.kind === 'bezier-in' || handle.kind === 'bezier-out') {
+                const rBez = 4.5 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rBez * 1.3 : rBez, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? '#00A3FF' : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = '#00A3FF';
+            } else if (handle.kind === 'segment-mid') {
+                const rMid = 4 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rMid * 1.3 : rMid, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            } else if (handle.kind === 'rotate') {
+                const rRot = 6.5 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rRot * 1.3 : rRot, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
             } else {
                 ctx.arc(handle.x, handle.y, isActive ? radius * 1.3 : radius, 0, Math.PI * 2);
                 ctx.fillStyle = isActive ? accent : '#FFFFFF';
