@@ -106,6 +106,8 @@ export interface ShapeFaceFillOptions {
     readonly patternAngleOffsetDeg?: number;
     /** Multiplier applied to base fillOpacity (e.g. 0.72 on top cap for natural 3D shading contrast in 'solid' mode) */
     readonly opacityMultiplier?: number;
+    /** Counter-rotation angle in degrees to preserve global pattern orientation */
+    readonly shapeRotationDeg?: number;
 }
 
 export interface CustomPathSegment {

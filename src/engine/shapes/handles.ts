@@ -182,7 +182,73 @@ export function resizeBoxByHandle(
     regularize = false,
     aspect = 1,
 ): ShapeRenderGeometry {
-    let { minX, minY, maxX, maxY } = getGeometryBox(geom);
+    const minX = Math.min(geom.x0, geom.x1);
+    const maxX = Math.max(geom.x0, geom.x1);
+    const minY = Math.min(geom.y0, geom.y1);
+    const maxY = Math.max(geom.y0, geom.y1);
+    const rot = geom.rotation || 0;
+
+    // Rotated box resize: keeps the opposite anchor corner/edge 100% invariant in world coordinates
+    if (Math.abs(rot) > 1e-4) {
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+
+        let unrotAnchorX = cx;
+        let unrotAnchorY = cy;
+        let signX = 1;
+        let signY = 1;
+
+        if (handleId === 'se') { unrotAnchorX = minX; unrotAnchorY = minY; signX = 1; signY = 1; }
+        else if (handleId === 'nw') { unrotAnchorX = maxX; unrotAnchorY = maxY; signX = -1; signY = -1; }
+        else if (handleId === 'ne') { unrotAnchorX = minX; unrotAnchorY = maxY; signX = 1; signY = -1; }
+        else if (handleId === 'sw') { unrotAnchorX = maxX; unrotAnchorY = minY; signX = -1; signY = 1; }
+        else if (handleId === 'e') { unrotAnchorX = minX; unrotAnchorY = cy; signX = 1; signY = 0; }
+        else if (handleId === 'w') { unrotAnchorX = maxX; unrotAnchorY = cy; signX = -1; signY = 0; }
+        else if (handleId === 's') { unrotAnchorX = cx; unrotAnchorY = minY; signX = 0; signY = 1; }
+        else if (handleId === 'n') { unrotAnchorX = cx; unrotAnchorY = maxY; signX = 0; signY = -1; }
+        else return { ...geom };
+
+        const worldAnchor = rotatePoint(unrotAnchorX, unrotAnchorY, cx, cy, rot);
+        const dWorldX = point.x - worldAnchor.x;
+        const dWorldY = point.y - worldAnchor.y;
+        const dLocal = rotatePoint(dWorldX, dWorldY, 0, 0, -rot);
+
+        let w = maxX - minX;
+        let h = maxY - minY;
+
+        if (signX !== 0) w = Math.max(8, dLocal.x * signX);
+        if (signY !== 0) h = Math.max(8, dLocal.y * signY);
+
+        if (regularize) {
+            if (signX !== 0 && signY !== 0) {
+                const size = Math.max(w, h / aspect);
+                w = size;
+                h = size * aspect;
+            } else if (signX !== 0) {
+                h = w * aspect;
+            } else if (signY !== 0) {
+                w = h / aspect;
+            }
+        }
+
+        const localCenterOffsetX = signX !== 0 ? (w / 2) * signX : 0;
+        const localCenterOffsetY = signY !== 0 ? (h / 2) * signY : 0;
+
+        const newWorldCenter = rotatePoint(
+            worldAnchor.x + localCenterOffsetX,
+            worldAnchor.y + localCenterOffsetY,
+            worldAnchor.x,
+            worldAnchor.y,
+            rot
+        );
+
+        const x0 = newWorldCenter.x - w / 2;
+        const x1 = newWorldCenter.x + w / 2;
+        const y0 = newWorldCenter.y - h / 2;
+        const y1 = newWorldCenter.y + h / 2;
+
+        return { ...geom, x0, y0, x1, y1, regularize };
+    }
 
     if ((BOX_CORNER_HANDLE_IDS as readonly string[]).includes(handleId)) {
         const anchorX = handleId === 'nw' || handleId === 'sw' ? maxX : minX;
@@ -197,33 +263,37 @@ export function resizeBoxByHandle(
         return { ...geom, x0: anchorX, y0: anchorY, x1: anchorX + dx, y1: anchorY + dy, regularize };
     }
 
-    if (handleId === 'n') minY = point.y;
-    else if (handleId === 's') maxY = point.y;
-    else if (handleId === 'e') maxX = point.x;
-    else if (handleId === 'w') minX = point.x;
+    let nextMinX = minX;
+    let nextMaxX = maxX;
+    let nextMinY = minY;
+    let nextMaxY = maxY;
+
+    if (handleId === 'n') nextMinY = point.y;
+    else if (handleId === 's') nextMaxY = point.y;
+    else if (handleId === 'e') nextMaxX = point.x;
+    else if (handleId === 'w') nextMinX = point.x;
     else return { ...geom };
 
     if (regularize) {
         if (handleId === 'n' || handleId === 's') {
-            const h = Math.abs(maxY - minY);
+            const h = Math.abs(nextMaxY - nextMinY);
             const w = h / aspect;
-            const cx = (minX + maxX) / 2;
-            minX = cx - w / 2;
-            maxX = cx + w / 2;
+            const cx = (nextMinX + nextMaxX) / 2;
+            nextMinX = cx - w / 2;
+            nextMaxX = cx + w / 2;
         } else {
-            const w = Math.abs(maxX - minX);
+            const w = Math.abs(nextMaxX - nextMinX);
             const h = w * aspect;
-            const cy = (minY + maxY) / 2;
-            minY = cy - h / 2;
-            maxY = cy + h / 2;
+            const cy = (nextMinY + nextMaxY) / 2;
+            nextMinY = cy - h / 2;
+            nextMaxY = cy + h / 2;
         }
     }
 
-    // Anchor x0/y0 at the edge that did not move so regularized output survives normalizeGeometry().
-    const x0 = handleId === 'w' ? maxX : minX;
-    const x1 = handleId === 'w' ? minX : maxX;
-    const y0 = handleId === 'n' ? maxY : minY;
-    const y1 = handleId === 'n' ? minY : maxY;
+    const x0 = handleId === 'w' ? nextMaxX : nextMinX;
+    const x1 = handleId === 'w' ? nextMinX : nextMaxX;
+    const y0 = handleId === 'n' ? nextMaxY : nextMinY;
+    const y1 = handleId === 'n' ? nextMinY : nextMaxY;
     return { ...geom, x0, y0, x1, y1, regularize };
 }
 
