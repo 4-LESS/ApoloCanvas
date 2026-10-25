@@ -15,6 +15,8 @@ import {
     rotatePoint,
     boxSnapPorts,
     computeSmartAlignmentGuides,
+    computePointAlignmentGuides,
+    getShapeKeyPoints,
     getSvgFillAttributes,
     type ShapeRenderGeometry,
     type ShapePathNode,
@@ -524,6 +526,124 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
             const res = computeSmartAlignmentGuides(activeBounds, otherBounds, 5);
             assert.equal(res.deltaX, 0, 'No snap offset');
             assert.equal(res.guides.length, 0, 'No guides emitted');
+        });
+
+        test('computePointAlignmentGuides aligns point to horizontal "altura" and vertical column (Fusion 360 CAD style)', () => {
+            const refPoints = [
+                { x: 200, y: 150 }, // Point A
+                { x: 400, y: 350 }, // Point B
+            ];
+
+            // 1. Point near horizontal height (y = 152 vs ref y = 150, diff = -2px <= tolerance 6px)
+            const pointNearHeight = { x: 80, y: 152 };
+            const resY = computePointAlignmentGuides(pointNearHeight, refPoints, 6);
+            assert.equal(resY.deltaY, -2, 'Snaps to exact reference height (y = 150)');
+            assert.equal(resY.snappedPoint.y, 150);
+            assert.equal(resY.guides.length, 1);
+            assert.equal(resY.guides[0].axis, 'y');
+            assert.equal(resY.guides[0].position, 150);
+            assert.ok(resY.guides[0].from <= 80, 'Guide spans past the dragged point');
+            assert.ok(resY.guides[0].to >= 200, 'Guide spans past the reference point');
+            assert.deepEqual(resY.guides[0].refPoint, { x: 200, y: 150 }, 'Includes source reference point');
+
+            // 2. Point near vertical column (x = 398 vs ref x = 400, diff = +2px <= tolerance 6px)
+            const pointNearCol = { x: 398, y: 50 };
+            const resX = computePointAlignmentGuides(pointNearCol, refPoints, 6);
+            assert.equal(resX.deltaX, 2, 'Snaps to exact reference column (x = 400)');
+            assert.equal(resX.snappedPoint.x, 400);
+            assert.equal(resX.guides.length, 1);
+            assert.equal(resX.guides[0].axis, 'x');
+            assert.equal(resX.guides[0].position, 400);
+
+            // 3. Point near both (intersection snap)
+            const pointNearBoth = { x: 203, y: 148 };
+            const resBoth = computePointAlignmentGuides(pointNearBoth, refPoints, 6);
+            assert.equal(resBoth.deltaX, -3);
+            assert.equal(resBoth.deltaY, 2);
+            assert.equal(resBoth.snappedPoint.x, 200);
+            assert.equal(resBoth.snappedPoint.y, 150);
+            assert.equal(resBoth.guides.length, 2, 'Emits both X and Y alignment guides');
+        });
+
+        test('computePointAlignmentGuides releases smoothly when dragged beyond tolerance (no sticking / hysteresis)', () => {
+            const refPoints = [{ x: 200, y: 150 }];
+            const tolerance = 6;
+
+            // Point is 10px away from reference height (y = 160 vs 150)
+            const pointAway = { x: 80, y: 160 };
+            const res = computePointAlignmentGuides(pointAway, refPoints, tolerance);
+            assert.equal(res.deltaX, 0, 'Zero delta X');
+            assert.equal(res.deltaY, 0, 'Zero delta Y');
+            assert.equal(res.guides.length, 0, 'No guides active');
+            assert.equal(res.snappedPoint.x, 80);
+            assert.equal(res.snappedPoint.y, 160);
+        });
+
+        test('getShapeKeyPoints extracts corners, edge midpoints, centers, and path nodes', () => {
+            // Unrotated box
+            const rectGeom: ShapeRenderGeometry = { x0: 100, y0: 100, x1: 300, y1: 200 };
+            const rectPoints = getShapeKeyPoints(rectGeom);
+            assert.ok(rectPoints.some(p => p.x === 100 && p.y === 100), 'Contains top-left corner');
+            assert.ok(rectPoints.some(p => p.x === 300 && p.y === 200), 'Contains bottom-right corner');
+            assert.ok(rectPoints.some(p => p.x === 200 && p.y === 150), 'Contains center');
+            assert.ok(rectPoints.some(p => p.x === 200 && p.y === 100), 'Contains top-edge midpoint');
+
+            // Rotated box (90 degrees around center (200, 150))
+            const rotGeom: ShapeRenderGeometry = { x0: 100, y0: 100, x1: 300, y1: 200, rotation: Math.PI / 2 };
+            const rotPoints = getShapeKeyPoints(rotGeom);
+            // Center stays (200, 150)
+            assert.ok(rotPoints.some(p => Math.round(p.x) === 200 && Math.round(p.y) === 150), 'Center stays invariant');
+            // Unrotated top-left (100, 100) rotated 90 deg around (200, 150):
+            // (100 - 200, 100 - 150) = (-100, -50). Rotated 90 deg = (50, -100). + (200, 150) = (250, 50)
+            assert.ok(rotPoints.some(p => Math.round(p.x) === 250 && Math.round(p.y) === 50), 'Rotated corner point');
+
+            // Multi-segment line with path nodes
+            const lineGeom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 200,
+                y1: 100,
+                pathNodes: [
+                    { x: 0, y: 0 },
+                    { x: 100, y: 50 },
+                    { x: 200, y: 100 },
+                ],
+            };
+            const linePoints = getShapeKeyPoints(lineGeom);
+            assert.equal(linePoints.length, 3, 'Contains exactly the 3 path nodes');
+            assert.deepEqual(linePoints[1], { x: 100, y: 50 }, 'Intermediate node is present');
+        });
+
+        test('selection move absolute baseline breaks free cleanly when dragged away from alignment (zero trap / zero freeze)', () => {
+            const initialBounds = { minX: 100, minY: 100, maxX: 200, maxY: 200 };
+            const otherBounds = [{ minX: 150, minY: 100, maxX: 250, maxY: 200 }];
+            const tolerance = 5;
+
+            // Step 1: User moves cursor by 48px.
+            // Predicted minX = 100 + 48 = 148px. Diff from other.minX (150) is 2px <= 5px.
+            const predicted1 = {
+                minX: initialBounds.minX + 48,
+                maxX: initialBounds.maxX + 48,
+                minY: initialBounds.minY,
+                maxY: initialBounds.maxY,
+            };
+            const snap1 = computeSmartAlignmentGuides(predicted1, otherBounds, tolerance);
+            assert.equal(snap1.deltaX, 2, 'Snaps +2px to align minX at 150');
+            const effectiveDx1 = 48 + snap1.deltaX;
+            assert.equal(effectiveDx1, 50, 'Effective displacement is 50px (snapped)');
+
+            // Step 2: User continues moving cursor smoothly to totalDx = 58px.
+            // Predicted minX = 100 + 58 = 158px. Diff from 150 is 8px > tolerance 5px.
+            const predicted2 = {
+                minX: initialBounds.minX + 58,
+                maxX: initialBounds.maxX + 58,
+                minY: initialBounds.minY,
+                maxY: initialBounds.maxY,
+            };
+            const snap2 = computeSmartAlignmentGuides(predicted2, otherBounds, tolerance);
+            assert.equal(snap2.deltaX, 0, 'Snapping releases completely');
+            const effectiveDx2 = 58 + snap2.deltaX;
+            assert.equal(effectiveDx2, 58, 'Effective displacement is 58px (cursor-tracked without resistance)');
         });
     });
 });
