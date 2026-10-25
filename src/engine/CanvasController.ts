@@ -130,6 +130,7 @@ import { PopoverController } from '../ui/kit/index.ts';
 import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
 import { smoothPressure } from './input/PressureCurve.ts';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser.ts';
+import { splitShapeDoc } from './eraser/ShapeEraser.ts';
 import {
     cleanAnchorText,
     findBestMatchingLine,
@@ -4284,10 +4285,20 @@ export class CanvasController {
                     }
                 }
             } else {
-                if (shapeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
-                    modified = true;
+                if (this.eraserMode === 'reticle') {
+                    const fragments = splitShapeDoc(element, points, radius, contentLeft, contentWidth, blockTop, uuid);
+                    if (fragments) {
+                        kept.push(...fragments);
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
                 } else {
-                    kept.push(element);
+                    if (shapeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
                 }
             }
         }
