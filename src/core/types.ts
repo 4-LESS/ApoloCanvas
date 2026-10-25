@@ -169,6 +169,250 @@ export interface WorkspaceToolState {
     shapeFavoriteProfiles: ShapeFavoriteProfile[];
     activeShapeProfileId: string;
     syncFavoriteProfiles: boolean;
+    colorCarousels?: WorkspaceColorCarousels;
+}
+
+export interface ColorProfileSlot {
+    color: string;
+    opacity: number; // 0..100
+}
+
+export interface ColorCarouselProfile {
+    id: string;
+    name?: string;
+    slots: ColorProfileSlot[];
+}
+
+export interface ColorCarouselContextState {
+    recentColors: ColorProfileSlot[];
+    profiles: ColorCarouselProfile[];
+}
+
+export interface WorkspaceColorCarousels {
+    pen: ColorCarouselContextState;
+    highlighter: ColorCarouselContextState;
+    shapeStroke: ColorCarouselContextState;
+    shapeFill: ColorCarouselContextState;
+    globalProfiles?: ColorCarouselProfile[];
+}
+
+export const DEFAULT_WORKSPACE_COLOR_CAROUSELS: WorkspaceColorCarousels = {
+    globalProfiles: [],
+    pen: {
+        recentColors: [
+            { color: '#E53935', opacity: 100 },
+            { color: '#FFA726', opacity: 100 },
+            { color: '#FFEE58', opacity: 100 },
+            { color: '#26A69A', opacity: 100 },
+            { color: '#1E88E5', opacity: 100 },
+            { color: '#7E57C2', opacity: 100 },
+        ],
+        profiles: [
+            {
+                id: 'pen-profile-1',
+                name: 'Primarios',
+                slots: [
+                    { color: '#E53935', opacity: 100 },
+                    { color: '#FFA726', opacity: 100 },
+                    { color: '#FFEE58', opacity: 100 },
+                    { color: '#26A69A', opacity: 100 },
+                    { color: '#1E88E5', opacity: 100 },
+                    { color: '#7E57C2', opacity: 100 },
+                ],
+            },
+            {
+                id: 'pen-profile-2',
+                name: 'Intensos',
+                slots: [
+                    { color: '#D32F2F', opacity: 100 },
+                    { color: '#C2185B', opacity: 100 },
+                    { color: '#7B1FA2', opacity: 100 },
+                    { color: '#512DA8', opacity: 100 },
+                    { color: '#1976D2', opacity: 100 },
+                    { color: '#0097A7', opacity: 100 },
+                ],
+            },
+            {
+                id: 'pen-profile-3',
+                name: 'Monocromo',
+                slots: [
+                    { color: '#212121', opacity: 100 },
+                    { color: '#424242', opacity: 100 },
+                    { color: '#616161', opacity: 100 },
+                    { color: '#9E9E9E', opacity: 100 },
+                    { color: '#E0E0E0', opacity: 100 },
+                    { color: '#FFFFFF', opacity: 100 },
+                ],
+            },
+        ],
+    },
+    highlighter: {
+        recentColors: [
+            { color: '#FDD835', opacity: 75 },
+            { color: '#43A047', opacity: 75 },
+            { color: '#00ACC1', opacity: 75 },
+            { color: '#1E88E5', opacity: 75 },
+            { color: '#8E24AA', opacity: 75 },
+            { color: '#E91E63', opacity: 75 },
+        ],
+        profiles: [
+            {
+                id: 'hl-profile-1',
+                name: 'Neón',
+                slots: [
+                    { color: '#FDD835', opacity: 75 },
+                    { color: '#43A047', opacity: 75 },
+                    { color: '#00ACC1', opacity: 75 },
+                    { color: '#1E88E5', opacity: 75 },
+                    { color: '#8E24AA', opacity: 75 },
+                    { color: '#E91E63', opacity: 75 },
+                ],
+            },
+            {
+                id: 'hl-profile-2',
+                name: 'Suaves',
+                slots: [
+                    { color: '#FFEE58', opacity: 75 },
+                    { color: '#66BB6A', opacity: 75 },
+                    { color: '#26C6DA', opacity: 75 },
+                    { color: '#42A5F5', opacity: 75 },
+                    { color: '#AB47BC', opacity: 75 },
+                    { color: '#EC407A', opacity: 75 },
+                ],
+            },
+            {
+                id: 'hl-profile-3',
+                name: 'Pasteles',
+                slots: [
+                    { color: '#FFF59D', opacity: 75 },
+                    { color: '#A5D6A7', opacity: 75 },
+                    { color: '#80DEEA', opacity: 75 },
+                    { color: '#90CAF9', opacity: 75 },
+                    { color: '#CE93D8', opacity: 75 },
+                    { color: '#F48FB1', opacity: 75 },
+                ],
+            },
+        ],
+    },
+    shapeStroke: {
+        recentColors: [
+            { color: '#E53935', opacity: 100 },
+            { color: '#FFA726', opacity: 100 },
+            { color: '#FFEE58', opacity: 100 },
+            { color: '#26A69A', opacity: 100 },
+            { color: '#1E88E5', opacity: 100 },
+            { color: '#7E57C2', opacity: 100 },
+        ],
+        profiles: [
+            {
+                id: 'shape-stroke-1',
+                name: 'Básicos',
+                slots: [
+                    { color: '#E53935', opacity: 100 },
+                    { color: '#FFA726', opacity: 100 },
+                    { color: '#FFEE58', opacity: 100 },
+                    { color: '#26A69A', opacity: 100 },
+                    { color: '#1E88E5', opacity: 100 },
+                    { color: '#7E57C2', opacity: 100 },
+                ],
+            },
+            {
+                id: 'shape-stroke-2',
+                name: 'Profundos',
+                slots: [
+                    { color: '#D32F2F', opacity: 100 },
+                    { color: '#C2185B', opacity: 100 },
+                    { color: '#7B1FA2', opacity: 100 },
+                    { color: '#512DA8', opacity: 100 },
+                    { color: '#1976D2', opacity: 100 },
+                    { color: '#0097A7', opacity: 100 },
+                ],
+            },
+            {
+                id: 'shape-stroke-3',
+                name: 'Monocromo',
+                slots: [
+                    { color: '#212121', opacity: 100 },
+                    { color: '#424242', opacity: 100 },
+                    { color: '#616161', opacity: 100 },
+                    { color: '#9E9E9E', opacity: 100 },
+                    { color: '#E0E0E0', opacity: 100 },
+                    { color: '#FFFFFF', opacity: 100 },
+                ],
+            },
+        ],
+    },
+    shapeFill: {
+        recentColors: [
+            { color: '#E53935', opacity: 50 },
+            { color: '#FFA726', opacity: 50 },
+            { color: '#FFEE58', opacity: 50 },
+            { color: '#26A69A', opacity: 50 },
+            { color: '#1E88E5', opacity: 50 },
+            { color: '#7E57C2', opacity: 50 },
+        ],
+        profiles: [
+            {
+                id: 'shape-fill-1',
+                name: 'Translúcidos',
+                slots: [
+                    { color: '#E53935', opacity: 50 },
+                    { color: '#FFA726', opacity: 50 },
+                    { color: '#FFEE58', opacity: 50 },
+                    { color: '#26A69A', opacity: 50 },
+                    { color: '#1E88E5', opacity: 50 },
+                    { color: '#7E57C2', opacity: 50 },
+                ],
+            },
+            {
+                id: 'shape-fill-2',
+                name: 'Suaves',
+                slots: [
+                    { color: '#FFCDD2', opacity: 30 },
+                    { color: '#F8BBD0', opacity: 30 },
+                    { color: '#E1BEE7', opacity: 30 },
+                    { color: '#D1C4E9', opacity: 30 },
+                    { color: '#BBDEFB', opacity: 30 },
+                    { color: '#B2EBF2', opacity: 30 },
+                ],
+            },
+            {
+                id: 'shape-fill-3',
+                name: 'Intensos',
+                slots: [
+                    { color: '#D32F2F', opacity: 70 },
+                    { color: '#C2185B', opacity: 70 },
+                    { color: '#7B1FA2', opacity: 70 },
+                    { color: '#512DA8', opacity: 70 },
+                    { color: '#1976D2', opacity: 70 },
+                    { color: '#0097A7', opacity: 70 },
+                ],
+            },
+        ],
+    },
+};
+
+export function cloneColorCarousels(source?: WorkspaceColorCarousels): WorkspaceColorCarousels {
+    const src = source ?? DEFAULT_WORKSPACE_COLOR_CAROUSELS;
+    const cloneProfile = (p: ColorCarouselProfile): ColorCarouselProfile => ({
+        id: p.id,
+        name: p.name,
+        slots: (p.slots ?? []).map(s => ({ color: s.color, opacity: s.opacity })),
+    });
+    const cloneContext = (ctx?: ColorCarouselContextState, fallbackCtx?: ColorCarouselContextState): ColorCarouselContextState => {
+        const c = ctx ?? fallbackCtx ?? { recentColors: [], profiles: [] };
+        return {
+            recentColors: (c.recentColors ?? []).map(s => ({ color: s.color, opacity: s.opacity })),
+            profiles: (c.profiles ?? []).filter(p => p.slots && p.slots.length > 0).map(cloneProfile),
+        };
+    };
+    return {
+        pen: cloneContext(src.pen, DEFAULT_WORKSPACE_COLOR_CAROUSELS.pen),
+        highlighter: cloneContext(src.highlighter, DEFAULT_WORKSPACE_COLOR_CAROUSELS.highlighter),
+        shapeStroke: cloneContext(src.shapeStroke, DEFAULT_WORKSPACE_COLOR_CAROUSELS.shapeStroke),
+        shapeFill: cloneContext(src.shapeFill, DEFAULT_WORKSPACE_COLOR_CAROUSELS.shapeFill),
+        globalProfiles: (src.globalProfiles ?? []).filter(p => p.slots && p.slots.length > 0).map(cloneProfile),
+    };
 }
 
 export type FavoriteTool = 'pen' | 'highlighter' | 'shape';
@@ -357,6 +601,7 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
     ],
     activeShapeProfileId: 'general',
     syncFavoriteProfiles: false,
+    colorCarousels: cloneColorCarousels(DEFAULT_WORKSPACE_COLOR_CAROUSELS),
 };
 syncLegacyFavoritesSlice(DEFAULT_WORKSPACE_TOOL_STATE);
 
@@ -542,6 +787,7 @@ export function hydrateFromSavedState(
         shapeFavoriteProfiles: shapeProfiles,
         activeShapeProfileId: activeShapeId,
         syncFavoriteProfiles: Boolean(saved.syncFavoriteProfiles ?? fallback.syncFavoriteProfiles ?? false),
+        colorCarousels: cloneColorCarousels(saved.colorCarousels ?? fallback.colorCarousels),
     };
 
     // Attach dynamic read-only getter and self-healing setter projection
@@ -645,6 +891,7 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
         shapeFavoriteProfiles: shapeProfiles,
         activeShapeProfileId: activeShapeId,
         syncFavoriteProfiles: Boolean(state.syncFavoriteProfiles),
+        colorCarousels: cloneColorCarousels(state.colorCarousels),
     };
 
     // Attach dynamic read-only getter and self-healing setter projection

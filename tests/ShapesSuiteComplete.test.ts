@@ -259,7 +259,7 @@ describe('Shapes Suite (Stages 1–4)', () => {
             const [lineBtn, fillBtn, ratioBtn] = bar.querySelectorAll('.prop-btn');
 
             // Fill pip reflects the active fill color
-            assert.equal(fillBtn.querySelector('.fill-color-pip').hidden, false);
+            assert.equal(fillBtn.classList.contains('has-fill'), true);
 
             lineBtn.click();
             assert.equal(tray.hidden, false);
@@ -279,7 +279,7 @@ describe('Shapes Suite (Stages 1–4)', () => {
             chips[0].click();
             assert.deepEqual(calls.fill, [true, false]);
             assert.equal(fillTray.querySelector('.fill-detail').hidden, true, 'Off hides the secondary row');
-            assert.equal(fillBtn.querySelector('.fill-color-pip').hidden, true);
+            assert.equal(fillBtn.classList.contains('has-fill'), false);
 
             ratioBtn.click();
             assert.deepEqual(calls.regularize, [true]);

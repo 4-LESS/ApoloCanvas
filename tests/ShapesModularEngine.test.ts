@@ -800,7 +800,7 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             // 3.3 Relleno Tray
             const fillBtn = bar.querySelector('[data-tb="fill"]') as HTMLElement;
             assert.ok(fillBtn, 'Must render fill button');
-            assert.ok(fillBtn.textContent.includes('Relleno'), 'Fill trigger is labelled "Relleno"');
+            assert.ok((fillBtn.getAttribute('aria-label') || fillBtn.title || '').includes('Relleno'), 'Fill trigger is accessible with "Relleno" tooltip');
             const fillTray = estuche.container.querySelector('[data-t="fill"]') as HTMLElement;
             assert.ok(fillTray, 'Must render fill tray');
 
@@ -823,20 +823,20 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             // Fill detail (opacity + colors) hidden while fill is off
             const detail = fillTray.querySelector('.fill-detail') as HTMLElement;
             assert.strictEqual(detail.hidden, true, 'Fill detail row hidden while fill is off');
-            const pip = fillBtn.querySelector('.fill-color-pip') as HTMLElement;
-            assert.strictEqual(pip.hidden, true, 'Fill color pip hidden while fill is off');
+            assert.strictEqual(fillBtn.classList.contains('has-fill'), false, 'Fill trigger has-fill is false while fill is off');
+
 
             // Click hachure pattern chip (index 2)
             (patternChips[2] as HTMLElement).click();
             assert.strictEqual(changedFillPattern, 'hachure', 'Clicking hachure pattern chip selects hachure');
             assert.strictEqual(toggledFill, true, 'Selecting a pattern enables fill');
             assert.strictEqual(detail.hidden, false, 'Fill detail row shown once fill is enabled');
-            assert.strictEqual(pip.hidden, false, 'Fill color pip shown once fill is enabled');
+            assert.strictEqual(fillBtn.classList.contains('has-fill'), true, 'Fill trigger has-fill is true once fill is enabled');
 
             // Density slider shown for hachure, fill opacity slider present
             const dens = fillTray.querySelector('.fill-density') as HTMLElement;
             assert.ok(dens?.classList.contains('is-shown'), 'Density slider is shown for hachure');
-            assert.ok(fillTray.querySelector('.fill-opacity-row'), 'Fill opacity slider is rendered in the fill tray');
+            assert.strictEqual(fillTray.querySelector('.fill-opacity-row'), null, 'Fill opacity slider is omitted from fill tray');
 
             // Subordinate fill color swatches (scoped inside the fill tray)
             const subFillRow = fillTray.querySelector('.fill-swatch-row');

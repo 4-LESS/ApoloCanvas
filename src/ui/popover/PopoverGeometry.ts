@@ -5,6 +5,7 @@ export interface PopoverGeometryOptions {
     margin?: number;
     fallbackWidth?: number;
     fallbackHeight?: number;
+    targetHeight?: number;
 }
 
 /**
@@ -26,14 +27,17 @@ export function applyPopoverGeometry(
     const offset = options.offset ?? 12;
     const margin = options.margin ?? 16;
 
-    popoverEl.style.visibility = 'hidden';
+    const wasVisible = popoverEl.style.visibility !== 'hidden' && !popoverEl.hidden;
+    if (!wasVisible) {
+        popoverEl.style.visibility = 'hidden';
+    }
     popoverEl.style.display = 'flex';
     popoverEl.style.maxHeight = '';
     popoverEl.style.overflowY = '';
 
     const popRect = popoverEl.getBoundingClientRect();
     const popW = popRect.width || popoverEl.offsetWidth || (options.fallbackWidth ?? 320);
-    const popH = popRect.height || popoverEl.offsetHeight || (options.fallbackHeight ?? 440);
+    const popH = options.targetHeight ?? (popRect.height || popoverEl.offsetHeight || (options.fallbackHeight ?? 440));
 
     const anchorRect = anchorEl
         ? anchorEl.getBoundingClientRect()
@@ -47,34 +51,22 @@ export function applyPopoverGeometry(
     const vpTop = vp?.offsetTop ?? 0;
 
     let left = 0;
-    let top = 0;
     let originX = 'center';
     let originY = 'center';
 
     const isBottom = slot === 'bl' || slot === 'bc' || slot === 'br';
     const isTop = slot === 'tl' || slot === 'tc' || slot === 'tr';
 
+    // Horizontal placement
     if (slot === 'ml') {
         left = tbRect.right + offset;
-        top = (anchorRect.top + anchorRect.height / 2) - popH / 2;
         originX = 'left';
-        originY = `${Math.max(24, Math.min(popH - 24, (anchorRect.top + anchorRect.height / 2) - top))}px`;
     } else if (slot === 'mr') {
         left = tbRect.left - offset - popW;
-        top = (anchorRect.top + anchorRect.height / 2) - popH / 2;
         originX = 'right';
-        originY = `${Math.max(24, Math.min(popH - 24, (anchorRect.top + anchorRect.height / 2) - top))}px`;
-    } else if (isBottom) {
-        top = tbRect.top - offset - popH;
-        left = (anchorRect.left + anchorRect.width / 2) - popW / 2;
-        originX = `${Math.max(24, Math.min(popW - 24, (anchorRect.left + anchorRect.width / 2) - left))}px`;
-        originY = 'bottom';
     } else {
-        // 'tl', 'tc', 'tr'
-        top = tbRect.bottom + offset;
         left = (anchorRect.left + anchorRect.width / 2) - popW / 2;
         originX = `${Math.max(24, Math.min(popW - 24, (anchorRect.left + anchorRect.width / 2) - left))}px`;
-        originY = 'top';
     }
 
     const minLeft = vpLeft + margin;
@@ -82,33 +74,55 @@ export function applyPopoverGeometry(
     if (left < minLeft) left = minLeft;
     if (left > maxLeft) left = maxLeft;
 
-    if (isBottom) {
-        const minTop = vpTop + margin;
-        if (top < minTop) {
-            top = minTop;
-            const availableH = tbRect.top - offset - minTop;
-            if (popH > availableH && availableH > 220) {
-                popoverEl.style.maxHeight = `${availableH}px`;
-                popoverEl.style.overflowY = 'auto';
-            }
-        }
-    } else if (isTop) {
-        const topMin = vpTop + margin;
-        const availableH = vpTop + vpH - margin - top;
-        if (popH > availableH && availableH > 220) {
+    // Vertical placement: Global edge-anchoring extending towards center
+    const vpCenterY = vpTop + vpH / 2;
+    const anchorCenterY = anchorRect.top + anchorRect.height / 2;
+
+    const anchorEdge: 'bottom' | 'top' = isBottom
+        ? 'bottom'
+        : isTop
+          ? 'top'
+          : anchorCenterY >= vpCenterY
+            ? 'bottom'
+            : 'top';
+
+    if (anchorEdge === 'bottom') {
+        const refBottom = isBottom
+            ? tbRect.top - offset
+            : Math.min(anchorCenterY + popH / 2, vpTop + vpH - margin);
+        const bottomCoord = Math.min(refBottom, vpTop + vpH - margin);
+        const bottomPx = (vpTop + vpH) - bottomCoord;
+        const safeBottomPx = Math.max(margin, bottomPx);
+
+        const availableH = vpH - safeBottomPx - margin;
+        if (popH > availableH && availableH > 200) {
             popoverEl.style.maxHeight = `${availableH}px`;
             popoverEl.style.overflowY = 'auto';
         }
-        if (top < topMin) top = topMin;
+
+        popoverEl.style.bottom = `${Math.round(safeBottomPx)}px`;
+        popoverEl.style.top = 'auto';
+        originY = 'bottom';
     } else {
-        const minTop = vpTop + margin;
-        const maxTop = vpTop + vpH - popH - margin;
-        if (top < minTop) top = minTop;
-        if (top > maxTop) top = maxTop;
+        const refTop = isTop
+            ? tbRect.bottom + offset
+            : Math.max(anchorCenterY - popH / 2, vpTop + margin);
+        const topCoord = Math.max(refTop, vpTop + margin);
+
+        const availableH = (vpTop + vpH - margin) - topCoord;
+        if (popH > availableH && availableH > 200) {
+            popoverEl.style.maxHeight = `${availableH}px`;
+            popoverEl.style.overflowY = 'auto';
+        }
+
+        popoverEl.style.top = `${Math.round(topCoord)}px`;
+        popoverEl.style.bottom = 'auto';
+        originY = 'top';
     }
 
     popoverEl.style.left = `${Math.round(left)}px`;
-    popoverEl.style.top = `${Math.round(top)}px`;
     popoverEl.style.transformOrigin = `${originX} ${originY}`;
-    popoverEl.style.visibility = '';
+    if (!wasVisible) {
+        popoverEl.style.visibility = '';
+    }
 }

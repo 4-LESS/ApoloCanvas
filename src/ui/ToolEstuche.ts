@@ -12,11 +12,28 @@ import type {
     StrokeFavoriteProfile,
     ShapeFavoriteProfile,
     ShapeFillPattern,
+    WorkspaceColorCarousels,
+    ColorProfileSlot,
+    ColorCarouselProfile,
+    ColorCarouselContextState,
 } from '../core/types.ts';
 import {
     DEFAULT_STROKE_FAVORITE_PROFILES,
     DEFAULT_SHAPE_FAVORITE_PROFILES,
+    DEFAULT_WORKSPACE_COLOR_CAROUSELS,
+    cloneColorCarousels,
 } from '../core/types.ts';
+
+function hexToRgba(hex: string, opacityPercent: number): string {
+    const clean = hex.replace('#', '');
+    const num = parseInt(clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean, 16);
+    if (isNaN(num)) return hex;
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    const a = Math.max(0, Math.min(1, opacityPercent / 100));
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
 import { getShapePlugin, listShapePlugins } from '../engine/shapes/index.ts';
 import { ICONS, createFillGlyph, createSvg, setAccessibleTooltip, bindTapOrClick } from './theme.ts';
 import { SliderControl, type PopoverController, type PopoverInstance } from './kit/index.ts';
@@ -92,6 +109,7 @@ export interface ToolEstucheState {
     fillPattern?: ShapeFillPattern;
     fillDensity?: number;
     fillOpacity?: number; // 0..1
+    colorCarousels?: WorkspaceColorCarousels;
 }
 
 export interface ToolEstucheCallbacks {
@@ -126,6 +144,7 @@ export interface ToolEstucheCallbacks {
     onChangeFillPattern?: (pattern: ShapeFillPattern) => void;
     onChangeFillDensity?: (density: number) => void;
     onChangeFillOpacity?: (opacity: number) => void;
+    onUpdateColorCarousels?: (carousels: WorkspaceColorCarousels) => void;
     onClose?: () => void;
 }
 
@@ -171,13 +190,11 @@ export class ToolEstuche implements PopoverInstance {
     private shapeOpenTray: 'line' | 'fill' | '' = '';
     private shapeLineGlyphContainer?: HTMLElement;
     private shapeFillGlyphContainer?: HTMLElement;
-    private shapeFillPip?: HTMLElement;
     private shapeLineOptionButtons: Map<StrokePattern, HTMLElement> = new Map();
     private shapeFillPatternButtons: Map<ShapeFillPattern | 'off', HTMLElement> = new Map();
     private shapeFillDetailEl?: HTMLElement;
     private shapeDensitySlider?: SliderControl;
     private shapeDensitySection?: HTMLElement;
-    private shapeFillOpacitySlider?: SliderControl;
     private shapeSubFillRowEl?: HTMLElement;
     private shapeSubFillButtons: Map<string, HTMLElement> = new Map();
     private straightenSwitch?: HTMLElement;
@@ -191,9 +208,7 @@ export class ToolEstuche implements PopoverInstance {
     private titleEl?: HTMLElement;
     private headerDotsContainer?: HTMLElement;
 
-    private recentColors: string[] = ['#E53935', '#FFA726', '#FFEE58', '#26A69A', '#42A5F5', '#1E88E5', '#7E57C2', '#EEEEEE'];
-    private maxRecentSlots = 8;
-    private colorPages: string[][] = [];
+    private colorCarousels: WorkspaceColorCarousels;
     private currentPageIndex = 0;
 
     constructor(
@@ -205,8 +220,7 @@ export class ToolEstuche implements PopoverInstance {
         this.state = { ...initialState };
         this.callbacks = callbacks;
         this.popoverController = popoverController;
-
-        this.initColorPages();
+        this.colorCarousels = cloneColorCarousels(initialState.colorCarousels);
 
         this.container = document.createElement('div');
         this.container.className = 'panel apolo-estuche-popover apolo-tool-estuche apolo-popover-shell';
@@ -228,35 +242,64 @@ export class ToolEstuche implements PopoverInstance {
         this.colorPicker = new ColorPickerPopover(parent, this.popoverController);
     }
 
-    private initColorPages(): void {
-        if (this.state.tool === 'highlighter') {
-            this.recentColors = ['#FDD835', '#43A047', '#00ACC1', '#1E88E5', '#8E24AA', '#E91E63', '#FB8C00', '#B0BEC5'];
-            this.colorPages = [
-                this.recentColors,
-                ['#FFEE58', '#66BB6A', '#26C6DA', '#42A5F5', '#AB47BC', '#EC407A', '#FFA726', '#CFD8DC'],
-                ['#FFF59D', '#A5D6A7', '#80DEEA', '#90CAF9', '#CE93D8', '#F48FB1', '#FFCC80', '#ECEFF1'],
-                ['#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#00BCD4', '#009688'],
-            ];
-        } else {
-            this.recentColors = ['#E53935', '#FFA726', '#FFEE58', '#26A69A', '#42A5F5', '#1E88E5', '#7E57C2', '#EEEEEE'];
-            this.colorPages = [
-                this.recentColors,
-                ['#D32F2F', '#C2185B', '#7B1FA2', '#512DA8', '#303F9F', '#1976D2', '#0288D1', '#0097A7'],
-                ['#FFCDD2', '#F8BBD0', '#E1BEE7', '#D1C4E9', '#C5CAE9', '#BBDEFB', '#B3E5FC', '#B2EBF2'],
-                ['#212121', '#424242', '#616161', '#757575', '#9E9E9E', '#BDBDBD', '#E0E0E0', '#FFFFFF'],
-            ];
+    private getColorContextKey(): 'pen' | 'highlighter' | 'shapeStroke' {
+        if (this.state.tool === 'highlighter') return 'highlighter';
+        if (this.state.tool === 'shape') return 'shapeStroke';
+        return 'pen';
+    }
+
+    private getColorContext(): ColorCarouselContextState {
+        const key = this.getColorContextKey();
+        if (!this.colorCarousels[key]) {
+            this.colorCarousels[key] = cloneColorCarousels()[key];
+        }
+        return this.colorCarousels[key];
+    }
+
+    private getShapeFillContext(): ColorCarouselContextState {
+        if (!this.colorCarousels.shapeFill) {
+            this.colorCarousels.shapeFill = cloneColorCarousels().shapeFill;
+        }
+        return this.colorCarousels.shapeFill;
+    }
+
+    private cleanEmptyProfiles(): void {
+        const prune = (profiles: ColorCarouselProfile[]) => profiles.filter(p => p.slots && p.slots.length > 0);
+        if (this.colorCarousels.globalProfiles) {
+            this.colorCarousels.globalProfiles = prune(this.colorCarousels.globalProfiles);
+        }
+        const ctxKeys: Array<'pen' | 'highlighter' | 'shapeStroke' | 'shapeFill'> = ['pen', 'highlighter', 'shapeStroke', 'shapeFill'];
+        for (const k of ctxKeys) {
+            if (this.colorCarousels[k]?.profiles) {
+                this.colorCarousels[k].profiles = prune(this.colorCarousels[k].profiles);
+            }
         }
     }
 
-    private pushRecentColor(hex: string): void {
+    private getActiveProfiles(): ColorCarouselProfile[] {
+        this.cleanEmptyProfiles();
+        const globals = this.colorCarousels.globalProfiles ?? [];
+        const locals = this.getColorContext().profiles ?? [];
+        return [...globals, ...locals];
+    }
+
+    private pushRecentColorForContext(key: 'pen' | 'highlighter' | 'shapeStroke' | 'shapeFill', hex: string, opacity: number = 100): void {
+        const ctx = this.colorCarousels[key];
+        if (!ctx) return;
         const clean = hex.toUpperCase();
-        this.recentColors = this.recentColors.filter((c) => c.toUpperCase() !== clean);
-        this.recentColors.unshift(clean);
-        if (this.recentColors.length > this.maxRecentSlots) {
-            this.recentColors.pop();
+        const normOpacity = Math.round(opacity <= 1 ? opacity * 100 : opacity);
+
+        ctx.recentColors = ctx.recentColors.filter((s) => s.color.toUpperCase() !== clean || s.opacity !== normOpacity);
+        ctx.recentColors.unshift({ color: clean, opacity: normOpacity });
+        if (ctx.recentColors.length > 6) {
+            ctx.recentColors.length = 6;
         }
-        this.colorPages[0] = this.recentColors;
         ColorPickerPopover.pushRecentColor(clean);
+        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+    }
+
+    private pushRecentColor(hex: string): void {
+        this.pushRecentColorForContext(this.getColorContextKey(), hex, this.getOpacityPercent());
     }
 
     private getTitleForTool(tool: ToolType): string {
@@ -283,7 +326,10 @@ export class ToolEstuche implements PopoverInstance {
             const toolChanged = state.tool && state.tool !== this.state.tool;
             if (toolChanged) {
                 this.state.showingFavorites = false;
-                this.initColorPages();
+                this.currentPageIndex = 0;
+            }
+            if (state.colorCarousels) {
+                this.colorCarousels = cloneColorCarousels(state.colorCarousels);
             }
             this.state = { ...this.state, ...state };
             if (state.color) {
@@ -304,6 +350,16 @@ export class ToolEstuche implements PopoverInstance {
         this.position(this.currentAnchorEl);
         this.triggerAnimation();
 
+        // Ensure no internal element retains focus on open to prevent stuck tooltips
+        if (typeof document !== 'undefined') {
+            const activeEl = (document as any).activeElement;
+            if (activeEl && typeof activeEl.blur === 'function' && this.container.contains(activeEl)) {
+                try {
+                    activeEl.blur();
+                } catch {}
+            }
+        }
+
         if (this.popoverController) {
             this.popoverController.open(this, this.currentAnchorEl);
         }
@@ -311,6 +367,7 @@ export class ToolEstuche implements PopoverInstance {
 
     close(): void {
         if (!this.isOpen()) return;
+        this.shapeOpenTray = '';
         this.openState = false;
         this.container.hidden = true;
         this.container.style.display = 'none';
@@ -348,7 +405,7 @@ export class ToolEstuche implements PopoverInstance {
         this.container.classList.add('apolo-popover-animated');
     }
 
-    position(anchorEl?: HTMLElement | null): void {
+    position(anchorEl?: HTMLElement | null, targetHeight?: number): void {
         if (!this.isOpen()) return;
         const anchor = anchorEl ?? this.currentAnchorEl;
         if (!anchor) return;
@@ -358,6 +415,7 @@ export class ToolEstuche implements PopoverInstance {
         applyPopoverGeometry(this.container, anchor, toolbarEl, this.state.slot, {
             fallbackWidth: w,
             fallbackHeight: 440,
+            targetHeight,
         });
     }
 
@@ -406,9 +464,12 @@ export class ToolEstuche implements PopoverInstance {
 
         if (!this.isOpen()) return;
 
+        if (partial.colorCarousels) {
+            this.colorCarousels = cloneColorCarousels(partial.colorCarousels);
+        }
         if (partial.tool && partial.tool !== previousTool) {
             this.state.showingFavorites = false;
-            this.initColorPages();
+            this.currentPageIndex = 0;
             this.render();
             this.position(this.currentAnchorEl);
             return;
@@ -1305,8 +1366,6 @@ export class ToolEstuche implements PopoverInstance {
         }
 
         // 2. Slider de grosor (1–12) con pista punteada
-        const sliderRow = document.createElement('div');
-        sliderRow.className = 'slider-row shape-width-row';
         this.widthSliderControl = new SliderControl({
             min: 1,
             max: 12,
@@ -1319,8 +1378,8 @@ export class ToolEstuche implements PopoverInstance {
                 this.callbacks.onChangeWidth(val);
             },
         });
-        sliderRow.appendChild(this.widthSliderControl.element);
-        this.bodyEl.appendChild(sliderRow);
+        this.widthSliderControl.element.classList.add('shape-width-row');
+        this.bodyEl.appendChild(this.widthSliderControl.element);
 
         // 3. Barra de 3 controles [Línea ▾] [Relleno ▾] [1:1] + bandeja contextual plegable
         const controls = document.createElement('div');
@@ -1334,20 +1393,14 @@ export class ToolEstuche implements PopoverInstance {
         const lineBtn = this.createPropButton('line', 'Tipo de línea');
         this.shapeLineGlyphContainer = document.createElement('span');
         this.shapeLineGlyphContainer.className = 'prop-glyph';
-        lineBtn.append(this.shapeLineGlyphContainer, this.createPropCaret());
+        lineBtn.appendChild(this.shapeLineGlyphContainer);
         bindTapOrClick(lineBtn, () => this.toggleShapeTray('line'));
         this.shapeLineBtn = lineBtn;
 
         const fillBtn = this.createPropButton('fill', 'Relleno de forma');
         this.shapeFillGlyphContainer = document.createElement('span');
         this.shapeFillGlyphContainer.className = 'prop-glyph';
-        const fillLabel = document.createElement('span');
-        fillLabel.className = 'prop-label';
-        fillLabel.textContent = 'Relleno';
-        this.shapeFillPip = document.createElement('span');
-        this.shapeFillPip.className = 'fill-color-pip';
-        this.shapeFillPip.setAttribute('aria-hidden', 'true');
-        fillBtn.append(this.shapeFillGlyphContainer, fillLabel, this.shapeFillPip, this.createPropCaret());
+        fillBtn.appendChild(this.shapeFillGlyphContainer);
         bindTapOrClick(fillBtn, () => {
             if (!this.isActiveShapeClosed()) return;
             this.toggleShapeTray('fill');
@@ -1355,11 +1408,7 @@ export class ToolEstuche implements PopoverInstance {
         this.shapeFillBtn = fillBtn;
 
         const ratioBtn = this.createPropButton('ratio', 'Formas perfectas (1:1 / 45°)');
-        ratioBtn.appendChild(createSvg(ICONS.ratio, { size: 16, strokeWidth: 1.8 }));
-        const ratioLabel = document.createElement('span');
-        ratioLabel.className = 'prop-label';
-        ratioLabel.textContent = '1:1';
-        ratioBtn.appendChild(ratioLabel);
+        ratioBtn.appendChild(createSvg(ICONS.ratio, { size: 19, strokeWidth: 1.8 }));
         bindTapOrClick(ratioBtn, () => {
             this.state.regularize = !this.state.regularize;
             this.updateShapeRegularizeVisual();
@@ -1369,13 +1418,23 @@ export class ToolEstuche implements PopoverInstance {
 
         bar.append(lineBtn, fillBtn, ratioBtn);
 
+        const dividerTop = document.createElement('div');
+        dividerTop.className = 'shape-divider shape-divider-top';
+
         const tray = document.createElement('div');
         tray.className = 'context-tray';
         tray.hidden = true;
         this.shapeContextTray = tray;
-        tray.append(this.createLineTraySection(), this.createFillTraySection());
 
-        controls.append(bar, tray);
+        const inner = document.createElement('div');
+        inner.className = 'context-tray-inner';
+        const dividerBottom = document.createElement('div');
+        dividerBottom.className = 'shape-divider shape-divider-bottom';
+
+        inner.append(this.createLineTraySection(), this.createFillTraySection(), dividerBottom);
+        tray.appendChild(inner);
+
+        controls.append(bar, dividerTop, tray);
         this.bodyEl.appendChild(controls);
 
         this.updateShapeButtonsVisual();
@@ -1394,16 +1453,81 @@ export class ToolEstuche implements PopoverInstance {
         btn.type = 'button';
         btn.className = 'shape-btn shape-grid-btn';
         btn.style.touchAction = 'manipulation';
+        btn.style.position = 'relative';
+        btn.style.zIndex = '2';
         btn.setAttribute('role', 'radio');
         btn.setAttribute('data-s', item.type);
         setAccessibleTooltip(btn, item.label);
         btn.appendChild(createSvg(item.iconD, { size: 20, strokeWidth: 1.8 }));
-        bindTapOrClick(btn, () => {
+
+        let downPos: { x: number; y: number; time: number } | null = null;
+        let isDragging = false;
+        let initialScroll = 0;
+        let lastTriggerTime = 0;
+
+        const triggerSelect = () => {
+            const now = Date.now();
+            if (now - lastTriggerTime < 300) return;
+            lastTriggerTime = now;
             this.state.shapeType = item.type;
             this.updateShapeButtonsVisual();
             this.updateShapeFillAvailability();
             this.callbacks.onSelectShapeType(item.type);
+            try {
+                btn.blur();
+            } catch {}
+        };
+
+        btn.addEventListener('pointerdown', (e: PointerEvent) => {
+            if (typeof e.button === 'number' && e.button !== 0 && e.button !== -1) return;
+            downPos = { x: e.clientX, y: e.clientY, time: Date.now() };
+            initialScroll = this.shapeCarouselEl?.scrollLeft ?? 0;
+            isDragging = false;
         });
+
+        btn.addEventListener('pointermove', (e: PointerEvent) => {
+            if (!downPos) return;
+            const dx = e.clientX - downPos.x;
+            if (Math.abs(dx) > 8 || isDragging) {
+                isDragging = true;
+                if (this.shapeCarouselEl) {
+                    this.shapeCarouselEl.scrollLeft = initialScroll - dx;
+                }
+            }
+        });
+
+        const onPointerEnd = (e: PointerEvent) => {
+            if (!downPos) return;
+            const dx = e.clientX - downPos.x;
+            const dy = e.clientY - downPos.y;
+            const dt = Date.now() - downPos.time;
+            const wasDrag = isDragging;
+            downPos = null;
+            isDragging = false;
+
+            if (wasDrag) {
+                if (this.shapeCarouselEl) {
+                    const width = Math.max(1, this.shapeCarouselEl.clientWidth);
+                    const targetPage = Math.round(this.shapeCarouselEl.scrollLeft / width);
+                    this.goToShapePage(targetPage);
+                }
+                return;
+            }
+
+            if (Math.hypot(dx, dy) <= 14 && dt <= 650) {
+                e.stopPropagation();
+                triggerSelect();
+            }
+        };
+
+        btn.addEventListener('pointerup', onPointerEnd);
+        btn.addEventListener('pointercancel', onPointerEnd);
+
+        btn.addEventListener('click', (e: MouseEvent) => {
+            e.stopPropagation();
+            triggerSelect();
+        });
+
         this.shapeButtons.set(item.type, btn);
         return btn;
     }
@@ -1418,12 +1542,6 @@ export class ToolEstuche implements PopoverInstance {
         return btn;
     }
 
-    private createPropCaret(): SVGSVGElement {
-        const caret = createSvg(ICONS.caret, { size: 9, strokeWidth: 1.7 });
-        caret.setAttribute('class', 'prop-caret');
-        return caret;
-    }
-
     private createLineTraySection(): HTMLElement {
         const section = document.createElement('div');
         section.className = 'tray-section tray-line';
@@ -1436,10 +1554,10 @@ export class ToolEstuche implements PopoverInstance {
         grid.setAttribute('role', 'radiogroup');
         grid.setAttribute('aria-label', 'Estilo de línea');
 
-        const lineStyles: Array<{ pattern: StrokePattern; label: string; index: number }> = [
-            { pattern: 'solid', label: 'Continua', index: 0 },
-            { pattern: 'dashed', label: 'Guiones', index: 1 },
-            { pattern: 'dotted', label: 'Puntos', index: 2 },
+        const lineStyles: Array<{ pattern: StrokePattern; cls: string; label: string }> = [
+            { pattern: 'solid', cls: '', label: 'Continua' },
+            { pattern: 'dashed', cls: 'is-dashed', label: 'Guiones' },
+            { pattern: 'dotted', cls: 'is-dotted', label: 'Puntos' },
         ];
 
         for (const item of lineStyles) {
@@ -1450,7 +1568,15 @@ export class ToolEstuche implements PopoverInstance {
             chip.setAttribute('role', 'radio');
             chip.setAttribute('data-pattern', item.pattern);
             setAccessibleTooltip(chip, item.label);
-            chip.appendChild(this.createLineOptionSvg(item.index));
+
+            const pill = document.createElement('span');
+            pill.className = 'popover-line-chip-pill';
+            pill.setAttribute('aria-hidden', 'true');
+
+            const bar = document.createElement('div');
+            bar.className = `popover-line-bar ${item.cls}`;
+            pill.appendChild(bar);
+            chip.appendChild(pill);
 
             bindTapOrClick(chip, () => {
                 this.state.pattern = item.pattern;
@@ -1525,7 +1651,10 @@ export class ToolEstuche implements PopoverInstance {
 
         const densSection = document.createElement('div');
         densSection.className = 'fill-density';
+        densSection.hidden = true;
         this.shapeDensitySection = densSection;
+        const densInner = document.createElement('div');
+        densInner.className = 'density-inner';
         this.shapeDensitySlider = new SliderControl({
             min: 1,
             max: 5,
@@ -1539,27 +1668,8 @@ export class ToolEstuche implements PopoverInstance {
                 this.updateShapeFillGlyphs();
             },
         });
-        densSection.appendChild(this.shapeDensitySlider.element);
-
-        const opacityRow = document.createElement('div');
-        opacityRow.className = 'fill-opacity-row';
-        const opacityLabel = document.createElement('span');
-        opacityLabel.className = 'tray-label';
-        opacityLabel.textContent = 'Opacidad de relleno';
-        this.shapeFillOpacitySlider = new SliderControl({
-            min: 10,
-            max: 100,
-            step: 5,
-            value: this.getFillOpacityPercent(),
-            variant: 'sm',
-            showValueText: false,
-            ariaLabel: 'Opacidad de relleno',
-            onChange: (val) => {
-                this.state.fillOpacity = val / 100;
-                this.callbacks.onChangeFillOpacity?.(val / 100);
-            },
-        });
-        opacityRow.append(opacityLabel, this.shapeFillOpacitySlider.element);
+        densInner.appendChild(this.shapeDensitySlider.element);
+        densSection.appendChild(densInner);
 
         const swatchRow = document.createElement('div');
         swatchRow.className = 'fill-swatch-row';
@@ -1567,28 +1677,9 @@ export class ToolEstuche implements PopoverInstance {
         swatchRow.setAttribute('aria-label', 'Color de relleno');
         this.shapeSubFillRowEl = swatchRow;
 
-        detail.append(densSection, opacityRow, swatchRow);
+        detail.append(densSection, swatchRow);
         section.appendChild(detail);
         return section;
-    }
-
-    private createLineOptionSvg(patternIndex: number): SVGSVGElement {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'ln');
-        svg.setAttribute('viewBox', '0 0 64 10');
-        svg.setAttribute('aria-hidden', 'true');
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', '6');
-        line.setAttribute('y1', '5');
-        line.setAttribute('x2', '58');
-        line.setAttribute('y2', '5');
-        if (patternIndex === 1) {
-            line.setAttribute('stroke-dasharray', '7 6');
-        } else if (patternIndex === 2) {
-            line.setAttribute('stroke-dasharray', '0.1 6.5');
-        }
-        svg.appendChild(line);
-        return svg;
     }
 
     private isShapeTypeActive(type: ShapeType): boolean {
@@ -1598,12 +1689,6 @@ export class ToolEstuche implements PopoverInstance {
 
     private isActiveShapeClosed(): boolean {
         return getShapePlugin(this.state.shapeType || 'rect').isClosed;
-    }
-
-    private getFillOpacityPercent(): number {
-        const raw = this.state.fillOpacity ?? DEFAULT_FILL_OPACITY;
-        const pct = raw > 1 ? raw : raw * 100;
-        return Math.max(10, Math.min(100, Math.round(pct / 5) * 5));
     }
 
     private goToShapePage(index: number): void {
@@ -1671,20 +1756,22 @@ export class ToolEstuche implements PopoverInstance {
 
     private syncShapeTrayVisual(): void {
         const open = this.shapeOpenTray;
-        const sync = (btn: HTMLElement | undefined, section: HTMLElement | undefined, isOpen: boolean) => {
+        const isOpen = open !== '';
+        const sync = (btn: HTMLElement | undefined, section: HTMLElement | undefined, isSectionOpen: boolean) => {
             if (btn) {
-                btn.classList.toggle('is-open', isOpen);
-                btn.setAttribute('aria-expanded', String(isOpen));
+                btn.classList.toggle('is-open', isSectionOpen);
+                btn.setAttribute('aria-expanded', String(isSectionOpen));
             }
             if (section) {
-                section.hidden = !isOpen;
-                section.classList.toggle('is-open', isOpen);
+                section.hidden = !isSectionOpen;
+                section.classList.toggle('is-open', isSectionOpen);
             }
         };
         sync(this.shapeLineBtn, this.shapeLineTray, open === 'line');
         sync(this.shapeFillBtn, this.shapeFillTray, open === 'fill');
         if (this.shapeContextTray) {
-            this.shapeContextTray.hidden = open === '';
+            this.shapeContextTray.hidden = !isOpen;
+            this.shapeContextTray.classList.toggle('is-open', isOpen);
             this.shapeContextTray.setAttribute('data-open', open || 'none');
         }
     }
@@ -1720,11 +1807,10 @@ export class ToolEstuche implements PopoverInstance {
     private updateShapeLineVisual(): void {
         const pattern = this.state.pattern || this.state.lineStyle || 'solid';
         if (this.shapeLineGlyphContainer) {
-            const iconD = pattern === 'dashed' ? ICONS.lineDashed : pattern === 'dotted' ? ICONS.lineDotted : ICONS.lineSolid;
-            const glyph = createSvg(iconD, { size: 18, strokeWidth: 2 });
-            if (pattern === 'dashed') glyph.setAttribute('stroke-dasharray', '4 3');
-            else if (pattern === 'dotted') glyph.setAttribute('stroke-dasharray', '0.1 3.5');
-            this.shapeLineGlyphContainer.replaceChildren(glyph);
+            const bar = document.createElement('div');
+            const cls = pattern === 'dashed' ? 'is-dashed' : pattern === 'dotted' ? 'is-dotted' : '';
+            bar.className = `popover-line-bar prop-line-preview ${cls}`;
+            this.shapeLineGlyphContainer.replaceChildren(bar);
         }
         for (const [pat, btn] of this.shapeLineOptionButtons) {
             const active = pat === pattern;
@@ -1747,10 +1833,6 @@ export class ToolEstuche implements PopoverInstance {
         if (this.shapeFillGlyphContainer) {
             this.shapeFillGlyphContainer.replaceChildren(createFillGlyph(pat, dens, 'bar-fill-glyph'));
         }
-        if (this.shapeFillPip) {
-            this.shapeFillPip.hidden = !fillActive;
-            this.shapeFillPip.style.backgroundColor = col;
-        }
 
         for (const [id, btn] of this.shapeFillPatternButtons) {
             const isActive = id === pat;
@@ -1767,7 +1849,6 @@ export class ToolEstuche implements PopoverInstance {
             this.shapeDensitySection.classList.toggle('is-shown', showDensity);
         }
         this.shapeDensitySlider?.setValue(dens, false);
-        this.shapeFillOpacitySlider?.setValue(this.getFillOpacityPercent(), false);
 
         this.renderShapeSubFillSwatches();
     }
@@ -1777,25 +1858,80 @@ export class ToolEstuche implements PopoverInstance {
         this.shapeSubFillRowEl.replaceChildren();
         this.shapeSubFillButtons.clear();
 
-        const activeColor = (this.state.fillColor || this.state.color).toUpperCase();
-        const colors = (this.colorPages[0] || this.recentColors).slice(0, 8);
+        const ctx = this.getShapeFillContext();
+        if (!ctx.recentColors || ctx.recentColors.length === 0) {
+            ctx.recentColors = cloneColorCarousels().shapeFill.recentColors;
+        }
 
-        for (const col of colors) {
+        const activeColor = (this.state.fillColor || this.state.color).toUpperCase();
+        const fillSlots = ctx.recentColors.slice(0, 6);
+        const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
+
+        for (const slot of fillSlots) {
+            const col = slot.color;
+            const slotOp = slot.opacity ?? 100;
             const sw = document.createElement('button');
             sw.type = 'button';
             const isActive = activeColor === col.toUpperCase();
             sw.className = isActive ? 'fill-swatch is-active' : 'fill-swatch';
+            if (slotOp < 100) {
+                sw.classList.add('has-transparency');
+            }
             sw.style.touchAction = 'manipulation';
-            sw.style.backgroundColor = col;
             sw.style.setProperty('--c', col);
             sw.setAttribute('role', 'radio');
             sw.setAttribute('aria-checked', String(isActive));
-            setAccessibleTooltip(sw, `Color de relleno ${col}`);
+            setAccessibleTooltip(sw, `Color de relleno ${col} (${slotOp}%)`);
 
-            bindTapOrClick(sw, () => {
+            const inner = document.createElement('span');
+            inner.className = 'popover-swatch-inner';
+            if (slotOp < 100) {
+                inner.style.backgroundColor = hexToRgba(col, slotOp);
+            } else {
+                sw.style.backgroundColor = col;
+                inner.style.backgroundColor = col;
+            }
+            sw.appendChild(inner);
+
+            bindTapOrClick(sw, (e) => {
+                if (isActive) {
+                    e?.stopPropagation();
+                    this.colorPicker.open(
+                        sw,
+                        this.state.slot,
+                        toolbarEl,
+                        col,
+                        (newColor, opacity) => {
+                            const normOpacity = typeof opacity === 'number'
+                                ? (opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity)))
+                                : (slotOp / 100);
+                            const opPercent = Math.round(normOpacity * 100);
+                            slot.color = newColor;
+                            slot.opacity = opPercent;
+                            this.state.fillColor = newColor;
+                            this.state.fillOpacity = normOpacity;
+                            this.pushRecentColorForContext('shapeFill', newColor, opPercent);
+                            this.callbacks.onChangeFillColor?.(newColor);
+                            this.callbacks.onChangeFillOpacity?.(normOpacity);
+                            this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+                            this.updateShapeFillGlyphs();
+                            this.renderShapeSubFillSwatches();
+                        },
+                        null,
+                        slotOp
+                    );
+                    return;
+                }
+
+                const normOpacity = slotOp / 100;
                 this.state.fillColor = col;
+                this.state.fillOpacity = normOpacity;
+                this.pushRecentColorForContext('shapeFill', col, slotOp);
                 this.callbacks.onChangeFillColor?.(col);
+                this.callbacks.onChangeFillOpacity?.(normOpacity);
+                this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
                 this.updateShapeFillGlyphs();
+                this.renderShapeSubFillSwatches();
             });
 
             this.shapeSubFillButtons.set(col, sw);
@@ -1808,23 +1944,34 @@ export class ToolEstuche implements PopoverInstance {
         addBtn.style.touchAction = 'manipulation';
         addBtn.setAttribute('data-apolo-popover-trigger', 'true');
         setAccessibleTooltip(addBtn, 'Personalizar color de relleno');
-        addBtn.appendChild(createSvg(ICONS.plus, { size: 12, strokeWidth: 2 }));
+        addBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
 
         bindTapOrClick(addBtn, (e) => {
             e?.stopPropagation();
-            const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
+            const currentFillOpacity = this.state.fillOpacity !== undefined
+                ? (this.state.fillOpacity <= 1 ? Math.round(this.state.fillOpacity * 100) : Math.round(this.state.fillOpacity))
+                : 50;
             this.colorPicker.open(
                 addBtn,
                 this.state.slot,
                 toolbarEl,
                 this.state.fillColor || this.state.color,
-                (newColor) => {
+                (newColor, opacity) => {
+                    const normOpacity = typeof opacity === 'number'
+                        ? (opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity)))
+                        : (this.state.fillOpacity ?? 0.5);
+                    const opPercent = Math.round(normOpacity * 100);
                     this.state.fillColor = newColor;
+                    this.state.fillOpacity = normOpacity;
+                    this.pushRecentColorForContext('shapeFill', newColor, opPercent);
                     this.callbacks.onChangeFillColor?.(newColor);
+                    this.callbacks.onChangeFillOpacity?.(normOpacity);
+                    this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
                     this.updateShapeFillGlyphs();
+                    this.renderShapeSubFillSwatches();
                 },
                 null,
-                100,
+                currentFillOpacity
             );
         });
 
@@ -2060,8 +2207,10 @@ export class ToolEstuche implements PopoverInstance {
     }
 
     private changeColorPage(delta: number): void {
+        const activeProfiles = this.getActiveProfiles();
+        const totalPages = 1 + activeProfiles.length + 1;
         const n = this.currentPageIndex + delta;
-        if (n >= 0 && n < this.colorPages.length) {
+        if (n >= 0 && n < totalPages) {
             this.currentPageIndex = n;
             this.updateColorsUI();
         }
@@ -2072,90 +2221,346 @@ export class ToolEstuche implements PopoverInstance {
         this.swatchRowEl.replaceChildren();
         this.swatchButtons.clear();
 
-        const colors = this.colorPages[this.currentPageIndex] || this.recentColors;
-        const visibleColors = colors.slice(0, 8);
-
-        for (const col of visibleColors) {
-            const sw = document.createElement('button');
-            sw.type = 'button';
-            const isActive = this.state.color.toUpperCase() === col.toUpperCase();
-            sw.className = `swatch popover-swatch-circle ${isActive ? 'is-active' : ''}`;
-            sw.style.touchAction = 'manipulation';
-            setAccessibleTooltip(sw, `Color ${col}`);
-            sw.style.backgroundColor = col;
-            sw.style.setProperty('--c', col);
-            sw.style.setProperty('--swatch-color', col);
-
-            const inner = document.createElement('span');
-            inner.className = 'popover-swatch-inner';
-            inner.style.backgroundColor = col;
-            sw.appendChild(inner);
-
-            bindTapOrClick(sw, () => {
-                this.state.color = col;
-                this.pushRecentColor(col);
-                for (const [, s] of this.swatchButtons) s.classList.remove('is-active');
-                sw.classList.add('is-active');
-                this.container.style.setProperty('--hl-color', col);
-                if (this.opacityInput?.parentElement) {
-                    this.opacityInput.parentElement.style.setProperty('--hl-color', col);
-                }
-                this.callbacks.onChangeColor(col);
-            });
-
-            this.swatchButtons.set(col, sw);
-            this.swatchRowEl.appendChild(sw);
+        const ctxKey = this.getColorContextKey();
+        const ctx = this.getColorContext();
+        const activeProfiles = this.getActiveProfiles();
+        const totalPages = 1 + activeProfiles.length + 1;
+        if (this.currentPageIndex >= totalPages) {
+            this.currentPageIndex = Math.max(0, totalPages - 1);
         }
 
-        // Circular "+" button (opens ColorPickerPopover)
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'swatch-add popover-color-add';
-        addBtn.style.touchAction = 'manipulation';
-        addBtn.setAttribute('data-apolo-popover-trigger', 'true');
-        setAccessibleTooltip(addBtn, 'Personalizar color');
-        addBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
+        const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
 
-        bindTapOrClick(addBtn, (e) => {
-            e?.stopPropagation();
-            const toolbarEl = (this.currentAnchorEl?.closest?.('.apolo-canvas-toolbar') as HTMLElement) || this.currentAnchorEl?.parentElement || null;
-            this.colorPicker.open(
-                addBtn,
-                this.state.slot,
-                toolbarEl,
-                this.state.color,
-                (newColor, opacity) => {
-                    this.state.color = newColor;
-                    this.state.opacity = opacity;
-                    this.state.pressureSensitivity = Math.max(0, Math.min(1, opacity / 100));
-                    this.pushRecentColor(newColor);
-                    this.currentPageIndex = 0;
+        this.cleanEmptyProfiles();
 
-                    this.container.style.setProperty('--hl-color', newColor);
-                    this.opacityInput?.parentElement?.style.setProperty('--hl-color', newColor);
-                    this.syncSliderVisual(this.opacityInput, this.opacityBubble, this.getOpacityPercent(), 0, 100);
+        if (this.currentPageIndex === 0) {
+            // --- Page 0: Historial / Colores recientes (6 slots + '+' button) ---
+            this.swatchRowEl.classList.remove('is-centered');
+            const recentSlots = ctx.recentColors.slice(0, 6);
+            for (const slot of recentSlots) {
+                const col = slot.color;
+                const slotOp = slot.opacity ?? 100;
+                const sw = document.createElement('button');
+                sw.type = 'button';
+                const isActive = this.state.color.toUpperCase() === col.toUpperCase() && this.getOpacityPercent() === slotOp;
+                sw.className = `swatch popover-swatch-circle ${isActive ? 'is-active' : ''}`;
+                if (slotOp < 100) {
+                    sw.classList.add('has-transparency');
+                }
+                sw.style.touchAction = 'manipulation';
+                setAccessibleTooltip(sw, `Color ${col} (${slotOp}%)`);
+                sw.style.setProperty('--c', col);
+                sw.style.setProperty('--swatch-color', col);
+
+                const inner = document.createElement('span');
+                inner.className = 'popover-swatch-inner';
+                if (slotOp < 100) {
+                    inner.style.backgroundColor = hexToRgba(col, slotOp);
+                } else {
+                    sw.style.backgroundColor = col;
+                    inner.style.backgroundColor = col;
+                }
+                sw.appendChild(inner);
+
+                bindTapOrClick(sw, (e) => {
+                    if (isActive) {
+                        e?.stopPropagation();
+                        this.colorPicker.open(
+                            sw,
+                            this.state.slot,
+                            toolbarEl,
+                            col,
+                            (newColor, opacity) => {
+                                const normOpacity = typeof opacity === 'number'
+                                    ? (opacity > 1 ? opacity : Math.round(opacity * 100))
+                                    : 100;
+                                slot.color = newColor;
+                                slot.opacity = normOpacity;
+                                this.state.color = newColor;
+                                const norm01 = normOpacity / 100;
+                                this.state.opacity = norm01;
+                                this.state.pressureSensitivity = norm01;
+                                this.pushRecentColorForContext(ctxKey, newColor, normOpacity);
+                                this.container.style.setProperty('--hl-color', newColor);
+                                this.opacityInput?.parentElement?.style.setProperty('--hl-color', newColor);
+                                this.syncSliderVisual(this.opacityInput, this.opacityBubble, normOpacity, 0, 100);
+                                this.callbacks.onChangeColor(newColor);
+                                this.callbacks.onChangeOpacity?.(norm01);
+                                this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+                                this.updateColorsUI();
+                            },
+                            null,
+                            slotOp
+                        );
+                        return;
+                    }
+
+                    this.state.color = col;
+                    const norm01 = slotOp / 100;
+                    this.state.opacity = norm01;
+                    this.state.pressureSensitivity = norm01;
+                    this.pushRecentColorForContext(ctxKey, col, slotOp);
+                    for (const [, s] of this.swatchButtons) s.classList.remove('is-active');
+                    sw.classList.add('is-active');
+                    this.container.style.setProperty('--hl-color', col);
+                    if (this.opacityInput?.parentElement) {
+                        this.opacityInput.parentElement.style.setProperty('--hl-color', col);
+                    }
+                    this.syncSliderVisual(this.opacityInput, this.opacityBubble, slotOp, 0, 100);
+                    this.callbacks.onChangeColor(col);
+                    this.callbacks.onChangeOpacity?.(norm01);
                     this.updateColorsUI();
-                    this.callbacks.onChangeColor(newColor);
-                    this.callbacks.onChangeOpacity?.(opacity);
-                },
-                null,
-                this.getOpacityPercent()
-            );
-        });
-        this.swatchRowEl.appendChild(addBtn);
+                });
 
-        // Pagination dots
+                this.swatchButtons.set(`${col}-${slotOp}`, sw);
+                this.swatchRowEl.appendChild(sw);
+            }
+
+            // Circular "+" button (exclusivo del historial de recientes)
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'swatch-add popover-color-add';
+            addBtn.style.touchAction = 'manipulation';
+            addBtn.setAttribute('data-apolo-popover-trigger', 'true');
+            setAccessibleTooltip(addBtn, 'Personalizar color');
+            addBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
+
+            bindTapOrClick(addBtn, (e) => {
+                e?.stopPropagation();
+                this.colorPicker.open(
+                    addBtn,
+                    this.state.slot,
+                    toolbarEl,
+                    this.state.color,
+                    (newColor, opacity) => {
+                        const normOpacity = typeof opacity === 'number'
+                            ? (opacity > 1 ? opacity : Math.round(opacity * 100))
+                            : 100;
+                        const norm01 = normOpacity / 100;
+                        this.state.color = newColor;
+                        this.state.opacity = norm01;
+                        this.state.pressureSensitivity = norm01;
+                        this.pushRecentColorForContext(ctxKey, newColor, normOpacity);
+                        this.container.style.setProperty('--hl-color', newColor);
+                        this.opacityInput?.parentElement?.style.setProperty('--hl-color', newColor);
+                        this.syncSliderVisual(this.opacityInput, this.opacityBubble, normOpacity, 0, 100);
+                        this.callbacks.onChangeColor(newColor);
+                        this.callbacks.onChangeOpacity?.(norm01);
+                        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+                        this.updateColorsUI();
+                    },
+                    null,
+                    this.getOpacityPercent()
+                );
+            });
+            this.swatchRowEl.appendChild(addBtn);
+
+        } else if (this.currentPageIndex <= activeProfiles.length) {
+            // --- Pages 1..N: Perfiles de colores guardados (SIN botón '+') ---
+            const profile = activeProfiles[this.currentPageIndex - 1];
+            const isGlobal = (this.colorCarousels.globalProfiles ?? []).some(gp => gp.id === profile.id);
+
+            // Renderizar los colores existentes del perfil
+            for (let slotIdx = 0; slotIdx < profile.slots.length; slotIdx++) {
+                const slot = profile.slots[slotIdx];
+                const col = slot.color;
+                const slotOp = slot.opacity ?? 100;
+                const sw = document.createElement('button');
+                sw.type = 'button';
+                const isActive = this.state.color.toUpperCase() === col.toUpperCase() && this.getOpacityPercent() === slotOp;
+                sw.className = `swatch popover-swatch-circle ${isActive ? 'is-active' : ''}`;
+                if (slotOp < 100) {
+                    sw.classList.add('has-transparency');
+                }
+                sw.style.touchAction = 'manipulation';
+                setAccessibleTooltip(sw, `Color ${col} (${slotOp}%) - ${profile.name || 'Perfil'}${isGlobal ? ' (Global)' : ''}`);
+                sw.style.setProperty('--c', col);
+                sw.style.setProperty('--swatch-color', col);
+
+                const inner = document.createElement('span');
+                inner.className = 'popover-swatch-inner';
+                if (slotOp < 100) {
+                    inner.style.backgroundColor = hexToRgba(col, slotOp);
+                } else {
+                    sw.style.backgroundColor = col;
+                    inner.style.backgroundColor = col;
+                }
+                sw.appendChild(inner);
+
+                bindTapOrClick(sw, (e) => {
+                    if (isActive) {
+                        e?.stopPropagation();
+                        this.colorPicker.open(
+                            sw,
+                            this.state.slot,
+                            toolbarEl,
+                            col,
+                            (newColor, opacity) => {
+                                const normOpacity = typeof opacity === 'number'
+                                    ? (opacity > 1 ? opacity : Math.round(opacity * 100))
+                                    : 100;
+                                slot.color = newColor;
+                                slot.opacity = normOpacity;
+                                this.state.color = newColor;
+                                const norm01 = normOpacity / 100;
+                                this.state.opacity = norm01;
+                                this.state.pressureSensitivity = norm01;
+                                this.pushRecentColorForContext(ctxKey, newColor, normOpacity);
+                                this.container.style.setProperty('--hl-color', newColor);
+                                this.opacityInput?.parentElement?.style.setProperty('--hl-color', newColor);
+                                this.syncSliderVisual(this.opacityInput, this.opacityBubble, normOpacity, 0, 100);
+                                this.callbacks.onChangeColor(newColor);
+                                this.callbacks.onChangeOpacity?.(norm01);
+                                this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+                                this.updateColorsUI();
+                            },
+                            null,
+                            slotOp
+                        );
+                        return;
+                    }
+
+                    this.state.color = col;
+                    const norm01 = slotOp / 100;
+                    this.state.opacity = norm01;
+                    this.state.pressureSensitivity = norm01;
+                    this.pushRecentColorForContext(ctxKey, col, slotOp);
+                    for (const [, s] of this.swatchButtons) s.classList.remove('is-active');
+                    sw.classList.add('is-active');
+                    this.container.style.setProperty('--hl-color', col);
+                    if (this.opacityInput?.parentElement) {
+                        this.opacityInput.parentElement.style.setProperty('--hl-color', col);
+                    }
+                    this.syncSliderVisual(this.opacityInput, this.opacityBubble, slotOp, 0, 100);
+                    this.callbacks.onChangeColor(col);
+                    this.callbacks.onChangeOpacity?.(norm01);
+                    this.updateColorsUI();
+                });
+
+                this.swatchButtons.set(`${col}-${slotOp}-${slotIdx}`, sw);
+                this.swatchRowEl.appendChild(sw);
+            }
+
+            // Mostrar exactamente UN círculo vacío dashed al final para añadir el siguiente color (si tiene menos de 6)
+            if (profile.slots.length < 6) {
+                const sw = document.createElement('button');
+                sw.type = 'button';
+                sw.className = 'swatch popover-swatch-circle is-dashed-empty';
+                sw.style.touchAction = 'manipulation';
+                setAccessibleTooltip(sw, 'Añadir color a la paleta');
+
+                bindTapOrClick(sw, (e) => {
+                    e?.stopPropagation();
+                    this.colorPicker.open(
+                        sw,
+                        this.state.slot,
+                        toolbarEl,
+                        this.state.color,
+                        (newColor, opacity) => {
+                            const normOpacity = typeof opacity === 'number'
+                                ? (opacity > 1 ? opacity : Math.round(opacity * 100))
+                                : 100;
+                            profile.slots.push({ color: newColor, opacity: normOpacity });
+                            this.state.color = newColor;
+                            const norm01 = normOpacity / 100;
+                            this.state.opacity = norm01;
+                            this.state.pressureSensitivity = norm01;
+                            this.pushRecentColorForContext(ctxKey, newColor, normOpacity);
+                            this.container.style.setProperty('--hl-color', newColor);
+                            this.opacityInput?.parentElement?.style.setProperty('--hl-color', newColor);
+                            this.syncSliderVisual(this.opacityInput, this.opacityBubble, normOpacity, 0, 100);
+                            this.callbacks.onChangeColor(newColor);
+                            this.callbacks.onChangeOpacity?.(norm01);
+                            this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+                            this.updateColorsUI();
+                        },
+                        null,
+                        this.getOpacityPercent()
+                    );
+                });
+
+                this.swatchRowEl.appendChild(sw);
+            }
+
+            // Centrar los elementos si la paleta tiene menos de 6 colores
+            if (profile.slots.length < 6) {
+                this.swatchRowEl.classList.add('is-centered');
+            } else {
+                this.swatchRowEl.classList.remove('is-centered');
+            }
+
+        } else {
+            // --- Page N+1: Extremo de creación de nueva entrada (1 único círculo vacío dashed centrado) ---
+            const sw = document.createElement('button');
+            sw.type = 'button';
+            sw.className = 'swatch popover-swatch-circle is-dashed-empty';
+            sw.style.touchAction = 'manipulation';
+            setAccessibleTooltip(sw, 'Crear nueva paleta de colores');
+
+            bindTapOrClick(sw, (e) => {
+                e?.stopPropagation();
+                this.colorPicker.open(
+                    sw,
+                    this.state.slot,
+                    toolbarEl,
+                    this.state.color,
+                    (newColor, opacity) => {
+                        const normOpacity = typeof opacity === 'number'
+                            ? (opacity > 1 ? opacity : Math.round(opacity * 100))
+                            : 100;
+                        const newProfile = {
+                            id: `${ctxKey}-profile-${Date.now()}`,
+                            name: `Paleta ${activeProfiles.length + 1}`,
+                            slots: [{ color: newColor, opacity: normOpacity }],
+                        };
+                        ctx.profiles.push(newProfile);
+                        this.currentPageIndex = this.getActiveProfiles().length;
+                        this.state.color = newColor;
+                        const norm01 = normOpacity / 100;
+                        this.state.opacity = norm01;
+                        this.state.pressureSensitivity = norm01;
+                        this.pushRecentColorForContext(ctxKey, newColor, normOpacity);
+                        this.container.style.setProperty('--hl-color', newColor);
+                        this.opacityInput?.parentElement?.style.setProperty('--hl-color', newColor);
+                        this.syncSliderVisual(this.opacityInput, this.opacityBubble, normOpacity, 0, 100);
+                        this.callbacks.onChangeColor(newColor);
+                        this.callbacks.onChangeOpacity?.(norm01);
+                        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+                        this.updateColorsUI();
+                    },
+                    null,
+                    this.getOpacityPercent()
+                );
+            });
+
+            this.swatchRowEl.appendChild(sw);
+            this.swatchRowEl.classList.add('is-centered');
+        }
+
+        // --- Pagination Dots ---
         this.paginationEl.replaceChildren();
-        for (let i = 0; i < this.colorPages.length; i++) {
+        for (let i = 0; i < totalPages; i++) {
             const dot = document.createElement('button');
             dot.type = 'button';
             const isActive = i === this.currentPageIndex;
-            dot.className = `${i === 0 ? 'popover-pag-clock is-clock-dot ' : 'dot '}popover-pag-dot ${isActive ? 'is-active' : ''}`;
-            dot.style.touchAction = 'manipulation';
-            setAccessibleTooltip(dot, i === 0 ? 'Colores recientes' : `Página ${i + 1}`);
-            if (i === 0) {
+            const isClock = i === 0;
+            const isNewPage = i === totalPages - 1;
+
+            if (isClock) {
+                dot.className = `popover-pag-clock is-clock-dot popover-pag-dot ${isActive ? 'is-active' : ''}`;
+                setAccessibleTooltip(dot, 'Colores recientes');
                 dot.appendChild(createSvg(ICONS.clock, { size: 14 }));
+            } else if (isNewPage) {
+                dot.className = `dot popover-pag-dot is-new-page-dot ${isActive ? 'is-active' : ''}`;
+                setAccessibleTooltip(dot, 'Nueva paleta');
+            } else {
+                const p = activeProfiles[i - 1];
+                const isGlob = (this.colorCarousels.globalProfiles ?? []).some(gp => gp.id === p?.id);
+                dot.className = `dot popover-pag-dot ${isActive ? 'is-active' : ''}`;
+                setAccessibleTooltip(dot, (p?.name || `Paleta ${i}`) + (isGlob ? ' (Global)' : ''));
             }
+
+            dot.style.touchAction = 'manipulation';
             bindTapOrClick(dot, () => {
                 this.currentPageIndex = i;
                 this.updateColorsUI();

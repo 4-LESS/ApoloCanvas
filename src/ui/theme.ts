@@ -512,6 +512,13 @@ export function bindTapOrClick(
         if (Math.hypot(dx, dy) <= 12 && dt <= 600) {
             lastTriggerTime = Date.now();
             action(e);
+            try {
+                if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+                    el.blur();
+                }
+            } catch {
+                // ignore
+            }
         }
     };
 
@@ -526,6 +533,11 @@ export function bindTapOrClick(
         }
         lastTriggerTime = Date.now();
         action(e);
+        try {
+            el.blur();
+        } catch {
+            // ignore
+        }
     };
 
     el.addEventListener('pointerdown', onPointerDown);
