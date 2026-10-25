@@ -347,6 +347,15 @@ export class CanvasController {
     private strokeStartTime = 0;
     private isShiftDown = false;
     private isCtrlDown = false;
+    private touchSlideState: {
+        pointerId: number;
+        elementId: string;
+        segIdx: number;
+        startGeom: ShapeRenderGeometry;
+        snapshot: HistorySnapshot;
+        changed: boolean;
+    } | null = null;
+    private penDwellTimer: number | null = null;
     private showSpenDebugHud = false;
     private debugInputHudEl: HTMLElement | null = null;
     private readonly debugHudLogs: string[] = [];
@@ -3261,8 +3270,29 @@ export class CanvasController {
             (!selectedForConnector || getShapePlugin(selectedForConnector.shapeType).isClosed) &&
             this.findSnapPort({ x: docX, y: docY }) !== null;
 
-        // Ctrl key active: blocks drawing new shapes, directly selects and slides linear/circuit segments
-        if (this.isCtrlDown && !barrel) {
+        // S-Pen Barrel button on a linear shape segment OR Ctrl key: activates segment sliding!
+        let activateSegmentSlide = this.isCtrlDown;
+        if (barrel && !activateSegmentSlide) {
+            let target = this.getSelectedShape();
+            if (!target || (target.shapeType !== 'line' && target.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 20 / this.zoom);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    target = hit;
+                }
+            }
+            if (target && (target.shapeType === 'line' || target.shapeType === 'arrow')) {
+                const geom = this.getShapeDocGeometry(target);
+                if (linearPathHit(geom, { x: docX, y: docY }, Math.max(16, 24 / this.zoom))) {
+                    activateSegmentSlide = true;
+                    barrel = false;
+                    this.barrelActive = false;
+                    this.isCtrlDown = true;
+                }
+            }
+        }
+
+        // Ctrl key active / S-Pen barrel on segment: blocks drawing new shapes, directly selects and slides linear/circuit segments
+        if (activateSegmentSlide && !barrel) {
             let targetShape = this.getSelectedShape();
             if (!targetShape || (targetShape.shapeType !== 'line' && targetShape.shapeType !== 'arrow')) {
                 const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
@@ -3284,6 +3314,27 @@ export class CanvasController {
 
         // Parametric control handles of the selected shape take priority over drawing / moving
         if (!startsConnector && (this.tool === 'lasso' || this.tool === 'shape') && !barrel && this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+            // S-Pen Long-press (Dwell ~200ms): holding on a linear segment converts drag to orthogonal slide
+            if (rawEvent?.pointerType === 'pen' && !this.isCtrlDown && !barrel) {
+                const targetShape = this.getSelectedShape();
+                if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                    const geom = this.getShapeDocGeometry(targetShape);
+                    if (linearPathHit(geom, { x: docX, y: docY }, Math.max(16, 24 / this.zoom))) {
+                        const startX = docX;
+                        const startY = docY;
+                        this.penDwellTimer = window.setTimeout(() => {
+                            this.penDwellTimer = null;
+                            if (this.handleDrag && this.handleDrag.elementId === targetShape.id) {
+                                const segIdx = findClosestLinearSegment(geom, { x: startX, y: startY });
+                                this.handleDrag.handleId = `seg-slide-${segIdx}`;
+                                try { navigator.vibrate?.(25); } catch {}
+                                this.renderDirty = true;
+                                this.schedulePaint();
+                            }
+                        }, 220);
+                    }
+                }
+            }
             this.schedulePaint();
             return;
         }
@@ -3363,6 +3414,14 @@ export class CanvasController {
             this.isShiftDown = Boolean(rawEvent.shiftKey);
             this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
         }
+        if (this.penDwellTimer && this.activeStart) {
+            const lastRaw = rawPoints[rawPoints.length - 1];
+            if (lastRaw && Math.hypot(lastRaw.x - this.activeStart.x, lastRaw.y - this.activeStart.y) > 6) {
+                window.clearTimeout(this.penDwellTimer);
+                this.penDwellTimer = null;
+            }
+        }
+
         if (this.handleDrag) {
             const last = rawPoints[rawPoints.length - 1];
             if (last) {
@@ -3464,6 +3523,10 @@ export class CanvasController {
     }
 
     private end(rawPoint: Point, barrel: boolean, releasedAt: number, rawEvent?: PointerEvent): void {
+        if (this.penDwellTimer) {
+            window.clearTimeout(this.penDwellTimer);
+            this.penDwellTimer = null;
+        }
         if (!this.activeStart) return;
         if (rawEvent) {
             this.isShiftDown = Boolean(rawEvent.shiftKey);
@@ -6555,6 +6618,41 @@ export class CanvasController {
                 this.lastSingleTouch = null;
                 this.singleTouchPanned = false;
             } else {
+                // Finger input for orthogonal segment sliding: touching a segment directly slides it
+                const rect = this.canvas.getBoundingClientRect();
+                const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+                const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+                let targetShape = this.getSelectedShape();
+                if (!targetShape || (targetShape.shapeType !== 'line' && targetShape.shapeType !== 'arrow')) {
+                    const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 24 / this.zoom);
+                    if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                        this.selection = [hit];
+                        this.emitSelection();
+                        targetShape = hit;
+                    }
+                }
+
+                if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                    const geom = this.getShapeDocGeometry(targetShape);
+                    if (linearPathHit(geom, { x: docX, y: docY }, Math.max(18, 28 / this.zoom))) {
+                        const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                        this.touchSlideState = {
+                            pointerId: event.pointerId,
+                            elementId: targetShape.id,
+                            segIdx,
+                            startGeom: geom,
+                            snapshot: this.createHistorySnapshot(),
+                            changed: false,
+                        };
+                        try { navigator.vibrate?.(20); } catch {}
+                        event.preventDefault();
+                        event.stopPropagation();
+                        try { this.canvas.setPointerCapture(event.pointerId); } catch {}
+                        this.schedulePaint();
+                        return;
+                    }
+                }
+
                 this.palmRejectedSingleTouch = false;
                 this.singleTouchStartCoords = { x: event.clientX, y: event.clientY, time: Date.now() };
                 this.lastSingleTouch = { x: event.clientX, y: event.clientY };
@@ -6575,6 +6673,25 @@ export class CanvasController {
     private readonly onTouchMove = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch' || !this.touches.has(event.pointerId)) return;
         this.touches.set(event.pointerId, this.localTouch(event));
+
+        if (this.touchSlideState && event.pointerId === this.touchSlideState.pointerId) {
+            const rect = this.canvas.getBoundingClientRect();
+            const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+            const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+            const shape = this.document.elements.find(el => el.id === this.touchSlideState!.elementId) as ShapeElement | undefined;
+            if (shape) {
+                const nextGeom = slideLinearSegment(this.touchSlideState.startGeom, this.touchSlideState.segIdx, { x: docX, y: docY });
+                const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+                applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
+                this.touchSlideState.changed = true;
+                this.strokeCache.delete(shape.id);
+                this.rebuildIndex();
+                this.renderDirty = true;
+                this.schedulePaint();
+            }
+            event.preventDefault();
+            return;
+        }
 
         if (this.touches.size === 1) {
             if (this.palmRejectedSingleTouch) {
@@ -6618,6 +6735,17 @@ export class CanvasController {
 
     private readonly onTouchEnd = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch') return;
+        if (this.touchSlideState && event.pointerId === this.touchSlideState.pointerId) {
+            if (this.touchSlideState.changed) {
+                this.recordHistory();
+                this.persistSoon();
+                this.options.eventBus?.emit('canvas:dirty', this.pageId);
+            }
+            this.touchSlideState = null;
+            this.touches.delete(event.pointerId);
+            event.preventDefault();
+            return;
+        }
         this.lastTouchEndTime = Date.now();
         this.lastTouchEndPos = { x: event.clientX, y: event.clientY };
 
