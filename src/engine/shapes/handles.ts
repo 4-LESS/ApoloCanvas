@@ -382,18 +382,6 @@ export function linearPathHit(geom: ShapeRenderGeometry, point: ShapePoint, tole
 
 /** Emits anchor nodes, segment midpoint curve handles, and cubic tangent handles. */
 export function linearControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
-    if (!geom.pathNodes) {
-        const handles: ShapeHandle[] = [
-            { id: 'start', kind: 'endpoint', x: geom.x0, y: geom.y0 },
-            { id: 'end', kind: 'endpoint', x: geom.x1, y: geom.y1 },
-        ];
-        const mid = geom.controlPoint
-            ? { x: (geom.x0 + 2 * geom.controlPoint.x + geom.x1) / 4, y: (geom.y0 + 2 * geom.controlPoint.y + geom.y1) / 4 }
-            : { x: (geom.x0 + geom.x1) / 2, y: (geom.y0 + geom.y1) / 2 };
-        handles.push({ id: 'curve', kind: 'curve', x: mid.x, y: mid.y });
-        return handles;
-    }
-
     const nodes = getLinearPathNodes(geom);
     const handles: ShapeHandle[] = [];
 
@@ -409,7 +397,7 @@ export function linearControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
         });
     }
 
-    // 2. Segment midpoint handles (Affinity push-pull curve bend)
+    // 2. Segment midpoint handles (suggestion at center)
     for (let i = 0; i < nodes.length - 1; i++) {
         const mid = getSegmentMidpoint(nodes[i], nodes[i + 1]);
         handles.push({
@@ -420,23 +408,44 @@ export function linearControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
         });
     }
 
-    // 3. Tangent handles for curved segments
+    // Legacy 'curve' handle for 2-node shapes for backward compatibility
+    if (!geom.pathNodes) {
+        const mid = geom.controlPoint
+            ? { x: (geom.x0 + 2 * geom.controlPoint.x + geom.x1) / 4, y: (geom.y0 + 2 * geom.controlPoint.y + geom.y1) / 4 }
+            : { x: (geom.x0 + geom.x1) / 2, y: (geom.y0 + geom.y1) / 2 };
+        handles.push({ id: 'curve', kind: 'curve', x: mid.x, y: mid.y });
+    }
+
+    // 3. Tangent control handles for each segment (start, end, and intermediate)
+    // The start and end points must also be control handles (tangents appear to modify)
     for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
-        if (n.handleIn) {
+        if (i > 0) {
+            // Incoming control handle (into node i from segment i-1)
+            const prev = nodes[i - 1];
+            const inPt = n.handleIn ?? {
+                x: prev.x + (2 * (n.x - prev.x)) / 3,
+                y: prev.y + (2 * (n.y - prev.y)) / 3,
+            };
             handles.push({
                 id: `bezier-in-${i}`,
                 kind: 'bezier-in',
-                x: n.handleIn.x,
-                y: n.handleIn.y,
+                x: inPt.x,
+                y: inPt.y,
             });
         }
-        if (n.handleOut) {
+        if (i < nodes.length - 1) {
+            // Outgoing control handle (out from node i into segment i)
+            const next = nodes[i + 1];
+            const outPt = n.handleOut ?? {
+                x: n.x + (next.x - n.x) / 3,
+                y: n.y + (next.y - n.y) / 3,
+            };
             handles.push({
                 id: `bezier-out-${i}`,
                 kind: 'bezier-out',
-                x: n.handleOut.x,
-                y: n.handleOut.y,
+                x: outPt.x,
+                y: outPt.y,
             });
         }
     }
@@ -444,14 +453,48 @@ export function linearControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
     return handles;
 }
 
-function snapAround(origin: ShapePoint, point: ShapePoint): ShapePoint {
+/**
+ * Snaps point around origin to 15-degree increments with cardinal/diagonal magnetic locking
+ * and orthogonal (dx = 0 or dy = 0) precision alignment.
+ */
+export function snapAngleOrOrthogonal(
+    origin: ShapePoint,
+    point: ShapePoint,
+    stepAngle = Math.PI / 12,
+    orthoThreshold = 8
+): ShapePoint {
     const dx = point.x - origin.x;
     const dy = point.y - origin.y;
     const r = Math.hypot(dx, dy);
     if (r < 1e-6) return { ...point };
-    const step = Math.PI / 4;
-    const theta = Math.round(Math.atan2(dy, dx) / step) * step;
+
+    // 1. Magnetic orthogonal lock: exact horizontal (dy = 0) and vertical (dx = 0)
+    if (Math.abs(dy) <= orthoThreshold) {
+        return { x: point.x, y: origin.y };
+    }
+    if (Math.abs(dx) <= orthoThreshold) {
+        return { x: origin.x, y: point.y };
+    }
+
+    // 2. Cardinal / diagonal lock (0, 45, 90, 135, 180...)
+    const angle = Math.atan2(dy, dx);
+    const cardinals = [
+        0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI,
+        -Math.PI, -(3 * Math.PI) / 4, -Math.PI / 2, -Math.PI / 4,
+    ];
+    for (const ca of cardinals) {
+        if (Math.abs(angle - ca) <= (5 * Math.PI) / 180) {
+            return { x: origin.x + r * Math.cos(ca), y: origin.y + r * Math.sin(ca) };
+        }
+    }
+
+    // 3. Step snapping (15 degrees)
+    const theta = Math.round(angle / stepAngle) * stepAngle;
     return { x: origin.x + r * Math.cos(theta), y: origin.y + r * Math.sin(theta) };
+}
+
+function snapAround(origin: ShapePoint, point: ShapePoint): ShapePoint {
+    return snapAngleOrOrthogonal(origin, point, Math.PI / 12, 8);
 }
 
 /**
@@ -468,7 +511,7 @@ export function applyLinearHandleDrag(
     regularize = false,
 ): ShapeRenderGeometry {
     // Legacy 2-node line / arrow support (single quadratic controlPoint)
-    if (!geom.pathNodes) {
+    if (!geom.pathNodes && !handleId.startsWith('bezier-in-') && !handleId.startsWith('bezier-out-')) {
         if (handleId === 'curve') {
             const mid = { x: (geom.x0 + geom.x1) / 2, y: (geom.y0 + geom.y1) / 2 };
             const dist = Math.hypot(point.x - mid.x, point.y - mid.y);
@@ -546,9 +589,13 @@ export function applyLinearHandleDrag(
         const idx = parseInt(handleId.replace('bezier-in-', ''), 10);
         if (idx < 0 || idx >= nodes.length) return { ...geom };
         const node = nodes[idx];
-        node.handleIn = { x: point.x, y: point.y };
-        const vx = point.x - node.x;
-        const vy = point.y - node.y;
+        let p = { ...point };
+        if (regularize) {
+            p = snapAngleOrOrthogonal(node, point);
+        }
+        node.handleIn = { x: p.x, y: p.y };
+        const vx = p.x - node.x;
+        const vy = p.y - node.y;
 
         if (node.nodeKind === 'symmetric') {
             node.handleOut = { x: node.x - vx, y: node.y - vy };
@@ -573,9 +620,13 @@ export function applyLinearHandleDrag(
         const idx = parseInt(handleId.replace('bezier-out-', ''), 10);
         if (idx < 0 || idx >= nodes.length) return { ...geom };
         const node = nodes[idx];
-        node.handleOut = { x: point.x, y: point.y };
-        const vx = point.x - node.x;
-        const vy = point.y - node.y;
+        let p = { ...point };
+        if (regularize) {
+            p = snapAngleOrOrthogonal(node, point);
+        }
+        node.handleOut = { x: p.x, y: p.y };
+        const vx = p.x - node.x;
+        const vy = p.y - node.y;
 
         if (node.nodeKind === 'symmetric') {
             node.handleIn = { x: node.x - vx, y: node.y - vy };
@@ -603,9 +654,14 @@ export function applyLinearHandleDrag(
 
     const cur = nodes[nodeIdx];
     let target = { x: point.x, y: point.y };
-    if (regularize && (nodeIdx === 0 || nodeIdx === nodes.length - 1)) {
-        const fixed = nodeIdx === 0 ? nodes[nodes.length - 1] : nodes[0];
-        target = snapAround(fixed, point);
+    if (regularize) {
+        const ref = nodeIdx > 0 ? nodes[nodeIdx - 1] : nodes[1] ?? cur;
+        target = snapAngleOrOrthogonal(ref, point);
+        if (nodeIdx < nodes.length - 1 && nodeIdx > 0) {
+            const nextNode = nodes[nodeIdx + 1];
+            if (Math.abs(target.x - nextNode.x) <= 8) target.x = nextNode.x;
+            if (Math.abs(target.y - nextNode.y) <= 8) target.y = nextNode.y;
+        }
     }
 
     const dx = target.x - cur.x;
@@ -635,7 +691,213 @@ export function applyLinearHandleDrag(
     return next;
 }
 
-/** Inserts a new anchor node at t = 0.5 of segmentIndex, splitting it into two independent segments. */
+/**
+ * Toggles an anchor node or segment between 90-degree orthogonal/sharp and curved.
+ * Single click/tap on a node toggles it between sharp (orthogonal 90 deg corner) and smooth Bezier.
+ */
+export function toggleNodeOrSegmentOrthogonal(
+    geom: ShapeRenderGeometry,
+    handleId: string
+): ShapeRenderGeometry {
+    const nodes = getLinearPathNodes(geom);
+    const nodeIdx = handleId === 'start' ? 0 : handleId === 'end' ? nodes.length - 1 : parseInt(handleId.replace('node-', ''), 10);
+
+    if (!isNaN(nodeIdx) && nodeIdx >= 0 && nodeIdx < nodes.length) {
+        const cur = nodes[nodeIdx];
+        const isCurved = cur.nodeKind === 'smooth' || Boolean(cur.handleIn || cur.handleOut);
+
+        if (isCurved) {
+            // Switch to 90 degrees / sharp
+            cur.nodeKind = 'sharp';
+            delete cur.handleIn;
+            delete cur.handleOut;
+
+            // If it's an intermediate node, align to orthogonal 90-degree corner relative to adjacent nodes
+            if (nodeIdx > 0 && nodeIdx < nodes.length - 1) {
+                const prev = nodes[nodeIdx - 1];
+                const next = nodes[nodeIdx + 1];
+                delete prev.handleOut;
+                delete next.handleIn;
+
+                // Two orthogonal corner configurations:
+                const opt1 = { x: prev.x, y: next.y };
+                const opt2 = { x: next.x, y: prev.y };
+                const d1 = Math.hypot(cur.x - opt1.x, cur.y - opt1.y);
+                const d2 = Math.hypot(cur.x - opt2.x, cur.y - opt2.y);
+                const best = d1 <= d2 ? opt1 : opt2;
+                cur.x = best.x;
+                cur.y = best.y;
+            }
+        } else {
+            // Switch to curved (smooth Bezier)
+            cur.nodeKind = 'smooth';
+            if (nodeIdx > 0 && nodeIdx < nodes.length - 1) {
+                const prev = nodes[nodeIdx - 1];
+                const next = nodes[nodeIdx + 1];
+                const vx = next.x - prev.x;
+                const vy = next.y - prev.y;
+                const len = Math.hypot(vx, vy);
+                if (len > 1e-4) {
+                    const dIn = Math.hypot(cur.x - prev.x, cur.y - prev.y) / 3;
+                    const dOut = Math.hypot(next.x - cur.x, next.y - cur.y) / 3;
+                    cur.handleIn = { x: cur.x - (vx / len) * dIn, y: cur.y - (vy / len) * dIn };
+                    cur.handleOut = { x: cur.x + (vx / len) * dOut, y: cur.y + (vy / len) * dOut };
+                }
+            } else if (nodeIdx === 0 && nodes.length > 1) {
+                const next = nodes[1];
+                const vx = next.x - cur.x;
+                const vy = next.y - cur.y;
+                const len = Math.hypot(vx, vy);
+                if (len > 1e-4) {
+                    cur.handleOut = { x: cur.x + vx / 3, y: cur.y + vy / 3 };
+                }
+            } else if (nodeIdx === nodes.length - 1 && nodes.length > 1) {
+                const prev = nodes[nodes.length - 2];
+                const vx = cur.x - prev.x;
+                const vy = cur.y - prev.y;
+                const len = Math.hypot(vx, vy);
+                if (len > 1e-4) {
+                    cur.handleIn = { x: cur.x - vx / 3, y: cur.y - vy / 3 };
+                }
+            }
+        }
+
+        const res: ShapeRenderGeometry = {
+            ...geom,
+            pathNodes: nodes,
+            x0: nodes[0].x,
+            y0: nodes[0].y,
+            x1: nodes[nodes.length - 1].x,
+            y1: nodes[nodes.length - 1].y,
+        };
+        delete res.controlPoint;
+        return res;
+    }
+
+    if (handleId === 'curve' || handleId.startsWith('seg-mid-')) {
+        const segIdx = handleId === 'curve' ? 0 : parseInt(handleId.replace('seg-mid-', ''), 10);
+        if (segIdx >= 0 && segIdx < nodes.length - 1) {
+            const p0 = nodes[segIdx];
+            const p1 = nodes[segIdx + 1];
+            const isCurved = Boolean(p0.handleOut || p1.handleIn);
+            if (isCurved) {
+                return straightenLinearSegment(geom, segIdx);
+            } else {
+                const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+                const dx = p1.x - p0.x;
+                const dy = p1.y - p0.y;
+                const len = Math.hypot(dx, dy);
+                const perpX = len > 1e-4 ? (-dy / len) * (len * 0.25) : 0;
+                const perpY = len > 1e-4 ? (dx / len) * (len * 0.25) : 0;
+                return applyLinearHandleDrag(geom, `seg-mid-${segIdx}`, { x: mid.x + perpX, y: mid.y + perpY });
+            }
+        }
+    }
+
+    return { ...geom };
+}
+
+/**
+ * Inserts a new anchor node at the closest position along the linear path to `point`.
+ * Allows generating points anywhere along the line or curve, not just at the center suggestion.
+ */
+export function insertLinearNodeAtPoint(
+    geom: ShapeRenderGeometry,
+    point: ShapePoint
+): { geom: ShapeRenderGeometry; handleId: string } | null {
+    const nodes = getLinearPathNodes(geom);
+    if (nodes.length < 2) return null;
+
+    let bestDistSq = Infinity;
+    let bestSeg = -1;
+    let bestT = 0.5;
+
+    const SAMPLES = 24;
+    for (let i = 0; i < nodes.length - 1; i++) {
+        const p0 = nodes[i];
+        const p1 = nodes[i + 1];
+        const cp1 = p0.handleOut;
+        const cp2 = p1.handleIn;
+
+        for (let s = 1; s < SAMPLES; s++) {
+            const t = s / SAMPLES;
+            const pt = (!cp1 && !cp2)
+                ? { x: p0.x + t * (p1.x - p0.x), y: p0.y + t * (p1.y - p0.y) }
+                : cubicPoint(p0, cp1 ?? p0, cp2 ?? p1, p1, t);
+            const d2 = (pt.x - point.x) ** 2 + (pt.y - point.y) ** 2;
+            if (d2 < bestDistSq) {
+                bestDistSq = d2;
+                bestSeg = i;
+                bestT = t;
+            }
+        }
+    }
+
+    if (bestSeg === -1) return null;
+
+    const p0 = nodes[bestSeg];
+    const p1 = nodes[bestSeg + 1];
+    const cp1 = p0.handleOut;
+    const cp2 = p1.handleIn;
+    let t = bestT;
+    for (let iter = 0; iter < 5; iter++) {
+        const dt = 0.01;
+        const tMinus = Math.max(0.01, t - dt);
+        const tPlus = Math.min(0.99, t + dt);
+        const ptMinus = (!cp1 && !cp2) ? { x: p0.x + tMinus * (p1.x - p0.x), y: p0.y + tMinus * (p1.y - p0.y) } : cubicPoint(p0, cp1 ?? p0, cp2 ?? p1, p1, tMinus);
+        const ptPlus = (!cp1 && !cp2) ? { x: p0.x + tPlus * (p1.x - p0.x), y: p0.y + tPlus * (p1.y - p0.y) } : cubicPoint(p0, cp1 ?? p0, cp2 ?? p1, p1, tPlus);
+        const dMinus = (ptMinus.x - point.x) ** 2 + (ptMinus.y - point.y) ** 2;
+        const dPlus = (ptPlus.x - point.x) ** 2 + (ptPlus.y - point.y) ** 2;
+        if (dMinus < bestDistSq) { bestDistSq = dMinus; t = tMinus; }
+        else if (dPlus < bestDistSq) { bestDistSq = dPlus; t = tPlus; }
+    }
+
+    if (!p0.handleOut && !p1.handleIn) {
+        const splitPt = { x: p0.x + t * (p1.x - p0.x), y: p0.y + t * (p1.y - p0.y) };
+        const newNode: ShapePathNode = {
+            x: splitPt.x,
+            y: splitPt.y,
+            nodeKind: 'sharp',
+        };
+        nodes.splice(bestSeg + 1, 0, newNode);
+    } else {
+        const c1 = p0.handleOut ?? { x: p0.x, y: p0.y };
+        const c2 = p1.handleIn ?? { x: p1.x, y: p1.y };
+
+        const q0 = { x: (1 - t) * p0.x + t * c1.x, y: (1 - t) * p0.y + t * c1.y };
+        const q1 = { x: (1 - t) * c1.x + t * c2.x, y: (1 - t) * c1.y + t * c2.y };
+        const q2 = { x: (1 - t) * c2.x + t * p1.x, y: (1 - t) * c2.y + t * p1.y };
+
+        const r0 = { x: (1 - t) * q0.x + t * q1.x, y: (1 - t) * q0.y + t * q1.y };
+        const r1 = { x: (1 - t) * q1.x + t * q2.x, y: (1 - t) * q1.y + t * q2.y };
+
+        const midPoint = { x: (1 - t) * r0.x + t * r1.x, y: (1 - t) * r0.y + t * r1.y };
+
+        p0.handleOut = q0;
+        p1.handleIn = q2;
+
+        const newNode: ShapePathNode = {
+            x: midPoint.x,
+            y: midPoint.y,
+            handleIn: r0,
+            handleOut: r1,
+            nodeKind: 'smooth',
+        };
+        nodes.splice(bestSeg + 1, 0, newNode);
+    }
+
+    const nextGeom: ShapeRenderGeometry = {
+        ...geom,
+        pathNodes: nodes,
+        x0: nodes[0].x,
+        y0: nodes[0].y,
+        x1: nodes[nodes.length - 1].x,
+        y1: nodes[nodes.length - 1].y,
+    };
+    delete nextGeom.controlPoint;
+    const handleId = `node-${bestSeg + 1}`;
+    return { geom: nextGeom, handleId };
+}
 export function splitLinearSegment(geom: ShapeRenderGeometry, segmentIndex: number): ShapeRenderGeometry {
     const nodes = getLinearPathNodes(geom);
     if (segmentIndex < 0 || segmentIndex >= nodes.length - 1) return { ...geom };

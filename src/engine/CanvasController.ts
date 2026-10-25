@@ -58,6 +58,10 @@ import {
     splitLinearSegment,
     straightenLinearSegment,
     toggleLinearNodeKind,
+    toggleNodeOrSegmentOrthogonal,
+    insertLinearNodeAtPoint,
+    linearPathHit,
+    snapAngleOrOrthogonal,
     rotatePoint,
     computeSmartAlignmentGuides,
     type AlignmentGuide,
@@ -4370,7 +4374,40 @@ export class CanvasController {
                 bestDistance = distance;
             }
         }
-        if (!best) return false;
+        if (!best) {
+            if ((shape.shapeType === 'line' || shape.shapeType === 'arrow') && linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
+                const inserted = insertLinearNodeAtPoint(geom, { x: docX, y: docY });
+                if (inserted) {
+                    const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+                    this.recordHistory();
+                    applyGeometryToShapeElement(shape, inserted.geom, anchor.originX, anchor.originY, anchor.scaleWidth);
+                    this.strokeCache.delete(shape.id);
+                    this.rebuildIndex();
+                    this.renderDirty = true;
+                    this.schedulePaint();
+                    this.persistSoon();
+
+                    this.points.clear();
+                    this.predictor.reset();
+                    this.resetLiveBake();
+                    this.movingSelection = false;
+                    this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+                    this.handleDrag = {
+                        elementId: shape.id,
+                        handleId: inserted.handleId,
+                        kind: 'vertex',
+                        startGeom: inserted.geom,
+                        grabOffsetX: 0,
+                        grabOffsetY: 0,
+                        snapshot: this.createHistorySnapshot(),
+                        changed: false,
+                        snap: null,
+                    };
+                    return true;
+                }
+            }
+            return false;
+        }
 
         const now = performance.now();
         const hitRadiusPx = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
