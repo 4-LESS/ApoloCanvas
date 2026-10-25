@@ -201,6 +201,49 @@ describe('Shape Eraser Reticle Slicing & Bezier Preservation', () => {
         }
     });
 
+    test('reticle eraser cutting cylinder preserves exact 3D curves and does NOT turn into a square', () => {
+        // Cylinder from (100, 100) to (300, 400) in world coordinates (normalized 0.1 to 0.3, 0.1 to 0.4)
+        const cylinder: ShapeElement = {
+            id: 'cyl-1',
+            type: 'shape',
+            shapeType: 'cylinder',
+            startX: 0.1,
+            startY: 0.1,
+            endX: 0.3,
+            endY: 0.4,
+            shapeParams: { capRatio: 0.22 },
+            fillEnabled: true,
+            fillColor: '#0088FF',
+            fillPattern: 'hachure',
+            style: { width: 2, color: '#000000' },
+            bounds: { minX: 0.1, minY: 0.1, maxX: 0.3, maxY: 0.4 },
+        };
+
+        // Cut through the left wall of the cylinder at x = 100, y = 250 with radius 15
+        const eraserPoints = [{ x: 100, y: 250 }];
+        const radius = 15;
+
+        const fragments = splitShapeDoc(cylinder, eraserPoints, radius, contentLeft, contentWidth, blockTop, uuid);
+        assert.ok(fragments !== null, 'Cylinder was cut');
+        assert.ok(fragments.length >= 1, 'Produces sliced cylinder fragments');
+
+        // Verify fill is removed
+        for (const frag of fragments) {
+            assert.equal(frag.fillEnabled, false, 'Fill is strictly disabled');
+            assert.equal(frag.fillColor, undefined);
+            assert.equal(frag.shapeType, 'line', 'Converted to editable open Bezier line path');
+        }
+
+        // Verify that it retained the curved caps and did NOT degrade into a 4-corner square
+        const mainFrag = fragments.find(f => f.pathNodes && f.pathNodes.length > 4);
+        assert.ok(mainFrag !== undefined, 'Main cylinder fragment exists');
+        const hasCubicCurves = mainFrag.pathNodes!.some(n => n.handleIn || n.handleOut);
+        assert.ok(hasCubicCurves, 'Cylinder retains 3D curved top cap and bottom base Bezier handles');
+
+        // Check node count: an un-degraded sliced cylinder silhouette has at least 6 nodes, not a 4-node square
+        assert.ok(mainFrag.pathNodes!.length >= 6, `Main fragment has ${mainFrag.pathNodes!.length} nodes (NOT a 4-node square)`);
+    });
+
     test('distant eraser gesture returns null leaving shape untouched', () => {
         const rect: ShapeElement = {
             id: 'rect-miss',

@@ -104,27 +104,70 @@ export function isPointInsideEraser(
 
 /**
  * Decomposes any ShapeElement into world-coordinate boundary path nodes,
- * supporting closed 2D shapes (rectangles, ellipses, polygons) and open linear paths.
+ * supporting closed 2D shapes (rectangles, ellipses, polygons), open linear paths,
+ * and multi-path 3D shapes like cylinders (silhouette + front rim arc).
  */
-export function shapeToBoundaryPath(
+export function shapeToBoundaryPaths(
     shape: ShapeElement,
     contentLeft: number,
     blockTop: number,
     contentWidth: number
-): { isClosed: boolean; nodes: ShapePathNode[] } {
+): Array<{ isClosed: boolean; nodes: ShapePathNode[] }> {
     const geom = shapeElementToGeometry(shape, contentLeft, blockTop, contentWidth);
 
     if (shape.shapeType === 'line' || shape.shapeType === 'arrow') {
-        return { isClosed: false, nodes: getLinearPathNodes(geom) };
+        return [{ isClosed: false, nodes: getLinearPathNodes(geom) }];
     }
 
     const minX = Math.min(geom.x0, geom.x1);
     const maxX = Math.max(geom.x0, geom.x1);
     const minY = Math.min(geom.y0, geom.y1);
     const maxY = Math.max(geom.y0, geom.y1);
+    const W = maxX - minX;
+    const H = maxY - minY;
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     const rot = geom.rotation ?? 0;
+
+    const toWorld = (u: number, v: number): ShapePoint => {
+        const rx = minX + u * W;
+        const ry = minY + v * H;
+        return rot !== 0 ? rotatePoint(rx, ry, cx, cy, rot) : { x: rx, y: ry };
+    };
+
+    if (shape.shapeType === 'cylinder') {
+        const c = Math.max(0.08, Math.min(0.48, geom.shapeParams?.capRatio ?? 0.22));
+        const k = 0.55228475;
+        const c_top = +(c * (1 - k)).toFixed(3);
+        const c_bot = +(c * (1 + k)).toFixed(3);
+        const c2 = +(2 * c).toFixed(3);
+        const x_k0 = +(0.5 * (1 - k)).toFixed(3);
+        const x_k1 = +(0.5 * (1 + k)).toFixed(3);
+        const y_low_mid = +(1 - c).toFixed(3);
+        const y_low_ctrl = +(1 - c + k * c).toFixed(3);
+
+        // Path 1: Outer 3D Silhouette (closed loop with curved top cap, bottom base, and straight vertical sides)
+        const silhouetteNodes: ShapePathNode[] = [
+            { ...toWorld(0, c), handleIn: toWorld(0, c_top), nodeKind: 'smooth' },
+            { ...toWorld(0, y_low_mid), handleOut: toWorld(0, y_low_ctrl), nodeKind: 'smooth' },
+            { ...toWorld(0.5, 1), handleIn: toWorld(x_k0, 1), handleOut: toWorld(x_k1, 1), nodeKind: 'smooth' },
+            { ...toWorld(1, y_low_mid), handleIn: toWorld(1, y_low_ctrl), nodeKind: 'smooth' },
+            { ...toWorld(1, c), handleOut: toWorld(1, c_top), nodeKind: 'smooth' },
+            { ...toWorld(0.5, 0), handleIn: toWorld(x_k1, 0), handleOut: toWorld(x_k0, 0), nodeKind: 'smooth' },
+        ];
+
+        // Path 2: Front Top Rim Arc (open curved seam across the front)
+        const frontRimNodes: ShapePathNode[] = [
+            { ...toWorld(0, c), handleOut: toWorld(0, c_bot), nodeKind: 'smooth' },
+            { ...toWorld(0.5, c2), handleIn: toWorld(x_k0, c2), handleOut: toWorld(x_k1, c2), nodeKind: 'smooth' },
+            { ...toWorld(1, c), handleIn: toWorld(1, c_bot), nodeKind: 'smooth' },
+        ];
+
+        return [
+            { isClosed: true, nodes: silhouetteNodes },
+            { isClosed: false, nodes: frontRimNodes },
+        ];
+    }
 
     if (shape.shapeType === 'rectangle') {
         const rawCorners = [
@@ -136,10 +179,10 @@ export function shapeToBoundaryPath(
         const corners = rot !== 0
             ? rawCorners.map(p => rotatePoint(p.x, p.y, cx, cy, rot))
             : rawCorners;
-        return {
+        return [{
             isClosed: true,
             nodes: corners.map(c => ({ x: c.x, y: c.y, nodeKind: 'sharp' as const })),
-        };
+        }];
     }
 
     if (shape.shapeType === 'ellipse') {
@@ -164,7 +207,7 @@ export function shapeToBoundaryPath(
                 nodeKind: 'smooth' as const,
             }))
             : rawNodes;
-        return { isClosed: true, nodes };
+        return [{ isClosed: true, nodes }];
     }
 
     if (shape.shapeType === 'triangle') {
@@ -176,10 +219,10 @@ export function shapeToBoundaryPath(
         const vertices = rot !== 0
             ? rawVertices.map(p => rotatePoint(p.x, p.y, cx, cy, rot))
             : rawVertices;
-        return {
+        return [{
             isClosed: true,
             nodes: vertices.map(v => ({ x: v.x, y: v.y, nodeKind: 'sharp' as const })),
-        };
+        }];
     }
 
     if (shape.shapeType === 'diamond') {
@@ -192,14 +235,14 @@ export function shapeToBoundaryPath(
         const pts = rot !== 0
             ? rawPts.map(p => rotatePoint(p.x, p.y, cx, cy, rot))
             : rawPts;
-        return {
+        return [{
             isClosed: true,
             nodes: pts.map(p => ({ x: p.x, y: p.y, nodeKind: 'sharp' as const })),
-        };
+        }];
     }
 
     if (shape.shapeType === 'hexagon') {
-        const bevel = (maxX - minX) * (geom.shapeParams?.bevelRatio ?? 0.25);
+        const bevel = W * (geom.shapeParams?.bevelRatio ?? 0.25);
         const rawPts = [
             { x: minX + bevel, y: minY },
             { x: maxX - bevel, y: minY },
@@ -211,13 +254,13 @@ export function shapeToBoundaryPath(
         const pts = rot !== 0
             ? rawPts.map(p => rotatePoint(p.x, p.y, cx, cy, rot))
             : rawPts;
-        return {
+        return [{
             isClosed: true,
             nodes: pts.map(p => ({ x: p.x, y: p.y, nodeKind: 'sharp' as const })),
-        };
+        }];
     }
 
-    // Default fallback (e.g. cylinder or other custom): 4 corners bounding box
+    // Default fallback: 4 corners bounding box
     const rawCorners = [
         { x: minX, y: minY },
         { x: maxX, y: minY },
@@ -227,10 +270,10 @@ export function shapeToBoundaryPath(
     const corners = rot !== 0
         ? rawCorners.map(p => rotatePoint(p.x, p.y, cx, cy, rot))
         : rawCorners;
-    return {
+    return [{
         isClosed: true,
         nodes: corners.map(c => ({ x: c.x, y: c.y, nodeKind: 'sharp' as const })),
-    };
+    }];
 }
 
 /**
@@ -254,50 +297,73 @@ export function splitShapeDoc(
 ): ShapeElement[] | null {
     if (eraser.length === 0) return null;
 
-    const { isClosed, nodes } = shapeToBoundaryPath(shape, contentLeft, blockTop, contentWidth);
-    if (nodes.length < 2) return null;
+    const paths = shapeToBoundaryPaths(shape, contentLeft, blockTop, contentWidth);
+    if (paths.length === 0) return null;
 
     const effRadius = radius + (shape.style.width || 2) / 2;
     const effRadiusSq = effRadius * effRadius;
 
-    const segmentCount = isClosed ? nodes.length : nodes.length - 1;
-    const subsegments: Subsegment[] = [];
     let anyHit = false;
+    const allChains: Subsegment[][] = [];
 
-    for (let segIdx = 0; segIdx < segmentCount; segIdx++) {
-        const A = nodes[segIdx];
-        const B = nodes[(segIdx + 1) % nodes.length];
-        const isCubic = Boolean(A.handleOut || B.handleIn);
+    for (const { isClosed, nodes } of paths) {
+        if (nodes.length < 2) continue;
+        const segmentCount = isClosed ? nodes.length : nodes.length - 1;
+        const subsegments: Subsegment[] = [];
 
-        const P0 = { x: A.x, y: A.y };
-        const P1 = A.handleOut ?? { x: A.x + (B.x - A.x) / 3, y: A.y + (B.y - A.y) / 3 };
-        const P2 = B.handleIn ?? { x: A.x + (2 * (B.x - A.x)) / 3, y: A.y + (2 * (B.y - A.y)) / 3 };
-        const P3 = { x: B.x, y: B.y };
+        for (let segIdx = 0; segIdx < segmentCount; segIdx++) {
+            const A = nodes[segIdx];
+            const B = nodes[(segIdx + 1) % nodes.length];
+            const isCubic = Boolean(A.handleOut || B.handleIn);
 
-        const sampleCount = isCubic ? 32 : 16;
-        const erasedSamples: boolean[] = [];
+            const P0 = { x: A.x, y: A.y };
+            const P1 = A.handleOut ?? { x: A.x + (B.x - A.x) / 3, y: A.y + (B.y - A.y) / 3 };
+            const P2 = B.handleIn ?? { x: A.x + (2 * (B.x - A.x)) / 3, y: A.y + (2 * (B.y - A.y)) / 3 };
+            const P3 = { x: B.x, y: B.y };
 
-        for (let m = 0; m <= sampleCount; m++) {
-            const t = m / sampleCount;
-            const pt = isCubic
-                ? evalCubicBezier(P0, P1, P2, P3, t)
-                : { x: (1 - t) * P0.x + t * P3.x, y: (1 - t) * P0.y + t * P3.y };
-            const isErased = isPointInsideEraser(pt, eraser, effRadiusSq);
-            erasedSamples.push(isErased);
-            if (isErased) anyHit = true;
-        }
+            const sampleCount = isCubic ? 32 : 16;
+            const erasedSamples: boolean[] = [];
 
-        // Identify kept parameter intervals [t0, t1]
-        let inRun = false;
-        let t0 = 0;
+            for (let m = 0; m <= sampleCount; m++) {
+                const t = m / sampleCount;
+                const pt = isCubic
+                    ? evalCubicBezier(P0, P1, P2, P3, t)
+                    : { x: (1 - t) * P0.x + t * P3.x, y: (1 - t) * P0.y + t * P3.y };
+                const isErased = isPointInsideEraser(pt, eraser, effRadiusSq);
+                erasedSamples.push(isErased);
+                if (isErased) anyHit = true;
+            }
 
-        for (let m = 0; m <= sampleCount; m++) {
-            const isErased = erasedSamples[m];
-            if (!isErased) {
-                if (!inRun) {
-                    inRun = true;
-                    // Refine entry boundary with binary search
-                    if (m > 0 && erasedSamples[m - 1]) {
+            // Identify kept parameter intervals [t0, t1]
+            let inRun = false;
+            let t0 = 0;
+
+            for (let m = 0; m <= sampleCount; m++) {
+                const isErased = erasedSamples[m];
+                if (!isErased) {
+                    if (!inRun) {
+                        inRun = true;
+                        // Refine entry boundary with binary search
+                        if (m > 0 && erasedSamples[m - 1]) {
+                            let low = (m - 1) / sampleCount;
+                            let high = m / sampleCount;
+                            for (let k = 0; k < 5; k++) {
+                                const mid = (low + high) / 2;
+                                const pt = isCubic
+                                    ? evalCubicBezier(P0, P1, P2, P3, mid)
+                                    : { x: (1 - mid) * P0.x + mid * P3.x, y: (1 - mid) * P0.y + mid * P3.y };
+                                if (isPointInsideEraser(pt, eraser, effRadiusSq)) low = mid;
+                                else high = mid;
+                            }
+                            t0 = high;
+                        } else {
+                            t0 = 0;
+                        }
+                    }
+                } else {
+                    if (inRun) {
+                        inRun = false;
+                        // Refine exit boundary with binary search
                         let low = (m - 1) / sampleCount;
                         let high = m / sampleCount;
                         for (let k = 0; k < 5; k++) {
@@ -305,133 +371,118 @@ export function splitShapeDoc(
                             const pt = isCubic
                                 ? evalCubicBezier(P0, P1, P2, P3, mid)
                                 : { x: (1 - mid) * P0.x + mid * P3.x, y: (1 - mid) * P0.y + mid * P3.y };
-                            if (isPointInsideEraser(pt, eraser, effRadiusSq)) low = mid;
-                            else high = mid;
+                            if (isPointInsideEraser(pt, eraser, effRadiusSq)) high = mid;
+                            else low = mid;
                         }
-                        t0 = high;
-                    } else {
-                        t0 = 0;
+                        const t1 = low;
+
+                        if (t1 - t0 > 1e-4) {
+                            if (isCubic) {
+                                const sub = extractCubicSubcurve(P0, P1, P2, P3, t0, t1);
+                                subsegments.push({
+                                    p0: sub.p0,
+                                    p1: sub.p1,
+                                    p2: sub.p2,
+                                    p3: sub.p3,
+                                    isCubic: true,
+                                    startsAtNode: t0 <= 1e-4,
+                                    endsAtNode: t1 >= 1 - 1e-4,
+                                    segIdx,
+                                });
+                            } else {
+                                subsegments.push({
+                                    p0: { x: (1 - t0) * P0.x + t0 * P3.x, y: (1 - t0) * P0.y + t0 * P3.y },
+                                    p3: { x: (1 - t1) * P0.x + t1 * P3.x, y: (1 - t1) * P0.y + t1 * P3.y },
+                                    isCubic: false,
+                                    startsAtNode: t0 <= 1e-4,
+                                    endsAtNode: t1 >= 1 - 1e-4,
+                                    segIdx,
+                                });
+                            }
+                        }
                     }
                 }
-            } else {
-                if (inRun) {
-                    inRun = false;
-                    // Refine exit boundary with binary search
-                    let low = (m - 1) / sampleCount;
-                    let high = m / sampleCount;
-                    for (let k = 0; k < 5; k++) {
-                        const mid = (low + high) / 2;
-                        const pt = isCubic
-                            ? evalCubicBezier(P0, P1, P2, P3, mid)
-                            : { x: (1 - mid) * P0.x + mid * P3.x, y: (1 - mid) * P0.y + mid * P3.y };
-                        if (isPointInsideEraser(pt, eraser, effRadiusSq)) high = mid;
-                        else low = mid;
-                    }
-                    const t1 = low;
+            }
 
-                    if (t1 - t0 > 1e-4) {
-                        if (isCubic) {
-                            const sub = extractCubicSubcurve(P0, P1, P2, P3, t0, t1);
-                            subsegments.push({
-                                p0: sub.p0,
-                                p1: sub.p1,
-                                p2: sub.p2,
-                                p3: sub.p3,
-                                isCubic: true,
-                                startsAtNode: t0 <= 1e-4,
-                                endsAtNode: t1 >= 1 - 1e-4,
-                                segIdx,
-                            });
-                        } else {
-                            subsegments.push({
-                                p0: { x: (1 - t0) * P0.x + t0 * P3.x, y: (1 - t0) * P0.y + t0 * P3.y },
-                                p3: { x: (1 - t1) * P0.x + t1 * P3.x, y: (1 - t1) * P0.y + t1 * P3.y },
-                                isCubic: false,
-                                startsAtNode: t0 <= 1e-4,
-                                endsAtNode: t1 >= 1 - 1e-4,
-                                segIdx,
-                            });
-                        }
+            if (inRun) {
+                const t1 = 1;
+                if (t1 - t0 > 1e-4) {
+                    if (isCubic) {
+                        const sub = extractCubicSubcurve(P0, P1, P2, P3, t0, t1);
+                        subsegments.push({
+                            p0: sub.p0,
+                            p1: sub.p1,
+                            p2: sub.p2,
+                            p3: sub.p3,
+                            isCubic: true,
+                            startsAtNode: t0 <= 1e-4,
+                            endsAtNode: true,
+                            segIdx,
+                        });
+                    } else {
+                        subsegments.push({
+                            p0: { x: (1 - t0) * P0.x + t0 * P3.x, y: (1 - t0) * P0.y + t0 * P3.y },
+                            p3: { x: (1 - t1) * P0.x + t1 * P3.x, y: (1 - t1) * P0.y + t1 * P3.y },
+                            isCubic: false,
+                            startsAtNode: t0 <= 1e-4,
+                            endsAtNode: true,
+                            segIdx,
+                        });
                     }
                 }
             }
         }
 
-        if (inRun) {
-            const t1 = 1;
-            if (t1 - t0 > 1e-4) {
-                if (isCubic) {
-                    const sub = extractCubicSubcurve(P0, P1, P2, P3, t0, t1);
-                    subsegments.push({
-                        p0: sub.p0,
-                        p1: sub.p1,
-                        p2: sub.p2,
-                        p3: sub.p3,
-                        isCubic: true,
-                        startsAtNode: t0 <= 1e-4,
-                        endsAtNode: true,
-                        segIdx,
-                    });
+        // Assemble continuous subsegment chains for this path
+        const pathChains: Subsegment[][] = [];
+        let currentChain: Subsegment[] = [];
+
+        for (let s = 0; s < subsegments.length; s++) {
+            const sub = subsegments[s];
+            if (currentChain.length === 0) {
+                currentChain.push(sub);
+            } else {
+                const prev = currentChain[currentChain.length - 1];
+                const isContinuation = prev.endsAtNode && sub.startsAtNode && sub.segIdx === prev.segIdx + 1;
+                if (isContinuation) {
+                    currentChain.push(sub);
                 } else {
-                    subsegments.push({
-                        p0: { x: (1 - t0) * P0.x + t0 * P3.x, y: (1 - t0) * P0.y + t0 * P3.y },
-                        p3: { x: (1 - t1) * P0.x + t1 * P3.x, y: (1 - t1) * P0.y + t1 * P3.y },
-                        isCubic: false,
-                        startsAtNode: t0 <= 1e-4,
-                        endsAtNode: true,
-                        segIdx,
-                    });
+                    pathChains.push(currentChain);
+                    currentChain = [sub];
                 }
             }
+        }
+        if (currentChain.length > 0) {
+            pathChains.push(currentChain);
+        }
+
+        // For closed paths: check if last chain wraps around to first chain
+        if (isClosed && pathChains.length > 1) {
+            const firstChain = pathChains[0];
+            const lastChain = pathChains[pathChains.length - 1];
+            const lastSub = lastChain[lastChain.length - 1];
+            const firstSub = firstChain[0];
+            if (lastSub.endsAtNode && firstSub.startsAtNode && lastSub.segIdx === segmentCount - 1 && firstSub.segIdx === 0) {
+                pathChains.pop();
+                firstChain.unshift(...lastChain);
+            }
+        }
+
+        for (const chain of pathChains) {
+            allChains.push(chain);
         }
     }
 
     if (!anyHit) return null;
-    if (subsegments.length === 0) return []; // Entire shape erased
+    if (allChains.length === 0) return []; // Entire shape erased
 
-    // Assemble continuous subsegment chains
-    const chains: Subsegment[][] = [];
-    let currentChain: Subsegment[] = [];
-
-    for (let s = 0; s < subsegments.length; s++) {
-        const sub = subsegments[s];
-        if (currentChain.length === 0) {
-            currentChain.push(sub);
-        } else {
-            const prev = currentChain[currentChain.length - 1];
-            const isContinuation = prev.endsAtNode && sub.startsAtNode && sub.segIdx === prev.segIdx + 1;
-            if (isContinuation) {
-                currentChain.push(sub);
-            } else {
-                chains.push(currentChain);
-                currentChain = [sub];
-            }
-        }
-    }
-    if (currentChain.length > 0) {
-        chains.push(currentChain);
-    }
-
-    // For closed shapes: check if last chain wraps around to first chain
-    if (isClosed && chains.length > 1) {
-        const firstChain = chains[0];
-        const lastChain = chains[chains.length - 1];
-        const lastSub = lastChain[lastChain.length - 1];
-        const firstSub = firstChain[0];
-        if (lastSub.endsAtNode && firstSub.startsAtNode && lastSub.segIdx === segmentCount - 1 && firstSub.segIdx === 0) {
-            // Merge last chain into first chain (wrap around)
-            chains.pop();
-            firstChain.unshift(...lastChain);
-        }
-    }
-
-    // Convert each chain into a ShapeElement
+    // Convert all chains into ShapeElement fragments
     const toU = (x: number) => (x - contentLeft) / contentWidth;
     const toV = (y: number) => (y - blockTop) / contentWidth;
     const fragments: ShapeElement[] = [];
 
-    for (let c = 0; c < chains.length; c++) {
-        const chain = chains[c];
+    for (let c = 0; c < allChains.length; c++) {
+        const chain = allChains[c];
         if (chain.length === 0) continue;
 
         const pathNodes: ShapePathNode[] = [];
@@ -482,7 +533,7 @@ export function splitShapeDoc(
 
         const xs = pathNodes.map(n => n.x);
         const ys = pathNodes.map(n => n.y);
-        const isLastChain = c === chains.length - 1;
+        const isLastChain = c === allChains.length - 1;
 
         const frag: ShapeElement = {
             ...shape,
