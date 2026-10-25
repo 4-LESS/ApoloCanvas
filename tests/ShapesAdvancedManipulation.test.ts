@@ -6,6 +6,9 @@ import {
     splitLinearSegment,
     straightenLinearSegment,
     toggleLinearNodeKind,
+    toggleNodeOrSegmentOrthogonal,
+    insertLinearNodeAtPoint,
+    snapAngleOrOrthogonal,
     getLinearPathNodes,
     linearControlHandles,
     applyRotationDrag,
@@ -121,6 +124,101 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
 
             const toggledBack = toggleLinearNodeKind(toggled, 1);
             assert.equal(toggledBack.pathNodes![1].nodeKind, 'sharp', 'Toggles smooth to sharp');
+        });
+
+        
+        test('start and end points expose control handles bezier-out-0 and bezier-in-last to modify curve directly', () => {
+            const line = getShapePlugin('line');
+            const geom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 200,
+                y1: 0,
+                pathNodes: [
+                    { x: 0, y: 0, nodeKind: 'sharp' },
+                    { x: 200, y: 0, nodeKind: 'sharp' },
+                ],
+            };
+
+            const handles = line.getControlHandles(geom);
+            const ids = handles.map(h => h.id);
+            assert.ok(ids.includes('bezier-out-0'), 'Start point exposes outgoing control handle');
+            assert.ok(ids.includes('bezier-in-1'), 'End point exposes incoming control handle');
+
+            // Dragging start control handle curves the path from the start point
+            const curvedFromStart = line.applyHandleDrag(geom, 'bezier-out-0', { x: 50, y: 50 });
+            assert.deepEqual(curvedFromStart.pathNodes![0].handleOut, { x: 50, y: 50 });
+
+            // Dragging end control handle curves the path into the end point
+            const curvedFromEnd = line.applyHandleDrag(curvedFromStart, 'bezier-in-1', { x: 150, y: 50 });
+            assert.deepEqual(curvedFromEnd.pathNodes![1].handleIn, { x: 150, y: 50 });
+        });
+
+        test('toggleNodeOrSegmentOrthogonal toggles between 90-degree orthogonal corner and curved Bezier on click', () => {
+            const geom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 200,
+                y1: 200,
+                pathNodes: [
+                    { x: 0, y: 0, nodeKind: 'sharp' },
+                    { x: 100, y: 150, nodeKind: 'smooth', handleIn: { x: 80, y: 130 }, handleOut: { x: 120, y: 170 } },
+                    { x: 200, y: 200, nodeKind: 'sharp' },
+                ],
+            };
+
+            // Clicking curved node-1 toggles it to 90-degree sharp corner
+            const sharp90 = toggleNodeOrSegmentOrthogonal(geom, 'node-1');
+            assert.equal(sharp90.pathNodes![1].nodeKind, 'sharp');
+            assert.equal(sharp90.pathNodes![1].handleIn, undefined);
+            assert.equal(sharp90.pathNodes![1].handleOut, undefined);
+            // The orthogonal alignment puts node-1 at either (0, 200) or (200, 0)
+            const n1 = sharp90.pathNodes![1];
+            assert.ok((n1.x === 0 && n1.y === 200) || (n1.x === 200 && n1.y === 0));
+
+            // Clicking again toggles back to smooth curved Bezier
+            const curvedBack = toggleNodeOrSegmentOrthogonal(sharp90, 'node-1');
+            assert.equal(curvedBack.pathNodes![1].nodeKind, 'smooth');
+            assert.ok(curvedBack.pathNodes![1].handleIn !== undefined);
+            assert.ok(curvedBack.pathNodes![1].handleOut !== undefined);
+        });
+
+        test('snapAngleOrOrthogonal provides 15-degree increments and magnetic orthogonal locks when regularize/Shift is active', () => {
+            const origin = { x: 100, y: 100 };
+
+            // Near horizontal (dy = 4px <= 8px): locks to exact horizontal dy = 0
+            const snapHoriz = snapAngleOrOrthogonal(origin, { x: 200, y: 104 });
+            assert.equal(snapHoriz.y, 100, 'Magnetic orthogonal lock to dy = 0');
+
+            // Near vertical (dx = 5px <= 8px): locks to exact vertical dx = 0
+            const snapVert = snapAngleOrOrthogonal(origin, { x: 105, y: 250 });
+            assert.equal(snapVert.x, 100, 'Magnetic orthogonal lock to dx = 0');
+
+            // 15-degree step snap (PI / 12)
+            const point14deg = { x: 100 + 100 * Math.cos((14 * Math.PI) / 180), y: 100 + 100 * Math.sin((14 * Math.PI) / 180) };
+            const snapped15 = snapAngleOrOrthogonal(origin, point14deg);
+            const snappedAngleDeg = Math.round((Math.atan2(snapped15.y - origin.y, snapped15.x - origin.x) * 180) / Math.PI);
+            assert.equal(snappedAngleDeg, 15, 'Snaps to 15 degrees increment');
+        });
+
+        test('insertLinearNodeAtPoint allows creating new points anywhere along the line, not just at the center suggestion', () => {
+            const geom: ShapeRenderGeometry = {
+                x0: 0,
+                y0: 0,
+                x1: 300,
+                y1: 0,
+                pathNodes: [
+                    { x: 0, y: 0, nodeKind: 'sharp' },
+                    { x: 300, y: 0, nodeKind: 'sharp' },
+                ],
+            };
+
+            // Click at x = 75 (25% along the segment, far from center x = 150)
+            const result = insertLinearNodeAtPoint(geom, { x: 75, y: 0 });
+            assert.ok(result !== null, 'Point successfully inserted');
+            assert.equal(result.geom.pathNodes?.length, 3, 'Path now has 3 nodes');
+            assert.equal(result.handleId, 'node-1', 'Returns handleId for new node');
+            assert.ok(Math.abs(result.geom.pathNodes![1].x - 75) < 5, 'New node is inserted at 25% (x ~ 75), not center');
         });
 
         test('arrowhead follows cubic curve terminal tangent', () => {
