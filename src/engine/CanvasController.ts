@@ -4229,7 +4229,17 @@ export class CanvasController {
     }
 
     private hitTestShapeElement(shape: ShapeElement, point: Point, tolerance: number): boolean {
-        return getShapePlugin(shape.shapeType).hitTest(this.getShapeDocGeometry(shape), point, tolerance);
+        const geom = this.getShapeDocGeometry(shape);
+        const rot = geom.rotation ?? shape.rotation ?? 0;
+        if (rot !== 0) {
+            const plugin = getShapePlugin(shape.shapeType);
+            const norm = plugin.normalizeGeometry(geom);
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            const inv = rotatePoint(point.x, point.y, cx, cy, -rot);
+            return plugin.hitTest(geom, inv, tolerance);
+        }
+        return getShapePlugin(shape.shapeType).hitTest(geom, point, tolerance);
     }
 
     private isTapGesture(start: Point, end: Point | undefined): boolean {
@@ -4401,6 +4411,14 @@ export class CanvasController {
         const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
         let target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
         let regularize = Boolean(shape.regularize || this.isShiftDown);
+
+        // Inverse rotate target point for non-rotate handles when shape is rotated
+        if (drag.handleId !== 'rotate' && drag.startGeom.rotation) {
+            const norm = plugin.normalizeGeometry(drag.startGeom);
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            target = rotatePoint(target.x, target.y, cx, cy, -drag.startGeom.rotation);
+        }
 
         // Connector endpoints magnetize to nearby ports; leaving the 14px radius releases them
         if (isConnectorShape(shape) && (drag.handleId === 'start' || drag.handleId === 'end')) {
@@ -5690,7 +5708,20 @@ export class CanvasController {
     ): void {
         const plugin = getShapePlugin(shape.shapeType);
         const geom = shapeElementToGeometry(shape, contentLeft, blockTop, contentWidth);
-        plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
+        const rot = geom.rotation ?? shape.rotation ?? 0;
+        if (rot !== 0) {
+            const norm = plugin.normalizeGeometry(geom);
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            context.save();
+            context.translate(cx, cy);
+            context.rotate(rot);
+            context.translate(-cx, -cy);
+            plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
+            context.restore();
+        } else {
+            plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
+        }
     }
 
     private paintActive(): void {
@@ -6027,16 +6058,30 @@ export class CanvasController {
         const padding = 6;
 
         ctx.save();
+        const rot = norm.rotation || shape.rotation || 0;
+        if (rot !== 0) {
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate(rot);
+            ctx.translate(-cx, -cy);
+        }
         ctx.strokeStyle = accent;
         ctx.globalAlpha = 0.55;
         ctx.lineWidth = 1 / this.zoom;
         ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        const rMinX = Math.min(norm.x0, norm.x1);
+        const rMaxX = Math.max(norm.x0, norm.x1);
+        const rMinY = Math.min(norm.y0, norm.y1);
+        const rMaxY = Math.max(norm.y0, norm.y1);
         ctx.strokeRect(
-            bounds.minX - padding,
-            bounds.minY - padding,
-            bounds.maxX - bounds.minX + padding * 2,
-            bounds.maxY - bounds.minY + padding * 2,
+            rMinX - padding,
+            rMinY - padding,
+            rMaxX - rMinX + padding * 2,
+            rMaxY - rMinY + padding * 2,
         );
+        ctx.restore();
+        ctx.save();
 
         // Bezier guides: endpoints / nodes → control points
         if (shape.shapeType === 'line' || shape.shapeType === 'arrow') {

@@ -356,7 +356,7 @@ describe('Shapes Suite (Stages 1–4)', () => {
             const rect = getShapePlugin('rectangle');
             const geom: ShapeRenderGeometry = { x0: 100, y0: 100, x1: 300, y1: 200 };
             const handles = rect.getControlHandles(geom);
-            assert.deepEqual(handles.map(h => h.id), ['nw', 'ne', 'se', 'sw', 'radius']);
+            assert.deepEqual(handles.map(h => h.id), ['nw', 'ne', 'se', 'sw', 'rotate', 'radius']);
             assert.equal(handles.find(h => h.id === 'radius')!.kind, 'radius');
 
             const rounded = rect.applyHandleDrag(geom, 'radius', { x: 140, y: 140 });
@@ -395,7 +395,7 @@ describe('Shapes Suite (Stages 1–4)', () => {
         test('triangle vertices can be dragged independently', () => {
             const tri = getShapePlugin('triangle');
             const geom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 100, y1: 100 };
-            assert.deepEqual(tri.getControlHandles(geom).map(h => h.id), ['v0', 'v1', 'v2', 'nw', 'ne', 'se', 'sw']);
+            assert.deepEqual(tri.getControlHandles(geom).map(h => h.id), ['v0', 'v1', 'v2', 'nw', 'ne', 'se', 'sw', 'rotate']);
 
             const free = tri.applyHandleDrag(geom, 'v1', { x: 150, y: 80 });
             assert.deepEqual(free.vertices, [{ x: 50, y: 0 }, { x: 150, y: 80 }, { x: 0, y: 100 }]);
@@ -408,7 +408,7 @@ describe('Shapes Suite (Stages 1–4)', () => {
         test('ellipse exposes corner + cardinal handles and honors 1:1 regularize', () => {
             const ellipse = getShapePlugin('ellipse');
             const geom: ShapeRenderGeometry = { x0: 0, y0: 0, x1: 100, y1: 60 };
-            assert.deepEqual(ellipse.getControlHandles(geom).map(h => h.id), ['nw', 'ne', 'se', 'sw', 'n', 'e', 's', 'w']);
+            assert.deepEqual(ellipse.getControlHandles(geom).map(h => h.id), ['nw', 'ne', 'se', 'sw', 'n', 'e', 's', 'w', 'rotate']);
             const circle = ellipse.applyHandleDrag(geom, 'se', { x: 140, y: 90 }, true);
             assert.equal(Math.abs(circle.x1 - circle.x0), Math.abs(circle.y1 - circle.y0));
             const east = ellipse.applyHandleDrag(geom, 'e', { x: 160, y: 999 });

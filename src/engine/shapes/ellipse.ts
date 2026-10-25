@@ -13,7 +13,7 @@ import {
     getSvgStrokeAttributes,
     regularizeClosedGeometry,
 } from './common.ts';
-import { boxCornerHandles, boxEdgeHandles, boxSnapPorts, resizeBoxByHandle } from './handles.ts';
+import { getGeometryBox, boxCornerHandles, boxEdgeHandles, boxSnapPorts, resizeBoxByHandle, rotationHandle, rotateHandles, applyRotationDrag, rotatedBoxBounds, rotatePoint } from './handles.ts';
 
 export const ellipseShapePlugin: ShapePlugin = {
     id: 'ellipse',
@@ -84,31 +84,54 @@ export const ellipseShapePlugin: ShapePlugin = {
     computeBounds(geom: ShapeRenderGeometry, strokeWidth: number): BoundingBox {
         const norm = this.normalizeGeometry(geom);
         const halfWidth = (strokeWidth || 3) / 2;
-        return {
-            minX: Math.min(norm.x0, norm.x1) - halfWidth,
-            maxX: Math.max(norm.x0, norm.x1) + halfWidth,
-            minY: Math.min(norm.y0, norm.y1) - halfWidth,
-            maxY: Math.max(norm.y0, norm.y1) + halfWidth,
-        };
+        const minX = Math.min(norm.x0, norm.x1);
+        const maxX = Math.max(norm.x0, norm.x1);
+        const minY = Math.min(norm.y0, norm.y1);
+        const maxY = Math.max(norm.y0, norm.y1);
+        return rotatedBoxBounds(minX, minY, maxX, maxY, norm.rotation, halfWidth);
     },
 
     hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean {
         const norm = this.normalizeGeometry(geom);
-        const cx = (norm.x0 + norm.x1) / 2;
-        const cy = (norm.y0 + norm.y1) / 2;
-        const rx = Math.max(0.1, Math.abs(norm.x1 - norm.x0) / 2) + tolerance;
-        const ry = Math.max(0.1, Math.abs(norm.y1 - norm.y0) / 2) + tolerance;
-        const eq = ((point.x - cx) / rx) ** 2 + ((point.y - cy) / ry) ** 2;
+        const minX = Math.min(norm.x0, norm.x1);
+        const maxX = Math.max(norm.x0, norm.x1);
+        const minY = Math.min(norm.y0, norm.y1);
+        const maxY = Math.max(norm.y0, norm.y1);
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        let p = point;
+        if (norm.rotation) {
+            p = rotatePoint(point.x, point.y, cx, cy, -norm.rotation);
+        }
+        const rx = Math.max(0.1, Math.abs(maxX - minX) / 2) + tolerance;
+        const ry = Math.max(0.1, Math.abs(maxY - minY) / 2) + tolerance;
+        const eq = ((p.x - cx) / rx) ** 2 + ((p.y - cy) / ry) ** 2;
         return eq <= 1;
     },
 
     getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[] {
         const norm = this.normalizeGeometry(geom);
-        return [...boxCornerHandles(norm), ...boxEdgeHandles(norm)];
+        const handles: ShapeHandle[] = [
+            ...boxCornerHandles(norm),
+            ...boxEdgeHandles(norm),
+            rotationHandle(norm),
+        ];
+        if (norm.rotation) {
+            const { minX, minY, maxX, maxY } = getGeometryBox(norm);
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
+            return rotateHandles(handles, cx, cy, norm.rotation);
+        }
+        return handles;
     },
 
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
-        return resizeBoxByHandle(this.normalizeGeometry(geom), handleId, newPoint, regularize ?? geom.regularize);
+        const norm = this.normalizeGeometry(geom);
+        const reg = regularize ?? geom.regularize;
+        if (handleId === 'rotate') {
+            return applyRotationDrag(norm, newPoint, reg);
+        }
+        return resizeBoxByHandle(norm, handleId, newPoint, reg);
     },
 
     getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
