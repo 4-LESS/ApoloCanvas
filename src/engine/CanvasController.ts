@@ -928,6 +928,18 @@ export class CanvasController {
                 onToggleRegularize: (enabled) => {
                     this.toolState.shape.regularize = enabled;
                     this.estuche?.updateState({ regularize: enabled });
+                    const selected = this.selection.filter((el): el is ShapeElement => el.type === 'shape');
+                    if (selected.length > 0) {
+                        this.recordHistory();
+                        for (const s of selected) {
+                            s.regularize = enabled;
+                            this.strokeCache.delete(s.id);
+                        }
+                        this.rebuildIndex();
+                        this.renderDirty = true;
+                        this.schedulePaint();
+                        this.persistSoon();
+                    }
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
@@ -4477,7 +4489,7 @@ export class CanvasController {
         const plugin = getShapePlugin(shape.shapeType);
         const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
         let target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
-        let regularize = Boolean(shape.regularize || this.isShiftDown);
+        let regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
 
         // Inverse rotate target point for non-rotate handles when shape is rotated
         if (drag.handleId !== 'rotate' && drag.startGeom.rotation) {
@@ -4498,7 +4510,7 @@ export class CanvasController {
 
         const next = plugin.applyHandleDrag(drag.startGeom, drag.handleId, target, regularize);
         applyGeometryToShapeElement(shape, next, anchor.originX, anchor.originY, anchor.scaleWidth);
-        if (drag.snap) shape.regularize = false;
+        shape.regularize = regularize && !drag.snap;
 
         drag.changed = true;
         this.strokeCache.delete(shape.id);

@@ -160,8 +160,8 @@ export const rectangleShapePlugin: ShapePlugin = {
     },
 
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
-        const norm = this.normalizeGeometry(geom);
-        const reg = regularize ?? geom.regularize;
+        const reg = regularize !== undefined ? regularize : Boolean(geom.regularize);
+        const norm = this.normalizeGeometry({ ...geom, regularize: reg });
         if (handleId === 'rotate') {
             return applyRotationDrag(norm, newPoint, reg);
         }

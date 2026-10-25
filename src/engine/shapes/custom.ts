@@ -322,8 +322,8 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
         },
 
         applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry {
-            const norm = this.normalizeGeometry(geom);
-            const reg = regularize ?? geom.regularize;
+            const reg = regularize !== undefined ? regularize : Boolean(geom.regularize);
+            const norm = this.normalizeGeometry({ ...geom, regularize: reg });
             if (def.applyParamDrag) {
                 const handled = def.applyParamDrag(norm, handleId, newPoint);
                 if (handled) return handled;
