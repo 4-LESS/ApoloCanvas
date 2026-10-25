@@ -59,6 +59,9 @@ import {
     straightenLinearSegment,
     toggleLinearNodeKind,
     rotatePoint,
+    computeSmartAlignmentGuides,
+    type AlignmentGuide,
+    type SnapTargetBounds,
     getShapePlugin,
     mapShapeElementPoints,
     refreshShapeElementBounds,
@@ -356,6 +359,7 @@ export class CanvasController {
     // Selection & Manipulation
     private selection: CanvasElement[] = [];
     private lastHandleTap: { shapeId: string; handleId: string; time: number; x: number; y: number } | null = null;
+    private activeAlignmentGuides: AlignmentGuide[] = [];
     private handleDrag: ShapeHandleDragState | null = null;
     private moveSelectionSnapshot: HistorySnapshot | null = null;
     // Hold-to-snap: dwell detection at the end of a freehand stroke
@@ -3314,8 +3318,32 @@ export class CanvasController {
         if (this.movingSelection && this.points.size > 1) {
             const last = this.points.get(this.points.size - 1);
             const prev = this.points.get(this.points.size - 2);
-            const dx = last.x - prev.x;
-            const dy = last.y - prev.y;
+            let dx = last.x - prev.x;
+            let dy = last.y - prev.y;
+
+            const selBounds = this.getSelectionDocBounds();
+            if (selBounds) {
+                const tol = 5 / this.zoom;
+                const otherBounds: SnapTargetBounds[] = [];
+                const selSet = new Set(this.selection.map(el => el.id));
+                for (const el of this.document.elements) {
+                    if (selSet.has(el.id)) continue;
+                    if (el.type === 'shape') {
+                        otherBounds.push(this.getElementDocBounds(el));
+                    }
+                }
+                const activePredicted = {
+                    minX: selBounds.minX + dx,
+                    maxX: selBounds.maxX + dx,
+                    minY: selBounds.minY + dy,
+                    maxY: selBounds.maxY + dy,
+                };
+                const smart = computeSmartAlignmentGuides(activePredicted, otherBounds, tol);
+                dx += smart.deltaX;
+                dy += smart.deltaY;
+                this.activeAlignmentGuides = smart.guides;
+            }
+
             this.translateSelection(dx, dy, false);
         }
 
@@ -3356,6 +3384,7 @@ export class CanvasController {
 
         if (this.movingSelection) {
             this.movingSelection = false;
+            this.activeAlignmentGuides = [];
             const snapshot = this.moveSelectionSnapshot;
             this.moveSelectionSnapshot = null;
             if (this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
@@ -3439,6 +3468,7 @@ export class CanvasController {
     }
 
     private cancel(): void {
+        this.activeAlignmentGuides = [];
         if (this.handleDrag) {
             this.revertHandleDrag();
         }
@@ -5505,6 +5535,7 @@ export class CanvasController {
         }
 
         if (this.selection.length) this.paintSelection();
+        this.paintAlignmentGuides();
         this.context.setTransform(1, 0, 0, 1, 0, 0);
     }
 
@@ -5995,6 +6026,27 @@ export class CanvasController {
         this.context.fillText(text, midX, midY);
 
         this.context.restore();
+    }
+
+    private paintAlignmentGuides(): void {
+        if (!this.activeAlignmentGuides || this.activeAlignmentGuides.length === 0) return;
+        const ctx = this.context;
+        ctx.save();
+        ctx.strokeStyle = '#FF2D78';
+        ctx.lineWidth = 1 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        ctx.beginPath();
+        for (const g of this.activeAlignmentGuides) {
+            if (g.axis === 'x') {
+                ctx.moveTo(g.position, g.from);
+                ctx.lineTo(g.position, g.to);
+            } else {
+                ctx.moveTo(g.from, g.position);
+                ctx.lineTo(g.to, g.position);
+            }
+        }
+        ctx.stroke();
+        ctx.restore();
     }
 
     private paintSelection(): void {
