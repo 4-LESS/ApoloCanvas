@@ -1,7 +1,7 @@
 /**
  * src/engine/shapes/line.ts
  *
- * 'line' shape plugin (straight or quadratic-curved via its 'curve' handle).
+ * 'line' shape plugin (straight, quadratic-curved, or multi-segment cubic Bezier path).
  */
 
 import type { BoundingBox } from '../../core/types.ts';
@@ -20,6 +20,23 @@ import {
 } from './handles.ts';
 
 export function traceLinearPath(ctx: CanvasRenderingContext2D, norm: ShapeRenderGeometry): void {
+    if (norm.pathNodes && norm.pathNodes.length >= 2) {
+        const nodes = norm.pathNodes;
+        ctx.moveTo(nodes[0].x, nodes[0].y);
+        for (let i = 0; i < nodes.length - 1; i++) {
+            const p0 = nodes[i];
+            const p1 = nodes[i + 1];
+            if (!p0.handleOut && !p1.handleIn) {
+                ctx.lineTo(p1.x, p1.y);
+            } else {
+                const cp1 = p0.handleOut ?? { x: p0.x, y: p0.y };
+                const cp2 = p1.handleIn ?? { x: p1.x, y: p1.y };
+                ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, p1.x, p1.y);
+            }
+        }
+        return;
+    }
+
     ctx.moveTo(norm.x0, norm.y0);
     if (norm.controlPoint && typeof ctx.quadraticCurveTo === 'function') {
         ctx.quadraticCurveTo(norm.controlPoint.x, norm.controlPoint.y, norm.x1, norm.y1);
@@ -29,6 +46,23 @@ export function traceLinearPath(ctx: CanvasRenderingContext2D, norm: ShapeRender
 }
 
 export function linearSvgPathData(norm: ShapeRenderGeometry): string {
+    if (norm.pathNodes && norm.pathNodes.length >= 2) {
+        const nodes = norm.pathNodes;
+        const commands: string[] = [`M ${nodes[0].x} ${nodes[0].y}`];
+        for (let i = 0; i < nodes.length - 1; i++) {
+            const p0 = nodes[i];
+            const p1 = nodes[i + 1];
+            if (!p0.handleOut && !p1.handleIn) {
+                commands.push(`L ${p1.x} ${p1.y}`);
+            } else {
+                const cp1 = p0.handleOut ?? { x: p0.x, y: p0.y };
+                const cp2 = p1.handleIn ?? { x: p1.x, y: p1.y };
+                commands.push(`C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${p1.x} ${p1.y}`);
+            }
+        }
+        return commands.join(' ');
+    }
+
     if (norm.controlPoint) {
         return `M ${norm.x0} ${norm.y0} Q ${norm.controlPoint.x} ${norm.controlPoint.y} ${norm.x1} ${norm.y1}`;
     }
