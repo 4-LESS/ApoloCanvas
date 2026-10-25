@@ -4604,8 +4604,9 @@ export class CanvasController {
                 nextGeom = isCurved
                     ? straightenLinearSegment(geom, segIdx)
                     : splitLinearSegment(geom, segIdx);
-            } else if (best.id.startsWith('node-')) {
-                const nodeIdx = parseInt(best.id.slice('node-'.length), 10);
+            } else if (best.id === 'start' || best.id === 'end' || best.id.startsWith('node-')) {
+                const nodes = getLinearPathNodes(geom);
+                const nodeIdx = best.id === 'start' ? 0 : best.id === 'end' ? nodes.length - 1 : parseInt(best.id.slice('node-'.length), 10);
                 nextGeom = toggleLinearNodeKind(geom, nodeIdx);
             }
             if (nextGeom) {
@@ -6396,12 +6397,14 @@ export class CanvasController {
         const rMaxX = Math.max(norm.x0, norm.x1);
         const rMinY = Math.min(norm.y0, norm.y1);
         const rMaxY = Math.max(norm.y0, norm.y1);
-        ctx.strokeRect(
-            rMinX - padding,
-            rMinY - padding,
-            rMaxX - rMinX + padding * 2,
-            rMaxY - rMinY + padding * 2,
-        );
+        if (shape.shapeType !== 'line' && shape.shapeType !== 'arrow') {
+            ctx.strokeRect(
+                rMinX - padding,
+                rMinY - padding,
+                rMaxX - rMinX + padding * 2,
+                rMaxY - rMinY + padding * 2,
+            );
+        }
         ctx.restore();
         ctx.save();
 
