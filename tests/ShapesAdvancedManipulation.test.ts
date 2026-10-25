@@ -20,6 +20,7 @@ import {
     getSvgFillAttributes,
     slideLinearSegment,
     findClosestLinearSegment,
+    linearPathHit,
     getPortNormal,
     autoAlignConnectorTangents,
     type ShapeRenderGeometry,
@@ -999,6 +1000,35 @@ describe('Stage 5 — Advanced Shape Manipulation (Affinity / CAD Vectors)', () 
             // East (1, 0) rotated 90 deg clockwise points South (0, 1)
             assert.ok(Math.abs(normal.nx) < 1e-4, 'nx is 0');
             assert.ok(Math.abs(normal.ny - 1) < 1e-4, 'ny is 1 (South)');
+        });
+
+        test('touch input directly slides linear segments orthogonally without needing keyboard Ctrl', () => {
+            // Initial 2-node line
+            const geom: ShapeRenderGeometry = { x0: 50, y0: 100, x1: 250, y1: 100 };
+            assert.ok(linearPathHit(geom, { x: 150, y: 102 }, 15), 'Touch on middle of segment is detected');
+            const segIdx = findClosestLinearSegment(geom, { x: 150, y: 102 });
+            assert.equal(segIdx, 0, 'Finds segment 0');
+
+            // Slide with finger downwards to y = 160
+            const slid = slideLinearSegment(geom, segIdx, { x: 150, y: 160 });
+            assert.equal(slid.pathNodes?.length, 4, 'Forms clean orthogonal U-step');
+            assert.equal(slid.pathNodes![0].y, 100, 'Start endpoint fixed');
+            assert.equal(slid.pathNodes![1].y, 160, 'Slid down to finger y');
+            assert.equal(slid.pathNodes![2].y, 160);
+            assert.equal(slid.pathNodes![3].y, 100, 'End endpoint fixed');
+        });
+
+        test('S-Pen barrel press on linear segment prioritizes orthogonal sliding over eraser', () => {
+            const geom: ShapeRenderGeometry = { x0: 0, y0: 50, x1: 200, y1: 50 };
+            const hit = linearPathHit(geom, { x: 100, y: 52 }, 20);
+            assert.ok(hit, 'S-Pen barrel touch on segment hits the line');
+            const segIdx = findClosestLinearSegment(geom, { x: 100, y: 52 });
+            assert.equal(segIdx, 0);
+
+            // Directly slides segment to y = 90
+            const slid = slideLinearSegment(geom, segIdx, { x: 100, y: 90 });
+            assert.equal(slid.pathNodes![1].y, 90);
+            assert.equal(slid.pathNodes![2].y, 90);
         });
     });
 });
