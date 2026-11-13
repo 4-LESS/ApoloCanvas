@@ -1,10 +1,12 @@
 import type { Point, ShapeElement, ShapePathNode } from '../../core/types.ts';
 import { getShapePlugin } from '../shapes/index.ts';
 import { shapeElementToGeometry } from '../shapes/element.ts';
-import { getLinearPathNodes, rotatePoint } from '../shapes/handles.ts';
+import { cubicPoint as evalCubicBezier, deCasteljau, getLinearPathNodes, rotatePoint } from '../shapes/handles.ts';
 import { clampCornerRadius } from '../shapes/rectangle.ts';
 import type { CustomPathSegment, ShapePoint } from '../shapes/types.ts';
 import { distToSegmentSquared } from './StrokeEraser.ts';
+
+export { evalCubicBezier, deCasteljau };
 
 interface Subsegment {
     p0: ShapePoint;
@@ -15,47 +17,6 @@ interface Subsegment {
     startsAtNode: boolean;
     endsAtNode: boolean;
     segIdx: number;
-}
-
-/**
- * Evaluates a cubic Bezier curve at parameter t in [0, 1].
- */
-export function evalCubicBezier(p0: ShapePoint, p1: ShapePoint, p2: ShapePoint, p3: ShapePoint, t: number): ShapePoint {
-    const mt = 1 - t;
-    const mt2 = mt * mt;
-    const t2 = t * t;
-    return {
-        x: mt2 * mt * p0.x + 3 * mt2 * t * p1.x + 3 * mt * t2 * p2.x + t2 * t * p3.x,
-        y: mt2 * mt * p0.y + 3 * mt2 * t * p1.y + 3 * mt * t2 * p2.y + t2 * t * p3.y,
-    };
-}
-
-/**
- * Splits a cubic Bezier curve into two subcurves at parameter t using De Casteljau's algorithm.
- */
-export function deCasteljau(
-    p0: ShapePoint,
-    p1: ShapePoint,
-    p2: ShapePoint,
-    p3: ShapePoint,
-    t: number
-): {
-    left: { p0: ShapePoint; p1: ShapePoint; p2: ShapePoint; p3: ShapePoint };
-    right: { p0: ShapePoint; p1: ShapePoint; p2: ShapePoint; p3: ShapePoint };
-} {
-    const q0 = { x: (1 - t) * p0.x + t * p1.x, y: (1 - t) * p0.y + t * p1.y };
-    const q1 = { x: (1 - t) * p1.x + t * p2.x, y: (1 - t) * p1.y + t * p2.y };
-    const q2 = { x: (1 - t) * p2.x + t * p3.x, y: (1 - t) * p2.y + t * p3.y };
-
-    const r0 = { x: (1 - t) * q0.x + t * q1.x, y: (1 - t) * q0.y + t * q1.y };
-    const r1 = { x: (1 - t) * q1.x + t * q2.x, y: (1 - t) * q1.y + t * q2.y };
-
-    const pt = { x: (1 - t) * r0.x + t * r1.x, y: (1 - t) * r0.y + t * r1.y };
-
-    return {
-        left: { p0, p1: q0, p2: r0, p3: pt },
-        right: { p0: pt, p1: r1, p2: q2, p3 }
-    };
 }
 
 /**
@@ -136,40 +97,6 @@ export function shapeToBoundaryPaths(
         const ry = minY + v * H;
         return rot !== 0 ? rotatePoint(rx, ry, cx, cy, rot) : { x: rx, y: ry };
     };
-
-    if (shape.shapeType === 'cylinder') {
-        const c = Math.max(0.08, Math.min(0.48, geom.shapeParams?.capRatio ?? 0.22));
-        const k = 0.55228475;
-        const c_top = +(c * (1 - k)).toFixed(3);
-        const c_bot = +(c * (1 + k)).toFixed(3);
-        const c2 = +(2 * c).toFixed(3);
-        const x_k0 = +(0.5 * (1 - k)).toFixed(3);
-        const x_k1 = +(0.5 * (1 + k)).toFixed(3);
-        const y_low_mid = +(1 - c).toFixed(3);
-        const y_low_ctrl = +(1 - c + k * c).toFixed(3);
-
-        // Path 1: Outer 3D Silhouette (closed loop with curved top cap, bottom base, and straight vertical sides)
-        const silhouetteNodes: ShapePathNode[] = [
-            { ...toWorld(0, c), handleIn: toWorld(0, c_top), nodeKind: 'smooth' },
-            { ...toWorld(0, y_low_mid), handleOut: toWorld(0, y_low_ctrl), nodeKind: 'smooth' },
-            { ...toWorld(0.5, 1), handleIn: toWorld(x_k0, 1), handleOut: toWorld(x_k1, 1), nodeKind: 'smooth' },
-            { ...toWorld(1, y_low_mid), handleIn: toWorld(1, y_low_ctrl), nodeKind: 'smooth' },
-            { ...toWorld(1, c), handleOut: toWorld(1, c_top), nodeKind: 'smooth' },
-            { ...toWorld(0.5, 0), handleIn: toWorld(x_k1, 0), handleOut: toWorld(x_k0, 0), nodeKind: 'smooth' },
-        ];
-
-        // Path 2: Front Top Rim Arc (open curved seam across the front)
-        const frontRimNodes: ShapePathNode[] = [
-            { ...toWorld(0, c), handleOut: toWorld(0, c_bot), nodeKind: 'smooth' },
-            { ...toWorld(0.5, c2), handleIn: toWorld(x_k0, c2), handleOut: toWorld(x_k1, c2), nodeKind: 'smooth' },
-            { ...toWorld(1, c), handleIn: toWorld(1, c_bot), nodeKind: 'smooth' },
-        ];
-
-        return [
-            { isClosed: true, nodes: silhouetteNodes },
-            { isClosed: false, nodes: frontRimNodes },
-        ];
-    }
 
     if (shape.shapeType === 'rectangle') {
         const radius = clampCornerRadius(geom.cornerRadius ?? shape.cornerRadius, W, H);
@@ -254,42 +181,7 @@ export function shapeToBoundaryPaths(
         }];
     }
 
-    if (shape.shapeType === 'diamond') {
-        const rawPts = [
-            { x: cx, y: minY },
-            { x: maxX, y: cy },
-            { x: cx, y: maxY },
-            { x: minX, y: cy },
-        ];
-        const pts = rot !== 0
-            ? rawPts.map(p => rotatePoint(p.x, p.y, cx, cy, rot))
-            : rawPts;
-        return [{
-            isClosed: true,
-            nodes: pts.map(p => ({ x: p.x, y: p.y, nodeKind: 'sharp' as const })),
-        }];
-    }
-
-    if (shape.shapeType === 'hexagon') {
-        const bevel = W * (geom.shapeParams?.bevelRatio ?? 0.25);
-        const rawPts = [
-            { x: minX + bevel, y: minY },
-            { x: maxX - bevel, y: minY },
-            { x: maxX, y: cy },
-            { x: maxX - bevel, y: maxY },
-            { x: minX + bevel, y: maxY },
-            { x: minX, y: cy },
-        ];
-        const pts = rot !== 0
-            ? rawPts.map(p => rotatePoint(p.x, p.y, cx, cy, rot))
-            : rawPts;
-        return [{
-            isClosed: true,
-            nodes: pts.map(p => ({ x: p.x, y: p.y, nodeKind: 'sharp' as const })),
-        }];
-    }
-
-    // Custom/plugin shapes exposing normalized subpaths
+    // Custom/plugin shapes exposing normalized subpaths (covers diamond, hexagon, cylinder, gates, electrical, etc.)
     const plugin = getShapePlugin(shape.shapeType);
     if (typeof plugin.getBoundarySubpaths === 'function') {
         const subpaths = plugin.getBoundarySubpaths(geom).filter(sp => sp.isStroked !== false);
@@ -351,6 +243,9 @@ function customCommandsToBoundaryPaths(
                 if (Math.hypot(last.x - first.x, last.y - first.y) < 0.5) {
                     if (last.handleIn && !first.handleIn) {
                         first.handleIn = last.handleIn;
+                        if (last.nodeKind === 'smooth') {
+                            first.nodeKind = 'smooth';
+                        }
                     }
                     currentNodes.pop();
                 }
@@ -466,12 +361,34 @@ export function splitShapeDoc(
             const sampleCount = isCubic ? 32 : 16;
             const erasedSamples: boolean[] = [];
 
-            for (let m = 0; m <= sampleCount; m++) {
-                const t = m / sampleCount;
-                const pt = isCubic
+            const evalSegPoint = (t: number): ShapePoint =>
+                isCubic
                     ? evalCubicBezier(P0, P1, P2, P3, t)
                     : { x: (1 - t) * P0.x + t * P3.x, y: (1 - t) * P0.y + t * P3.y };
-                const isErased = isPointInsideEraser(pt, eraser, effRadiusSq);
+
+            const refineBoundary = (low: number, high: number, entry: boolean): number => {
+                for (let k = 0; k < 5; k++) {
+                    const mid = (low + high) / 2;
+                    const inside = isPointInsideEraser(evalSegPoint(mid), eraser, effRadiusSq);
+                    if (entry ? inside : !inside) low = mid;
+                    else high = mid;
+                }
+                return entry ? high : low;
+            };
+
+            const pushSubsegment = (startT: number, endT: number) => {
+                if (endT - startT <= 1e-4) return;
+                const base = { startsAtNode: startT <= 1e-4, endsAtNode: endT >= 1 - 1e-4, segIdx };
+                if (isCubic) {
+                    const sub = extractCubicSubcurve(P0, P1, P2, P3, startT, endT);
+                    subsegments.push({ p0: sub.p0, p1: sub.p1, p2: sub.p2, p3: sub.p3, isCubic: true, ...base });
+                } else {
+                    subsegments.push({ p0: evalSegPoint(startT), p3: evalSegPoint(endT), isCubic: false, ...base });
+                }
+            };
+
+            for (let m = 0; m <= sampleCount; m++) {
+                const isErased = isPointInsideEraser(evalSegPoint(m / sampleCount), eraser, effRadiusSq);
                 erasedSamples.push(isErased);
                 if (isErased) anyHit = true;
             }
@@ -481,97 +398,21 @@ export function splitShapeDoc(
             let t0 = 0;
 
             for (let m = 0; m <= sampleCount; m++) {
-                const isErased = erasedSamples[m];
-                if (!isErased) {
+                if (!erasedSamples[m]) {
                     if (!inRun) {
                         inRun = true;
-                        // Refine entry boundary with binary search
-                        if (m > 0 && erasedSamples[m - 1]) {
-                            let low = (m - 1) / sampleCount;
-                            let high = m / sampleCount;
-                            for (let k = 0; k < 5; k++) {
-                                const mid = (low + high) / 2;
-                                const pt = isCubic
-                                    ? evalCubicBezier(P0, P1, P2, P3, mid)
-                                    : { x: (1 - mid) * P0.x + mid * P3.x, y: (1 - mid) * P0.y + mid * P3.y };
-                                if (isPointInsideEraser(pt, eraser, effRadiusSq)) low = mid;
-                                else high = mid;
-                            }
-                            t0 = high;
-                        } else {
-                            t0 = 0;
-                        }
+                        t0 = m > 0 && erasedSamples[m - 1]
+                            ? refineBoundary((m - 1) / sampleCount, m / sampleCount, true)
+                            : 0;
                     }
-                } else {
-                    if (inRun) {
-                        inRun = false;
-                        // Refine exit boundary with binary search
-                        let low = (m - 1) / sampleCount;
-                        let high = m / sampleCount;
-                        for (let k = 0; k < 5; k++) {
-                            const mid = (low + high) / 2;
-                            const pt = isCubic
-                                ? evalCubicBezier(P0, P1, P2, P3, mid)
-                                : { x: (1 - mid) * P0.x + mid * P3.x, y: (1 - mid) * P0.y + mid * P3.y };
-                            if (isPointInsideEraser(pt, eraser, effRadiusSq)) high = mid;
-                            else low = mid;
-                        }
-                        const t1 = low;
-
-                        if (t1 - t0 > 1e-4) {
-                            if (isCubic) {
-                                const sub = extractCubicSubcurve(P0, P1, P2, P3, t0, t1);
-                                subsegments.push({
-                                    p0: sub.p0,
-                                    p1: sub.p1,
-                                    p2: sub.p2,
-                                    p3: sub.p3,
-                                    isCubic: true,
-                                    startsAtNode: t0 <= 1e-4,
-                                    endsAtNode: t1 >= 1 - 1e-4,
-                                    segIdx,
-                                });
-                            } else {
-                                subsegments.push({
-                                    p0: { x: (1 - t0) * P0.x + t0 * P3.x, y: (1 - t0) * P0.y + t0 * P3.y },
-                                    p3: { x: (1 - t1) * P0.x + t1 * P3.x, y: (1 - t1) * P0.y + t1 * P3.y },
-                                    isCubic: false,
-                                    startsAtNode: t0 <= 1e-4,
-                                    endsAtNode: t1 >= 1 - 1e-4,
-                                    segIdx,
-                                });
-                            }
-                        }
-                    }
+                } else if (inRun) {
+                    inRun = false;
+                    pushSubsegment(t0, refineBoundary((m - 1) / sampleCount, m / sampleCount, false));
                 }
             }
 
             if (inRun) {
-                const t1 = 1;
-                if (t1 - t0 > 1e-4) {
-                    if (isCubic) {
-                        const sub = extractCubicSubcurve(P0, P1, P2, P3, t0, t1);
-                        subsegments.push({
-                            p0: sub.p0,
-                            p1: sub.p1,
-                            p2: sub.p2,
-                            p3: sub.p3,
-                            isCubic: true,
-                            startsAtNode: t0 <= 1e-4,
-                            endsAtNode: true,
-                            segIdx,
-                        });
-                    } else {
-                        subsegments.push({
-                            p0: { x: (1 - t0) * P0.x + t0 * P3.x, y: (1 - t0) * P0.y + t0 * P3.y },
-                            p3: { x: (1 - t1) * P0.x + t1 * P3.x, y: (1 - t1) * P0.y + t1 * P3.y },
-                            isCubic: false,
-                            startsAtNode: t0 <= 1e-4,
-                            endsAtNode: true,
-                            segIdx,
-                        });
-                    }
-                }
+                pushSubsegment(t0, 1);
             }
         }
 

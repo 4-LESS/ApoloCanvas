@@ -22,19 +22,8 @@ import {
     DEFAULT_SHAPE_FAVORITE_PROFILES,
     cloneColorCarousels,
 } from '../core/types.ts';
-
-function hexToRgba(hex: string, opacityPercent: number): string {
-    const clean = hex.replace('#', '');
-    const num = parseInt(clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean, 16);
-    if (isNaN(num)) return hex;
-    const r = (num >> 16) & 255;
-    const g = (num >> 8) & 255;
-    const b = num & 255;
-    const a = Math.max(0, Math.min(1, opacityPercent / 100));
-    return `rgba(${r}, ${g}, ${b}, ${a})`;
-}
 import { getShapePlugin, listShapePlugins } from '../engine/shapes/index.ts';
-import { ICONS, createFillGlyph, createSvg, setAccessibleTooltip, bindTapOrClick } from './theme.ts';
+import { ICONS, createFillGlyph, createSvg, createSwatchCircleButton, setAccessibleTooltip, bindTapOrClick } from './theme.ts';
 import { SliderControl, type PopoverController, type PopoverInstance } from './kit/index.ts';
 import { ColorPickerPopover } from './popover/ColorPickerPopover.ts';
 import { applyPopoverGeometry } from './popover/PopoverGeometry.ts';
@@ -1940,6 +1929,30 @@ export class ToolEstuche implements PopoverInstance {
         this.syncActiveSwatchClasses();
     }
 
+    private toOpacityPercent(opacity: number | undefined, fallbackPercent = 100): number {
+        return typeof opacity === 'number'
+            ? (opacity > 1 ? opacity : Math.round(opacity * 100))
+            : fallbackPercent;
+    }
+
+    private toUnitOpacity(opacity: number | undefined, fallbackUnit: number): number {
+        return typeof opacity === 'number'
+            ? (opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity)))
+            : fallbackUnit;
+    }
+
+    private applyShapeFillPickerResult(newColor: string, normOpacity: number): void {
+        const opPercent = Math.round(normOpacity * 100);
+        this.state.fillColor = newColor;
+        this.state.fillOpacity = normOpacity;
+        this.pushRecentColorForContext('shapeFill', newColor, opPercent);
+        this.callbacks.onChangeFillColor?.(newColor);
+        this.callbacks.onChangeFillOpacity?.(normOpacity);
+        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+        this.updateShapeFillGlyphs();
+        this.renderShapeSubFillSwatches();
+    }
+
     private createCarouselSwatchButton(
         slot: ColorProfileSlot,
         tooltip: string,
@@ -1949,49 +1962,34 @@ export class ToolEstuche implements PopoverInstance {
     ): HTMLButtonElement {
         const col = slot.color;
         const slotOp = slot.opacity ?? 100;
-        const sw = document.createElement('button');
-        sw.type = 'button';
         const isActive = this.state.color.toUpperCase() === col.toUpperCase() && this.getOpacityPercent() === slotOp;
-        sw.className = `swatch popover-swatch-circle ${isActive ? 'is-active' : ''}`;
-        if (slotOp < 100) {
-            sw.classList.add('has-transparency');
-        }
-        sw.dataset.color = col.toUpperCase();
-        sw.dataset.opacity = String(slotOp);
-        sw.setAttribute('aria-pressed', String(isActive));
-        sw.style.touchAction = 'manipulation';
-        setAccessibleTooltip(sw, tooltip);
-        sw.style.setProperty('--c', col);
-        sw.style.setProperty('--swatch-color', col);
-
-        const inner = document.createElement('span');
-        inner.className = 'popover-swatch-inner';
-        if (slotOp < 100) {
-            inner.style.backgroundColor = hexToRgba(col, slotOp);
-        } else {
-            sw.style.backgroundColor = col;
-            inner.style.backgroundColor = col;
-        }
-        sw.appendChild(inner);
-
-        bindTapOrClick(sw, (e) => {
-            if (sw.classList.contains('is-active')) {
-                e?.stopPropagation();
-                this.colorPicker.open(
-                    sw,
-                    this.state.slot,
-                    toolbarEl as HTMLElement,
-                    col,
-                    onPickerConfirm,
-                    null,
-                    slotOp,
-                    this.getContextRecentHexes(ctxKey)
-                );
-                return;
-            }
-            this.applyCarouselSwatchSelection(ctxKey, col, slotOp, sw);
+        const sw = createSwatchCircleButton({
+            className: 'swatch popover-swatch-circle',
+            color: col,
+            opacity: slotOp,
+            active: isActive,
+            innerClass: 'popover-swatch-inner',
+            title: tooltip,
+            dataset: { color: col.toUpperCase(), opacity: String(slotOp) },
+            attrs: { 'aria-pressed': String(isActive) },
+            onClick: (e) => {
+                if (sw.classList.contains('is-active')) {
+                    e?.stopPropagation();
+                    this.colorPicker.open(
+                        sw,
+                        this.state.slot,
+                        toolbarEl as HTMLElement,
+                        col,
+                        onPickerConfirm,
+                        null,
+                        slotOp,
+                        this.getContextRecentHexes(ctxKey)
+                    );
+                    return;
+                }
+                this.applyCarouselSwatchSelection(ctxKey, col, slotOp, sw);
+            },
         });
-
         return sw;
     }
 
@@ -2016,75 +2014,51 @@ export class ToolEstuche implements PopoverInstance {
             const slot = fillSlots[slotIdx];
             const col = slot.color;
             const slotOp = slot.opacity ?? 100;
-            const sw = document.createElement('button');
-            sw.type = 'button';
             const isActive = activeColor === col.toUpperCase() && (activeFillOp === null || slotOp === activeFillOp);
-            sw.className = isActive ? 'fill-swatch is-active' : 'fill-swatch';
-            if (slotOp < 100) {
-                sw.classList.add('has-transparency');
-            }
-            sw.dataset.color = col.toUpperCase();
-            sw.dataset.opacity = String(slotOp);
-            sw.style.touchAction = 'manipulation';
-            sw.style.setProperty('--c', col);
-            sw.setAttribute('role', 'radio');
-            sw.setAttribute('aria-checked', String(isActive));
-            setAccessibleTooltip(sw, `Color de relleno ${col} (${slotOp}%)`);
+            const sw = createSwatchCircleButton({
+                className: 'fill-swatch',
+                color: col,
+                opacity: slotOp,
+                active: isActive,
+                innerClass: 'popover-swatch-inner',
+                title: `Color de relleno ${col} (${slotOp}%)`,
+                dataset: { color: col.toUpperCase(), opacity: String(slotOp) },
+                attrs: { role: 'radio', 'aria-checked': String(isActive) },
+                onClick: (e) => {
+                    if (sw.classList.contains('is-active')) {
+                        e?.stopPropagation();
+                        this.colorPicker.open(
+                            sw,
+                            this.state.slot,
+                            toolbarEl as HTMLElement,
+                            col,
+                            (newColor, opacity) => {
+                                const normOpacity = this.toUnitOpacity(opacity, slotOp / 100);
+                                slot.color = newColor;
+                                slot.opacity = Math.round(normOpacity * 100);
+                                this.applyShapeFillPickerResult(newColor, normOpacity);
+                            },
+                            null,
+                            slotOp,
+                            this.getContextRecentHexes('shapeFill')
+                        );
+                        return;
+                    }
 
-            const inner = document.createElement('span');
-            inner.className = 'popover-swatch-inner';
-            if (slotOp < 100) {
-                inner.style.backgroundColor = hexToRgba(col, slotOp);
-            } else {
-                sw.style.backgroundColor = col;
-                inner.style.backgroundColor = col;
-            }
-            sw.appendChild(inner);
-
-            bindTapOrClick(sw, (e) => {
-                if (sw.classList.contains('is-active')) {
-                    e?.stopPropagation();
-                    this.colorPicker.open(
-                        sw,
-                        this.state.slot,
-                        toolbarEl as HTMLElement,
-                        col,
-                        (newColor, opacity) => {
-                            const normOpacity = typeof opacity === 'number'
-                                ? (opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity)))
-                                : (slotOp / 100);
-                            const opPercent = Math.round(normOpacity * 100);
-                            slot.color = newColor;
-                            slot.opacity = opPercent;
-                            this.state.fillColor = newColor;
-                            this.state.fillOpacity = normOpacity;
-                            this.pushRecentColorForContext('shapeFill', newColor, opPercent);
-                            this.callbacks.onChangeFillColor?.(newColor);
-                            this.callbacks.onChangeFillOpacity?.(normOpacity);
-                            this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
-                            this.updateShapeFillGlyphs();
-                            this.renderShapeSubFillSwatches();
-                        },
-                        null,
-                        slotOp,
-                        this.getContextRecentHexes('shapeFill')
-                    );
-                    return;
-                }
-
-                const normOpacity = slotOp / 100;
-                this.state.fillColor = col;
-                this.state.fillOpacity = normOpacity;
-                this.pushRecentColorForContext('shapeFill', col, slotOp);
-                for (const btn of this.shapeSubFillButtons.values()) {
-                    const isThis = btn === sw;
-                    btn.classList.toggle('is-active', isThis);
-                    btn.setAttribute('aria-checked', String(isThis));
-                }
-                this.callbacks.onChangeFillColor?.(col);
-                this.callbacks.onChangeFillOpacity?.(normOpacity);
-                this.updateShapeFillGlyphs();
-                this.syncActiveFillSwatchClasses();
+                    const normOpacity = slotOp / 100;
+                    this.state.fillColor = col;
+                    this.state.fillOpacity = normOpacity;
+                    this.pushRecentColorForContext('shapeFill', col, slotOp);
+                    for (const btn of this.shapeSubFillButtons.values()) {
+                        const isThis = btn === sw;
+                        btn.classList.toggle('is-active', isThis);
+                        btn.setAttribute('aria-checked', String(isThis));
+                    }
+                    this.callbacks.onChangeFillColor?.(col);
+                    this.callbacks.onChangeFillOpacity?.(normOpacity);
+                    this.updateShapeFillGlyphs();
+                    this.syncActiveFillSwatchClasses();
+                },
             });
 
             this.shapeSubFillButtons.set(`${col.toUpperCase()}-${slotOp}-${slotIdx}`, sw);
@@ -2110,18 +2084,7 @@ export class ToolEstuche implements PopoverInstance {
                 toolbarEl as HTMLElement,
                 this.state.fillColor || this.state.color,
                 (newColor, opacity) => {
-                    const normOpacity = typeof opacity === 'number'
-                        ? (opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity)))
-                        : (this.state.fillOpacity ?? 0.5);
-                    const opPercent = Math.round(normOpacity * 100);
-                    this.state.fillColor = newColor;
-                    this.state.fillOpacity = normOpacity;
-                    this.pushRecentColorForContext('shapeFill', newColor, opPercent);
-                    this.callbacks.onChangeFillColor?.(newColor);
-                    this.callbacks.onChangeFillOpacity?.(normOpacity);
-                    this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
-                    this.updateShapeFillGlyphs();
-                    this.renderShapeSubFillSwatches();
+                    this.applyShapeFillPickerResult(newColor, this.toUnitOpacity(opacity, this.state.fillOpacity ?? 0.5));
                 },
                 null,
                 currentFillOpacity,
@@ -2387,6 +2350,36 @@ export class ToolEstuche implements PopoverInstance {
 
         this.cleanEmptyProfiles();
 
+        const commitCarouselColor = (
+            newColor: string,
+            normOpacity: number,
+            applySlot?: () => void,
+        ) => {
+            applySlot?.();
+            this.applyCarouselSwatchSelection(ctxKey, newColor, normOpacity);
+            this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
+            this.updateColorsUI();
+        };
+
+        const openCarouselPicker = (
+            anchor: HTMLElement,
+            onPicked: (newColor: string, normOpacity: number) => void,
+        ) => {
+            this.colorPicker.open(
+                anchor,
+                this.state.slot,
+                toolbarEl,
+                this.state.color,
+                (newColor, opacity) => {
+                    const normOpacity = this.toOpacityPercent(opacity, 100);
+                    onPicked(newColor, normOpacity);
+                },
+                null,
+                this.getOpacityPercent(),
+                this.getContextRecentHexes(ctxKey)
+            );
+        };
+
         if (this.currentPageIndex === 0) {
             // --- Page 0: Historial / Colores recientes (6 slots + '+' button) ---
             this.swatchRowEl.classList.remove('is-centered');
@@ -2399,16 +2392,10 @@ export class ToolEstuche implements PopoverInstance {
                     `Color ${slot.color} (${slotOp}%)`,
                     ctxKey,
                     toolbarEl,
-                    (newColor, opacity) => {
-                        const normOpacity = typeof opacity === 'number'
-                            ? (opacity > 1 ? opacity : Math.round(opacity * 100))
-                            : 100;
+                    (newColor, opacity) => commitCarouselColor(newColor, this.toOpacityPercent(opacity, 100), () => {
                         slot.color = newColor;
-                        slot.opacity = normOpacity;
-                        this.applyCarouselSwatchSelection(ctxKey, newColor, normOpacity);
-                        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
-                        this.updateColorsUI();
-                    }
+                        slot.opacity = this.toOpacityPercent(opacity, 100);
+                    })
                 );
                 this.swatchButtons.set(`${slot.color.toUpperCase()}-${slotOp}-${slotIdx}`, sw);
                 this.swatchRowEl.appendChild(sw);
@@ -2425,23 +2412,9 @@ export class ToolEstuche implements PopoverInstance {
 
             bindTapOrClick(addBtn, (e) => {
                 e?.stopPropagation();
-                this.colorPicker.open(
-                    addBtn,
-                    this.state.slot,
-                    toolbarEl,
-                    this.state.color,
-                    (newColor, opacity) => {
-                        const normOpacity = typeof opacity === 'number'
-                            ? (opacity > 1 ? opacity : Math.round(opacity * 100))
-                            : 100;
-                        this.applyCarouselSwatchSelection(ctxKey, newColor, normOpacity);
-                        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
-                        this.updateColorsUI();
-                    },
-                    null,
-                    this.getOpacityPercent(),
-                    this.getContextRecentHexes(ctxKey)
-                );
+                openCarouselPicker(addBtn, (newColor, normOpacity) => {
+                    commitCarouselColor(newColor, normOpacity);
+                });
             });
             this.swatchRowEl.appendChild(addBtn);
 
@@ -2459,16 +2432,10 @@ export class ToolEstuche implements PopoverInstance {
                     `Color ${slot.color} (${slotOp}%) - ${profile.name || 'Perfil'}${isGlobal ? ' (Global)' : ''}`,
                     ctxKey,
                     toolbarEl,
-                    (newColor, opacity) => {
-                        const normOpacity = typeof opacity === 'number'
-                            ? (opacity > 1 ? opacity : Math.round(opacity * 100))
-                            : 100;
+                    (newColor, opacity) => commitCarouselColor(newColor, this.toOpacityPercent(opacity, 100), () => {
                         slot.color = newColor;
-                        slot.opacity = normOpacity;
-                        this.applyCarouselSwatchSelection(ctxKey, newColor, normOpacity);
-                        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
-                        this.updateColorsUI();
-                    }
+                        slot.opacity = this.toOpacityPercent(opacity, 100);
+                    })
                 );
                 this.swatchButtons.set(`${slot.color.toUpperCase()}-${slotOp}-${slotIdx}`, sw);
                 this.swatchRowEl.appendChild(sw);
@@ -2476,78 +2443,44 @@ export class ToolEstuche implements PopoverInstance {
 
             // Mostrar exactamente UN círculo vacío dashed al final para añadir el siguiente color (si tiene menos de 6)
             if (profile.slots.length < 6) {
-                const sw = document.createElement('button');
-                sw.type = 'button';
-                sw.className = 'swatch popover-swatch-circle is-dashed-empty';
-                sw.style.touchAction = 'manipulation';
-                setAccessibleTooltip(sw, 'Añadir color a la paleta');
-
-                bindTapOrClick(sw, (e) => {
-                    e?.stopPropagation();
-                    this.colorPicker.open(
-                        sw,
-                        this.state.slot,
-                        toolbarEl,
-                        this.state.color,
-                        (newColor, opacity) => {
-                            const normOpacity = typeof opacity === 'number'
-                                ? (opacity > 1 ? opacity : Math.round(opacity * 100))
-                                : 100;
-                            profile.slots.push({ color: newColor, opacity: normOpacity });
-                            this.applyCarouselSwatchSelection(ctxKey, newColor, normOpacity);
-                            this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
-                            this.updateColorsUI();
-                        },
-                        null,
-                        this.getOpacityPercent(),
-                        this.getContextRecentHexes(ctxKey)
-                    );
+                const sw = createSwatchCircleButton({
+                    className: 'swatch popover-swatch-circle',
+                    emptyClass: 'is-dashed-empty',
+                    title: 'Añadir color a la paleta',
+                    onClick: (e) => {
+                        e?.stopPropagation();
+                        openCarouselPicker(sw, (newColor, normOpacity) => {
+                            commitCarouselColor(newColor, normOpacity, () => {
+                                profile.slots.push({ color: newColor, opacity: normOpacity });
+                            });
+                        });
+                    },
                 });
-
                 this.swatchRowEl.appendChild(sw);
             }
 
             // Centrar los elementos si la paleta tiene menos de 6 colores
-            if (profile.slots.length < 6) {
-                this.swatchRowEl.classList.add('is-centered');
-            } else {
-                this.swatchRowEl.classList.remove('is-centered');
-            }
+            this.swatchRowEl.classList.toggle('is-centered', profile.slots.length < 6);
 
         } else {
             // --- Page N+1: Extremo de creación de nueva entrada (1 único círculo vacío dashed centrado) ---
-            const sw = document.createElement('button');
-            sw.type = 'button';
-            sw.className = 'swatch popover-swatch-circle is-dashed-empty';
-            sw.style.touchAction = 'manipulation';
-            setAccessibleTooltip(sw, 'Crear nueva paleta de colores');
-
-            bindTapOrClick(sw, (e) => {
-                e?.stopPropagation();
-                this.colorPicker.open(
-                    sw,
-                    this.state.slot,
-                    toolbarEl,
-                    this.state.color,
-                    (newColor, opacity) => {
-                        const normOpacity = typeof opacity === 'number'
-                            ? (opacity > 1 ? opacity : Math.round(opacity * 100))
-                            : 100;
-                        const newProfile = {
-                            id: `${ctxKey}-profile-${Date.now()}`,
-                            name: `Paleta ${activeProfiles.length + 1}`,
-                            slots: [{ color: newColor, opacity: normOpacity }],
-                        };
-                        ctx.profiles.push(newProfile);
-                        this.currentPageIndex = this.getActiveProfiles().length;
-                        this.applyCarouselSwatchSelection(ctxKey, newColor, normOpacity);
-                        this.callbacks.onUpdateColorCarousels?.(cloneColorCarousels(this.colorCarousels));
-                        this.updateColorsUI();
-                    },
-                    null,
-                    this.getOpacityPercent(),
-                    this.getContextRecentHexes(ctxKey)
-                );
+            const sw = createSwatchCircleButton({
+                className: 'swatch popover-swatch-circle',
+                emptyClass: 'is-dashed-empty',
+                title: 'Crear nueva paleta de colores',
+                onClick: (e) => {
+                    e?.stopPropagation();
+                    openCarouselPicker(sw, (newColor, normOpacity) => {
+                        commitCarouselColor(newColor, normOpacity, () => {
+                            ctx.profiles.push({
+                                id: `${ctxKey}-profile-${Date.now()}`,
+                                name: `Paleta ${activeProfiles.length + 1}`,
+                                slots: [{ color: newColor, opacity: normOpacity }],
+                            });
+                            this.currentPageIndex = this.getActiveProfiles().length;
+                        });
+                    });
+                },
             });
 
             this.swatchRowEl.appendChild(sw);

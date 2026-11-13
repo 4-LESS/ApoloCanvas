@@ -16,119 +16,15 @@ import {
     PopoverController,
     type IconName,
 } from '../src/ui/kit/index.ts';
+import { createMockWindowAndDoc, setupMockDom } from './helpers/mockDom.ts';
 
-function createMockEnvironment() {
-    const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
-    const mockWindow = {
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: null,
-        addEventListener: (event: string, listener: Function, options?: any) => {
-            if (!listeners.has(event)) listeners.set(event, []);
-            listeners.get(event)!.push({ listener, options });
-        },
-        removeEventListener: (event: string, listener: Function) => {
-            const list = listeners.get(event);
-            if (list) {
-                const idx = list.findIndex(item => item.listener === listener);
-                if (idx !== -1) list.splice(idx, 1);
-            }
-        },
-        dispatch: (event: string, evObj: any) => {
-            const list = listeners.get(event) || [];
-            for (const item of [...list]) {
-                item.listener(evObj);
-            }
-        },
-    };
-
-    const createElement = (tag: string) => {
-        const children: any[] = [];
-        const classes = new Set<string>();
-        const attributes = new Map<string, string>();
-        const elementListeners = new Map<string, Function[]>();
-        const styleObj: any = {
-            display: '',
-            zIndex: '',
-            position: '',
-            left: '',
-            top: '',
-            transform: '',
-            setProperty: (k: string, v: string) => { styleObj[k] = v; },
-            getPropertyValue: (k: string) => styleObj[k] ?? '',
-        };
-        const el: any = {
-            tagName: tag.toUpperCase(),
-            style: styleObj,
-            dataset: {},
-            hidden: false,
-            className: '',
-            children,
-            classList: {
-                add: (c: string) => { classes.add(c); el.className = [...classes].join(' '); },
-                remove: (c: string) => { classes.delete(c); el.className = [...classes].join(' '); },
-                contains: (c: string) => classes.has(c) || el.className.split(/\s+/).filter(Boolean).includes(c),
-                toggle: (c: string, force?: boolean) => {
-                    const next = force !== undefined ? force : !classes.has(c);
-                    if (next) classes.add(c); else classes.delete(c);
-                    el.className = [...classes].join(' ');
-                    return next;
-                },
-            },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); },
-            getAttribute: (k: string) => attributes.get(k) ?? null,
-            appendChild: (child: any) => { children.push(child); child.parentElement = el; return child; },
-            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            remove: () => {
-                if (el.parentElement?.children) {
-                    const idx = el.parentElement.children.indexOf(el);
-                    if (idx !== -1) el.parentElement.children.splice(idx, 1);
-                }
-            },
-            contains: (target: any) => target === el || children.some(c => c === target || c?.contains?.(target)),
-            addEventListener: (type: string, fn: Function) => {
-                if (!elementListeners.has(type)) elementListeners.set(type, []);
-                elementListeners.get(type)!.push(fn);
-            },
-            removeEventListener: (type: string, fn: Function) => {
-                const list = elementListeners.get(type);
-                if (list) {
-                    const idx = list.indexOf(fn);
-                    if (idx !== -1) list.splice(idx, 1);
-                }
-            },
-            dispatch: (ev: any) => {
-                const list = elementListeners.get(ev.type) || [];
-                for (const fn of list) fn(ev);
-                return true;
-            },
-            closest: (sel: string) => {
-                if (sel.includes('data-apolo-popover-trigger') && attributes.has('data-apolo-popover-trigger')) {
-                    return el;
-                }
-                return null;
-            },
-            getBoundingClientRect: () => ({ left: 100, top: 100, right: 200, bottom: 144, width: 100, height: 44 }),
-        };
-        return el;
-    };
-
-    const mockDocument = {
-        body: createElement('body'),
-        createElement,
-        createElementNS: (_ns: string, tag: string) => createElement(tag),
-        elementsFromPoint: () => [],
-    };
-
-    return { mockWindow, mockDocument };
-}
+const KIT_DOM_OPTS = {
+    defaultRect: { left: 100, top: 100, right: 200, bottom: 144, width: 100, height: 44 },
+};
 
 describe('Fase 2: UI Kit Primitives & Popover System', () => {
     test('Icon: createSvgIcon creates pure DOM SVG elements with correct attributes and zero innerHTML', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             const iconsToTest: IconName[] = [
@@ -147,14 +43,12 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
                 assert.ok(svg.children.length > 0, `Icon ${name} should have children created via DOM`);
             }
         } finally {
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('IconButton: renders 44px touch target, sets ARIA attributes and handles keyboard activation', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             let clicked = false;
@@ -185,14 +79,12 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             btn.element.dispatch({ type: 'keydown', key: ' ' });
             assert.strictEqual(clicked, true);
         } finally {
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('SegmentedControl: provides radiogroup semantics and toggles active item', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             let selected = 'normal';
@@ -222,14 +114,12 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             assert.strictEqual(fineBtn.getAttribute('aria-checked'), 'true');
             assert.strictEqual(normalBtn.getAttribute('aria-checked'), 'false');
         } finally {
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('ColorSwatchRow: sets radiogroup semantics and double ring active states', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             let selectedColor = '#1F4FD8';
@@ -257,14 +147,12 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             assert.strictEqual(purpleBtn.getAttribute('aria-checked'), 'true');
             assert.strictEqual(blueBtn.getAttribute('aria-checked'), 'false');
         } finally {
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('SliderRow: updates value in-place without touching DOM structure or range input', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             let reportedVal = 2.5;
@@ -294,14 +182,12 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             // Structure is preserved
             assert.strictEqual(slider.element.children[1], inputEl, 'Input node must NEVER be replaced during dragging');
         } finally {
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('ToggleRow: sets switch semantics and updates checked state', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             let state = false;
@@ -321,7 +207,7 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             assert.strictEqual(toggle.getChecked(), true);
             assert.strictEqual(switchBtn.getAttribute('aria-checked'), 'true');
         } finally {
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
@@ -366,7 +252,7 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
         assert.ok(pos4.left + 288 <= 1024 - 12, 'Popover must not overflow the viewport right edge');
 
         // 5. Test applyPopoverPosition
-        const { mockDocument } = createMockEnvironment();
+        const { mockDocument } = createMockWindowAndDoc(KIT_DOM_OPTS);
         const testEl = mockDocument.createElement('div');
         applyPopoverPosition(testEl as any, pos1);
         assert.strictEqual(testEl.style.position, 'fixed');
@@ -375,11 +261,7 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
     });
 
     test('PopoverShell & PopoverController: manages stacking, trigger immunity and outside dismissal', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, mockWindow, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             const controller = new PopoverController();
@@ -446,15 +328,12 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             shell1.destroy();
             shell2.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('AnchorPositioning: Galaxy Tab S10 landscape viewport simulation with visualViewport and virtual keyboard', () => {
-        const { mockWindow } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        (globalThis as any).window = mockWindow;
+        const { mockWindow, teardown } = setupMockDom(KIT_DOM_OPTS);
 
         try {
             // Galaxy Tab S10 standard landscape CSS viewport
@@ -528,7 +407,7 @@ describe('Fase 2: UI Kit Primitives & Popover System', () => {
             });
             assert.strictEqual(edgePos.left, 12, 'Left must be clamped to safe area padding 12px from bezel');
         } finally {
-            (globalThis as any).window = prevWin;
+            teardown();
         }
     });
 });

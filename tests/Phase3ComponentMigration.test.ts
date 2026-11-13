@@ -7,166 +7,15 @@ import { ZoomPill } from '../src/ui/ZoomPill.ts';
 import { ColorPickerPopover } from '../src/ui/popover/ColorPickerPopover.ts';
 import { PopoverController } from '../src/ui/kit/index.ts';
 import { applyPopoverGeometry } from '../src/ui/popover/PopoverGeometry.ts';
+import { setupMockDom } from './helpers/mockDom.ts';
 
-function createMockEnvironment() {
-    const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
-    const mockWindow = {
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: {
-            width: 1024,
-            height: 768,
-            offsetLeft: 0,
-            offsetTop: 0,
-        },
-        addEventListener: (event: string, listener: Function, options?: any) => {
-            if (!listeners.has(event)) listeners.set(event, []);
-            listeners.get(event)!.push({ listener, options });
-        },
-        removeEventListener: (event: string, listener: Function) => {
-            const list = listeners.get(event);
-            if (list) {
-                const idx = list.findIndex(item => item.listener === listener);
-                if (idx !== -1) list.splice(idx, 1);
-            }
-        },
-        dispatch: (event: string, evObj: any) => {
-            const list = listeners.get(event) || [];
-            for (const item of [...list]) {
-                item.listener(evObj);
-            }
-        },
-    };
-
-    const createElement = (tag: string) => {
-        const children: any[] = [];
-        const classes = new Set<string>();
-        const attributes = new Map<string, string>();
-        const elementListeners = new Map<string, Function[]>();
-        const styleObj: any = {
-            display: '',
-            zIndex: '',
-            position: '',
-            left: '',
-            top: '',
-            width: '',
-            height: '',
-            transform: '',
-            transformOrigin: '',
-            setProperty: (k: string, v: string) => { styleObj[k] = v; },
-            getPropertyValue: (k: string) => styleObj[k] ?? '',
-        };
-        const el: any = {
-            tagName: tag.toUpperCase(),
-            style: styleObj,
-            dataset: {},
-            hidden: false,
-            className: '',
-            children,
-            classList: {
-                add: (...items: string[]) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    for (const item of items) set.add(item);
-                    el.className = [...set].join(' ');
-                },
-                remove: (...items: string[]) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    for (const item of items) set.delete(item);
-                    el.className = [...set].join(' ');
-                },
-                contains: (c: string) => el.className.split(/\s+/).filter(Boolean).includes(c),
-                toggle: (c: string, force?: boolean) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    const next = force !== undefined ? force : !set.has(c);
-                    if (next) set.add(c); else set.delete(c);
-                    el.className = [...set].join(' ');
-                    return next;
-                },
-            },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); if (k === 'class') el.className = String(v); },
-            getAttribute: (k: string) => attributes.get(k) ?? null,
-            hasAttribute: (k: string) => attributes.has(k),
-            removeAttribute: (k: string) => { attributes.delete(k); },
-            appendChild: (child: any) => { children.push(child); child.parentElement = el; return child; },
-            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            remove: () => {
-                if (el.parentElement?.children) {
-                    const idx = el.parentElement.children.indexOf(el);
-                    if (idx !== -1) el.parentElement.children.splice(idx, 1);
-                }
-            },
-            contains: (target: any) => target === el || children.some(c => c === target || c?.contains?.(target)),
-            addEventListener: (type: string, fn: Function) => {
-                if (!elementListeners.has(type)) elementListeners.set(type, []);
-                elementListeners.get(type)!.push(fn);
-            },
-            removeEventListener: (type: string, fn: Function) => {
-                const list = elementListeners.get(type);
-                if (list) {
-                    const idx = list.indexOf(fn);
-                    if (idx !== -1) list.splice(idx, 1);
-                }
-            },
-            dispatch: (ev: any) => {
-                const list = elementListeners.get(ev.type) || [];
-                for (const fn of list) fn(ev);
-                return true;
-            },
-            closest: (sel: string) => {
-                if (sel.includes('data-apolo-popover-trigger') && attributes.has('data-apolo-popover-trigger')) {
-                    return el;
-                }
-                return null;
-            },
-            querySelector: (sel: string) => {
-                let found: any = null;
-                const check = (node: any) => {
-                    if (found) return;
-                    if (sel.startsWith('.') && (node.className?.split(/\s+/).includes(sel.slice(1)) || node.getAttribute?.('class')?.split(/\s+/).includes(sel.slice(1)))) {
-                        found = node;
-                        return;
-                    }
-                    if (node.tagName?.toLowerCase() === sel.toLowerCase()) {
-                        found = node;
-                        return;
-                    }
-                    for (const c of node.children || []) check(c);
-                };
-                for (const c of children) check(c);
-                return found;
-            },
-            getBoundingClientRect: () => ({ left: 200, top: 100, right: 244, bottom: 144, width: 44, height: 44 }),
-            querySelectorAll: (sel: string) => {
-                const matches: any[] = [];
-                const check = (node: any) => {
-                    if (sel.includes('button') && node.tagName === 'BUTTON') matches.push(node);
-                    for (const c of node.children || []) check(c);
-                };
-                check(el);
-                return matches;
-            },
-        };
-        return el;
-    };
-
-    const mockDocument = {
-        body: createElement('body'),
-        createElement,
-        createElementNS: (_ns: string, tag: string) => createElement(tag),
-        elementsFromPoint: () => [],
-    };
-
-    return { mockWindow, mockDocument };
-}
+const PHASE3_DOM_OPTS = {
+    defaultRect: { left: 200, top: 100, right: 244, bottom: 144, width: 44, height: 44 },
+};
 
 describe('Fase 3: Migración de Componentes al UI Kit', () => {
     test('ToolEstuche: mounts cleanly as PopoverShell, preserves slider drag without DOM destruction', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, mockWindow, teardown } = setupMockDom(PHASE3_DOM_OPTS);
 
         try {
             const popoverController = new PopoverController();
@@ -303,22 +152,15 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             estuche.destroy();
             popoverController.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('Popover geometry respects visualViewport bounds when keyboard reduces available space', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = {
-            ...mockWindow,
-            innerWidth: 1200,
-            innerHeight: 900,
-            visualViewport: { width: 420, height: 560, offsetLeft: 24, offsetTop: 0 },
-        };
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, mockWindow, teardown } = setupMockDom(PHASE3_DOM_OPTS);
+        mockWindow.innerWidth = 1200;
+        mockWindow.innerHeight = 900;
+        mockWindow.visualViewport = { width: 420, height: 560, offsetLeft: 24, offsetTop: 0 };
 
         try {
             const popover = mockDocument.createElement('div');
@@ -347,17 +189,12 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             assert.ok(left + 300 <= 24 + 420 - 16, 'Popover should respect the active visual viewport width');
             assert.ok(top >= 16, 'Popover should not drift above the visual viewport');
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('BoxMenu: renders Variante A structure, anchors via calculateAnchorPosition, and dismisses on Escape', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, mockWindow, teardown } = setupMockDom(PHASE3_DOM_OPTS);
 
         try {
             const popoverController = new PopoverController();
@@ -421,17 +258,12 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             boxMenu.destroy();
             popoverController.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('LassoMenu: positions floating menu at 1:1 scale without scale(1/zoom)', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, mockWindow, teardown } = setupMockDom(PHASE3_DOM_OPTS);
 
         try {
             let copied = false;
@@ -490,17 +322,12 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
             assert.strictEqual(lasso.isOpen(), false);
             lasso.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('ZoomPill: updates label with pure SVG icons and in-place zoom text', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, mockWindow, teardown } = setupMockDom(PHASE3_DOM_OPTS);
 
         try {
             let zoomInCount = 0;
@@ -536,17 +363,12 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
 
             pill.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('ColorPickerPopover: transparency slider uses neutral track and high-contrast thumb matching toolbar slider', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, mockWindow, teardown } = setupMockDom(PHASE3_DOM_OPTS);
 
         try {
             const popover = new ColorPickerPopover(mockDocument.body as any);
@@ -569,8 +391,7 @@ describe('Fase 3: Migración de Componentes al UI Kit', () => {
 
             popover.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 });

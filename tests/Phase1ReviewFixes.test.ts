@@ -6,111 +6,11 @@ import { FORBIDDEN_DOM_SELECTORS, isScreenPointForbidden } from '../src/engine/a
 import { InputManager } from '../src/engine/input/InputManager.ts';
 import { BoxMenu } from '../src/ui/BoxMenu.ts';
 import { LassoMenu } from '../src/ui/LassoMenu.ts';
+import { setupMockDom } from './helpers/mockDom.ts';
 
-function createMockEnvironment() {
-    const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
-    const mockWindow = {
-        innerWidth: 1024,
-        innerHeight: 768,
-        addEventListener: (event: string, listener: Function, options?: any) => {
-            if (!listeners.has(event)) listeners.set(event, []);
-            listeners.get(event)!.push({ listener, options });
-        },
-        removeEventListener: (event: string, listener: Function) => {
-            const list = listeners.get(event);
-            if (list) {
-                const idx = list.findIndex(item => item.listener === listener);
-                if (idx !== -1) list.splice(idx, 1);
-            }
-        },
-        dispatch: (event: string, evObj: any) => {
-            const list = listeners.get(event) || [];
-            for (const item of [...list]) {
-                item.listener(evObj);
-            }
-        },
-    };
-
-    const createElement = (tag: string) => {
-        const children: any[] = [];
-        const classes = new Set<string>();
-        const attributes = new Map<string, string>();
-        const elementListeners = new Map<string, Function[]>();
-        const el: any = {
-            tagName: tag.toUpperCase(),
-            style: { display: '', zIndex: '', position: '', left: '', top: '' } as Record<string, string>,
-            dataset: {},
-            hidden: false,
-            className: '',
-            children,
-            classList: {
-                add: (c: string) => { classes.add(c); el.className = [...classes].join(' '); },
-                remove: (c: string) => { classes.delete(c); el.className = [...classes].join(' '); },
-                contains: (c: string) => classes.has(c),
-                toggle: (c: string, force?: boolean) => {
-                    const next = force !== undefined ? force : !classes.has(c);
-                    if (next) classes.add(c); else classes.delete(c);
-                    el.className = [...classes].join(' ');
-                    return next;
-                },
-            },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); },
-            getAttribute: (k: string) => attributes.get(k) ?? null,
-            appendChild: (child: any) => { children.push(child); child.parentElement = el; return child; },
-            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            empty: () => { children.length = 0; },
-            remove: () => {
-                if (el.parentElement?.children) {
-                    const idx = el.parentElement.children.indexOf(el);
-                    if (idx !== -1) el.parentElement.children.splice(idx, 1);
-                }
-            },
-            contains: (target: any) => target === el || children.some(c => c === target || c?.contains?.(target)),
-            addEventListener: (type: string, fn: Function) => {
-                if (!elementListeners.has(type)) elementListeners.set(type, []);
-                elementListeners.get(type)!.push(fn);
-            },
-            removeEventListener: (type: string, fn: Function) => {
-                const list = elementListeners.get(type);
-                if (list) {
-                    const idx = list.indexOf(fn);
-                    if (idx !== -1) list.splice(idx, 1);
-                }
-            },
-            dispatch: (ev: any) => {
-                const list = elementListeners.get(ev.type) || [];
-                for (const fn of list) fn(ev);
-                return true;
-            },
-            closest: () => null,
-            getBoundingClientRect: () => ({ left: 100, top: 100, right: 200, bottom: 130, width: 100, height: 30 }),
-            querySelectorAll: (sel: string) => {
-                const result: any[] = [];
-                const search = (node: any) => {
-                    for (const ch of node.children || []) {
-                        if (ch.tagName === sel.toUpperCase() || ch.classList?.contains(sel.replace('.', ''))) {
-                            result.push(ch);
-                        }
-                        search(ch);
-                    }
-                };
-                search(el);
-                return result;
-            },
-        };
-        return el;
-    };
-
-    const mockDocument = {
-        body: createElement('body'),
-        createElement,
-        createElementNS: () => createElement('svg'),
-        elementsFromPoint: () => [],
-    };
-
-    return { mockWindow, mockDocument };
-}
+const REVIEW_DOM_OPTS = {
+    defaultRect: { left: 100, top: 100, right: 200, bottom: 130, width: 100, height: 30 },
+};
 
 describe('Phase 1 Review Actions & Guard Verification', () => {
     test('styles.css: centralizes --apolo-layer-canvas token and eliminates !important from popovers & BoxMenu', () => {
@@ -164,11 +64,7 @@ describe('Phase 1 Review Actions & Guard Verification', () => {
     });
 
     test('InputManager: isPalmRejected() and isPointerRejected() correctly reflect palm gating', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWindow = (globalThis as any).window;
-        const prevDocument = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(REVIEW_DOM_OPTS);
 
         try {
             const canvas = mockDocument.createElement('canvas');
@@ -225,17 +121,12 @@ describe('Phase 1 Review Actions & Guard Verification', () => {
 
             im.destroy();
         } finally {
-            (globalThis as any).window = prevWindow;
-            (globalThis as any).document = prevDocument;
+            teardown();
         }
     });
 
     test('BoxMenu: Does not hardcode z-index and provides ARIA semantics & keyboard navigation', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWindow = (globalThis as any).window;
-        const prevDocument = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(REVIEW_DOM_OPTS);
 
         try {
             let heightFitted = false;
@@ -282,17 +173,12 @@ describe('Phase 1 Review Actions & Guard Verification', () => {
             assert.strictEqual(menu.isOpen(), false);
             menu.destroy();
         } finally {
-            (globalThis as any).window = prevWindow;
-            (globalThis as any).document = prevDocument;
+            teardown();
         }
     });
 
     test('LassoMenu: isOpen() reflects menu container visibility', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWindow = (globalThis as any).window;
-        const prevDocument = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(REVIEW_DOM_OPTS);
 
         try {
             const lasso = new LassoMenu({
@@ -313,8 +199,7 @@ describe('Phase 1 Review Actions & Guard Verification', () => {
             assert.strictEqual(lasso.isOpen(), false);
             lasso.destroy();
         } finally {
-            (globalThis as any).window = prevWindow;
-            (globalThis as any).document = prevDocument;
+            teardown();
         }
     });
 });

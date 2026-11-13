@@ -1,7 +1,7 @@
 import { describe, test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { CanvasController, type CanvasControllerOptions } from '../src/engine/CanvasController.ts';
-import { setupMockDom, type MockEnvironment } from './helpers/mockDom.ts';
+import { createControllerOptions as createBaseOptions, setupMockDom, type MockEnvironment } from './helpers/mockDom.ts';
 
 function setMockLineRange(el: any, start: number, end: number): void {
     el.dataset.apoloLineStart = String(start);
@@ -10,22 +10,16 @@ function setMockLineRange(el: any, start: number, end: number): void {
     el.setAttribute('data-apolo-line-end', String(end));
 }
 
-function createBaseOptions(overrides: Partial<CanvasControllerOptions> = {}): CanvasControllerOptions {
-    return {
-        palmRejectionCooldownMs: 400,
-        autoSaveDebounceMs: 500,
-        defaultPenColor: '#1F4FD8',
-        defaultPenWidth: 3,
-        enabled: true,
-        enableMouseDrawing: false,
-        shapeRecognition: false,
-        straightenLines: false,
-        app: {
-            metadataCache: { getFileCache: () => null },
-            vault: { cachedRead: async () => '', process: async () => {} },
-        } as any,
-        ...overrides,
-    };
+function mountPreviewController(
+    scroller: any,
+    notePath: string,
+    overrides: Partial<CanvasControllerOptions> = {},
+    extra: { editor?: any; docModel?: any } = {},
+): CanvasController {
+    const file = { path: notePath, basename: notePath.replace(/\.md$/, '') } as any;
+    const doc = extra.docModel ?? ({ id: notePath, version: 2, elements: [], blocks: {} } as any);
+    const persistence = { flush: async () => {}, enqueue: () => {}, saveDocument: async () => {} } as any;
+    return new CanvasController(scroller as any, extra.editor, doc, file, notePath, persistence, createBaseOptions(overrides));
 }
 
 describe('Fase 3 - Spacing & Reading View Coherence', () => {
@@ -75,22 +69,7 @@ describe('Fase 3 - Spacing & Reading View Coherence', () => {
             blocks: {},
         } as any;
 
-        const mockFile = { path: 'jukebox.md', basename: 'jukebox' } as any;
-        const mockPersistence = {
-            flush: async () => {},
-            enqueue: () => {},
-            saveDocument: async () => {},
-        } as any;
-
-        const controller = new CanvasController(
-            scroller as any,
-            mockEditor,
-            docModel,
-            mockFile,
-            'jukebox.md',
-            mockPersistence,
-            createBaseOptions(),
-        );
+        const controller = mountPreviewController(scroller, 'jukebox.md', {}, { editor: mockEditor, docModel });
 
         await controller.insertCanvas(280);
         const lines = docMarkdown.split('\n');
@@ -111,29 +90,17 @@ describe('Fase 3 - Spacing & Reading View Coherence', () => {
         scroller.appendChild(spaceDiv);
 
         const markdownSource = `${'\n'.repeat(12)}<div data-apolo-space="c_1" data-h="280"></div>\n`;
-        const mockFile = { path: 'jukebox.md', basename: 'jukebox' } as any;
-        const mockDoc = { id: 'p', version: 2, elements: [], blocks: {} } as any;
-        const mockPersistence = { flush: async () => {}, enqueue: () => {} } as any;
-
-        const controller = new CanvasController(
-            scroller as any,
-            undefined,
-            mockDoc,
-            mockFile,
-            'jukebox.md',
-            mockPersistence,
-            createBaseOptions({
-                readonly: true,
-                app: {
-                    metadataCache: {
-                        getFileCache: () => ({
-                            sections: [{ type: 'html', position: { start: { line: 12, col: 0, offset: 12 }, end: { line: 12, col: 46, offset: 58 } } }],
-                        }),
-                    },
-                    vault: { cachedRead: async () => markdownSource },
-                } as any,
-            }),
-        );
+        const controller = mountPreviewController(scroller, 'jukebox.md', {
+            readonly: true,
+            app: {
+                metadataCache: {
+                    getFileCache: () => ({
+                        sections: [{ type: 'html', position: { start: { line: 12, col: 0, offset: 12 }, end: { line: 12, col: 46, offset: 58 } } }],
+                    }),
+                },
+                vault: { cachedRead: async () => markdownSource },
+            } as any,
+        });
 
         controller.syncPreviewSpacing();
         assert.equal(spaceDiv.style.marginTop, `${12 * 24}px`, 'Must preserve all 12 leading blank lines as marginTop');
@@ -152,32 +119,20 @@ describe('Fase 3 - Spacing & Reading View Coherence', () => {
         setMockLineRange(spaceDiv, 12, 12);
         scroller.appendChild(spaceDiv);
 
-        const mockFile = { path: 'virt.md', basename: 'virt' } as any;
-        const mockDoc = { id: 'p2', version: 2, elements: [], blocks: {} } as any;
-        const mockPersistence = { flush: async () => {}, enqueue: () => {} } as any;
-
-        const controller = new CanvasController(
-            scroller as any,
-            undefined,
-            mockDoc,
-            mockFile,
-            'virt.md',
-            mockPersistence,
-            createBaseOptions({
-                readonly: true,
-                app: {
-                    metadataCache: {
-                        getFileCache: () => ({
-                            sections: [
-                                { type: 'paragraph', position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 5, col: 10, offset: 80 } } },
-                                { type: 'html', position: { start: { line: 12, col: 0, offset: 90 }, end: { line: 12, col: 46, offset: 136 } } },
-                            ],
-                        }),
-                    },
-                    vault: { cachedRead: async () => 'Text above\n\n\n\n\n\n\n\n\n\n\n\n<div data-apolo-space="c_1"></div>' },
-                } as any,
-            }),
-        );
+        const controller = mountPreviewController(scroller, 'virt.md', {
+            readonly: true,
+            app: {
+                metadataCache: {
+                    getFileCache: () => ({
+                        sections: [
+                            { type: 'paragraph', position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 5, col: 10, offset: 80 } } },
+                            { type: 'html', position: { start: { line: 12, col: 0, offset: 90 }, end: { line: 12, col: 46, offset: 136 } } },
+                        ],
+                    }),
+                },
+                vault: { cachedRead: async () => 'Text above\n\n\n\n\n\n\n\n\n\n\n\n<div data-apolo-space="c_1"></div>' },
+            } as any,
+        });
 
         controller.syncPreviewSpacing();
         assert.equal(spaceDiv.style.marginTop, '', 'Virtualized preceding section must NOT get bogus leading blank-line marginTop');
@@ -198,32 +153,20 @@ describe('Fase 3 - Spacing & Reading View Coherence', () => {
         scroller.appendChild(emptyWrapper);
         scroller.appendChild(spaceDiv);
 
-        const mockFile = { path: 'gap.md', basename: 'gap' } as any;
-        const mockDoc = { id: 'p3', version: 2, elements: [], blocks: {} } as any;
-        const mockPersistence = { flush: async () => {}, enqueue: () => {} } as any;
-
-        const controller = new CanvasController(
-            scroller as any,
-            undefined,
-            mockDoc,
-            mockFile,
-            'gap.md',
-            mockPersistence,
-            createBaseOptions({
-                readonly: true,
-                app: {
-                    metadataCache: {
-                        getFileCache: () => ({
-                            sections: [
-                                { type: 'paragraph', position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 5, offset: 5 } } },
-                                { type: 'html', position: { start: { line: 6, col: 0, offset: 12 }, end: { line: 6, col: 36, offset: 48 } } },
-                            ],
-                        }),
-                    },
-                    vault: { cachedRead: async () => 'Hello\n\n\n\n\n\n<div data-apolo-space="c_1"></div>' },
-                } as any,
-            }),
-        );
+        const controller = mountPreviewController(scroller, 'gap.md', {
+            readonly: true,
+            app: {
+                metadataCache: {
+                    getFileCache: () => ({
+                        sections: [
+                            { type: 'paragraph', position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 5, offset: 5 } } },
+                            { type: 'html', position: { start: { line: 6, col: 0, offset: 12 }, end: { line: 6, col: 36, offset: 48 } } },
+                        ],
+                    }),
+                },
+                vault: { cachedRead: async () => 'Hello\n\n\n\n\n\n<div data-apolo-space="c_1"></div>' },
+            } as any,
+        });
 
         controller.syncPreviewSpacing();
         assert.equal(spaceDiv.style.marginTop, `${5 * 24}px`, 'Must preserve 5 blank lines between paragraph and canvas');
@@ -247,19 +190,7 @@ describe('Fase 3 - Spacing & Reading View Coherence', () => {
         spaceDiv.getBoundingClientRect = () => ({ left: 40, top: 100, width: 700, height: 280, right: 740, bottom: 380 } as DOMRect);
         scroller.appendChild(spaceDiv);
 
-        const mockFile = { path: 'title.md', basename: 'title' } as any;
-        const mockDoc = { id: 'p4', version: 2, elements: [], blocks: {} } as any;
-        const mockPersistence = { flush: async () => {}, enqueue: () => {} } as any;
-
-        const controller = new CanvasController(
-            scroller as any,
-            undefined,
-            mockDoc,
-            mockFile,
-            'title.md',
-            mockPersistence,
-            createBaseOptions({ readonly: true }),
-        );
+        const controller = mountPreviewController(scroller, 'title.md', { readonly: true });
 
         const top = (controller as any).getBlockTop('line:0', '');
         assert.ok(top >= 80, `line:0 blockTop in Reading Mode must stay below inline-title bottom (80px), got ${top}`);

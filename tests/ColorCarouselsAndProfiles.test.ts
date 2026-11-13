@@ -10,8 +10,7 @@ import {
     type WorkspaceToolState,
     type ColorCarouselProfile,
 } from '../src/core/types.ts';
-import { setupMockDom } from './helpers/mockDom.ts';
-import { ToolEstuche } from '../src/ui/ToolEstuche.ts';
+import { createTestEstuche, setupMockDom } from './helpers/mockDom.ts';
 import { ColorPickerPopover } from '../src/ui/popover/ColorPickerPopover.ts';
 
 describe('Color Carousels, Profiles & Independent History', () => {
@@ -226,44 +225,21 @@ describe('Color Carousels, Profiles & Independent History', () => {
             let currentColor = '#FFA726';
             const selectedColors: string[] = [];
 
-            const estuche = new ToolEstuche(
+            const { estuche } = createTestEstuche(
                 {
-                    tool: 'pen',
-                    slot: 'tc',
                     color: currentColor,
-                    width: 3,
-                    profileId: 'fountain',
                     smoothing: 0.4,
                     pressureSensitivity: 0.65,
-                    opacity: 1,
-                    favorites: [],
-                    eraserMode: 'whole',
                     eraserRadius: 15,
-                    scribbleToErase: false,
                     lassoMode: 'free',
-                    shapeType: 'rect',
-                    snapGrid: false,
                     colorCarousels: carousels,
                 },
                 {
-                    onSelectProfile: () => {},
                     onChangeColor: (c) => {
                         currentColor = c;
                         selectedColors.push(c);
                         estuche.updateState({ color: c });
                     },
-                    onChangeWidth: () => {},
-                    onChangeSmoothing: () => {},
-                    onChangePressure: () => {},
-                    onUseFavorite: () => {},
-                    onSaveFavorite: () => {},
-                    onSelectEraserMode: () => {},
-                    onChangeEraserRadius: () => {},
-                    onToggleScribble: () => {},
-                    onSelectLassoMode: () => {},
-                    onSelectShapeType: () => {},
-                    onToggleSnapGrid: () => {},
-                    onClose: () => {},
                 },
                 root,
             );
@@ -334,27 +310,16 @@ describe('Color Carousels, Profiles & Independent History', () => {
             let currentColor = '#E53935';
             let updatedCarousels: WorkspaceColorCarousels | null = null;
 
-            const estuche = new ToolEstuche(
+            const { estuche } = createTestEstuche(
                 {
-                    tool: 'pen',
-                    slot: 'tc',
                     color: currentColor,
-                    width: 3,
-                    profileId: 'fountain',
                     smoothing: 0.4,
                     pressureSensitivity: 0.7,
-                    opacity: 1,
-                    favorites: [],
-                    eraserMode: 'whole',
                     eraserRadius: 15,
-                    scribbleToErase: false,
                     lassoMode: 'free',
-                    shapeType: 'rect',
-                    snapGrid: false,
                     colorCarousels: carousels,
                 },
                 {
-                    onSelectProfile: () => {},
                     onChangeColor: (c) => {
                         currentColor = c;
                         estuche.updateState({ color: c });
@@ -362,18 +327,6 @@ describe('Color Carousels, Profiles & Independent History', () => {
                     onUpdateColorCarousels: (c) => {
                         updatedCarousels = c;
                     },
-                    onChangeWidth: () => {},
-                    onChangeSmoothing: () => {},
-                    onChangePressure: () => {},
-                    onUseFavorite: () => {},
-                    onSaveFavorite: () => {},
-                    onSelectEraserMode: () => {},
-                    onChangeEraserRadius: () => {},
-                    onToggleScribble: () => {},
-                    onSelectLassoMode: () => {},
-                    onSelectShapeType: () => {},
-                    onToggleSnapGrid: () => {},
-                    onClose: () => {},
                 },
                 root,
             );
@@ -433,41 +386,17 @@ describe('Color Carousels, Profiles & Independent History', () => {
             ColorPickerPopover.pushRecentColor(existingLast);
             assert.deepEqual(ColorPickerPopover.getRecentColors(), initial, 'Pushing existing color in ColorPickerPopover must not reorder');
 
-            const estuche = new ToolEstuche(
+            const { estuche } = createTestEstuche(
                 {
                     tool: 'highlighter',
-                    slot: 'tc',
                     color: '#FDD835',
                     width: 12,
-                    profileId: 'fountain',
                     smoothing: 0.4,
-                    pressureSensitivity: 0.5,
                     opacity: 0.75,
-                    favorites: [],
-                    eraserMode: 'whole',
                     eraserRadius: 15,
-                    scribbleToErase: false,
                     lassoMode: 'free',
-                    shapeType: 'rect',
-                    snapGrid: false,
                 },
-                {
-                    onSelectProfile: () => {},
-                    onChangeColor: () => {},
-                    onChangeWidth: () => {},
-                    onChangeSmoothing: () => {},
-                    onChangePressure: () => {},
-                    onChangeOpacity: () => {},
-                    onUseFavorite: () => {},
-                    onSaveFavorite: () => {},
-                    onSelectEraserMode: () => {},
-                    onChangeEraserRadius: () => {},
-                    onToggleScribble: () => {},
-                    onSelectLassoMode: () => {},
-                    onSelectShapeType: () => {},
-                    onToggleSnapGrid: () => {},
-                    onClose: () => {},
-                },
+                {},
                 mockDoc.createElement('div'),
             );
 

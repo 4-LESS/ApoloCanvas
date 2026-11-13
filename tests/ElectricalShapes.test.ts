@@ -6,9 +6,6 @@ import {
     findNearestSnapPort,
     followBoundConnectors,
     autoAlignConnectorTangents,
-    shapeElementToGeometry,
-    applyGeometryToShapeElement,
-    type ConnectorGeometryAdapter,
     type ShapeRenderGeometry,
     type ShapeStyleConfig,
 } from '../src/engine/shapes/index.ts';
@@ -17,10 +14,16 @@ import {
     type ShapeElement,
 } from '../src/core/types.ts';
 import { splitShapeDoc } from '../src/engine/eraser/ShapeEraser.ts';
-import { ToolEstuche } from '../src/ui/ToolEstuche.ts';
-import { Toolbar } from '../src/ui/Toolbar.ts';
 import { createShapePreview } from '../src/ui/favorites/FavoritesDrawer.ts';
-import { createMockEnvironment } from './helpers/mockDom.ts';
+import {
+    assertNear as near,
+    createMockCanvasCtx,
+    createTestEstuche,
+    createTestToolbar,
+    identityAdapter,
+    makeShape,
+    setupMockDom,
+} from './helpers/mockDom.ts';
 
 const ELECTRICAL_IDS = [
     'resistor',
@@ -32,118 +35,15 @@ const ELECTRICAL_IDS = [
     'transistor-mosfet',
 ] as const;
 
-const identityAdapter: ConnectorGeometryAdapter = {
-    getGeometry: (el) => shapeElementToGeometry(el, 0, 0, 1),
-    setGeometry: (el, geom) => applyGeometryToShapeElement(el, geom, 0, 0, 1),
-};
-
-function makeShape(
-    id: string,
-    shapeType: string,
-    x0: number,
-    y0: number,
-    x1: number,
-    y1: number,
-    extra: Partial<ShapeElement> = {},
-): ShapeElement {
-    return {
-        id,
-        type: 'shape',
-        shapeType,
-        timestamp: 0,
-        zIndex: 0,
-        blockId: 'line:0',
-        startX: x0,
-        startY: y0,
-        endX: x1,
-        endY: y1,
-        style: { color: '#111111', width: 2, pattern: 'solid', opacity: 1 },
-        bounds: {
-            minX: Math.min(x0, x1),
-            minY: Math.min(y0, y1),
-            maxX: Math.max(x0, x1),
-            maxY: Math.max(y0, y1),
-        },
-        ...extra,
-    };
-}
-
-function createMockCanvasCtx() {
-    const strokes: Array<{ style: unknown; alpha: number }> = [];
-    const fills: Array<{ style: unknown; alpha: number }> = [];
-    const ctx: any = {
-        strokeStyle: '',
-        fillStyle: '',
-        lineWidth: 1,
-        lineCap: 'butt',
-        lineJoin: 'miter',
-        globalAlpha: 1,
-        save() {},
-        restore() {},
-        beginPath() {},
-        moveTo() {},
-        lineTo() {},
-        bezierCurveTo() {},
-        quadraticCurveTo() {},
-        arc() {},
-        ellipse() {},
-        rect() {},
-        closePath() {},
-        translate() {},
-        rotate() {},
-        scale() {},
-        setLineDash() {},
-        createPattern: () => null,
-        stroke() {
-            strokes.push({ style: this.strokeStyle, alpha: this.globalAlpha });
-        },
-        fill() {
-            fills.push({ style: this.fillStyle, alpha: this.globalAlpha });
-        },
-    };
-    return { ctx, strokes, fills };
-}
-
-function near(actual: number, expected: number, eps = 1e-6): void {
-    assert.ok(Math.abs(actual - expected) <= eps, `Expected ${actual} to be within ${eps} of ${expected}`);
-}
-
-function installDom(): any {
-    const mockDocument = createMockEnvironment();
-    (globalThis as any).document = mockDocument;
-    (globalThis as any).window = {
-        document: mockDocument,
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: null,
-        devicePixelRatio: 1,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        setTimeout: (fn: Function, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (id: any) => clearTimeout(id),
-        requestAnimationFrame: (cb: Function) => setTimeout(cb, 0),
-        cancelAnimationFrame: (id: any) => clearTimeout(id),
-    };
-    return mockDocument;
-}
-
 describe('Electrical diagram shapes & terminal snap ports', () => {
-    const saved: Record<string, any> = {};
+    let dom: ReturnType<typeof setupMockDom>;
 
     beforeEach(() => {
-        for (const key of ['window', 'document', 'requestAnimationFrame', 'cancelAnimationFrame', 'getComputedStyle', 'ResizeObserver']) {
-            saved[key] = (globalThis as any)[key];
-        }
-        (globalThis as any).getComputedStyle = () => ({ position: 'relative', overflow: 'auto', userSelect: 'none' });
-        (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-        (globalThis as any).requestAnimationFrame = (cb: Function) => setTimeout(cb, 0);
-        (globalThis as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
+        dom = setupMockDom();
     });
 
     afterEach(() => {
-        for (const key of Object.keys(saved)) {
-            (globalThis as any)[key] = saved[key];
-        }
+        dom.teardown();
     });
 
     test('registry exposes all 7 electrical components, metadata and aliases', () => {
@@ -400,40 +300,10 @@ describe('Electrical diagram shapes & terminal snap ports', () => {
     });
 
     test('UI integrates electrical pages in ToolEstuche, Toolbar icon and FavoritesDrawer preview', () => {
-        installDom();
         const selected: string[] = [];
-        const estuche = new ToolEstuche(
-            {
-                tool: 'shape',
-                slot: 'tc',
-                color: '#2f6bff',
-                width: 3,
-                profileId: 'fountain',
-                smoothing: 0.5,
-                pressureSensitivity: 0.5,
-                favorites: [],
-                eraserMode: 'whole',
-                eraserRadius: 15,
-                scribbleToErase: false,
-                lassoMode: 'free',
-                shapeType: 'transistor-npn',
-                snapGrid: false,
-            },
-            {
-                onSelectProfile: () => {},
-                onChangeColor: () => {},
-                onChangeWidth: () => {},
-                onChangeSmoothing: () => {},
-                onChangePressure: () => {},
-                onUseFavorite: () => {},
-                onSaveFavorite: () => {},
-                onSelectEraserMode: () => {},
-                onChangeEraserRadius: () => {},
-                onToggleScribble: () => {},
-                onSelectLassoMode: () => {},
-                onSelectShapeType: (s) => { selected.push(s); },
-                onToggleSnapGrid: () => {},
-            },
+        const { estuche } = createTestEstuche(
+            { tool: 'shape', smoothing: 0.5, eraserRadius: 15, lassoMode: 'free', shapeType: 'transistor-npn' },
+            { onSelectShapeType: (s) => { selected.push(s); } },
             (globalThis as any).document.body,
         );
         estuche.open(undefined, (globalThis as any).document.createElement('button'));
@@ -456,34 +326,14 @@ describe('Electrical diagram shapes & terminal snap ports', () => {
         assert.deepEqual(selected, ['resistor']);
         estuche.destroy();
 
-        const toolbar = new Toolbar(
-            {
-                slot: 'tc',
-                penEnabled: true,
-                activeTool: 'shape',
-                activeShape: 'resistor',
-                activeColor: '#000',
-                activeWidth: 2,
-                activeProfileId: 'fountain',
-                activeFavoriteIndex: 0,
-                favorites: [],
-                snapGrid: false,
-                canUndo: false,
-                canRedo: false,
-                eraserRadius: 15,
-                onSlotChange: () => {},
-                onToggleKeyboardMode: () => {},
-                onSelectTool: () => {},
-                onToggleEstuche: () => {},
-                onUndo: () => {},
-                onRedo: () => {},
-                onSelectFavorite: () => {},
-                onChangeColor: () => {},
-                onToggleSnapGrid: () => {},
-                onInsertCanvas: () => {},
-            } as any,
-            (globalThis as any).document.body,
-        );
+        const { toolbar } = createTestToolbar({
+            activeTool: 'shape',
+            activeShape: 'resistor',
+            activeColor: '#000',
+            activeWidth: 2,
+            favorites: [],
+            eraserRadius: 15,
+        });
         const wrap = toolbar.getToolButton('shape')!.querySelector('.apolo-tool-icon-wrap') as any;
         assert.equal(wrap.getAttribute('data-shape'), 'resistor');
         assert.equal(wrap.querySelector('path').getAttribute('d'), getShapePlugin('resistor').iconSvgPaths.join(' '));

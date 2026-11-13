@@ -31,107 +31,20 @@ import { CanvasController } from '../src/engine/CanvasController.ts';
 import { ShapeRecognizer, MIN_RECOGNITION_CONFIDENCE } from '../src/tools/ShapeRecognizer.ts';
 import { renderElement } from '../src/io/PersistenceQueue.ts';
 import { createShapePreview } from '../src/ui/favorites/FavoritesDrawer.ts';
-import { createMockEnvironment } from './helpers/mockDom.ts';
-
-// ---------------------------------------------------------------------------
-// Environment helpers
-// ---------------------------------------------------------------------------
-
-function createMockWindow(mockDocument: any): any {
-    return {
-        document: mockDocument,
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: null,
-        devicePixelRatio: 1,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        setTimeout: (fn: Function, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (id: any) => clearTimeout(id),
-        requestAnimationFrame: (cb: Function) => setTimeout(cb, 0),
-        cancelAnimationFrame: (id: any) => clearTimeout(id),
-    };
-}
-
-function installDom(): any {
-    const mockDocument = createMockEnvironment();
-    (globalThis as any).document = mockDocument;
-    (globalThis as any).window = createMockWindow(mockDocument);
-    return mockDocument;
-}
-
-/** Content column at x = 100, width 800, top 0 → normalized u = (docX - 100) / 800, v = docY / 800. */
-const CONTENT_LEFT = 100;
-const CONTENT_WIDTH = 800;
-
-function createController(configure: (state: WorkspaceToolState) => void, extraOptions: Record<string, unknown> = {}) {
-    const mockDocument = installDom();
-    const scroller = mockDocument.createElement('div');
-    scroller.getBoundingClientRect = () => ({ top: 0, left: 0, width: 1000, height: 1000, bottom: 1000, right: 1000 });
-    const contentEl = mockDocument.createElement('div');
-    contentEl.className = 'cm-content';
-    contentEl.offsetWidth = CONTENT_WIDTH;
-    contentEl.getBoundingClientRect = () => ({
-        top: 0, left: CONTENT_LEFT, width: CONTENT_WIDTH, height: 2000, bottom: 2000, right: CONTENT_LEFT + CONTENT_WIDTH,
-    });
-    scroller.appendChild(contentEl);
-
-    const docModel: PageDocument = {
-        schemaVersion: 1,
-        version: 1,
-        id: 'suite-page',
-        notePath: 'suite.md',
-        elements: [],
-        createdAt: 1000,
-        updatedAt: 1000,
-    };
-    const persistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
-    const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
-    configure(toolState);
-
-    const controller = new CanvasController(
-        scroller as any,
-        undefined,
-        docModel,
-        { path: 'suite.md' } as any,
-        'suite.md',
-        persistence,
-        { toolState, enableMouseDrawing: true, ...extraOptions } as any,
-    );
-    return { controller, canvas: (controller as any).canvas, internals: controller as any };
-}
-
-let clock = 10_000;
-
-function pointer(canvas: any, type: 'pointerdown' | 'pointermove' | 'pointerup', x: number, y: number, timeStamp = (clock += 16)): void {
-    canvas.dispatchEvent({
-        type,
-        pointerId: 1,
-        pointerType: 'pen',
-        clientX: x,
-        clientY: y,
-        buttons: type === 'pointerup' ? 0 : 1,
-        button: 0,
-        pressure: type === 'pointerup' ? 0 : 0.5,
-        shiftKey: false,
-        timeStamp,
-        preventDefault: () => {},
-        stopPropagation: () => {},
-    });
-}
-
-function dragGesture(canvas: any, from: [number, number], to: [number, number], steps = 4): void {
-    pointer(canvas, 'pointerdown', from[0], from[1]);
-    for (let i = 1; i <= steps; i++) {
-        pointer(canvas, 'pointermove', from[0] + ((to[0] - from[0]) * i) / steps, from[1] + ((to[1] - from[1]) * i) / steps);
-    }
-    pointer(canvas, 'pointerup', to[0], to[1]);
-}
-
-function tapGesture(canvas: any, at: [number, number]): void {
-    pointer(canvas, 'pointerdown', at[0], at[1]);
-    pointer(canvas, 'pointerup', at[0], at[1]);
-}
+import {
+    CONTENT_LEFT,
+    CONTENT_WIDTH,
+    createTestController as createController,
+    createTestEstuche,
+    createTestToolbar,
+    dragGesture,
+    identityAdapter,
+    installDom,
+    makeShape,
+    pointer,
+    setupMockDom,
+    tapGesture,
+} from './helpers/mockDom.ts';
 
 const u = (docX: number) => (docX - CONTENT_LEFT) / CONTENT_WIDTH;
 const v = (docY: number) => docY / CONTENT_WIDTH;
@@ -141,49 +54,17 @@ function shapes(controller: CanvasController): ShapeElement[] {
     return controller.getDocument().elements.filter((el): el is ShapeElement => el.type === 'shape');
 }
 
-/** Identity anchor (origin 0, scale 1) adapter for pure connector tests. */
-const identityAdapter: ConnectorGeometryAdapter = {
-    getGeometry: (el) => shapeElementToGeometry(el, 0, 0, 1),
-    setGeometry: (el, geom) => applyGeometryToShapeElement(el, geom, 0, 0, 1),
-};
-
-function makeShape(id: string, shapeType: string, x0: number, y0: number, x1: number, y1: number, extra: Partial<ShapeElement> = {}): ShapeElement {
-    return {
-        id,
-        type: 'shape',
-        shapeType,
-        timestamp: 0,
-        zIndex: 0,
-        blockId: 'line:0',
-        startX: x0,
-        startY: y0,
-        endX: x1,
-        endY: y1,
-        style: { color: '#111111', width: 2, pattern: 'solid', opacity: 1 },
-        bounds: { minX: Math.min(x0, x1), minY: Math.min(y0, y1), maxX: Math.max(x0, x1), maxY: Math.max(y0, y1) },
-        ...extra,
-    };
-}
-
 // ---------------------------------------------------------------------------
 
 describe('Shapes Suite (Stages 1–4)', () => {
-    const saved: Record<string, any> = {};
+    let dom: ReturnType<typeof setupMockDom>;
 
     beforeEach(() => {
-        for (const key of ['window', 'document', 'requestAnimationFrame', 'cancelAnimationFrame', 'getComputedStyle', 'ResizeObserver']) {
-            saved[key] = (globalThis as any)[key];
-        }
-        (globalThis as any).getComputedStyle = () => ({ position: 'relative', overflow: 'auto', userSelect: 'none' });
-        (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-        (globalThis as any).requestAnimationFrame = (cb: Function) => setTimeout(cb, 0);
-        (globalThis as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
+        dom = setupMockDom();
     });
 
     afterEach(() => {
-        for (const [key, value] of Object.entries(saved)) {
-            (globalThis as any)[key] = value;
-        }
+        dom.teardown();
     });
 
     // =======================================================================
@@ -192,20 +73,10 @@ describe('Shapes Suite (Stages 1–4)', () => {
     describe('Stage 1 — Shapes estuche, toolbar icon & multi-face 3D fills', () => {
         test('carousel shows base shapes on page 1, extended on page 2, and electrical circuits + transistors on pages 3–4', async () => {
             installDom();
-            const { ToolEstuche } = await import('../src/ui/ToolEstuche.ts');
             const selected: string[] = [];
-            const estuche = new ToolEstuche(
-                {
-                    tool: 'shape', slot: 'tc', color: '#2f6bff', width: 3, profileId: 'fountain', smoothing: 0.5,
-                    pressureSensitivity: 0.5, favorites: [], eraserMode: 'whole', eraserRadius: 15, scribbleToErase: false,
-                    lassoMode: 'free', shapeType: 'cylinder', snapGrid: false,
-                },
-                {
-                    onSelectProfile: () => {}, onChangeColor: () => {}, onChangeWidth: () => {}, onChangeSmoothing: () => {},
-                    onChangePressure: () => {}, onUseFavorite: () => {}, onSaveFavorite: () => {}, onSelectEraserMode: () => {},
-                    onChangeEraserRadius: () => {}, onToggleScribble: () => {}, onSelectLassoMode: () => {},
-                    onSelectShapeType: (s) => { selected.push(s); }, onToggleSnapGrid: () => {},
-                },
+            const { estuche } = createTestEstuche(
+                { tool: 'shape', smoothing: 0.5, eraserRadius: 15, lassoMode: 'free', shapeType: 'cylinder' },
+                { onSelectShapeType: (s) => { selected.push(s); } },
                 (globalThis as any).document.body,
             );
             estuche.open(undefined, (globalThis as any).document.createElement('button'));
@@ -245,19 +116,13 @@ describe('Shapes Suite (Stages 1–4)', () => {
 
         test('prop bar toggles the line tray, the 5-column fill tray and the 1:1 state', async () => {
             installDom();
-            const { ToolEstuche } = await import('../src/ui/ToolEstuche.ts');
             const calls: Record<string, unknown[]> = { pattern: [], fill: [], fillPattern: [], regularize: [], fillOpacity: [] };
-            const estuche = new ToolEstuche(
+            const { estuche } = createTestEstuche(
                 {
-                    tool: 'shape', slot: 'tc', color: '#2f6bff', width: 3, profileId: 'fountain', smoothing: 0.5,
-                    pressureSensitivity: 0.5, favorites: [], eraserMode: 'whole', eraserRadius: 15, scribbleToErase: false,
-                    lassoMode: 'free', shapeType: 'ellipse', snapGrid: false, fillEnabled: true, fillPattern: 'solid', fillOpacity: 0.4,
+                    tool: 'shape', smoothing: 0.5, eraserRadius: 15, lassoMode: 'free',
+                    shapeType: 'ellipse', fillEnabled: true, fillPattern: 'solid', fillOpacity: 0.4,
                 },
                 {
-                    onSelectProfile: () => {}, onChangeColor: () => {}, onChangeWidth: () => {}, onChangeSmoothing: () => {},
-                    onChangePressure: () => {}, onUseFavorite: () => {}, onSaveFavorite: () => {}, onSelectEraserMode: () => {},
-                    onChangeEraserRadius: () => {}, onToggleScribble: () => {}, onSelectLassoMode: () => {},
-                    onSelectShapeType: () => {}, onToggleSnapGrid: () => {},
                     onChangeLineStyle: (p) => calls.pattern.push(p),
                     onToggleFillEnabled: (f) => calls.fill.push(f),
                     onChangeFillPattern: (p) => calls.fillPattern.push(p),
@@ -303,15 +168,13 @@ describe('Shapes Suite (Stages 1–4)', () => {
 
         test('toolbar shape button shows the icon of the armed shape plugin', async () => {
             installDom();
-            const { Toolbar } = await import('../src/ui/Toolbar.ts');
-            const toolbar = new Toolbar({
-                slot: 'tc', penEnabled: true, activeTool: 'shape', activeShape: 'rectangle', activeColor: '#000',
-                activeWidth: 2, activeProfileId: 'fountain', activeFavoriteIndex: 0, favorites: [], snapGrid: false,
-                canUndo: false, canRedo: false, eraserRadius: 15,
-                onSlotChange: () => {}, onToggleKeyboardMode: () => {}, onSelectTool: () => {}, onToggleEstuche: () => {},
-                onUndo: () => {}, onRedo: () => {}, onSelectFavorite: () => {}, onChangeColor: () => {},
-                onToggleSnapGrid: () => {}, onInsertCanvas: () => {},
-            } as any, (globalThis as any).document.body);
+            const { toolbar } = createTestToolbar({
+                activeTool: 'shape',
+                activeShape: 'rectangle',
+                activeWidth: 2,
+                favorites: [],
+                eraserRadius: 15,
+            });
 
             toolbar.setShape('cylinder');
             const wrap = toolbar.getToolButton('shape')!.querySelector('.apolo-tool-icon-wrap') as any;
@@ -588,15 +451,16 @@ describe('Shapes Suite (Stages 1–4)', () => {
             }, { shapeRecognition: true });
 
             const corners: Array<[number, number]> = [[200, 100], [500, 100], [500, 300], [200, 300], [200, 100]];
-            pointer(canvas, 'pointerdown', 200, 100);
+            let ts = 10_000;
+            pointer(canvas, 'pointerdown', 200, 100, (ts += 16));
             for (let i = 1; i < corners.length; i++) {
                 const [ax, ay] = corners[i - 1];
                 const [bx, by] = corners[i];
                 for (let s = 1; s <= 10; s++) {
-                    pointer(canvas, 'pointermove', ax + ((bx - ax) * s) / 10, ay + ((by - ay) * s) / 10);
+                    pointer(canvas, 'pointermove', ax + ((bx - ax) * s) / 10, ay + ((by - ay) * s) / 10, (ts += 16));
                 }
             }
-            const lastMove = clock;
+            const lastMove = ts;
 
             // Live dwell (360ms) shows a snap preview while the stylus is held
             await new Promise(resolve => setTimeout(resolve, 420));
@@ -621,9 +485,10 @@ describe('Shapes Suite (Stages 1–4)', () => {
                 state.activeTool = 'pen';
                 state.pen.straightenLines = false;
             }, { shapeRecognition: true });
-            pointer(canvas, 'pointerdown', 200, 100);
-            for (let i = 1; i <= 10; i++) pointer(canvas, 'pointermove', 200 + i * 30, 100);
-            pointer(canvas, 'pointerup', 500, 100, clock + 10);
+            let ts = 20_000;
+            pointer(canvas, 'pointerdown', 200, 100, (ts += 16));
+            for (let i = 1; i <= 10; i++) pointer(canvas, 'pointermove', 200 + i * 30, 100, (ts += 16));
+            pointer(canvas, 'pointerup', 500, 100, ts + 10);
             assert.equal(controller.getDocument().elements[0]?.type, 'stroke');
             controller.destroy();
         });

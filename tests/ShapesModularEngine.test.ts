@@ -29,70 +29,17 @@ import {
 } from '../src/core/types.ts';
 import { CanvasController } from '../src/engine/CanvasController.ts';
 import { renderElement, renderSvg, renderBoxSvg } from '../src/io/PersistenceQueue.ts';
-import { createMockEnvironment } from './helpers/mockDom.ts';
-
-function createMockEngineEnv() {
-    const mockDocument = createMockEnvironment();
-    const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
-    const mockWindow: any = {
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: null,
-        devicePixelRatio: 1,
-        addEventListener: (event: string, listener: Function, options?: any) => {
-            if (!listeners.has(event)) listeners.set(event, []);
-            listeners.get(event)!.push({ listener, options });
-        },
-        removeEventListener: (event: string, listener: Function) => {
-            const list = listeners.get(event);
-            if (list) {
-                const idx = list.findIndex(item => item.listener === listener);
-                if (idx !== -1) list.splice(idx, 1);
-            }
-        },
-        dispatch: (event: string, evObj: any) => {
-            const list = listeners.get(event) || [];
-            for (const item of [...list]) {
-                item.listener(evObj);
-            }
-        },
-        setTimeout: (fn: Function, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (id: any) => clearTimeout(id),
-        requestAnimationFrame: (cb: Function) => setTimeout(cb, 16),
-        cancelAnimationFrame: (id: any) => clearTimeout(id),
-    };
-    return { mockWindow, mockDocument };
-}
+import { createTestEstuche, installDom, setupMockDom } from './helpers/mockDom.ts';
 
 describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => {
-    let originalWindow: any;
-    let originalDocument: any;
-    let originalRAF: any;
-    let originalCAF: any;
-    let originalComputedStyle: any;
-    let originalResizeObserver: any;
+    let dom: ReturnType<typeof setupMockDom>;
 
     beforeEach(() => {
-        originalWindow = (globalThis as any).window;
-        originalDocument = (globalThis as any).document;
-        originalRAF = (globalThis as any).requestAnimationFrame;
-        originalCAF = (globalThis as any).cancelAnimationFrame;
-        originalComputedStyle = (globalThis as any).getComputedStyle;
-        originalResizeObserver = (globalThis as any).ResizeObserver;
-
-        (globalThis as any).getComputedStyle = () => ({ position: 'relative', overflow: 'auto', userSelect: 'none' });
-        (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-        (globalThis as any).requestAnimationFrame = (cb: Function) => setTimeout(cb, 0);
-        (globalThis as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
+        dom = setupMockDom();
     });
 
     afterEach(() => {
-        (globalThis as any).window = originalWindow;
-        (globalThis as any).document = originalDocument;
-        (globalThis as any).requestAnimationFrame = originalRAF;
-        (globalThis as any).cancelAnimationFrame = originalCAF;
-        (globalThis as any).getComputedStyle = originalComputedStyle;
-        (globalThis as any).ResizeObserver = originalResizeObserver;
+        dom.teardown();
     });
 
     describe('1. Shape Registry & Custom Shape API', () => {
@@ -407,9 +354,7 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
 
     describe('4. Real-Time paintActive Preview & Pointer Drag Workflow', () => {
         test('pointerdown -> pointermove updates live elastic preview and pointerup commits matching coordinates', () => {
-            const { mockWindow, mockDocument } = createMockEngineEnv();
-            (globalThis as any).window = mockWindow;
-            (globalThis as any).document = mockDocument;
+            const mockDocument = installDom();
 
             const scroller = mockDocument.createElement('div');
             scroller.getBoundingClientRect = () => ({
@@ -538,9 +483,7 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
         });
 
         test('Shift key during pointer drag forces regularize: true on committed shape', () => {
-            const { mockWindow, mockDocument } = createMockEngineEnv();
-            (globalThis as any).window = mockWindow;
-            (globalThis as any).document = mockDocument;
+            const mockDocument = installDom();
 
             const scroller = mockDocument.createElement('div');
             scroller.getBoundingClientRect = () => ({
@@ -659,11 +602,8 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
 
     describe('5. ToolEstuche Shapes UI Controls & Accessibility', () => {
         test('renders base shapes and custom shapes row with pagination', async () => {
-            const { mockWindow, mockDocument } = createMockEngineEnv();
-            (globalThis as any).window = mockWindow;
-            (globalThis as any).document = mockDocument;
+            const mockDocument = installDom();
 
-            const { ToolEstuche } = await import('../src/ui/ToolEstuche.ts');
             const root = mockDocument.createElement('div');
             mockDocument.body.appendChild(root);
 
@@ -673,41 +613,23 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
             let changedFillPattern: string | undefined;
             let changedFillColor: string | undefined;
 
-            const estuche = new ToolEstuche(
+            const { estuche } = createTestEstuche(
                 {
                     tool: 'shape',
                     slot: 'bottom',
                     color: '#111827',
                     width: 2,
-                    profileId: 'fountain',
                     smoothing: 0.5,
-                    pressureSensitivity: 0.5,
-                    favorites: [],
-                    eraserMode: 'whole',
                     eraserRadius: 15,
-                    scribbleToErase: false,
                     lassoMode: 'free',
                     shapeType: 'rectangle',
-                    snapGrid: false,
                     regularize: false,
                     fillEnabled: false,
                     fillColor: '#1F4FD8',
                     fillPattern: 'solid',
                 },
                 {
-                    onSelectProfile: () => {},
-                    onChangeColor: () => {},
-                    onChangeWidth: () => {},
-                    onChangeSmoothing: () => {},
-                    onChangePressure: () => {},
-                    onUseFavorite: () => {},
-                    onSaveFavorite: () => {},
-                    onSelectEraserMode: () => {},
-                    onChangeEraserRadius: () => {},
-                    onToggleScribble: () => {},
-                    onSelectLassoMode: () => {},
                     onSelectShapeType: (s) => { selectedShape = s; },
-                    onToggleSnapGrid: () => {},
                     onToggleRegularize: (reg) => { toggledRegularize = reg; },
                     onToggleFillEnabled: (fe) => { toggledFill = fe; },
                     onChangeFillPattern: (fp) => { changedFillPattern = fp; },
@@ -963,9 +885,7 @@ describe('PR #1 Modular Shape Architecture & Real-Time Rendering Engine', () => 
         });
 
         test('FavoritesDrawer createShapePreview renders cylinder with two-face fill', async () => {
-            const { mockWindow, mockDocument } = createMockEngineEnv();
-            (globalThis as any).window = mockWindow;
-            (globalThis as any).document = mockDocument;
+            const mockDocument = installDom();
 
             const { createShapePreview } = await import('../src/ui/favorites/FavoritesDrawer.ts');
             const previewSvg = createShapePreview({

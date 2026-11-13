@@ -1,32 +1,12 @@
 import type { Point, ShapeElement, StrokeElement } from '../../core/types.ts';
-import { getShapePlugin, sampleLinearPath, shapeElementToGeometry } from '../shapes/index.ts';
+import {
+    distToSegmentSquared,
+    getShapePlugin,
+    sampleLinearPath,
+    shapeElementToGeometry,
+} from '../shapes/index.ts';
 
-/**
- * Calculates squared distance from a point to a 2D line segment.
- */
-export function distToSegmentSquared(
-    px: number,
-    py: number,
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-): number {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) {
-        const ex = px - x1;
-        const ey = py - y1;
-        return ex * ex + ey * ey;
-    }
-    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
-    const projX = x1 + t * dx;
-    const projY = y1 + t * dy;
-    const ex = px - projX;
-    const ey = py - projY;
-    return ex * ex + ey * ey;
-}
+export { distToSegmentSquared };
 
 /**
  * Checks whether two 2D line segments intersect.

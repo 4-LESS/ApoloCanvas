@@ -13,25 +13,29 @@ import {
     getClosedPathBounds,
     buildBlobGeometryFromPoints,
     boxSnapPorts,
-    type ConnectorGeometryAdapter,
     type ShapeRenderGeometry,
     type ShapeStyleConfig,
 } from '../src/engine/shapes/index.ts';
 import {
-    cloneWorkspaceToolState,
-    DEFAULT_WORKSPACE_TOOL_STATE,
     type CanvasElement,
-    type PageDocument,
     type ShapeElement,
     type WorkspaceToolState,
 } from '../src/core/types.ts';
-import { CanvasController } from '../src/engine/CanvasController.ts';
 import { splitShapeDoc } from '../src/engine/eraser/ShapeEraser.ts';
 import { renderElement } from '../src/io/PersistenceQueue.ts';
-import { ToolEstuche } from '../src/ui/ToolEstuche.ts';
-import { Toolbar } from '../src/ui/Toolbar.ts';
 import { createShapePreview } from '../src/ui/favorites/FavoritesDrawer.ts';
-import { createMockEnvironment } from './helpers/mockDom.ts';
+import {
+    assertNear as near,
+    CONTENT_WIDTH,
+    createMockCanvasCtx,
+    createTestController,
+    createTestEstuche,
+    createTestToolbar,
+    identityAdapter,
+    makeShape,
+    pointer,
+    setupMockDom,
+} from './helpers/mockDom.ts';
 
 const LOGIC_GATE_IDS = [
     'gate-and',
@@ -43,192 +47,18 @@ const LOGIC_GATE_IDS = [
     'gate-xnor',
 ] as const;
 
-const identityAdapter: ConnectorGeometryAdapter = {
-    getGeometry: (el) => shapeElementToGeometry(el, 0, 0, 1),
-    setGeometry: (el, geom) => applyGeometryToShapeElement(el, geom, 0, 0, 1),
-};
-
-const CONTENT_LEFT = 100;
-const CONTENT_WIDTH = 800;
-
-function makeShape(
-    id: string,
-    shapeType: string,
-    x0: number,
-    y0: number,
-    x1: number,
-    y1: number,
-    extra: Partial<ShapeElement> = {},
-): ShapeElement {
-    return {
-        id,
-        type: 'shape',
-        shapeType,
-        timestamp: 0,
-        zIndex: 0,
-        blockId: 'line:0',
-        startX: x0,
-        startY: y0,
-        endX: x1,
-        endY: y1,
-        style: { color: '#111111', width: 2, pattern: 'solid', opacity: 1 },
-        bounds: {
-            minX: Math.min(x0, x1),
-            minY: Math.min(y0, y1),
-            maxX: Math.max(x0, x1),
-            maxY: Math.max(y0, y1),
-        },
-        ...extra,
-    };
-}
-
-function createMockCanvasCtx() {
-    const strokes: Array<{ style: unknown; alpha: number }> = [];
-    const fills: Array<{ style: unknown; alpha: number }> = [];
-    let closedCount = 0;
-    let clippedCount = 0;
-    const ctx: any = {
-        strokeStyle: '',
-        fillStyle: '',
-        lineWidth: 1,
-        lineCap: 'butt',
-        lineJoin: 'miter',
-        globalAlpha: 1,
-        save() {},
-        restore() {},
-        beginPath() {},
-        moveTo() {},
-        lineTo() {},
-        bezierCurveTo() {},
-        quadraticCurveTo() {},
-        arc() {},
-        ellipse() {},
-        rect() {},
-        fillRect() {
-            fills.push({ style: this.fillStyle, alpha: this.globalAlpha });
-        },
-        clip() {
-            clippedCount++;
-        },
-        closePath() {
-            closedCount++;
-        },
-        translate() {},
-        rotate() {},
-        scale() {},
-        setLineDash() {},
-        createPattern: () => null,
-        stroke() {
-            strokes.push({ style: this.strokeStyle, alpha: this.globalAlpha });
-        },
-        fill() {
-            fills.push({ style: this.fillStyle, alpha: this.globalAlpha });
-        },
-    };
-    return {
-        ctx,
-        strokes,
-        fills,
-        get closedCount() { return closedCount; },
-        get clippedCount() { return clippedCount; },
-    };
-}
-
-function near(actual: number, expected: number, eps = 1e-6): void {
-    assert.ok(Math.abs(actual - expected) <= eps, `Expected ${actual} to be within ${eps} of ${expected}`);
-}
-
-function installDom(): any {
-    const mockDocument = createMockEnvironment();
-    (globalThis as any).document = mockDocument;
-    (globalThis as any).window = {
-        document: mockDocument,
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: null,
-        devicePixelRatio: 1,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        setTimeout: (fn: Function, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (id: any) => clearTimeout(id),
-        requestAnimationFrame: (cb: Function) => setTimeout(cb, 0),
-        cancelAnimationFrame: (id: any) => clearTimeout(id),
-    };
-    return mockDocument;
-}
-
-function createController(configure: (state: WorkspaceToolState) => void) {
-    const mockDocument = installDom();
-    const scroller = mockDocument.createElement('div');
-    scroller.getBoundingClientRect = () => ({ top: 0, left: 0, width: 1000, height: 1000, bottom: 1000, right: 1000 });
-    const contentEl = mockDocument.createElement('div');
-    contentEl.className = 'cm-content';
-    contentEl.offsetWidth = CONTENT_WIDTH;
-    contentEl.getBoundingClientRect = () => ({
-        top: 0, left: CONTENT_LEFT, width: CONTENT_WIDTH, height: 2000, bottom: 2000, right: CONTENT_LEFT + CONTENT_WIDTH,
-    });
-    scroller.appendChild(contentEl);
-
-    const docModel: PageDocument = {
-        schemaVersion: 1,
-        version: 1,
-        id: 'logic-blob-page',
-        notePath: 'logic-blob.md',
-        elements: [],
-        createdAt: 1000,
-        updatedAt: 1000,
-    };
-    const persistence = { flush: async () => {}, enqueue: () => {}, loadDocumentForNote: async () => docModel } as any;
-    const toolState = cloneWorkspaceToolState(DEFAULT_WORKSPACE_TOOL_STATE);
-    configure(toolState);
-
-    const controller = new CanvasController(
-        scroller as any,
-        undefined,
-        docModel,
-        { path: 'logic-blob.md' } as any,
-        'logic-blob.md',
-        persistence,
-        { toolState, enableMouseDrawing: true } as any,
-    );
-    return { controller, canvas: (controller as any).canvas, internals: controller as any };
-}
-
-let clock = 50_000;
-function pointer(canvas: any, type: 'pointerdown' | 'pointermove' | 'pointerup', x: number, y: number, timeStamp = (clock += 16)): void {
-    canvas.dispatchEvent({
-        type,
-        pointerId: 1,
-        pointerType: 'pen',
-        clientX: x,
-        clientY: y,
-        buttons: type === 'pointerup' ? 0 : 1,
-        button: 0,
-        pressure: type === 'pointerup' ? 0 : 0.5,
-        shiftKey: false,
-        timeStamp,
-        preventDefault: () => {},
-        stopPropagation: () => {},
-    });
-}
+const createController = (configure: (state: WorkspaceToolState) => void) =>
+    createTestController(configure, { notePath: 'logic-blob.md' });
 
 describe('Logic gates & closed fillable freeform blob shape', () => {
-    const saved: Record<string, any> = {};
+    let dom: ReturnType<typeof setupMockDom>;
 
     beforeEach(() => {
-        for (const key of ['window', 'document', 'requestAnimationFrame', 'cancelAnimationFrame', 'getComputedStyle', 'ResizeObserver']) {
-            saved[key] = (globalThis as any)[key];
-        }
-        (globalThis as any).getComputedStyle = () => ({ position: 'relative', overflow: 'auto', userSelect: 'none' });
-        (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-        (globalThis as any).requestAnimationFrame = (cb: Function) => setTimeout(cb, 0);
-        (globalThis as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
+        dom = setupMockDom();
     });
 
     afterEach(() => {
-        for (const key of Object.keys(saved)) {
-            (globalThis as any)[key] = saved[key];
-        }
+        dom.teardown();
     });
 
     test('logic gates: registry, category, aliases and icon paths', () => {
@@ -593,40 +423,10 @@ describe('Logic gates & closed fillable freeform blob shape', () => {
     });
 
     test('UI integrates Puertas lógicas pages (5-6), blob on page 2, Toolbar & FavoritesDrawer preview', () => {
-        installDom();
         const selected: string[] = [];
-        const estuche = new ToolEstuche(
-            {
-                tool: 'shape',
-                slot: 'tc',
-                color: '#2f6bff',
-                width: 3,
-                profileId: 'fountain',
-                smoothing: 0.5,
-                pressureSensitivity: 0.5,
-                favorites: [],
-                eraserMode: 'whole',
-                eraserRadius: 15,
-                scribbleToErase: false,
-                lassoMode: 'free',
-                shapeType: 'gate-and',
-                snapGrid: false,
-            },
-            {
-                onSelectProfile: () => {},
-                onChangeColor: () => {},
-                onChangeWidth: () => {},
-                onChangeSmoothing: () => {},
-                onChangePressure: () => {},
-                onUseFavorite: () => {},
-                onSaveFavorite: () => {},
-                onSelectEraserMode: () => {},
-                onChangeEraserRadius: () => {},
-                onToggleScribble: () => {},
-                onSelectLassoMode: () => {},
-                onSelectShapeType: (s) => { selected.push(s); },
-                onToggleSnapGrid: () => {},
-            },
+        const { estuche } = createTestEstuche(
+            { tool: 'shape', smoothing: 0.5, eraserRadius: 15, lassoMode: 'free', shapeType: 'gate-and' },
+            { onSelectShapeType: (s) => { selected.push(s); } },
             (globalThis as any).document.body,
         );
         estuche.open(undefined, (globalThis as any).document.createElement('button'));
@@ -655,34 +455,14 @@ describe('Logic gates & closed fillable freeform blob shape', () => {
         assert.equal((estuche as any).isActiveShapeClosed(), true, 'Blob allows fill controls');
         estuche.destroy();
 
-        const toolbar = new Toolbar(
-            {
-                slot: 'tc',
-                penEnabled: true,
-                activeTool: 'shape',
-                activeShape: 'gate-nand',
-                activeColor: '#000',
-                activeWidth: 2,
-                activeProfileId: 'fountain',
-                activeFavoriteIndex: 0,
-                favorites: [],
-                snapGrid: false,
-                canUndo: false,
-                canRedo: false,
-                eraserRadius: 15,
-                onSlotChange: () => {},
-                onToggleKeyboardMode: () => {},
-                onSelectTool: () => {},
-                onToggleEstuche: () => {},
-                onUndo: () => {},
-                onRedo: () => {},
-                onSelectFavorite: () => {},
-                onChangeColor: () => {},
-                onToggleSnapGrid: () => {},
-                onInsertCanvas: () => {},
-            } as any,
-            (globalThis as any).document.body,
-        );
+        const { toolbar } = createTestToolbar({
+            activeTool: 'shape',
+            activeShape: 'gate-nand',
+            activeColor: '#000',
+            activeWidth: 2,
+            favorites: [],
+            eraserRadius: 15,
+        });
         const wrap = toolbar.getToolButton('shape')!.querySelector('.apolo-tool-icon-wrap') as any;
         assert.equal(wrap.getAttribute('data-shape'), 'gate-nand');
         assert.equal(wrap.querySelector('path').getAttribute('d'), getShapePlugin('gate-nand').iconSvgPaths.join(' '));

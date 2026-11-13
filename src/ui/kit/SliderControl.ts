@@ -46,26 +46,8 @@ export class SliderControl {
             this.element.setAttribute('aria-label', options.ariaLabel);
         }
 
-        // Minus button: .st
-        this.minusBtn = document.createElement('button');
-        this.minusBtn.type = 'button';
-        this.minusBtn.className = 'st slider-step popover-step-btn';
-        this.minusBtn.style.touchAction = 'manipulation';
-        this.minusBtn.style.position = 'relative';
-        this.minusBtn.style.overflow = 'hidden';
-        this.minusBtn.style.width = '24px';
-        this.minusBtn.style.height = '24px';
-        this.minusBtn.style.minWidth = '24px';
-        this.minusBtn.style.maxWidth = '24px';
-        this.minusBtn.style.minHeight = '24px';
-        this.minusBtn.style.maxHeight = '24px';
-        setAccessibleTooltip(this.minusBtn, 'Disminuir');
-        this.minusBtn.appendChild(createSvg(ICONS.minus, { size: 14, strokeWidth: 2 }));
-        bindTapOrClick(this.minusBtn, (e) => {
-            e?.stopPropagation();
-            this.setValue(this.value - this.step, true);
-            try { this.minusBtn.blur(); } catch {}
-        });
+        // Minus / Track / Thumb / Plus
+        this.minusBtn = this.createStepButton('Disminuir', ICONS.minus, -1);
 
         // Track: .trk
         this.trackEl = document.createElement('div');
@@ -85,26 +67,7 @@ export class SliderControl {
         this.thumbEl.className = 'th';
         this.trackEl.appendChild(this.thumbEl);
 
-        // Plus button: .st
-        this.plusBtn = document.createElement('button');
-        this.plusBtn.type = 'button';
-        this.plusBtn.className = 'st slider-step popover-step-btn';
-        this.plusBtn.style.touchAction = 'manipulation';
-        this.plusBtn.style.position = 'relative';
-        this.plusBtn.style.overflow = 'hidden';
-        this.plusBtn.style.width = '24px';
-        this.plusBtn.style.height = '24px';
-        this.plusBtn.style.minWidth = '24px';
-        this.plusBtn.style.maxWidth = '24px';
-        this.plusBtn.style.minHeight = '24px';
-        this.plusBtn.style.maxHeight = '24px';
-        setAccessibleTooltip(this.plusBtn, 'Aumentar');
-        this.plusBtn.appendChild(createSvg(ICONS.plus, { size: 14, strokeWidth: 2 }));
-        bindTapOrClick(this.plusBtn, (e) => {
-            e?.stopPropagation();
-            this.setValue(this.value + this.step, true);
-            try { this.plusBtn.blur(); } catch {}
-        });
+        this.plusBtn = this.createStepButton('Aumentar', ICONS.plus, 1);
 
         // Setup pointer event handling on track with pointer capture
         this.setupPointerEvents();
@@ -112,6 +75,29 @@ export class SliderControl {
 
         this.element.append(this.minusBtn, this.trackEl, this.plusBtn);
         this.syncVisual();
+    }
+
+    private createStepButton(tooltip: string, iconPath: string, direction: -1 | 1): HTMLButtonElement {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'st slider-step popover-step-btn';
+        btn.style.touchAction = 'manipulation';
+        btn.style.position = 'relative';
+        btn.style.overflow = 'hidden';
+        btn.style.width = '24px';
+        btn.style.height = '24px';
+        btn.style.minWidth = '24px';
+        btn.style.maxWidth = '24px';
+        btn.style.minHeight = '24px';
+        btn.style.maxHeight = '24px';
+        setAccessibleTooltip(btn, tooltip);
+        btn.appendChild(createSvg(iconPath, { size: 14, strokeWidth: 2 }));
+        bindTapOrClick(btn, (e) => {
+            e?.stopPropagation();
+            this.setValue(this.value + direction * this.step, true);
+            try { btn.blur(); } catch {}
+        });
+        return btn;
     }
 
     private setupPointerEvents(): void {

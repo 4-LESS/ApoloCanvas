@@ -1,8 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { setupMockDom } from './helpers/mockDom.ts';
+import { createTestEstuche, setupMockDom } from './helpers/mockDom.ts';
 import { bindTapOrClick } from '../src/ui/theme.ts';
-import { ToolEstuche } from '../src/ui/ToolEstuche.ts';
 import { SliderControl } from '../src/ui/kit/SliderControl.ts';
 
 describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => {
@@ -172,7 +171,7 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
         let selectedLineStyle = '';
         let fillPatternState = '';
 
-        const estuche = new ToolEstuche(
+        const { estuche } = createTestEstuche(
             {
                 tool: 'shape',
                 slot: 'top',
@@ -180,22 +179,10 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
                 width: 2,
                 profileId: 'pen-round' as any,
                 smoothing: 0.5,
-                pressureSensitivity: 0.5,
-                shapeType: 'rect',
                 regularize: false,
-                lineStyle: 'solid',
-                pattern: 'solid',
                 fillEnabled: false,
             },
             {
-                onSelectProfile: () => {},
-                onChangeColor: () => {},
-                onChangeWidth: () => {},
-                onChangeSmoothing: () => {},
-                onChangePressure: () => {},
-                onSelectEraserMode: () => {},
-                onChangeEraserRadius: () => {},
-                onSelectLassoMode: () => {},
                 onSelectShapeType: (st) => {
                     selectedShape = st;
                 },
@@ -425,27 +412,9 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
         const parent = document.createElement('div');
         let selectedShape = '';
 
-        const estuche = new ToolEstuche(
-            {
-                tool: 'shape',
-                slot: 'top',
-                color: '#2f6bff',
-                width: 2,
-                shapeType: 'rect',
-            },
-            {
-                onSelectProfile: () => {},
-                onChangeColor: () => {},
-                onChangeWidth: () => {},
-                onChangeSmoothing: () => {},
-                onChangePressure: () => {},
-                onSelectEraserMode: () => {},
-                onChangeEraserRadius: () => {},
-                onSelectLassoMode: () => {},
-                onSelectShapeType: (st) => {
-                    selectedShape = st;
-                },
-            },
+        const { estuche } = createTestEstuche(
+            { tool: 'shape', slot: 'top', color: '#2f6bff', width: 2 },
+            { onSelectShapeType: (st) => { selectedShape = st; } },
             parent
         );
         estuche.open();
@@ -531,27 +500,9 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
             height: 40,
         } as any);
 
-        const estuche = new ToolEstuche(
-            {
-                tool: 'shape',
-                shapeType: 'rectangle',
-                color: '#2f6bff',
-                width: 3,
-                slot: 'ml',
-            },
-            {
-                onSelectShapeType: () => {},
-                onChangeWidth: () => {},
-                onChangeSmoothing: () => {},
-                onChangePressure: () => {},
-                onUseFavorite: () => {},
-                onSaveFavorite: () => {},
-                onSelectEraserMode: () => {},
-                onChangeEraserRadius: () => {},
-                onToggleScribble: () => {},
-                onSelectLassoMode: () => {},
-                onToggleSnapGrid: () => {},
-            }
+        const { estuche } = createTestEstuche(
+            { tool: 'shape', shapeType: 'rectangle', color: '#2f6bff', width: 3, slot: 'ml' },
+            {},
         );
 
         // Mock base closed dimensions for container
@@ -627,27 +578,9 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
             height: 40,
         } as any);
 
-        const estuche = new ToolEstuche(
-            {
-                tool: 'shape',
-                shapeType: 'rectangle',
-                color: '#2f6bff',
-                width: 3,
-                slot: 'ml',
-            },
-            {
-                onSelectShapeType: () => {},
-                onChangeWidth: () => {},
-                onChangeSmoothing: () => {},
-                onChangePressure: () => {},
-                onUseFavorite: () => {},
-                onSaveFavorite: () => {},
-                onSelectEraserMode: () => {},
-                onChangeEraserRadius: () => {},
-                onToggleScribble: () => {},
-                onSelectLassoMode: () => {},
-                onToggleSnapGrid: () => {},
-            }
+        const { estuche } = createTestEstuche(
+            { tool: 'shape', shapeType: 'rectangle', color: '#2f6bff', width: 3, slot: 'ml' },
+            {},
         );
 
         estuche.container.getBoundingClientRect = () => ({
@@ -696,27 +629,9 @@ describe('Shapes Drawer Stylus Responsiveness & Tap/Click Normalization', () => 
             height: 40,
         } as any);
 
-        const estuche = new ToolEstuche(
-            {
-                tool: 'shape',
-                shapeType: 'rectangle',
-                color: '#2f6bff',
-                width: 3,
-                slot: 'ml',
-            },
-            {
-                onSelectShapeType: () => {},
-                onChangeWidth: () => {},
-                onChangeSmoothing: () => {},
-                onChangePressure: () => {},
-                onUseFavorite: () => {},
-                onSaveFavorite: () => {},
-                onSelectEraserMode: () => {},
-                onChangeEraserRadius: () => {},
-                onToggleScribble: () => {},
-                onSelectLassoMode: () => {},
-                onToggleSnapGrid: () => {},
-            }
+        const { estuche } = createTestEstuche(
+            { tool: 'shape', shapeType: 'rectangle', color: '#2f6bff', width: 3, slot: 'ml' },
+            {},
         );
 
         estuche.open(undefined, anchor);

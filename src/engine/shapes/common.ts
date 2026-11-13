@@ -340,14 +340,16 @@ export function distToSegmentSquared(
 export function pointInPolygon(
     px: number,
     py: number,
-    polygon: Array<[number, number]>,
+    polygon: ReadonlyArray<[number, number] | { x: number; y: number }>,
 ): boolean {
     let inside = false;
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const xi = polygon[i][0];
-        const yi = polygon[i][1];
-        const xj = polygon[j][0];
-        const yj = polygon[j][1];
+        const pi = polygon[i];
+        const pj = polygon[j];
+        const xi = Array.isArray(pi) ? pi[0] : pi.x;
+        const yi = Array.isArray(pi) ? pi[1] : pi.y;
+        const xj = Array.isArray(pj) ? pj[0] : pj.x;
+        const yj = Array.isArray(pj) ? pj[1] : pj.y;
         const intersect = ((yi > py) !== (yj > py)) &&
             (px < ((xj - xi) * (py - yi)) / (yj - yi) + xi);
         if (intersect) inside = !inside;

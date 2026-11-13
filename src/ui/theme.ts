@@ -94,21 +94,6 @@ export const DEFAULT_FAVORITES: PenFavorite[] = [
     { profile: 'pencil', color: '#111827', width: 3 },
 ];
 
-export const DEFAULT_TOOL_PALETTES: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }> = {
-    pen: {
-        colors: ['#E53935', '#1F4FD8', '#10B981', '#111827'],
-        opacities: [100, 100, 100, 100],
-    },
-    highlighter: {
-        colors: ['#1E88E5', '#FDD835', '#43A047', '#00ACC1'],
-        opacities: [75, 75, 75, 75],
-    },
-    shape: {
-        colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
-        opacities: [100, 100, 100, 100],
-    },
-};
-
 /**
  * 24x24 px linear SVG icons with stroke-width 1.8, stroke-linecap round, stroke-linejoin round.
  */
@@ -598,4 +583,96 @@ export function bindTapOrClick(
         }
     };
 }
+
+/** Clamps a numeric opacity percentage into [0, 100], falling back to 100. */
+export function normalizeOpacityPercent(value: number | undefined | null, fallback = 100): number {
+    return Math.max(0, Math.min(100, Number.isFinite(value) ? Number(value) : fallback));
+}
+
+/** Converts #RGB or #RRGGBB hex color + 0..100 opacity percentage into rgba() (or returns input when opacity >= 100). */
+export function hexToRgba(hex: string, opacityPercent: number): string {
+    const op = normalizeOpacityPercent(opacityPercent, 100) / 100;
+    if (op >= 1) return hex;
+    const clean = hex.replace('#', '');
+    if (clean.length === 3) {
+        const r = parseInt(clean[0] + clean[0], 16);
+        const g = parseInt(clean[1] + clean[1], 16);
+        const b = parseInt(clean[2] + clean[2], 16);
+        return `rgba(${r}, ${g}, ${b}, ${op})`;
+    }
+    if (clean.length === 6) {
+        const r = parseInt(clean.slice(0, 2), 16);
+        const g = parseInt(clean.slice(2, 4), 16);
+        const b = parseInt(clean.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${op})`;
+    }
+    return hex;
+}
+
+export interface SwatchCircleButtonOptions {
+    className: string;
+    color?: string | null;
+    opacity?: number;
+    active?: boolean;
+    activeClass?: string;
+    innerClass?: string;
+    emptyClass?: string;
+    title?: string;
+    ariaLabel?: string;
+    onClick?: (e?: MouseEvent | PointerEvent) => void;
+    dataset?: Record<string, string>;
+    attrs?: Record<string, string>;
+}
+
+/** Creates a circular color swatch button using standard DOM APIs for compatibility with mock/test DOMs. */
+export function createSwatchCircleButton(options: SwatchCircleButtonOptions): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = options.className;
+    btn.style.touchAction = 'manipulation';
+    if (options.active) {
+        btn.classList.add(options.activeClass ?? 'is-active');
+    }
+    if (!options.color && options.emptyClass) {
+        btn.classList.add(options.emptyClass);
+    }
+    if (options.title) {
+        setAccessibleTooltip(btn, options.ariaLabel ?? options.title, options.title);
+    } else if (options.ariaLabel) {
+        btn.setAttribute('aria-label', options.ariaLabel);
+    }
+    if (options.dataset) {
+        for (const [k, v] of Object.entries(options.dataset)) {
+            btn.dataset[k] = v;
+        }
+    }
+    if (options.attrs) {
+        for (const [k, v] of Object.entries(options.attrs)) {
+            btn.setAttribute(k, v);
+        }
+    }
+    if (options.color) {
+        const op = normalizeOpacityPercent(options.opacity, 100);
+        if (op < 100) {
+            btn.classList.add('has-transparency');
+        }
+        btn.style.setProperty('--c', options.color);
+        btn.style.setProperty('--swatch-color', options.color);
+        const fillColor = hexToRgba(options.color, op);
+        const inner = options.innerClass ? document.createElement('span') : null;
+        if (inner) {
+            inner.className = options.innerClass!;
+            inner.style.backgroundColor = fillColor;
+            btn.appendChild(inner);
+        }
+        if (op >= 100 || !inner) {
+            btn.style.backgroundColor = fillColor;
+        }
+    }
+    if (options.onClick) {
+        bindTapOrClick(btn, options.onClick);
+    }
+    return btn;
+}
+
 

@@ -340,14 +340,6 @@ export function linearSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
 // Multi-Segment Bezier & Quadratic Path Helpers (lines & arrows)
 // ---------------------------------------------------------------------------
 
-export function quadraticPoint(p0: ShapePoint, c: ShapePoint, p1: ShapePoint, t: number): ShapePoint {
-    const mt = 1 - t;
-    return {
-        x: mt * mt * p0.x + 2 * mt * t * c.x + t * t * p1.x,
-        y: mt * mt * p0.y + 2 * mt * t * c.y + t * t * p1.y,
-    };
-}
-
 export function cubicPoint(p0: ShapePoint, cp1: ShapePoint, cp2: ShapePoint, p1: ShapePoint, t: number): ShapePoint {
     const mt = 1 - t;
     const mt2 = mt * mt;
@@ -355,6 +347,29 @@ export function cubicPoint(p0: ShapePoint, cp1: ShapePoint, cp2: ShapePoint, p1:
     return {
         x: mt2 * mt * p0.x + 3 * mt2 * t * cp1.x + 3 * mt * t2 * cp2.x + t2 * t * p1.x,
         y: mt2 * mt * p0.y + 3 * mt2 * t * cp1.y + 3 * mt * t2 * cp2.y + t2 * t * p1.y,
+    };
+}
+
+/** Splits a cubic Bezier curve into two subcurves at parameter t using De Casteljau's algorithm. */
+export function deCasteljau(
+    p0: ShapePoint,
+    p1: ShapePoint,
+    p2: ShapePoint,
+    p3: ShapePoint,
+    t: number,
+): {
+    left: { p0: ShapePoint; p1: ShapePoint; p2: ShapePoint; p3: ShapePoint };
+    right: { p0: ShapePoint; p1: ShapePoint; p2: ShapePoint; p3: ShapePoint };
+} {
+    const q0 = { x: (1 - t) * p0.x + t * p1.x, y: (1 - t) * p0.y + t * p1.y };
+    const q1 = { x: (1 - t) * p1.x + t * p2.x, y: (1 - t) * p1.y + t * p2.y };
+    const q2 = { x: (1 - t) * p2.x + t * p3.x, y: (1 - t) * p2.y + t * p3.y };
+    const r0 = { x: (1 - t) * q0.x + t * q1.x, y: (1 - t) * q0.y + t * q1.y };
+    const r1 = { x: (1 - t) * q1.x + t * q2.x, y: (1 - t) * q1.y + t * q2.y };
+    const pt = { x: (1 - t) * r0.x + t * r1.x, y: (1 - t) * r0.y + t * r1.y };
+    return {
+        left: { p0, p1: q0, p2: r0, p3: pt },
+        right: { p0: pt, p1: r1, p2: q2, p3 },
     };
 }
 
@@ -389,12 +404,6 @@ export function getSegmentMidpoint(p0: ShapePathNode, p1: ShapePathNode): ShapeP
     const cp1 = p0.handleOut ?? { x: p0.x, y: p0.y };
     const cp2 = p1.handleIn ?? { x: p1.x, y: p1.y };
     return cubicPoint(p0, cp1, cp2, p1, 0.5);
-}
-
-/** Legacy curve handle point: B(0.5) of segment 0. */
-export function getCurveHandlePoint(geom: ShapeRenderGeometry): ShapePoint {
-    const nodes = getLinearPathNodes(geom);
-    return getSegmentMidpoint(nodes[0], nodes[1]);
 }
 
 /** Polyline approximation of the linear shape (supporting straight, quadratic, and cubic segments). */
@@ -662,59 +671,29 @@ export function applyLinearHandleDrag(
         return next;
     }
 
-    // Cubic incoming tangent handle
-    if (handleId.startsWith('bezier-in-')) {
-        const idx = parseInt(handleId.replace('bezier-in-', ''), 10);
+    // Cubic incoming/outgoing tangent handles
+    if (handleId.startsWith('bezier-in-') || handleId.startsWith('bezier-out-')) {
+        const isIn = handleId.startsWith('bezier-in-');
+        const idx = parseInt(handleId.slice(isIn ? 'bezier-in-'.length : 'bezier-out-'.length), 10);
         if (idx < 0 || idx >= nodes.length) return { ...geom };
         const node = nodes[idx];
-        let p = { ...point };
-        if (regularize) {
-            p = snapAngleOrOrthogonal(node, point);
-        }
-        node.handleIn = { x: p.x, y: p.y };
+        const p = regularize ? snapAngleOrOrthogonal(node, point) : { ...point };
+        const primaryKey = isIn ? 'handleIn' : 'handleOut';
+        const oppositeKey = isIn ? 'handleOut' : 'handleIn';
+        node[primaryKey] = { x: p.x, y: p.y };
         const vx = p.x - node.x;
         const vy = p.y - node.y;
 
         if (node.nodeKind === 'symmetric') {
-            node.handleOut = { x: node.x - vx, y: node.y - vy };
-        } else if (node.nodeKind === 'smooth' && node.handleOut) {
-            const outLen = Math.hypot(node.handleOut.x - node.x, node.handleOut.y - node.y);
-            const inLen = Math.hypot(vx, vy);
-            if (inLen > 1e-6 && outLen > 1e-6) {
-                node.handleOut = {
-                    x: node.x - (vx / inLen) * outLen,
-                    y: node.y - (vy / inLen) * outLen,
-                };
-            }
-        }
-
-        const next: ShapeRenderGeometry = { ...geom, pathNodes: nodes, regularize };
-        delete next.controlPoint;
-        return next;
-    }
-
-    // Cubic outgoing tangent handle
-    if (handleId.startsWith('bezier-out-')) {
-        const idx = parseInt(handleId.replace('bezier-out-', ''), 10);
-        if (idx < 0 || idx >= nodes.length) return { ...geom };
-        const node = nodes[idx];
-        let p = { ...point };
-        if (regularize) {
-            p = snapAngleOrOrthogonal(node, point);
-        }
-        node.handleOut = { x: p.x, y: p.y };
-        const vx = p.x - node.x;
-        const vy = p.y - node.y;
-
-        if (node.nodeKind === 'symmetric') {
-            node.handleIn = { x: node.x - vx, y: node.y - vy };
-        } else if (node.nodeKind === 'smooth' && node.handleIn) {
-            const inLen = Math.hypot(node.handleIn.x - node.x, node.handleIn.y - node.y);
-            const outLen = Math.hypot(vx, vy);
-            if (outLen > 1e-6 && inLen > 1e-6) {
-                node.handleIn = {
-                    x: node.x - (vx / outLen) * inLen,
-                    y: node.y - (vy / outLen) * inLen,
+            node[oppositeKey] = { x: node.x - vx, y: node.y - vy };
+        } else if (node.nodeKind === 'smooth' && node[oppositeKey]) {
+            const opp = node[oppositeKey]!;
+            const oppLen = Math.hypot(opp.x - node.x, opp.y - node.y);
+            const priLen = Math.hypot(vx, vy);
+            if (priLen > 1e-6 && oppLen > 1e-6) {
+                node[oppositeKey] = {
+                    x: node.x - (vx / priLen) * oppLen,
+                    y: node.y - (vy / priLen) * oppLen,
                 };
             }
         }
@@ -930,39 +909,7 @@ export function insertLinearNodeAtPoint(
         else if (dPlus < bestDistSq) { bestDistSq = dPlus; t = tPlus; }
     }
 
-    if (!p0.handleOut && !p1.handleIn) {
-        const splitPt = { x: p0.x + t * (p1.x - p0.x), y: p0.y + t * (p1.y - p0.y) };
-        const newNode: ShapePathNode = {
-            x: splitPt.x,
-            y: splitPt.y,
-            nodeKind: 'sharp',
-        };
-        nodes.splice(bestSeg + 1, 0, newNode);
-    } else {
-        const c1 = p0.handleOut ?? { x: p0.x, y: p0.y };
-        const c2 = p1.handleIn ?? { x: p1.x, y: p1.y };
-
-        const q0 = { x: (1 - t) * p0.x + t * c1.x, y: (1 - t) * p0.y + t * c1.y };
-        const q1 = { x: (1 - t) * c1.x + t * c2.x, y: (1 - t) * c1.y + t * c2.y };
-        const q2 = { x: (1 - t) * c2.x + t * p1.x, y: (1 - t) * c2.y + t * p1.y };
-
-        const r0 = { x: (1 - t) * q0.x + t * q1.x, y: (1 - t) * q0.y + t * q1.y };
-        const r1 = { x: (1 - t) * q1.x + t * q2.x, y: (1 - t) * q1.y + t * q2.y };
-
-        const midPoint = { x: (1 - t) * r0.x + t * r1.x, y: (1 - t) * r0.y + t * r1.y };
-
-        p0.handleOut = q0;
-        p1.handleIn = q2;
-
-        const newNode: ShapePathNode = {
-            x: midPoint.x,
-            y: midPoint.y,
-            handleIn: r0,
-            handleOut: r1,
-            nodeKind: 'smooth',
-        };
-        nodes.splice(bestSeg + 1, 0, newNode);
-    }
+    nodes.splice(bestSeg + 1, 0, insertLinearSplitNode(p0, p1, t, 'sharp'));
 
     const nextGeom: ShapeRenderGeometry = {
         ...geom,
@@ -976,47 +923,39 @@ export function insertLinearNodeAtPoint(
     const handleId = `node-${bestSeg + 1}`;
     return { geom: nextGeom, handleId };
 }
+
+function insertLinearSplitNode(
+    p0: ShapePathNode,
+    p1: ShapePathNode,
+    t: number,
+    straightKind: 'sharp' | 'smooth',
+): ShapePathNode {
+    if (!p0.handleOut && !p1.handleIn) {
+        return {
+            x: p0.x + t * (p1.x - p0.x),
+            y: p0.y + t * (p1.y - p0.y),
+            nodeKind: straightKind,
+        };
+    }
+    const c1 = p0.handleOut ?? { x: p0.x, y: p0.y };
+    const c2 = p1.handleIn ?? { x: p1.x, y: p1.y };
+    const { left, right } = deCasteljau(p0, c1, c2, p1, t);
+    p0.handleOut = left.p1;
+    p1.handleIn = right.p2;
+    return {
+        x: left.p3.x,
+        y: left.p3.y,
+        handleIn: left.p2,
+        handleOut: right.p1,
+        nodeKind: 'smooth',
+    };
+}
+
 export function splitLinearSegment(geom: ShapeRenderGeometry, segmentIndex: number): ShapeRenderGeometry {
     const nodes = getLinearPathNodes(geom);
     if (segmentIndex < 0 || segmentIndex >= nodes.length - 1) return { ...geom };
 
-    const p0 = nodes[segmentIndex];
-    const p1 = nodes[segmentIndex + 1];
-
-    if (!p0.handleOut && !p1.handleIn) {
-        // Straight line split
-        const mid: ShapePathNode = {
-            x: (p0.x + p1.x) / 2,
-            y: (p0.y + p1.y) / 2,
-            nodeKind: 'smooth',
-        };
-        nodes.splice(segmentIndex + 1, 0, mid);
-    } else {
-        // de Casteljau split at t = 0.5
-        const cp1 = p0.handleOut ?? { x: p0.x, y: p0.y };
-        const cp2 = p1.handleIn ?? { x: p1.x, y: p1.y };
-
-        const q0 = { x: (p0.x + cp1.x) / 2, y: (p0.y + cp1.y) / 2 };
-        const q1 = { x: (cp1.x + cp2.x) / 2, y: (cp1.y + cp2.y) / 2 };
-        const q2 = { x: (cp2.x + p1.x) / 2, y: (cp2.y + p1.y) / 2 };
-
-        const r0 = { x: (q0.x + q1.x) / 2, y: (q0.y + q1.y) / 2 };
-        const r1 = { x: (q1.x + q2.x) / 2, y: (q1.y + q2.y) / 2 };
-
-        const midPoint = { x: (r0.x + r1.x) / 2, y: (r0.y + r1.y) / 2 };
-
-        p0.handleOut = q0;
-        p1.handleIn = q2;
-
-        const midNode: ShapePathNode = {
-            x: midPoint.x,
-            y: midPoint.y,
-            handleIn: r0,
-            handleOut: r1,
-            nodeKind: 'smooth',
-        };
-        nodes.splice(segmentIndex + 1, 0, midNode);
-    }
+    nodes.splice(segmentIndex + 1, 0, insertLinearSplitNode(nodes[segmentIndex], nodes[segmentIndex + 1], 0.5, 'smooth'));
 
     const next: ShapeRenderGeometry = {
         ...geom,

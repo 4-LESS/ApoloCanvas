@@ -28,6 +28,7 @@ import type {
 } from '../core/types.ts';
 import {
     DEFAULT_WORKSPACE_TOOL_STATE,
+    cloneElements,
     cloneWorkspaceToolState,
 } from '../core/types.ts';
 import { InputManager } from './input/InputManager.ts';
@@ -58,6 +59,7 @@ import {
     toggleLinearNodeKind,
     insertLinearNodeAtPoint,
     linearPathHit,
+    pointInPolygon,
     rotatePoint,
     computeSmartAlignmentGuides,
     computePointAlignmentGuides,
@@ -964,41 +966,11 @@ export class CanvasController {
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
                 },
-                onToggleFillEnabled: (enabled) => {
-                    this.toolState.shape.fillEnabled = enabled;
-                    this.applyStyleToSelectedShapes({ fillEnabled: enabled });
-                    this.estuche?.updateState({ fillEnabled: enabled });
-                    this.syncEstucheFavoriteState();
-                    this.notifyToolStateChange();
-                },
-                onChangeFillColor: (color) => {
-                    this.toolState.shape.fillColor = color;
-                    this.applyStyleToSelectedShapes({ fillColor: color });
-                    this.estuche?.updateState({ fillColor: color });
-                    this.syncEstucheFavoriteState();
-                    this.notifyToolStateChange();
-                },
-                onChangeFillPattern: (pattern) => {
-                    this.toolState.shape.fillPattern = pattern;
-                    this.applyStyleToSelectedShapes({ fillEnabled: true, fillPattern: pattern });
-                    this.estuche?.updateState({ fillPattern: pattern });
-                    this.syncEstucheFavoriteState();
-                    this.notifyToolStateChange();
-                },
-                onChangeFillDensity: (density) => {
-                    this.toolState.shape.fillDensity = density;
-                    this.applyStyleToSelectedShapes({ fillDensity: density });
-                    this.estuche?.updateState({ fillDensity: density });
-                    this.syncEstucheFavoriteState();
-                    this.notifyToolStateChange();
-                },
-                onChangeFillOpacity: (opacity) => {
-                    this.toolState.shape.fillOpacity = opacity;
-                    this.applyStyleToSelectedShapes({ fillOpacity: opacity });
-                    this.estuche?.updateState({ fillOpacity: opacity });
-                    this.syncEstucheFavoriteState();
-                    this.notifyToolStateChange();
-                },
+                onToggleFillEnabled: (enabled) => this.updateShapeFillState({ fillEnabled: enabled }),
+                onChangeFillColor: (color) => this.updateShapeFillState({ fillColor: color }),
+                onChangeFillPattern: (pattern) => this.updateShapeFillState({ fillPattern: pattern }, { fillEnabled: true, fillPattern: pattern }),
+                onChangeFillDensity: (density) => this.updateShapeFillState({ fillDensity: density }),
+                onChangeFillOpacity: (opacity) => this.updateShapeFillState({ fillOpacity: opacity }),
                 onToggleStraighten: (enabled) => {
                     this.setStraightenLines(enabled);
                     this.options.onToggleStraighten?.(enabled);
@@ -1008,6 +980,17 @@ export class CanvasController {
             this.uiRoot,
             this.popoverController,
         );
+    }
+
+    private updateShapeFillState(
+        patch: Partial<Pick<WorkspaceToolState['shape'], 'fillEnabled' | 'fillColor' | 'fillPattern' | 'fillDensity' | 'fillOpacity'>>,
+        selectedPatch: Partial<Pick<WorkspaceToolState['shape'], 'fillEnabled' | 'fillColor' | 'fillPattern' | 'fillDensity' | 'fillOpacity'>> = patch,
+    ): void {
+        Object.assign(this.toolState.shape, patch);
+        this.applyStyleToSelectedShapes(selectedPatch);
+        this.estuche?.updateState(patch);
+        this.syncEstucheFavoriteState();
+        this.notifyToolStateChange();
     }
 
     private initLassoMenu(): void {
@@ -4666,22 +4649,7 @@ export class CanvasController {
         if (this.isCtrlDown && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
             if (linearPathHit(geom, { x: docX, y: docY }, Math.max(hitRadius * 2.5, 24 / this.zoom, 16))) {
                 const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
-                this.points.clear();
-                this.predictor.reset();
-                this.resetLiveBake();
-                this.movingSelection = false;
-                this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
-                this.handleDrag = {
-                    elementId: shape.id,
-                    handleId: `seg-slide-${segIdx}`,
-                    kind: 'segment-mid',
-                    startGeom: geom,
-                    grabOffsetX: 0,
-                    grabOffsetY: 0,
-                    snapshot: this.createHistorySnapshot(),
-                    changed: false,
-                    snap: null,
-                };
+                this.startHandleDragSession(shape.id, `seg-slide-${segIdx}`, 'segment-mid', geom, 0, 0, docX, docY, rawPoint);
                 return true;
             }
         }
@@ -4699,31 +4667,8 @@ export class CanvasController {
             if ((shape.shapeType === 'line' || shape.shapeType === 'arrow') && linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
                 const inserted = insertLinearNodeAtPoint(geom, { x: docX, y: docY });
                 if (inserted) {
-                    const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
-                    this.recordHistory();
-                    applyGeometryToShapeElement(shape, inserted.geom, anchor.originX, anchor.originY, anchor.scaleWidth);
-                    this.strokeCache.delete(shape.id);
-                    this.rebuildIndex();
-                    this.renderDirty = true;
-                    this.schedulePaint();
-                    this.persistSoon();
-
-                    this.points.clear();
-                    this.predictor.reset();
-                    this.resetLiveBake();
-                    this.movingSelection = false;
-                    this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
-                    this.handleDrag = {
-                        elementId: shape.id,
-                        handleId: inserted.handleId,
-                        kind: 'vertex',
-                        startGeom: inserted.geom,
-                        grabOffsetX: 0,
-                        grabOffsetY: 0,
-                        snapshot: this.createHistorySnapshot(),
-                        changed: false,
-                        snap: null,
-                    };
+                    this.applyHandleGeometryMutation(shape, inserted.geom);
+                    this.startHandleDragSession(shape.id, inserted.handleId, 'vertex', inserted.geom, 0, 0, docX, docY, rawPoint);
                     return true;
                 }
             }
@@ -4758,36 +4703,56 @@ export class CanvasController {
                 nextGeom = toggleLinearNodeKind(geom, nodeIdx);
             }
             if (nextGeom) {
-                const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
-                this.recordHistory();
-                applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
-                this.strokeCache.delete(shape.id);
-                this.rebuildIndex();
-                this.renderDirty = true;
-                this.schedulePaint();
-                this.persistSoon();
-                this.options.eventBus?.emit('canvas:dirty', this.pageId);
+                this.applyHandleGeometryMutation(shape, nextGeom, true);
                 return true;
             }
         }
 
+        this.startHandleDragSession(shape.id, best.id, best.kind, geom, best.x - docX, best.y - docY, docX, docY, rawPoint);
+        return true;
+    }
+
+    private startHandleDragSession(
+        elementId: string,
+        handleId: string,
+        kind: ShapeHandleKind,
+        startGeom: ShapeRenderGeometry,
+        grabOffsetX: number,
+        grabOffsetY: number,
+        docX: number,
+        docY: number,
+        rawPoint: Point,
+    ): void {
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
         this.movingSelection = false;
         this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
         this.handleDrag = {
-            elementId: shape.id,
-            handleId: best.id,
-            kind: best.kind,
-            startGeom: geom,
-            grabOffsetX: best.x - docX,
-            grabOffsetY: best.y - docY,
+            elementId,
+            handleId,
+            kind,
+            startGeom,
+            grabOffsetX,
+            grabOffsetY,
             snapshot: this.createHistorySnapshot(),
             changed: false,
             snap: null,
         };
-        return true;
+    }
+
+    private applyHandleGeometryMutation(shape: ShapeElement, nextGeom: ShapeRenderGeometry, emitDirty = false): void {
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        this.recordHistory();
+        applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
+        this.strokeCache.delete(shape.id);
+        this.rebuildIndex();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        if (emitDirty) {
+            this.options.eventBus?.emit('canvas:dirty', this.pageId);
+        }
     }
 
     private updateHandleDrag(docPoint: { x: number; y: number }): void {
@@ -7076,32 +7041,4 @@ function contains(bounds: BoundingBox, x: number, y: number, padding: number): b
     return x >= bounds.minX - padding && x <= bounds.maxX + padding && y >= bounds.minY - padding && y <= bounds.maxY + padding;
 }
 
-function pointInPolygon(x: number, y: number, polygon: Point[]): boolean {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const a = polygon[i];
-        const b = polygon[j];
-        const crosses = (a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y || Number.EPSILON) + a.x;
-        if (crosses) inside = !inside;
-    }
-    return inside;
-}
-
-export function cloneElements(elements: readonly CanvasElement[]): CanvasElement[] {
-    return elements.map(el => {
-        if (el.type === 'stroke') {
-            return {
-                ...el,
-                points: el.points.slice(),
-                style: { ...el.style },
-                bounds: { ...el.bounds },
-            };
-        } else {
-            return {
-                ...el,
-                style: { ...el.style },
-                bounds: { ...el.bounds },
-            };
-        }
-    });
-}
+export { cloneElements };

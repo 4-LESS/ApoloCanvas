@@ -7,7 +7,7 @@ import type {
 } from '../../core/types.ts';
 import { cloneColorCarousels } from '../../core/types.ts';
 import { ColorPickerPopover } from '../popover/ColorPickerPopover.ts';
-import { ICONS, createSvg } from '../theme.ts';
+import { ICONS, createSvg, createSwatchCircleButton } from '../theme.ts';
 
 export type ToolScopeKey = 'pen' | 'highlighter' | 'shapeStroke' | 'shapeFill';
 export type PaletteScopeKey = 'global' | ToolScopeKey;
@@ -32,17 +32,6 @@ const SCOPE_OPTIONS: Record<PaletteScopeKey, string> = {
     shapeStroke: '🔷 Formas (Trazo)',
     shapeFill: '🎨 Formas (Relleno)',
 };
-
-function hexToRgba(hex: string, opacityPercent: number): string {
-    const clean = hex.replace('#', '');
-    const num = parseInt(clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean, 16);
-    if (isNaN(num)) return hex;
-    const r = (num >> 16) & 255;
-    const g = (num >> 8) & 255;
-    const b = num & 255;
-    const a = Math.max(0, Math.min(1, opacityPercent / 100));
-    return `rgba(${r}, ${g}, ${b}, ${a})`;
-}
 
 export class ColorPaletteManager {
     private readonly plugin: ApoloCanvasPlugin;
@@ -479,6 +468,34 @@ export class ColorPaletteManager {
         return card;
     }
 
+    private createSlotSwatchButton(
+        slot: { color: string; opacity?: number },
+        onChange: () => Promise<void>,
+    ): HTMLButtonElement {
+        const slotOp = slot.opacity ?? 100;
+        const sw = createSwatchCircleButton({
+            className: 'swatch popover-swatch-circle',
+            color: slot.color,
+            opacity: slotOp,
+            innerClass: 'popover-swatch-inner',
+            title: `Color ${slot.color} (${slotOp}%) - Clic para cambiar`,
+            onClick: (e) => {
+                e?.stopPropagation();
+                this.openColorPickerForAnchor(
+                    sw,
+                    slot.color,
+                    slotOp,
+                    async (newColor, newOpacity) => {
+                        slot.color = newColor;
+                        slot.opacity = newOpacity;
+                        await onChange();
+                    }
+                );
+            },
+        });
+        return sw;
+    }
+
     private renderPaletteRow(
         profile: ColorCarouselProfile,
         onChange: () => Promise<void>
@@ -494,39 +511,7 @@ export class ColorPaletteManager {
             const slotWrapper = document.createElement('div');
             slotWrapper.className = 'apolo-slot-circle-wrapper';
 
-            const sw = document.createElement('button');
-            sw.type = 'button';
-            const hasTrans = (slot.opacity ?? 100) < 100;
-            sw.className = `swatch popover-swatch-circle ${hasTrans ? 'has-transparency' : ''}`;
-            sw.title = `Color ${slot.color} (${slot.opacity ?? 100}%) - Clic para cambiar`;
-            sw.style.touchAction = 'manipulation';
-            sw.style.setProperty('--c', slot.color);
-            sw.style.setProperty('--swatch-color', slot.color);
-
-            const inner = document.createElement('span');
-            inner.className = 'popover-swatch-inner';
-            if (hasTrans) {
-                inner.style.backgroundColor = hexToRgba(slot.color, slot.opacity ?? 100);
-            } else {
-                sw.style.backgroundColor = slot.color;
-                inner.style.backgroundColor = slot.color;
-            }
-            sw.appendChild(inner);
-
-            // Clicking swatch opens real ColorPickerPopover
-            sw.onclick = (e) => {
-                e.stopPropagation();
-                this.openColorPickerForAnchor(
-                    sw,
-                    slot.color,
-                    slot.opacity ?? 100,
-                    async (newColor, newOpacity) => {
-                        slot.color = newColor;
-                        slot.opacity = newOpacity;
-                        await onChange();
-                    }
-                );
-            };
+            const sw = this.createSlotSwatchButton(slot, onChange);
 
             // Small subtle delete badge on hover/touch
             const delBadge = document.createElement('button');
@@ -550,22 +535,23 @@ export class ColorPaletteManager {
 
         // If slots < 6: show single dashed circle centered to add next color
         if (profile.slots.length < 6) {
-            const addBtn = document.createElement('button');
-            addBtn.type = 'button';
-            addBtn.className = 'swatch popover-swatch-circle is-dashed-empty';
-            addBtn.title = 'Añadir nuevo color a la paleta';
-            addBtn.onclick = (e) => {
-                e.stopPropagation();
-                this.openColorPickerForAnchor(
-                    addBtn,
-                    '#2F6BFF',
-                    100,
-                    async (newColor, newOpacity) => {
-                        profile.slots.push({ color: newColor, opacity: newOpacity });
-                        await onChange();
-                    }
-                );
-            };
+            const addBtn = createSwatchCircleButton({
+                className: 'swatch popover-swatch-circle',
+                emptyClass: 'is-dashed-empty',
+                title: 'Añadir nuevo color a la paleta',
+                onClick: (e) => {
+                    e?.stopPropagation();
+                    this.openColorPickerForAnchor(
+                        addBtn,
+                        '#2F6BFF',
+                        100,
+                        async (newColor, newOpacity) => {
+                            profile.slots.push({ color: newColor, opacity: newOpacity });
+                            await onChange();
+                        }
+                    );
+                },
+            });
             rowEl.appendChild(addBtn);
         }
 
@@ -582,43 +568,8 @@ export class ColorPaletteManager {
         rowEl.className = 'swatch-row popover-swatches-row apolo-settings-palette-row';
 
         const recentSlots = ctx.recentColors.slice(0, 6);
-        for (let i = 0; i < recentSlots.length; i++) {
-            const slot = recentSlots[i];
-            const sw = document.createElement('button');
-            sw.type = 'button';
-            const hasTrans = (slot.opacity ?? 100) < 100;
-            sw.className = `swatch popover-swatch-circle ${hasTrans ? 'has-transparency' : ''}`;
-            sw.title = `Color ${slot.color} (${slot.opacity ?? 100}%) - Clic para cambiar`;
-            sw.style.touchAction = 'manipulation';
-            sw.style.setProperty('--c', slot.color);
-            sw.style.setProperty('--swatch-color', slot.color);
-
-            const inner = document.createElement('span');
-            inner.className = 'popover-swatch-inner';
-            if (hasTrans) {
-                inner.style.backgroundColor = hexToRgba(slot.color, slot.opacity ?? 100);
-            } else {
-                sw.style.backgroundColor = slot.color;
-                inner.style.backgroundColor = slot.color;
-            }
-            sw.appendChild(inner);
-
-            // Clicking swatch opens real ColorPickerPopover
-            sw.onclick = (e) => {
-                e.stopPropagation();
-                this.openColorPickerForAnchor(
-                    sw,
-                    slot.color,
-                    slot.opacity ?? 100,
-                    async (newColor, newOpacity) => {
-                        slot.color = newColor;
-                        slot.opacity = newOpacity;
-                        await onChange();
-                    }
-                );
-            };
-
-            rowEl.appendChild(sw);
+        for (const slot of recentSlots) {
+            rowEl.appendChild(this.createSlotSwatchButton(slot, onChange));
         }
 
         // Circular "+" button (exclusivo del historial de recientes)
