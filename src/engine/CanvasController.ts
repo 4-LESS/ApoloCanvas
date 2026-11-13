@@ -145,7 +145,7 @@ import {
     normalizeBoxId,
     type SpaceMutation,
 } from '../editor/ApoloSpaceExtension.ts';
-import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion.ts';
+import { findCanvasInsertionLine, insertCanvasIntoMarkdown } from '../editor/CanvasInsertion.ts';
 import {
     type DocumentContentBounds,
     isInkAllowedAt,
@@ -3145,13 +3145,7 @@ export class CanvasController {
                     : 0;
 
                 // Determine first content line (skipping frontmatter properties)
-                let firstContentLine = 0;
-                try {
-                    const cache = this.options.app.metadataCache.getFileCache(this.file);
-                    if (cache?.frontmatterPosition) {
-                        firstContentLine = cache.frontmatterPosition.end.line + 1;
-                    }
-                } catch { /* ignore */ }
+                const firstContentLine = this.getFirstContentLine();
 
                 const firstLineNum = Math.min(cm.state.doc.lines, Math.max(1, firstContentLine + 1));
                 const firstBlock = cm.lineBlockAt(cm.state.doc.line(firstLineNum).from);
@@ -3161,18 +3155,13 @@ export class CanvasController {
                 contentBottom = baseTop + lastBlock.bottom;
             }
         } else {
-            // Reading Mode: use rendered content blocks
+            // Reading Mode: use rendered content blocks + preview header floor
+            const previewFloor = this.getPreviewContentTop();
             const rendered = Array.from(
                 this.scroller.querySelectorAll<HTMLElement>('[data-apolo-line-start]')
             );
             if (rendered.length > 0) {
-                let firstContentLine = 0;
-                try {
-                    const cache = this.options.app.metadataCache.getFileCache(this.file);
-                    if (cache?.frontmatterPosition) {
-                        firstContentLine = cache.frontmatterPosition.end.line + 1;
-                    }
-                } catch { /* ignore */ }
+                const firstContentLine = this.getFirstContentLine();
 
                 let minTop = Number.POSITIVE_INFINITY;
                 let maxBottom = Number.NEGATIVE_INFINITY;
@@ -3186,9 +3175,14 @@ export class CanvasController {
                         if (b > maxBottom) maxBottom = b;
                     }
                 }
-                contentTop = Number.isFinite(minTop) ? minTop : 0;
+                if (Number.isFinite(minTop)) {
+                    contentTop = previewFloor > 0 ? Math.min(minTop, previewFloor) : minTop;
+                } else {
+                    contentTop = previewFloor;
+                }
                 contentBottom = Number.isFinite(maxBottom) ? maxBottom : this.scroller.scrollHeight / this.zoom;
             } else {
+                contentTop = previewFloor;
                 contentBottom = this.scroller.scrollHeight / this.zoom;
             }
         }
@@ -4188,6 +4182,7 @@ export class CanvasController {
                     }
 
                     const previewLh = this.getPreviewLineHeight();
+                    const previewFloor = this.getPreviewContentTop();
                     if (prevBlock) {
                         const rect = prevBlock.getBoundingClientRect();
                         const prevBottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
@@ -4201,7 +4196,7 @@ export class CanvasController {
                         const nextTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
                         const nextStart = parseInt(nextBlock.dataset.apoloLineStart || '0', 10);
                         const deltaLines = nextStart - targetLine;
-                        const estimatedTop = Math.max(0, nextTop - deltaLines * previewLh);
+                        const estimatedTop = Math.max(previewFloor, nextTop - deltaLines * previewLh);
                         this.blockPositionCache.set(cacheKey, estimatedTop);
                         return estimatedTop;
                     }
@@ -4245,12 +4240,9 @@ export class CanvasController {
         if (lineMatch) {
             const lineNum = parseInt(lineMatch[1], 10);
             if (this.options.readonly) {
-                const sectionEl = this.scroller.querySelector<HTMLElement>('.markdown-preview-section')
-                    ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
-                const baseTop = sectionEl
-                    ? (sectionEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
-                    : 0;
-                return baseTop + lineNum * this.getPreviewLineHeight();
+                const firstContentLine = this.getFirstContentLine();
+                const previewTop = this.getPreviewContentTop();
+                return previewTop + Math.max(0, lineNum - firstContentLine) * this.getPreviewLineHeight();
             }
             const lineCount = Math.max(1, this.editor ? this.editor.lineCount() : 1);
             const avgLineHeight = this.editor ? (this.scroller.scrollHeight / lineCount) : 26;
@@ -5177,15 +5169,18 @@ export class CanvasController {
         BoxRegistry.setGridDensity(boxId, defGridDensity);
         BoxRegistry.setBorderOutline(boxId, defBorder);
 
-        // 2. Insert into Markdown
+        // 2. Insert into Markdown (clearing any existing freehand ink above/at end of note)
         if (this.editor) {
             const cursor = this.editor.getCursor?.();
             const content = this.editor.getValue();
+            const cursorLine = cursor ? cursor.line : undefined;
+            const minLine = this.computeMinLineBelowFreehandInk(content, cursorLine);
             const { updatedContent, insertedLine } = insertCanvasIntoMarkdown(
                 content,
                 boxId,
                 defHeight,
-                cursor ? cursor.line : undefined,
+                cursorLine,
+                minLine > 0 ? { minLine } : undefined,
             );
 
             if (updatedContent !== content) {
@@ -5197,8 +5192,16 @@ export class CanvasController {
                 this.requestCmMeasure();
             }
         } else {
+            const currentContent = await this.options.app.vault.cachedRead(this.file);
+            const minLine = this.computeMinLineBelowFreehandInk(currentContent, undefined);
             await this.options.app.vault.process(this.file, (content) => {
-                const res = insertCanvasIntoMarkdown(content, boxId, defHeight, undefined);
+                const res = insertCanvasIntoMarkdown(
+                    content,
+                    boxId,
+                    defHeight,
+                    undefined,
+                    minLine > 0 ? { minLine } : undefined,
+                );
                 return res.updatedContent;
             });
         }
@@ -5691,6 +5694,136 @@ export class CanvasController {
         this.schedulePaint();
     }
 
+    private getFirstContentLine(lines?: string[]): number {
+        try {
+            const cache = this.options.app.metadataCache.getFileCache(this.file);
+            if (cache?.frontmatterPosition) {
+                return cache.frontmatterPosition.end.line + 1;
+            }
+        } catch {
+            // ignore
+        }
+        if (lines && lines.length > 1 && lines[0].trim() === '---') {
+            for (let i = 1; i < lines.length; i++) {
+                if (lines[i].trim() === '---') {
+                    return i + 1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private getElementComputedStyle(el: HTMLElement): CSSStyleDeclaration | null {
+        const fn = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+            ? window.getComputedStyle.bind(window)
+            : (typeof getComputedStyle === 'function' ? getComputedStyle : null);
+        return fn ? fn(el) : null;
+    }
+
+    private getPreviewContentTop(): number {
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        let floorTop = 0;
+        const headerEls = Array.from(
+            this.scroller.querySelectorAll<HTMLElement>('.mod-header, .inline-title, .metadata-container')
+        );
+        for (const el of headerEls) {
+            const rect = el.getBoundingClientRect();
+            if (rect.height <= 0 && rect.width <= 0) continue;
+            const style = this.getElementComputedStyle(el);
+            const marginBottom = parseFloat(style?.marginBottom || '0') || 0;
+            const bottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom + marginBottom / this.zoom;
+            if (bottom > floorTop) floorTop = bottom;
+        }
+        const sectionEl = this.scroller.querySelector<HTMLElement>('.markdown-preview-section')
+            ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
+        if (sectionEl) {
+            const rect = sectionEl.getBoundingClientRect();
+            const sectionTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            if (sectionTop > floorTop) floorTop = sectionTop;
+        }
+        return floorTop;
+    }
+
+    private computeMinLineBelowFreehandInk(content: string, cursorLine?: number): number {
+        const nonBoxElements = this.document.elements.filter(el => !el.blockId.startsWith('space:'));
+        if (nonBoxElements.length === 0) return 0;
+
+        const targetLine = findCanvasInsertionLine(content, cursorLine);
+        const lines = content.split('\n');
+        const hasNonBlankAfterTarget = lines.slice(targetLine + 1).some(l => l.trim() !== '');
+        if (hasNonBlankAfterTarget) return 0;
+
+        let maxInkBottomDocY = Number.NEGATIVE_INFINITY;
+        for (const el of nonBoxElements) {
+            const b = this.getElementDocBounds(el);
+            if (b.maxY > maxInkBottomDocY) maxInkBottomDocY = b.maxY;
+        }
+        if (!Number.isFinite(maxInkBottomDocY)) return 0;
+
+        const firstContentLine = this.getFirstContentLine(lines);
+        let lastNonBlankLine = -1;
+        for (let i = Math.min(targetLine, lines.length - 1); i >= firstContentLine; i--) {
+            if (lines[i].trim() !== '') {
+                lastNonBlankLine = i;
+                break;
+            }
+        }
+
+        let lineHeight = 24;
+        let anchorDocY = 0;
+
+        if (!this.options.readonly && this.editor) {
+            const cm = (this.editor as any)?.cm as EditorView | undefined;
+            const scrollerRect = this.scroller.getBoundingClientRect();
+            const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content');
+            const contentTop = contentEl
+                ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                : this.getDocumentContentBounds().contentTop;
+            if (cm && cm.state && cm.state.doc) {
+                const cmLh = (cm as any).defaultLineHeight;
+                if (typeof cmLh === 'number' && cmLh > 0) {
+                    lineHeight = cmLh;
+                } else {
+                    const lineEl = this.scroller.querySelector<HTMLElement>('.cm-line');
+                    if (lineEl) {
+                        const lh = parseFloat(this.getElementComputedStyle(lineEl)?.lineHeight || '');
+                        if (!Number.isNaN(lh) && lh > 0) lineHeight = lh;
+                    }
+                }
+                if (lastNonBlankLine >= firstContentLine) {
+                    const lineNum = Math.min(cm.state.doc.lines, lastNonBlankLine + 1);
+                    const lb = cm.lineBlockAt(cm.state.doc.line(lineNum).from);
+                    anchorDocY = contentTop + lb.bottom;
+                } else {
+                    const lineNum = Math.min(cm.state.doc.lines, firstContentLine + 1);
+                    const lb = cm.lineBlockAt(cm.state.doc.line(lineNum).from);
+                    anchorDocY = contentTop + lb.top;
+                }
+            } else {
+                const bounds = this.getDocumentContentBounds();
+                anchorDocY = bounds.contentTop + (lastNonBlankLine >= firstContentLine
+                    ? (lastNonBlankLine - firstContentLine + 1) * lineHeight
+                    : 0);
+            }
+        } else {
+            lineHeight = this.getPreviewLineHeight();
+            const previewTop = this.getPreviewContentTop();
+            anchorDocY = previewTop + (lastNonBlankLine >= firstContentLine
+                ? (lastNonBlankLine - firstContentLine + 1) * lineHeight
+                : 0);
+        }
+
+        const clearancePx = 16;
+        if (maxInkBottomDocY + clearancePx <= anchorDocY) return 0;
+
+        const blankLinesNeeded = Math.max(
+            1,
+            Math.ceil((maxInkBottomDocY + clearancePx - anchorDocY) / Math.max(8, lineHeight)),
+        );
+        const baseBlankStartLine = lastNonBlankLine >= firstContentLine ? lastNonBlankLine + 1 : firstContentLine;
+        return baseBlankStartLine + blankLinesNeeded;
+    }
+
     private getPreviewLineHeight(): number {
         const pEl = this.scroller.querySelector<HTMLElement>(
             '.markdown-preview-section p, .markdown-preview-sizer p, .markdown-preview-section li'
@@ -5699,10 +5832,10 @@ export class CanvasController {
             ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-section')
             ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
         if (targetEl) {
-            const style = window.getComputedStyle(targetEl);
-            const lh = parseFloat(style.lineHeight);
+            const style = this.getElementComputedStyle(targetEl);
+            const lh = parseFloat(style?.lineHeight || '');
             if (!Number.isNaN(lh) && lh > 0) return lh;
-            const fs = parseFloat(style.fontSize);
+            const fs = parseFloat(style?.fontSize || '');
             if (!Number.isNaN(fs) && fs > 0) return fs * 1.5;
         }
         return 24;
@@ -5728,58 +5861,121 @@ export class CanvasController {
 
         const lineHeight = this.getPreviewLineHeight();
 
-        let firstContentLine = 0;
+        let cache: ReturnType<typeof this.options.app.metadataCache.getFileCache> | null = null;
         try {
-            const cache = this.options.app.metadataCache.getFileCache(this.file);
-            if (cache?.frontmatterPosition) {
-                firstContentLine = cache.frontmatterPosition.end.line + 1;
-            }
+            cache = this.options.app.metadataCache.getFileCache(this.file);
         } catch {
             // ignore
         }
+        const firstContentLine = cache?.frontmatterPosition
+            ? cache.frontmatterPosition.end.line + 1
+            : 0;
+        const hasSectionBetween = (startInclusive: number, endExclusive: number): boolean => {
+            const sections = cache?.sections;
+            if (!sections || endExclusive <= startInclusive) return false;
+            return sections.some(
+                sec =>
+                    sec.type !== 'yaml'
+                    && sec.position.start.line >= startInclusive
+                    && sec.position.start.line < endExclusive,
+            );
+        };
+        const isElementVirtualizedPusher = (el: Element | null): boolean => {
+            if (!el || typeof el !== 'object') return false;
+            const htmlEl = el as HTMLElement;
+            if (!htmlEl.classList?.contains('markdown-preview-pusher')) return false;
+            const h = htmlEl.getBoundingClientRect().height || parseFloat(htmlEl.style?.height || '0') || 0;
+            return h > 0;
+        };
+        const hasUnannotatedSiblingBetween = (a: HTMLElement, b: HTMLElement): boolean => {
+            if (a.parentElement !== b.parentElement) return false;
+            let cursor = a.nextElementSibling;
+            while (cursor && cursor !== b) {
+                if (isElementVirtualizedPusher(cursor)) return true;
+                if ((cursor.textContent || '').trim().length > 0) {
+                    return true;
+                }
+                cursor = cursor.nextElementSibling;
+            }
+            return false;
+        };
 
         for (let i = 0; i < topLevelBlocks.length; i++) {
             const current = topLevelBlocks[i];
             const currentStart = parseInt(current.dataset.apoloLineStart || '0', 10);
 
             if (i === 0) {
-                // Only apply leadingBlankLines if current is actually at the beginning of content!
-                // If currentStart > firstContentLine + 1, preceding blocks are virtualized, NOT blank.
-                if (currentStart <= firstContentLine + 1) {
+                // Apply leading blank lines whenever no real markdown section (nor virtualized pusher) precedes current.
+                const hasPrecedingSection = hasSectionBetween(firstContentLine, currentStart)
+                    || isElementVirtualizedPusher(current.previousElementSibling);
+                if (!hasPrecedingSection) {
                     const leadingBlankLines = currentStart - firstContentLine;
-                    if (leadingBlankLines > 0) {
-                        current.style.marginTop = `${leadingBlankLines * lineHeight}px`;
-                    } else {
-                        current.style.marginTop = '';
-                    }
+                    current.style.marginTop = leadingBlankLines > 0
+                        ? `${leadingBlankLines * lineHeight}px`
+                        : '';
                 }
             } else {
                 const prev = topLevelBlocks[i - 1];
-                // Only apply inter-block spacing if prev and current are immediate DOM siblings
-                if (current.previousElementSibling === prev) {
-                    const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                // Apply inter-block blank lines for direct siblings OR when no virtualized section/content sits in between
+                const isDirectSibling = current.previousElementSibling === prev;
+                const noInterveningSection = !hasSectionBetween(prevEnd + 1, currentStart)
+                    && !hasUnannotatedSiblingBetween(prev, current);
+                if (isDirectSibling || noInterveningSection) {
                     const blankLines = currentStart - prevEnd - 1;
-
-                    if (blankLines > 0) {
-                        current.style.marginTop = `${blankLines * lineHeight}px`;
-                    } else {
-                        current.style.marginTop = '';
-                    }
+                    current.style.marginTop = blankLines > 0
+                        ? `${blankLines * lineHeight}px`
+                        : '';
                 }
             }
         }
 
-        if (topLevelBlocks.length > 0) {
+        if (topLevelBlocks.length > 0 && typeof this.options.app?.vault?.cachedRead === 'function') {
+            const firstBlock = topLevelBlocks[0];
+            const firstStart = parseInt(firstBlock.dataset.apoloLineStart || '0', 10);
             const lastBlock = topLevelBlocks[topLevelBlocks.length - 1];
             const lastBlockEnd = parseInt(lastBlock.dataset.apoloLineEnd || lastBlock.dataset.apoloLineStart || '0', 10);
             void this.options.app.vault.cachedRead(this.file).then(content => {
                 if (this.destroyed) return;
                 const lines = content.split('\n');
+                const effectiveFirstContentLine = this.getFirstContentLine(lines);
+                let layoutChanged = false;
+
+                if (firstStart > effectiveFirstContentLine) {
+                    const leadingSlice = lines.slice(effectiveFirstContentLine, firstStart);
+                    if (leadingSlice.length > 0 && leadingSlice.every(l => l.trim() === '')) {
+                        const expectedTop = `${leadingSlice.length * lineHeight}px`;
+                        if (firstBlock.style.marginTop !== expectedTop) {
+                            firstBlock.style.marginTop = expectedTop;
+                            layoutChanged = true;
+                        }
+                    }
+                }
+
+                for (let i = 1; i < topLevelBlocks.length; i++) {
+                    const prev = topLevelBlocks[i - 1];
+                    const current = topLevelBlocks[i];
+                    const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                    const currentStart = parseInt(current.dataset.apoloLineStart || '0', 10);
+                    const betweenSlice = lines.slice(prevEnd + 1, currentStart);
+                    if (betweenSlice.length > 0 && betweenSlice.every(l => l.trim() === '')) {
+                        const expectedTop = `${betweenSlice.length * lineHeight}px`;
+                        if (current.style.marginTop !== expectedTop) {
+                            current.style.marginTop = expectedTop;
+                            layoutChanged = true;
+                        }
+                    }
+                }
+
                 const trailingSlice = lines.slice(lastBlockEnd + 1);
                 const areAllTrailingBlank = trailingSlice.length > 0 && trailingSlice.every(l => l.trim() === '');
                 const nextMarginBottom = areAllTrailingBlank ? `${trailingSlice.length * lineHeight}px` : '';
                 if (lastBlock.style.marginBottom !== nextMarginBottom) {
                     lastBlock.style.marginBottom = nextMarginBottom;
+                    layoutChanged = true;
+                }
+
+                if (layoutChanged) {
                     this.blockPositionCache.clear();
                     this.rebuildIndex();
                     this.renderDirty = true;

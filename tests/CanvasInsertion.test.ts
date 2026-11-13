@@ -142,4 +142,22 @@ test('CanvasInsertion (Step c1) - Block Boundaries Detection', async (t) => {
         const { updatedContent } = insertCanvasIntoMarkdown(doc, 'c_blank', 280, 1);
         assert.ok(updatedContent.includes('Párrafo 1\n\n<div data-apolo-space="c_blank" data-h="280"></div>\n\nPárrafo 2'));
     });
+
+    await t.test('Pads leading blank lines when minLine is requested on an empty note with ink', () => {
+        const { updatedContent, insertedLine } = insertCanvasIntoMarkdown('', 'c_ink_empty', 280, 0, { minLine: 10 });
+        const lines = updatedContent.split('\n');
+        assert.equal(insertedLine, 10);
+        assert.equal(lines[10], '<div data-apolo-space="c_ink_empty" data-h="280"></div>');
+        assert.ok(lines.slice(0, 10).every(l => l === ''), 'Lines above canvas must remain blank');
+    });
+
+    await t.test('Pads blank lines after existing heading when minLine exceeds targetLine', () => {
+        const doc = '# Diagrama\n\n';
+        const { updatedContent, insertedLine } = insertCanvasIntoMarkdown(doc, 'c_ink_below', 280, 0, { minLine: 8 });
+        const lines = updatedContent.split('\n');
+        assert.equal(insertedLine, 8);
+        assert.equal(lines[0], '# Diagrama');
+        assert.equal(lines[8], '<div data-apolo-space="c_ink_below" data-h="280"></div>');
+        assert.ok(lines.slice(1, 8).every(l => l === ''), 'Intermediate lines must remain blank');
+    });
 });
