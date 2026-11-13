@@ -5,7 +5,7 @@
  * an anchor origin) and ShapeRenderGeometry in document / export space.
  */
 
-import type { NormalizedShapePoint, ShapeElement, ShapePathNode } from '../../core/types.ts';
+import type { NormalizedShapePoint, ShapeElement } from '../../core/types.ts';
 import type { ShapeRenderGeometry, ShapeStyleConfig } from './types.ts';
 import { getShapePlugin } from './index.ts';
 import { linearPathBounds } from './handles.ts';

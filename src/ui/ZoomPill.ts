@@ -8,7 +8,6 @@ export interface ZoomPillCallbacks {
 
 export class ZoomPill {
     readonly container: HTMLElement;
-    private zoom = 1;
     private readonly labelEl: HTMLElement;
     private readonly fitBtn: HTMLButtonElement;
     private callbacks: ZoomPillCallbacks;
@@ -56,7 +55,6 @@ export class ZoomPill {
     }
 
     setZoom(zoom: number): void {
-        this.zoom = zoom;
         this.labelEl.textContent = `${Math.round(zoom * 100)} %`;
         this.fitBtn.hidden = Math.abs(zoom - 1) < 0.05;
     }

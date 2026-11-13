@@ -152,7 +152,6 @@ export class Toolbar {
     private keyboardBtn!: HTMLButtonElement;
     private toolButtons = new Map<ToolType, HTMLButtonElement>();
     private shapeBtnIcon!: HTMLElement;
-    private insertCanvasBtn!: HTMLButtonElement;
     private undoBtn!: HTMLButtonElement;
     private redoBtn!: HTMLButtonElement;
     private favGroup!: HTMLElement;
@@ -160,7 +159,6 @@ export class Toolbar {
     private thicknessGroup!: HTMLElement;
     private thicknessTriggerBtn!: HTMLButtonElement;
     private thickLinePreview!: HTMLElement;
-    private thicknessButtons: HTMLButtonElement[] = [];
     private gridBtn!: HTMLButtonElement;
 
     // Modular Popovers
@@ -690,7 +688,6 @@ export class Toolbar {
             e.stopPropagation();
             this.options.onInsertCanvas?.();
         });
-        this.insertCanvasBtn = insertCanvasBtn;
         this.container.appendChild(insertCanvasBtn);
 
         this.container.appendChild(this.createDivider());
@@ -864,7 +861,6 @@ export class Toolbar {
         });
 
         this.thicknessTriggerBtn = thickBtn;
-        this.thicknessButtons = [thickBtn];
         thicknessGroup.appendChild(thickBtn);
         this.container.appendChild(thicknessGroup);
         this.updateThicknessVisual();

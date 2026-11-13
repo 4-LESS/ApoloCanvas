@@ -1,4 +1,4 @@
-import type { BoundingBox, CanvasElement, Point, ShapeElement, StrokeElement } from '../../core/types.ts';
+import type { Point, ShapeElement, StrokeElement } from '../../core/types.ts';
 import { getShapePlugin, sampleLinearPath, shapeElementToGeometry } from '../shapes/index.ts';
 
 /**

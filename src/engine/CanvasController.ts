@@ -1,4 +1,4 @@
-import type { App, Editor, Notice, TFile } from 'obsidian';
+import type { App, Editor, TFile } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
 import type {
@@ -40,9 +40,7 @@ import {
     getOrCreateStrokeSprite,
     type LiveBakeState,
     renderContinuousSolidStroke,
-    snapLineAngle,
 } from './PatternedStrokeRenderer.ts';
-import { getPenPlugin } from './pens/index.ts';
 import {
     MAGNETIC_SNAP_RADIUS_PX,
     applyGeometryToShapeElement,
@@ -58,18 +56,14 @@ import {
     splitLinearSegment,
     straightenLinearSegment,
     toggleLinearNodeKind,
-    toggleNodeOrSegmentOrthogonal,
     insertLinearNodeAtPoint,
     linearPathHit,
-    snapAngleOrOrthogonal,
     rotatePoint,
     computeSmartAlignmentGuides,
     computePointAlignmentGuides,
     getShapeKeyPoints,
     findClosestLinearSegment,
     slideLinearSegment,
-    getPortNormal,
-    autoAlignConnectorTangents,
     type AlignmentGuide,
     type SnapTargetBounds,
     type ReferencePoint,
@@ -96,7 +90,6 @@ import { EngineEventBus } from '../core/events.ts';
 import { Toolbar } from '../ui/Toolbar.ts';
 import { ToolEstuche } from '../ui/ToolEstuche.ts';
 import {
-    computeFavoriteFingerprint,
     findMatchingFavorite,
     getNextFavoritePreset,
     toggleFavoritePreset,
@@ -118,21 +111,17 @@ import {
     deleteShapeProfile,
     renameFavoritePreset,
     type ToolFavoritePreset,
-    type PenFavoritePreset,
-    type HighlighterFavoritePreset,
-    type ShapeFavoritePreset,
 } from '../ui/favorites/FavoritesStore.ts';
 import { LassoMenu } from '../ui/LassoMenu.ts';
 import { BoxMenu, type BoxMenuState } from '../ui/BoxMenu.ts';
 import { ZoomPill } from '../ui/ZoomPill.ts';
 import { Toast } from '../ui/Toast.ts';
 import { PopoverController } from '../ui/kit/index.ts';
-import { createDotsIcon, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
+import { createDotsIcon, DEFAULT_FAVORITES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
 import { smoothPressure } from './input/PressureCurve.ts';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser.ts';
 import { splitShapeDoc } from './eraser/ShapeEraser.ts';
 import {
-    cleanAnchorText,
     findBestMatchingLine,
     findBestMatchingPreviewBlock,
     type PreviewBlockInfo,
@@ -341,9 +330,7 @@ export class CanvasController {
     private barrelEraseSession = false;
     private barrelSegmentSlideLatched = false;
     private penBarrelPressed = false;
-    private lastBarrelCycleTime = 0;
     private isPenTipDown = false;
-    private lastPenEventTime = 0;
     private lastPointerDownTime = 0;
     private pointerDownStartPos: { x: number; y: number } | null = null;
     private strokeStartTime = 0;
@@ -369,7 +356,6 @@ export class CanvasController {
     private gridDensity = 32;
     private smoothing = 0.6;
     private pressureSensitivity = 0.75;
-    private previousPenColor = '#1F4FD8';
     private favorites: PenFavorite[];
     private activeFavoriteIndex = 0;
     private toolPalettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }>;
@@ -411,8 +397,6 @@ export class CanvasController {
         return this.activeStart !== null && !this.barrelActive && !this.barrelEraseSession;
     }
     private activeAnchor: Anchor | null = null;
-    private activeContentLeft = 0;
-    private activeContentWidth = 1;
     private activeBlockTop = 0;
     private readonly blockPositionCache = new Map<string, number>();
     private movingSelection = false;
@@ -421,14 +405,16 @@ export class CanvasController {
     private hasPrediction = false;
 
     // Live O(1) Incremental Baking Buffer
-    private liveBakeCanvas: HTMLCanvasElement | null = null;
-    private liveBakeCtx: CanvasRenderingContext2D | null = null;
-    private liveBakedIndex = 0;
-    private liveBakeSegState: Record<string, unknown> = {};
-    private liveBakeZoom = -1;
-    private liveBakeScrollLeft = -1;
-    private liveBakeScrollTop = -1;
-    private liveBakeStyleKey = '';
+    private readonly liveBakeState: LiveBakeState = {
+        liveBakeCanvas: null,
+        liveBakeCtx: null,
+        liveBakedIndex: 0,
+        liveBakeSegState: {},
+        liveBakeZoom: -1,
+        liveBakeScrollLeft: -1,
+        liveBakeScrollTop: -1,
+        liveBakeStyleKey: '',
+    };
     private straightenLines = false;
 
     // Zoom & Viewport State (Single Source of Truth: {zoom, scrollLeft, scrollTop})
@@ -540,7 +526,6 @@ export class CanvasController {
             pattern: this.toolState.pen.pattern,
             lineCap: 'round',
         };
-        this.previousPenColor = this.toolState.pen.color;
 
         this.applyWorkspaceToolState(this.toolState, false);
 
@@ -1482,7 +1467,6 @@ export class CanvasController {
 
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
-            this.lastPenEventTime = performance.now();
             this.isPenTipDown = true;
             if (isConfirmedBarrelPress(event) || this.isPenBarrelEvent(event)) {
                 this.penBarrelPressed = true;
@@ -1560,8 +1544,6 @@ export class CanvasController {
 
     private readonly onPointerMove = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
-            this.lastPenEventTime = performance.now();
-
             // Stylus barrel detection in hover (Windows Ink / W3C reports buttons & 32 / button 5;
             // Android / DeX reports buttons & 2 / button 2).
             const barrelHoverActive = !this.isPenTipDown && !this.isDrawing && isStylusHoverBarrel(e);
@@ -1571,7 +1553,7 @@ export class CanvasController {
                     this.penBarrelPressed = true;
                 }
                 if (this.penEnabled && !this.isEventInUiControl(e)) {
-                    this.updateCursor(e, false);
+                    this.updateCursor(e);
                 }
                 this.updateDebugHud(e, 'hover-barrel');
                 e.preventDefault();
@@ -1597,7 +1579,6 @@ export class CanvasController {
     private readonly onPointerUp = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
             this.isPenTipDown = false;
-            this.lastPenEventTime = performance.now();
             if (!this.isPenBarrelEvent(e) || e.buttons === 0) this.penBarrelPressed = false;
         } else if (e.buttons === 0) {
             this.penBarrelPressed = false;
@@ -1608,7 +1589,6 @@ export class CanvasController {
     private readonly onPointerCancel = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
             this.isPenTipDown = false;
-            this.lastPenEventTime = performance.now();
         }
         this.penBarrelPressed = false;
         this.updateDebugHud(e);
@@ -1620,8 +1600,6 @@ export class CanvasController {
         if (e.pointerType === 'pen') this.isPenTipDown = false;
         this.updateDebugHud(e);
     };
-
-    private readonly onPointerDown = this.onCanvasPointerDownHandleCheck;
 
     public cancelActiveStroke(): void {
         this.input?.cancelActiveDrawing();
@@ -2549,7 +2527,6 @@ export class CanvasController {
     setInkColor(color: string): void {
         this.style.color = color;
         if (this.tool === 'pen') {
-            this.previousPenColor = color;
             this.toolState.pen.color = color;
         } else if (this.tool === 'highlighter') {
             this.toolState.highlighter.color = color;
@@ -2742,7 +2719,6 @@ export class CanvasController {
     }
 
     setTool(tool: ToolType, notify = true): void {
-        const previousTool = this.tool;
         this.tool = tool;
         this.toolState.activeTool = tool;
 
@@ -3196,7 +3172,7 @@ export class CanvasController {
         return true;
     }
 
-    private updateCursor(event: PointerEvent, isDrawing = false): void {
+    private updateCursor(event: PointerEvent): void {
         if (!this.penEnabled) {
             this.canvas.style.cursor = '';
             return;
@@ -3365,10 +3341,6 @@ export class CanvasController {
             this.lastPointerDownTime = this.strokeStartTime;
         }
 
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        this.activeContentLeft = contentLeft;
-        this.activeContentWidth = contentWidth;
-
         this.activeAnchor = this.anchorAt(docX, docY);
         this.activeBlockTop = this.activeAnchor.y;
 
@@ -3486,7 +3458,7 @@ export class CanvasController {
         }
 
         if (rawEvent) {
-            this.updateCursor(rawEvent, true);
+            this.updateCursor(rawEvent);
             this.checkAutoScroll(rawEvent);
         }
 
@@ -3715,10 +3687,10 @@ export class CanvasController {
     }
 
     private resetLiveBake(): void {
-        this.liveBakedIndex = 0;
-        this.liveBakeSegState = {};
-        if (this.liveBakeCtx && this.liveBakeCanvas) {
-            this.liveBakeCtx.clearRect(0, 0, this.liveBakeCanvas.width, this.liveBakeCanvas.height);
+        this.liveBakeState.liveBakedIndex = 0;
+        this.liveBakeState.liveBakeSegState = {};
+        if (this.liveBakeState.liveBakeCtx && this.liveBakeState.liveBakeCanvas) {
+            this.liveBakeState.liveBakeCtx.clearRect(0, 0, this.liveBakeState.liveBakeCanvas.width, this.liveBakeState.liveBakeCanvas.height);
         }
     }
 
@@ -4278,7 +4250,6 @@ export class CanvasController {
 
     private anchorAt(docX: number, docY: number): Anchor {
         const scrollerRect = this.scroller.getBoundingClientRect();
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
 
         // 1. Check if (docX, docY) falls inside any apolo-space box (both Live Preview & Reading mode).
         // Strokes starting within the box bounds belong to that box.
@@ -5215,83 +5186,6 @@ export class CanvasController {
         return boxId;
     }
 
-    private insertSpace(points: Point[]): void {
-        if (points.length < 2) return;
-        const dy = points[points.length - 1].y - points[0].y;
-        if (Math.abs(dy) < 6) return;
-        const pivot = points[0].y;
-
-        this.recordHistory();
-
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-
-        // 1. Check if the pivot touch is inside an existing apolo-space block
-        const spaceBlocks = Array.from(this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]'));
-        const scrollerRect = this.scroller.getBoundingClientRect();
-        let targetSpace: { id: string; height: number; el: HTMLElement; top: number; bottom: number } | null = null;
-
-        for (const blockEl of spaceBlocks) {
-            const spaceId = blockEl.dataset.apoloSpaceId || blockEl.dataset.apoloSpace;
-            if (!spaceId) continue;
-            const rect = blockEl.getBoundingClientRect();
-            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-            const bottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
-            const height = Math.max(1, bottom - top);
-            const hitMargin = Math.max(16, (44 - height) / 2);
-            if (pivot >= top - hitMargin && pivot <= bottom + hitMargin) {
-                const currentHeight = parseInt(blockEl.dataset.apoloHeight || String(Math.round(rect.height / this.zoom)), 10);
-                targetSpace = { id: spaceId, height: currentHeight, el: blockEl, top, bottom };
-                break;
-            }
-        }
-
-        let effectiveShift = 0;
-        let mutation: SpaceMutation | null = null;
-
-        if (targetSpace) {
-            // Modifying existing space block
-            const newHeight = Math.max(0, targetSpace.height + Math.round(dy));
-            effectiveShift = newHeight - targetSpace.height;
-
-            if (newHeight <= 10 && dy < 0) {
-                // Remove space block
-                mutation = { id: targetSpace.id, height: 0, isNew: false, remove: true, targetLine: 0 };
-                targetSpace.el.remove();
-            } else {
-                const clampedH = Math.max(20, Math.min(3000, newHeight));
-                mutation = { id: targetSpace.id, height: clampedH, isNew: false, remove: false, targetLine: 0 };
-                targetSpace.el.style.height = `${clampedH}px`;
-                targetSpace.el.dataset.apoloHeight = String(clampedH);
-            }
-        } else if (dy >= 20) {
-            // Creating a new space block
-            const newId = `space-${Date.now()}`;
-            const newHeight = Math.round(dy);
-            effectiveShift = newHeight;
-
-            let targetLine = 0;
-            if (this.editor) {
-                const anchor = this.anchorAt(contentLeft + contentWidth / 2, pivot);
-                if (anchor.blockId.startsWith('line:')) {
-                    targetLine = parseInt(anchor.blockId.slice(5), 10);
-                } else {
-                    targetLine = this.editor.lastLine();
-                }
-            }
-            mutation = { id: newId, height: newHeight, isNew: true, remove: false, targetLine };
-        }
-
-        if (mutation) {
-            this.blockPositionCache.clear();
-            this.rebuildIndex();
-            // 2. Debounced write to markdown file via vault.process
-            this.queueSpaceMutation(mutation);
-            this.persistSoon();
-            this.schedulePaint();
-            this.toast?.show(`Espacio: ${effectiveShift > 0 ? '+' : ''}${Math.round(effectiveShift)} px`);
-        }
-    }
-
     private queueSpaceMutation(mutation: SpaceMutation): void {
         this.pendingSpaceMutations.push(mutation);
         if (this.spacerDebounceTimer !== null) {
@@ -5401,23 +5295,6 @@ export class CanvasController {
         } catch (err) {
             console.error('[ApoloCanvas] Error updating space block via vault.process:', err);
         }
-    }
-
-    private testAnchorDisplacement(): void {
-        if (this.document.elements.length === 0) {
-            this.toast?.show('Dibuja algún trazo primero para probar el anclaje');
-            return;
-        }
-        const { width: contentWidth } = this.getContentGeometry();
-        this.recordHistory();
-        const dv = 56 / contentWidth;
-        for (const element of this.document.elements) {
-            this.shiftElementNormalized(element, 0, dv);
-        }
-        this.rebuildIndex();
-        this.persistSoon();
-        this.schedulePaint();
-        this.toast?.show('Tinta desplazada +56 px simulando nuevo párrafo arriba');
     }
 
     private getBoxHeightsSnapshot(): Record<string, number> {
@@ -6209,10 +6086,6 @@ export class CanvasController {
         return getOrCreateStrokeSprite(el, this.strokeCache, geom, this.zoom, ratio);
     }
 
-    private getOrCreatePencilCache(el: StrokeElement): HTMLCanvasElement | null {
-        return this.getOrCreateStrokeCache(el);
-    }
-
     private isHighlighter(element: CanvasElement): boolean {
         if (element.type !== 'stroke') return false;
         if (element.style.isHighlighter) return true;
@@ -6460,7 +6333,6 @@ export class CanvasController {
                 DEFAULT_INK_LIMITS.topMarginPx,
             );
             const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
-            const penPlugin = getPenPlugin(this.penProfileId);
 
             if (!this.straightenLines && validRuns.length === 1 && validRuns[0].length === rawPoints.length) {
                 const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
@@ -6468,7 +6340,7 @@ export class CanvasController {
                     ? this.getElementAnchorGeometry(this.activeAnchor.blockId)
                     : null;
                 const baked = bakeLiveStrokeSegment(
-                    this as unknown as LiveBakeState,
+                    this.liveBakeState,
                     context,
                     validRuns[0],
                     activeStyle,
@@ -6565,56 +6437,6 @@ export class CanvasController {
         this.context.restore();
     }
 
-    private paintSpacer(): void {
-        if (!this.activeStart || this.points.size === 0) return;
-        const currentY = this.points.getY(this.points.size - 1);
-        const startY = this.activeStart.y;
-        const dy = currentY - startY;
-
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        const scrollerW = this.scroller.clientWidth / this.zoom;
-        const x1 = Math.max(0, contentLeft - 20);
-        const x2 = Math.min(scrollerW, contentLeft + contentWidth + 20);
-
-        this.context.save();
-
-        // Start pivot line (gray dashed)
-        this.context.strokeStyle = '#8B949E';
-        this.context.lineWidth = 1.5 / this.zoom;
-        this.context.setLineDash([4 / this.zoom, 4 / this.zoom]);
-        this.context.beginPath();
-        this.context.moveTo(x1, startY);
-        this.context.lineTo(x2, startY);
-        this.context.stroke();
-
-        // End line (blue solid)
-        this.context.strokeStyle = '#2F6BFF';
-        this.context.lineWidth = 2 / this.zoom;
-        this.context.setLineDash([]);
-        this.context.beginPath();
-        this.context.moveTo(x1, currentY);
-        this.context.lineTo(x2, currentY);
-        this.context.stroke();
-
-        // Tinted region between pivot and currentY
-        const minY = Math.min(startY, currentY);
-        const h = Math.abs(dy);
-        this.context.fillStyle = dy >= 0 ? 'rgba(47, 107, 255, 0.08)' : 'rgba(239, 68, 68, 0.08)';
-        this.context.fillRect(x1, minY, x2 - x1, h);
-
-        // Height badge at center
-        const midX = (x1 + x2) / 2;
-        const midY = (startY + currentY) / 2;
-        const text = `${dy >= 0 ? '+' : ''}${Math.round(dy)} px`;
-        this.context.font = `600 ${Math.round(13 / this.zoom)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-        this.context.fillStyle = '#2F6BFF';
-        this.context.textAlign = 'center';
-        this.context.textBaseline = 'middle';
-        this.context.fillText(text, midX, midY);
-
-        this.context.restore();
-    }
-
     private paintAlignmentGuides(): void {
         if (!this.activeAlignmentGuides || this.activeAlignmentGuides.length === 0) return;
         const ctx = this.context;
@@ -6706,7 +6528,6 @@ export class CanvasController {
         const plugin = getShapePlugin(shape.shapeType);
         const geom = this.getShapeDocGeometry(shape);
         const norm = plugin.normalizeGeometry(geom);
-        const bounds = this.getElementDocBounds(shape);
         const ctx = this.context;
         const accent = '#2F6BFF';
         const padding = 6;

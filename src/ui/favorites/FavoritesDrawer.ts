@@ -258,7 +258,6 @@ export class FavoritesDrawer {
     private currentSlice: any = null;
     private profiles: { id: string; name: string }[] = [];
     private activeProfileId: string = '';
-    private syncFavoriteProfiles: boolean = false;
     private isCreatingProfile: boolean = false;
     private lastValidProfileId: string = '';
     private showDotsIndicator: boolean = false;
@@ -277,14 +276,13 @@ export class FavoritesDrawer {
         parent?: HTMLElement,
         initialProfiles?: readonly { id: string; name: string }[],
         initialActiveProfileId?: string,
-        initialSyncProfiles?: boolean,
+        _initialSyncProfiles?: boolean,
         showDotsIndicator?: boolean,
     ) {
         this.callbacks = callbacks;
         this.tool = initialTool;
         this.favorites = [...initialFavorites];
         this.currentSlice = initialSlice ?? null;
-        this.syncFavoriteProfiles = Boolean(initialSyncProfiles);
         this.showDotsIndicator = Boolean(showDotsIndicator);
 
         if (initialProfiles && initialProfiles.length > 0) {
@@ -492,7 +490,7 @@ export class FavoritesDrawer {
         currentSlice?: any,
         profiles?: readonly { id: string; name: string }[],
         activeProfileId?: string,
-        syncFavoriteProfiles?: boolean,
+        _syncFavoriteProfiles?: boolean,
     ): void {
         this.tool = tool;
         this.favorites = [...favorites];
@@ -502,9 +500,6 @@ export class FavoritesDrawer {
         }
         if (activeProfileId !== undefined) {
             this.activeProfileId = activeProfileId;
-        }
-        if (syncFavoriteProfiles !== undefined) {
-            this.syncFavoriteProfiles = syncFavoriteProfiles;
         }
         this.render();
     }
@@ -528,7 +523,6 @@ export class FavoritesDrawer {
             this.profiles = partial.profiles.map(p => ({ id: p.id, name: p.name }));
         }
         if (partial.activeProfileId !== undefined) this.activeProfileId = partial.activeProfileId;
-        if (partial.syncFavoriteProfiles !== undefined) this.syncFavoriteProfiles = partial.syncFavoriteProfiles;
         if (partial.isCreatingProfile !== undefined) this.isCreatingProfile = partial.isCreatingProfile;
         this.render();
     }

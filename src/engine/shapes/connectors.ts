@@ -115,7 +115,7 @@ export function autoAlignConnectorTangents(
     geom: ShapeRenderGeometry,
     element: ShapeElement,
     elements: readonly CanvasElement[],
-    adapter: Pick<ConnectorGeometryAdapter, 'getGeometry'>,
+    _adapter: Pick<ConnectorGeometryAdapter, 'getGeometry'>,
 ): ShapeRenderGeometry {
     const startBinding = element.startBinding;
     const endBinding = element.endBinding;

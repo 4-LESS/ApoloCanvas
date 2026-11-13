@@ -3,8 +3,6 @@ import { EngineEventBus } from './core/events.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, StrokeFavoriteProfile, ShapeFavoriteProfile, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
 import { DEFAULT_WORKSPACE_TOOL_STATE, DEFAULT_STROKE_FAVORITE_PROFILES, DEFAULT_SHAPE_FAVORITE_PROFILES, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
 import {
-    computeFavoriteFingerprint,
-    findMatchingFavorite,
     getNextFavoritePreset,
     toggleFavoritePreset,
     removeFavoriteById,
@@ -19,17 +17,13 @@ import {
     deleteStrokeProfile,
     renameShapeProfile,
     deleteShapeProfile,
-    renameFavoritePreset,
     setCanonicalFavorites,
     getCanonicalFavorites,
     type ToolFavoritePreset,
-    type PenFavoritePreset,
-    type HighlighterFavoritePreset,
-    type ShapeFavoritePreset,
 } from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
 import { PersistenceQueue, syncBoxPreviewSvg } from './io/PersistenceQueue.ts';
-import { createDotsIcon, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
+import { createDotsIcon, DEFAULT_FAVORITES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
 import { ColorPaletteManager } from './ui/settings/ColorPaletteManager.ts';
@@ -518,6 +512,12 @@ export default class ApoloCanvasPlugin extends Plugin {
     applyWorkspaceToolStateToController(controller: CanvasController): void {
         if (this.settings.toolState) {
             controller.applyWorkspaceToolState(this.settings.toolState, true);
+        }
+    }
+
+    public syncActiveControllerToolState(): void {
+        if (this.controller && this.settings.toolState) {
+            this.controller.applyWorkspaceToolState(this.settings.toolState, true);
         }
     }
 
@@ -1016,13 +1016,13 @@ export default class ApoloCanvasPlugin extends Plugin {
                 onToggleFavorite: () => {
                     this.debouncedSaveSettings();
                 },
-                onApplyFavorite: (preset: ToolFavoritePreset) => {
+                onApplyFavorite: (_preset: ToolFavoritePreset) => {
                     this.debouncedSaveSettings();
                 },
-                onDeleteFavorite: (presetId: string) => {
+                onDeleteFavorite: (_presetId: string) => {
                     this.debouncedSaveSettings();
                 },
-                onReorderFavorites: (fromIndex: number, toIndex: number) => {
+                onReorderFavorites: (_fromIndex: number, _toIndex: number) => {
                     this.debouncedSaveSettings();
                 },
                 toolState: this.settings.toolState,

@@ -20,7 +20,6 @@ import type {
 import {
     DEFAULT_STROKE_FAVORITE_PROFILES,
     DEFAULT_SHAPE_FAVORITE_PROFILES,
-    DEFAULT_WORKSPACE_COLOR_CAROUSELS,
     cloneColorCarousels,
 } from '../core/types.ts';
 
@@ -42,8 +41,6 @@ import { applyPopoverGeometry } from './popover/PopoverGeometry.ts';
 import { FavoritesDrawer } from './favorites/FavoritesDrawer.ts';
 
 const SHAPES_PER_PAGE = 5;
-/** Matches the engine default used by applyCanvasFill / getSvgFillAttributes. */
-const DEFAULT_FILL_OPACITY = 0.2;
 
 interface ShapeSelectorItem {
     type: ShapeType;

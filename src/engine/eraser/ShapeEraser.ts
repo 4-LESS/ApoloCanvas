@@ -3,7 +3,7 @@ import { getShapePlugin } from '../shapes/index.ts';
 import { shapeElementToGeometry } from '../shapes/element.ts';
 import { getLinearPathNodes, rotatePoint } from '../shapes/handles.ts';
 import { clampCornerRadius } from '../shapes/rectangle.ts';
-import type { CustomPathSegment, ShapePoint, ShapeRenderGeometry } from '../shapes/types.ts';
+import type { CustomPathSegment, ShapePoint } from '../shapes/types.ts';
 import { distToSegmentSquared } from './StrokeEraser.ts';
 
 interface Subsegment {

@@ -1,5 +1,5 @@
 import type { App, TFile } from 'obsidian';
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, Point, ShapeElement, StrokeElement } from '../core/types.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, Point, StrokeElement } from '../core/types.ts';
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
 import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
@@ -550,7 +550,7 @@ function resolveRenderBoxDarkTheme(meta?: BoxSvgRenderMeta): boolean {
     if (meta?.isDarkTheme !== undefined) return meta.isDarkTheme;
     if (typeof document !== 'undefined' && document?.body?.classList) {
         if (document.body.classList.contains('theme-light')) return false;
-        if (document.body.classList.contains('theme-dark')) return true;
+        if (isDarkTheme()) return true;
     }
     return true;
 }
@@ -681,12 +681,6 @@ export function syncBoxPreviewSvg(
         previewSvgWrap.replaceChildren(parsedSvg);
         previewSvgWrap.dataset.apoloSvgHash = svgHash;
     }
-}
-
-function vaultRelativeLink(notePath: string, assetPath: string): string {
-    const noteFolder = notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/')) : '';
-    const prefix = noteFolder ? `${noteFolder}/` : '';
-    return assetPath.startsWith(prefix) ? assetPath.slice(prefix.length) : assetPath;
 }
 
 export function renderSvg(document: PageDocument): string {

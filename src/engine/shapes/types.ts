@@ -6,7 +6,6 @@
 
 import type {
     BoundingBox,
-    PathNodeKind,
     ShapeCustomParams,
     ShapeFillPattern,
     ShapePathNode,

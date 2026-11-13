@@ -6,7 +6,6 @@ import type {
     ShapeFavoritePreset,
     StrokePattern,
     ShapeType,
-    BuiltInShapeType,
     ShapeFillPattern,
     PenProfileId,
     ToolFavoritePreset,

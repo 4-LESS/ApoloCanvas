@@ -2,7 +2,6 @@ import { Notice } from 'obsidian';
 import type ApoloCanvasPlugin from '../../main.ts';
 import type {
     WorkspaceColorCarousels,
-    ColorProfileSlot,
     ColorCarouselProfile,
     ToolbarSlot,
 } from '../../core/types.ts';
@@ -153,9 +152,7 @@ export class ColorPaletteManager {
 
     private async saveAndNotify(): Promise<void> {
         await this.plugin.saveSettings();
-        if ((this.plugin as any).controller) {
-            (this.plugin as any).controller.applyWorkspaceToolState(this.plugin.settings.toolState, true);
-        }
+        this.plugin.syncActiveControllerToolState();
     }
 
     private findProfileLocation(profileId: string): { scope: PaletteScopeKey; list: ColorCarouselProfile[]; index: number } | null {

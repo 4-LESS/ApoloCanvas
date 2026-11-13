@@ -15,7 +15,6 @@ import {
     cylinderShapePlugin,
     diamondShapePlugin,
     hexagonShapePlugin,
-    createCustomShapePlugin,
 } from './custom.ts';
 
 export * from './types.ts';
