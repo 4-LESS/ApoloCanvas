@@ -28,8 +28,8 @@ import {
     type ShapeFavoritePreset,
 } from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
-import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue.ts';
-import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
+import { PersistenceQueue, syncBoxPreviewSvg } from './io/PersistenceQueue.ts';
+import { createDotsIcon, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
 import { ColorPaletteManager } from './ui/settings/ColorPaletteManager.ts';
@@ -270,21 +270,8 @@ export default class ApoloCanvasPlugin extends Plugin {
                     if (id) {
                         const doc = this.controller?.getDocument() ?? (this.mountedFilePath ? this.persistence?.getDocument(this.mountedFilePath) : null);
                         const boxElements = doc?.elements.filter(e => e.blockId === `space:${id}`) || [];
-                        let previewSvgWrap = s.querySelector<HTMLElement>('.apolo-box-preview-svg');
-                        if (boxElements.length > 0) {
-                            if (!previewSvgWrap) {
-                                previewSvgWrap = document.createElement('div');
-                                previewSvgWrap.className = 'apolo-box-preview-svg';
-                                s.appendChild(previewSvgWrap);
-                            }
-                            const boxW = Math.round(s.clientWidth || s.offsetWidth || 800);
-                            const svgMarkup = renderBoxSvg(id, boxElements, boxW, h);
-                            const parsedSvg = createSvgFromMarkup(svgMarkup);
-                            previewSvgWrap.replaceChildren(parsedSvg);
-                            previewSvgWrap.dataset.apoloSvgHash = `${boxElements.length}:${boxW}:${h}`;
-                        } else if (previewSvgWrap) {
-                            previewSvgWrap.remove();
-                        }
+                        const boxW = Math.round(s.clientWidth || s.offsetWidth || 800);
+                        syncBoxPreviewSvg(s, id, boxElements, boxW, h, doc?.boxes?.[id]);
                     }
                 } else if (id) {
                     if (!existingOptions) {

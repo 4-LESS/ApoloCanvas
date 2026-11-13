@@ -340,6 +340,10 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             const norm = this.normalizeGeometry(geom);
             return isClosed ? boxSnapPorts(norm) : linearSnapPorts(norm);
         },
+
+        getBoundarySubpaths(geom: ShapeRenderGeometry): CustomShapeSubpath[] {
+            return getDefinitionSubpaths(def, this.normalizeGeometry(geom));
+        },
     };
 }
 

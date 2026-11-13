@@ -97,6 +97,8 @@ export interface ShapePlugin {
     applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry;
     /** Ports where connector endpoints can magnetically attach. */
     getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[];
+    /** Optional subpath contour decomposition used by geometric erasers on custom shapes. */
+    getBoundarySubpaths?(geom: ShapeRenderGeometry): CustomShapeSubpath[];
 }
 
 export type NormalizedPoint = [number, number];

@@ -83,7 +83,7 @@ import {
     type ShapeStyleConfig,
 } from './shapes/index.ts';
 import { SpatialGrid } from './spatial/SpatialGrid.ts';
-import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
+import { PersistenceQueue, syncBoxPreviewSvg } from '../io/PersistenceQueue.ts';
 import {
     HOLD_TO_SNAP_DWELL_MS,
     HOLD_TO_SNAP_MOVE_TOLERANCE_PX,
@@ -127,7 +127,7 @@ import { BoxMenu, type BoxMenuState } from '../ui/BoxMenu.ts';
 import { ZoomPill } from '../ui/ZoomPill.ts';
 import { Toast } from '../ui/Toast.ts';
 import { PopoverController } from '../ui/kit/index.ts';
-import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
+import { createDotsIcon, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
 import { smoothPressure } from './input/PressureCurve.ts';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser.ts';
 import { splitShapeDoc } from './eraser/ShapeEraser.ts';
@@ -1896,24 +1896,7 @@ export class CanvasController {
                 if (existingOptions) existingOptions.remove();
 
                 const boxElements = this.document.elements.filter(e => e.blockId === `space:${id}`);
-                let previewSvgWrap = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
-                if (boxElements.length > 0) {
-                    if (!previewSvgWrap) {
-                        previewSvgWrap = document.createElement('div');
-                        previewSvgWrap.className = 'apolo-box-preview-svg';
-                        el.appendChild(previewSvgWrap);
-                    }
-                    const targetW = Math.round(boxWidth || 800);
-                    const svgHash = `${boxElements.length}:${targetW}:${h}`;
-                    if (previewSvgWrap.dataset.apoloSvgHash !== svgHash || previewSvgWrap.children.length === 0) {
-                        const svgMarkup = renderBoxSvg(id, boxElements, targetW, h);
-                        const parsedSvg = createSvgFromMarkup(svgMarkup);
-                        previewSvgWrap.replaceChildren(parsedSvg);
-                        previewSvgWrap.dataset.apoloSvgHash = svgHash;
-                    }
-                } else if (previewSvgWrap) {
-                    previewSvgWrap.remove();
-                }
+                syncBoxPreviewSvg(el, id, boxElements, Math.round(boxWidth || 800), h, this.document.boxes?.[id]);
             } else {
                 const existingPreviewSvg = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
                 if (existingPreviewSvg) existingPreviewSvg.remove();
@@ -4382,6 +4365,10 @@ export class CanvasController {
         let modified = false;
 
         for (const element of this.document.elements) {
+            if (this.toolState.eraser.onlyHighlighter && !this.isHighlighter(element)) {
+                kept.push(element);
+                continue;
+            }
             const blockTop = this.getBlockTop(element.blockId, element.anchorText);
             if (element.type === 'stroke') {
                 if (this.eraserMode === 'reticle') {

@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { boxCompanionPath, companionPath, renderBoxSvg } from '../src/io/PersistenceQueue.ts';
+import { boxCompanionPath, companionPath, computeBoxPreviewSvgHash, renderBoxSvg } from '../src/io/PersistenceQueue.ts';
 import { BoxRegistry } from '../src/core/BoxRegistry.ts';
 import type { CanvasElement, PageDocument, ShapeElement, StrokeElement } from '../src/core/types.ts';
 
@@ -332,5 +332,40 @@ describe('(d) Exportador SVG companion por caja y (e) Modo lectura integral', ()
         assert.ok(svg.includes('stroke-dasharray="0.5 6.6"'));
         assert.ok(svg.includes('stroke-linecap="butt"'));
         assert.ok(svg.includes('stroke-linecap="round"'));
+    });
+
+    test('renderBoxSvg honors light/dark default background and omitDefaultBg for inline previews', () => {
+        const lightSvg = renderBoxSvg('box-bg-light', [], 600, 200, { bgTheme: 'default', isDarkTheme: false });
+        assert.ok(lightSvg.includes('fill="#f4f5f8"'), 'Light theme default background must render #f4f5f8');
+
+        const darkSvg = renderBoxSvg('box-bg-dark', [], 600, 200, { bgTheme: 'default', isDarkTheme: true });
+        assert.ok(darkSvg.includes('fill="#1f1f21"'), 'Dark theme default background must render #1f1f21');
+
+        const inlinePreviewSvg = renderBoxSvg('box-bg-inline', [], 600, 200, { bgTheme: 'default', omitDefaultBg: true });
+        assert.ok(!inlinePreviewSvg.includes('<rect width="100%" height="100%" fill="#'), 'Inline default preview must leave background transparent for host CSS');
+    });
+
+    test('computeBoxPreviewSvgHash detects style and coordinate edits with unchanged count and dimensions', () => {
+        const baseShape: ShapeElement = {
+            id: 'shape-hash',
+            type: 'shape',
+            shapeType: 'rectangle',
+            timestamp: 1,
+            zIndex: 0,
+            blockId: 'space:box-hash',
+            startX: 0.1,
+            startY: 0.1,
+            endX: 0.5,
+            endY: 0.5,
+            style: { color: '#1F4FD8', width: 3, opacity: 1, pattern: 'solid' },
+            bounds: { minX: 0.1, minY: 0.1, maxX: 0.5, maxY: 0.5 },
+        };
+        const recolored: ShapeElement = {
+            ...baseShape,
+            style: { ...baseShape.style, color: '#D9480F' },
+        };
+        const hash1 = computeBoxPreviewSvgHash('box-hash', [baseShape], 800, 280);
+        const hash2 = computeBoxPreviewSvgHash('box-hash', [recolored], 800, 280);
+        assert.notStrictEqual(hash1, hash2, 'Preview hash must invalidate on style mutation even when count and size match');
     });
 });

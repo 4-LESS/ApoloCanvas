@@ -1,7 +1,9 @@
 import type { Point, ShapeElement, ShapePathNode } from '../../core/types.ts';
+import { getShapePlugin } from '../shapes/index.ts';
 import { shapeElementToGeometry } from '../shapes/element.ts';
 import { getLinearPathNodes, rotatePoint } from '../shapes/handles.ts';
-import type { ShapePoint, ShapeRenderGeometry } from '../shapes/types.ts';
+import { clampCornerRadius } from '../shapes/rectangle.ts';
+import type { CustomPathSegment, ShapePoint, ShapeRenderGeometry } from '../shapes/types.ts';
 import { distToSegmentSquared } from './StrokeEraser.ts';
 
 interface Subsegment {
@@ -170,6 +172,39 @@ export function shapeToBoundaryPaths(
     }
 
     if (shape.shapeType === 'rectangle') {
+        const radius = clampCornerRadius(geom.cornerRadius ?? shape.cornerRadius, W, H);
+        if (radius > 0.5) {
+            const k = 0.55228475;
+            const kr = k * radius;
+            const rawNodes: ShapePathNode[] = [
+                { x: minX + radius, y: minY, handleIn: { x: minX + radius - kr, y: minY }, nodeKind: 'smooth' },
+                { x: maxX - radius, y: minY, handleOut: { x: maxX - radius + kr, y: minY }, nodeKind: 'smooth' },
+                { x: maxX, y: minY + radius, handleIn: { x: maxX, y: minY + radius - kr }, nodeKind: 'smooth' },
+                { x: maxX, y: maxY - radius, handleOut: { x: maxX, y: maxY - radius + kr }, nodeKind: 'smooth' },
+                { x: maxX - radius, y: maxY, handleIn: { x: maxX - radius + kr, y: maxY }, nodeKind: 'smooth' },
+                { x: minX + radius, y: maxY, handleOut: { x: minX + radius - kr, y: maxY }, nodeKind: 'smooth' },
+                { x: minX, y: maxY - radius, handleIn: { x: minX, y: maxY - radius + kr }, nodeKind: 'smooth' },
+                { x: minX, y: minY + radius, handleOut: { x: minX, y: minY + radius - kr }, nodeKind: 'smooth' },
+            ];
+            // Coalesce zero-length straight edges (pill/circular rounded rect when 2*r == width or height)
+            const compact: ShapePathNode[] = [];
+            for (const node of rawNodes) {
+                const prev = compact[compact.length - 1];
+                if (
+                    prev
+                    && !prev.handleOut
+                    && !node.handleIn
+                    && Math.hypot(node.x - prev.x, node.y - prev.y) < 1e-3
+                ) {
+                    prev.handleOut = node.handleOut;
+                } else {
+                    compact.push(node);
+                }
+            }
+            const nodes = rot !== 0 ? compact.map(n => rotatePathNode(n, cx, cy, rot)) : compact;
+            return [{ isClosed: true, nodes }];
+        }
+
         const rawCorners = [
             { x: minX, y: minY },
             { x: maxX, y: minY },
@@ -199,13 +234,7 @@ export function shapeToBoundaryPaths(
             { x: cx - rx, y: cy, handleIn: { x: cx - rx, y: cy + ky }, handleOut: { x: cx - rx, y: cy - ky }, nodeKind: 'smooth' },
         ];
         const nodes = rot !== 0
-            ? rawNodes.map(n => ({
-                x: rotatePoint(n.x, n.y, cx, cy, rot).x,
-                y: rotatePoint(n.x, n.y, cx, cy, rot).y,
-                handleIn: n.handleIn ? rotatePoint(n.handleIn.x, n.handleIn.y, cx, cy, rot) : undefined,
-                handleOut: n.handleOut ? rotatePoint(n.handleOut.x, n.handleOut.y, cx, cy, rot) : undefined,
-                nodeKind: 'smooth' as const,
-            }))
+            ? rawNodes.map(n => rotatePathNode(n, cx, cy, rot))
             : rawNodes;
         return [{ isClosed: true, nodes }];
     }
@@ -260,6 +289,20 @@ export function shapeToBoundaryPaths(
         }];
     }
 
+    // Custom/plugin shapes exposing normalized subpaths
+    const plugin = getShapePlugin(shape.shapeType);
+    if (typeof plugin.getBoundarySubpaths === 'function') {
+        const subpaths = plugin.getBoundarySubpaths(geom).filter(sp => sp.isStroked !== false);
+        const pluginPaths: Array<{ isClosed: boolean; nodes: ShapePathNode[] }> = [];
+        for (const sp of subpaths) {
+            const defaultClosed = sp.isClosed !== false && plugin.isClosed !== false;
+            pluginPaths.push(...customCommandsToBoundaryPaths(sp.commands, toWorld, defaultClosed));
+        }
+        if (pluginPaths.length > 0) {
+            return pluginPaths;
+        }
+    }
+
     // Default fallback: 4 corners bounding box
     const rawCorners = [
         { x: minX, y: minY },
@@ -274,6 +317,105 @@ export function shapeToBoundaryPaths(
         isClosed: true,
         nodes: corners.map(c => ({ x: c.x, y: c.y, nodeKind: 'sharp' as const })),
     }];
+}
+
+function rotatePathNode(n: ShapePathNode, cx: number, cy: number, rot: number): ShapePathNode {
+    const pt = rotatePoint(n.x, n.y, cx, cy, rot);
+    return {
+        x: pt.x,
+        y: pt.y,
+        handleIn: n.handleIn ? rotatePoint(n.handleIn.x, n.handleIn.y, cx, cy, rot) : undefined,
+        handleOut: n.handleOut ? rotatePoint(n.handleOut.x, n.handleOut.y, cx, cy, rot) : undefined,
+        nodeKind: n.nodeKind,
+    };
+}
+
+function customCommandsToBoundaryPaths(
+    commands: CustomPathSegment[],
+    toWorld: (u: number, v: number) => ShapePoint,
+    defaultClosed: boolean,
+): Array<{ isClosed: boolean; nodes: ShapePathNode[] }> {
+    const out: Array<{ isClosed: boolean; nodes: ShapePathNode[] }> = [];
+    let currentNodes: ShapePathNode[] = [];
+    let currentClosed = false;
+    let curU = 0;
+    let curV = 0;
+    let startU = 0;
+    let startV = 0;
+
+    const flushSubpath = () => {
+        if (currentNodes.length >= 2) {
+            if (currentClosed && currentNodes.length >= 3) {
+                const first = currentNodes[0];
+                const last = currentNodes[currentNodes.length - 1];
+                if (Math.hypot(last.x - first.x, last.y - first.y) < 0.5) {
+                    if (last.handleIn && !first.handleIn) {
+                        first.handleIn = last.handleIn;
+                    }
+                    currentNodes.pop();
+                }
+            }
+            if (currentNodes.length >= 2) {
+                out.push({ isClosed: currentClosed, nodes: currentNodes });
+            }
+        }
+        currentNodes = [];
+        currentClosed = false;
+    };
+
+    for (const cmd of commands) {
+        switch (cmd.type) {
+            case 'M':
+                flushSubpath();
+                curU = cmd.args[0];
+                curV = cmd.args[1];
+                startU = curU;
+                startV = curV;
+                currentNodes.push({ ...toWorld(curU, curV), nodeKind: 'sharp' });
+                break;
+            case 'L':
+                curU = cmd.args[0];
+                curV = cmd.args[1];
+                currentNodes.push({ ...toWorld(curU, curV), nodeKind: 'sharp' });
+                break;
+            case 'C': {
+                const [u1, v1, u2, v2, u3, v3] = cmd.args;
+                if (currentNodes.length > 0) {
+                    currentNodes[currentNodes.length - 1].handleOut = toWorld(u1, v1);
+                }
+                curU = u3;
+                curV = v3;
+                currentNodes.push({ ...toWorld(u3, v3), handleIn: toWorld(u2, v2), nodeKind: 'smooth' });
+                break;
+            }
+            case 'Q': {
+                const [uc, vc, u2, v2] = cmd.args;
+                const c1u = curU + (2 / 3) * (uc - curU);
+                const c1v = curV + (2 / 3) * (vc - curV);
+                const c2u = u2 + (2 / 3) * (uc - u2);
+                const c2v = v2 + (2 / 3) * (vc - v2);
+                if (currentNodes.length > 0) {
+                    currentNodes[currentNodes.length - 1].handleOut = toWorld(c1u, c1v);
+                }
+                curU = u2;
+                curV = v2;
+                currentNodes.push({ ...toWorld(u2, v2), handleIn: toWorld(c2u, c2v), nodeKind: 'smooth' });
+                break;
+            }
+            case 'Z':
+                currentClosed = true;
+                curU = startU;
+                curV = startV;
+                flushSubpath();
+                break;
+        }
+    }
+
+    if (currentNodes.length >= 2) {
+        currentClosed = currentClosed || defaultClosed;
+        flushSubpath();
+    }
+    return out;
 }
 
 /**
