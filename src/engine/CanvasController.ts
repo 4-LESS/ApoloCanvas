@@ -67,6 +67,7 @@ import {
     type AlignmentGuide,
     type SnapTargetBounds,
     type ReferencePoint,
+    buildBlobGeometryFromPoints,
     getShapePlugin,
     mapShapeElementPoints,
     refreshShapeElementBounds,
@@ -3614,17 +3615,23 @@ export class CanvasController {
             this.rebuildIndex();
             this.renderDirty = true;
             this.persistSoon();
-        } else if (this.tool === 'shape' && this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
-            // Tapping with the shape tool selects an existing shape (exposing its handles) instead of
-            // creating a zero-size shape
-            this.selectShapeAt(this.activeStart);
-        } else {
-            this.recordHistory();
-            if (this.tool === 'shape') {
+        } else if (this.tool === 'shape') {
+            const isBlob = getShapePlugin(this.shapeType).id === 'blob';
+            const isTap = isBlob
+                ? raw.every(pt => Math.hypot(pt.x - this.activeStart!.x, pt.y - this.activeStart!.y) < SHAPE_TAP_SLOP_PX)
+                : this.isTapGesture(this.activeStart, raw[raw.length - 1]);
+            if (isTap) {
+                // Tapping with the shape tool selects an existing shape (exposing its handles) instead of
+                // creating a zero-size shape
+                this.selectShapeAt(this.activeStart);
+            } else {
+                this.recordHistory();
                 const rawEndPoint = raw[raw.length - 1];
                 let endPt = { x: rawEndPoint.x, y: rawEndPoint.y };
-                const snaps = this.resolveConnectorSnaps(this.shapeType, this.activeStart, endPt);
-                if (!snaps.end && !this.isShiftDown) {
+                const snaps: { start: SnapPortHit | null; end: SnapPortHit | null } = isBlob
+                    ? { start: null, end: null }
+                    : this.resolveConnectorSnaps(this.shapeType, this.activeStart, endPt);
+                if (!isBlob && !snaps.end && !this.isShiftDown) {
                     const tol = 6 / this.zoom;
                     const refPoints = this.getAllReferencePoints();
                     refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
@@ -3635,19 +3642,21 @@ export class CanvasController {
                 this.addShape(this.activeStart, endPt, this.shapeType, {
                     startSnap: snaps.start,
                     endSnap: snaps.end,
+                    ...(isBlob ? { points: raw } : {}),
                 });
+            }
+        } else {
+            this.recordHistory();
+            // Hold-to-snap: the live dwell preview wins; otherwise a stationary hold right
+            // before release still converts the stroke
+            const recognized = this.snapPreview ?? (this.isHoldToSnapActive()
+                ? this.recognizer.recognize(raw, releasedAt, lastMotionAt)
+                : null);
+            if (recognized) {
+                this.addRecognizedShape(recognized);
+                this.toast?.show(`Forma reconocida: ${getShapePlugin(recognized.type).name}`);
             } else {
-                // Hold-to-snap: the live dwell preview wins; otherwise a stationary hold right
-                // before release still converts the stroke
-                const recognized = this.snapPreview ?? (this.isHoldToSnapActive()
-                    ? this.recognizer.recognize(raw, releasedAt, lastMotionAt)
-                    : null);
-                if (recognized) {
-                    this.addRecognizedShape(recognized);
-                    this.toast?.show(`Forma reconocida: ${getShapePlugin(recognized.type).name}`);
-                } else {
-                    this.addStroke(raw);
-                }
+                this.addStroke(raw);
             }
         }
 
@@ -3941,6 +3950,7 @@ export class CanvasController {
             style?: StrokeStyle;
             regularize?: boolean;
             vertices?: Point[];
+            points?: Point[];
             fill?: boolean;
             /** Magnetic ports the connector endpoints were snapped to (line / arrow only). */
             startSnap?: SnapPortHit | null;
@@ -3950,6 +3960,15 @@ export class CanvasController {
         const isMagnetized = Boolean(options.startSnap || options.endSnap);
         if (options.startSnap) start = { ...start, x: options.startSnap.x, y: options.startSnap.y };
         if (options.endSnap) end = { ...end, x: options.endSnap.x, y: options.endSnap.y };
+        const plugin = getShapePlugin(shapeType);
+        const blobGeom = plugin.id === 'blob' && options.points && options.points.length >= 2
+            ? buildBlobGeometryFromPoints(options.points)
+            : null;
+        const anchorStart = start;
+        if (blobGeom) {
+            start = { x: blobGeom.x0, y: blobGeom.y0 };
+            end = { x: blobGeom.x1, y: blobGeom.y1 };
+        }
         const bounds = this.getDocumentContentBounds();
         const forbiddenY = bounds.contentTop > 0 ? bounds.contentTop - DEFAULT_INK_LIMITS.topMarginPx : -Infinity;
         if (bounds.contentTop > 0 && start.y < forbiddenY && end.y < forbiddenY) {
@@ -3957,7 +3976,7 @@ export class CanvasController {
             return;
         }
 
-        const anchor = this.activeAnchor ?? this.anchorAt(start.x, start.y);
+        const anchor = this.activeAnchor ?? this.anchorAt(anchorStart.x, anchorStart.y);
         const geom = this.getElementAnchorGeometry(anchor.blockId, anchor.text);
         const isBoxStroke = geom.isBox;
         const spaceId = anchor.blockId.startsWith('space:') ? anchor.blockId.slice(6) : '';
@@ -3965,9 +3984,8 @@ export class CanvasController {
         const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
 
         // Port positions win over 45° snapping and grid snapping
-        const regularize = isMagnetized ? false : (options.regularize ?? Boolean(this.toolState.shape.regularize || this.isShiftDown));
-        const plugin = getShapePlugin(shapeType);
-        const normalizedGeom = plugin.normalizeGeometry({
+        const regularize = (isMagnetized || blobGeom) ? false : (options.regularize ?? Boolean(this.toolState.shape.regularize || this.isShiftDown));
+        const normalizedGeom = blobGeom ?? plugin.normalizeGeometry({
             x0: start.x,
             y0: start.y,
             x1: end.x,
@@ -3984,7 +4002,7 @@ export class CanvasController {
         let { u: startU, v: startV } = sanitizeNormalizedPoint(rawStartU, rawStartV, { isBoxStroke });
         let { u: endU, v: endV } = sanitizeNormalizedPoint(rawEndU, rawEndV, { isBoxStroke });
 
-        if (isBoxStroke && (this.snapGrid || isBoxSnap) && !isMagnetized) {
+        if (isBoxStroke && (this.snapGrid || isBoxSnap) && !isMagnetized && !blobGeom) {
             const snStart = snapNormalizedPoint(startU, startV, boxGridDensity);
             const snEnd = snapNormalizedPoint(endU, endV, boxGridDensity);
             startU = snStart.u; startV = snStart.v;
@@ -4028,6 +4046,20 @@ export class CanvasController {
                 const { u, v: vv } = sanitizeNormalizedPoint((v.x - geom.originX) / geom.scaleWidth, (v.y - geom.originY) / geom.scaleWidth, { isBoxStroke });
                 return { x: u, y: vv };
             });
+            element.regularize = false;
+            refreshShapeElementBounds(element);
+        }
+        if (normalizedGeom.pathNodes && normalizedGeom.pathNodes.length >= 2) {
+            const normPt = (pt: { x: number; y: number }) => {
+                const { u, v } = sanitizeNormalizedPoint((pt.x - geom.originX) / geom.scaleWidth, (pt.y - geom.originY) / geom.scaleWidth, { isBoxStroke });
+                return { x: u, y: v };
+            };
+            element.pathNodes = normalizedGeom.pathNodes.map(n => ({
+                ...normPt(n),
+                ...(n.handleIn ? { handleIn: normPt(n.handleIn) } : {}),
+                ...(n.handleOut ? { handleOut: normPt(n.handleOut) } : {}),
+                ...(n.nodeKind ? { nodeKind: n.nodeKind } : {}),
+            }));
             element.regularize = false;
             refreshShapeElementBounds(element);
         }
@@ -4793,7 +4825,7 @@ export class CanvasController {
         if (!isGuideBypassed && !drag.snap && drag.handleId !== 'rotate') {
             const tol = 6 / this.zoom;
             const refPoints = this.getAllReferencePoints(shape.id);
-            if (shape.pathNodes && shape.pathNodes.length > 1) {
+            if (!plugin.isClosed && shape.pathNodes && shape.pathNodes.length > 1) {
                 const geom = this.getShapeDocGeometry(shape);
                 const nodes = getLinearPathNodes(geom);
                 for (let i = 0; i < nodes.length; i++) {
@@ -6271,30 +6303,44 @@ export class CanvasController {
                     y: this.points.getY(this.points.size - 1),
                 };
 
-                const snaps = this.resolveConnectorSnaps(shapeType, this.activeStart, lastDocPt);
-                let endPtX = snaps.end?.x ?? lastDocPt.x;
-                let endPtY = snaps.end?.y ?? lastDocPt.y;
-                if (!snaps.end && !this.isShiftDown) {
-                    const tol = 6 / this.zoom;
-                    const refPoints = this.getAllReferencePoints();
-                    refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
-                    const ptGuide = computePointAlignmentGuides({ x: endPtX, y: endPtY }, refPoints, tol);
-                    if (ptGuide.deltaY !== 0) endPtY = ptGuide.snappedPoint.y;
-                    if (ptGuide.deltaX !== 0) endPtX = ptGuide.snappedPoint.x;
-                    this.activeAlignmentGuides = ptGuide.guides;
-                } else if (snaps.end) {
+                let geom: ShapeRenderGeometry;
+                if (shapePlugin.id === 'blob') {
                     this.activeAlignmentGuides = [];
-                }
+                    const rawPts = this.readActivePoints();
+                    geom = rawPts.length >= 2
+                        ? buildBlobGeometryFromPoints(rawPts)
+                        : shapePlugin.normalizeGeometry({
+                            x0: this.activeStart.x,
+                            y0: this.activeStart.y,
+                            x1: lastDocPt.x,
+                            y1: lastDocPt.y,
+                        });
+                } else {
+                    const snaps = this.resolveConnectorSnaps(shapeType, this.activeStart, lastDocPt);
+                    let endPtX = snaps.end?.x ?? lastDocPt.x;
+                    let endPtY = snaps.end?.y ?? lastDocPt.y;
+                    if (!snaps.end && !this.isShiftDown) {
+                        const tol = 6 / this.zoom;
+                        const refPoints = this.getAllReferencePoints();
+                        refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
+                        const ptGuide = computePointAlignmentGuides({ x: endPtX, y: endPtY }, refPoints, tol);
+                        if (ptGuide.deltaY !== 0) endPtY = ptGuide.snappedPoint.y;
+                        if (ptGuide.deltaX !== 0) endPtX = ptGuide.snappedPoint.x;
+                        this.activeAlignmentGuides = ptGuide.guides;
+                    } else if (snaps.end) {
+                        this.activeAlignmentGuides = [];
+                    }
 
-                const regularize = !snaps.start && !snaps.end && Boolean(this.toolState.shape.regularize || this.isShiftDown);
-                const geom = shapePlugin.normalizeGeometry({
-                    x0: snaps.start?.x ?? this.activeStart.x,
-                    y0: snaps.start?.y ?? this.activeStart.y,
-                    x1: endPtX,
-                    y1: endPtY,
-                    regularize,
-                });
-                this.paintSnapTargets([snaps.start, snaps.end]);
+                    const regularize = !snaps.start && !snaps.end && Boolean(this.toolState.shape.regularize || this.isShiftDown);
+                    geom = shapePlugin.normalizeGeometry({
+                        x0: snaps.start?.x ?? this.activeStart.x,
+                        y0: snaps.start?.y ?? this.activeStart.y,
+                        x1: endPtX,
+                        y1: endPtY,
+                        regularize,
+                    });
+                    this.paintSnapTargets([snaps.start, snaps.end]);
+                }
 
                 const styleConfig: ShapeStyleConfig = {
                     strokeColor: this.toolState.shape.color || this.style.color,

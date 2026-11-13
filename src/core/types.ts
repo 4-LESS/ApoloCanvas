@@ -37,13 +37,21 @@ export type BuiltInShapeType =
     | 'diamond'
     | 'hexagon'
     | 'cylinder'
+    | 'blob'
     | 'resistor'
     | 'capacitor'
     | 'power-source'
     | 'ground'
     | 'transistor-npn'
     | 'transistor-pnp'
-    | 'transistor-mosfet';
+    | 'transistor-mosfet'
+    | 'gate-and'
+    | 'gate-or'
+    | 'gate-not'
+    | 'gate-nand'
+    | 'gate-nor'
+    | 'gate-xor'
+    | 'gate-xnor';
 export type ShapeType = BuiltInShapeType | (string & {});
 export type ShapeFillPattern = 'solid' | 'hachure' | 'cross-hatch' | 'dots';
 
@@ -1010,7 +1018,8 @@ export type ShapePortId =
     | 'v0' | 'v1' | 'v2'
     | 'start' | 'end'
     | 'base' | 'collector' | 'emitter'
-    | 'gate' | 'drain' | 'source';
+    | 'gate' | 'drain' | 'source'
+    | 'in' | 'in1' | 'in2' | 'out';
 
 export interface ShapeConnectorBinding {
     elementId: string;

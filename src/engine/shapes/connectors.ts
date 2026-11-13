@@ -91,9 +91,9 @@ export function getPortNormal(portId: string, rotation = 0): { nx: number; ny: n
     let nx = 0;
     let ny = 0;
     if (portId === 'n' || portId === 'collector' || portId === 'drain') { nx = 0; ny = -1; }
-    else if (portId === 'e') { nx = 1; ny = 0; }
+    else if (portId === 'e' || portId === 'out') { nx = 1; ny = 0; }
     else if (portId === 's' || portId === 'emitter' || portId === 'source') { nx = 0; ny = 1; }
-    else if (portId === 'w' || portId === 'base' || portId === 'gate') { nx = -1; ny = 0; }
+    else if (portId === 'w' || portId === 'base' || portId === 'gate' || portId === 'in' || portId === 'in1' || portId === 'in2') { nx = -1; ny = 0; }
     else { nx = 0; ny = 0; }
 
     if (rotation !== 0 && (nx !== 0 || ny !== 0)) {

@@ -73,9 +73,13 @@ const SHAPE_PAGE_GROUPS: ReadonlyArray<{
         title: 'Transistores',
         match: (p) => p.category === 'electrical-transistor',
     },
+    {
+        title: 'Puertas lógicas',
+        match: (p) => p.category === 'electrical-logic',
+    },
 ];
 
-/** Page 1 holds base shapes; subsequent pages group extended geometric, electrical, and transistor symbols (5 per page). */
+/** Page 1 holds base shapes; subsequent pages group extended geometric, electrical, transistor, and logic-gate symbols (5 per page). */
 function buildShapeSelectorPages(): ShapeSelectorItem[][] {
     const basePlugins = new Set(BASE_SHAPE_ITEMS.map(item => getShapePlugin(item.type)));
     const extendedPlugins = listShapePlugins().filter(plugin => !basePlugins.has(plugin));

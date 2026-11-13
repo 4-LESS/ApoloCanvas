@@ -71,7 +71,7 @@ export interface ShapeSnapPort {
     readonly ny?: number;
 }
 
-export type ShapeCategory = 'geometric' | 'electrical-basic' | 'electrical-transistor';
+export type ShapeCategory = 'geometric' | 'electrical-basic' | 'electrical-transistor' | 'electrical-logic';
 
 export interface CustomShapePortSpec {
     readonly id: string;

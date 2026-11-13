@@ -18,7 +18,7 @@ import type {
 } from './types.ts';
 import { createCustomShapePlugin } from './custom.ts';
 
-function polylineSubpath(
+export function polylineSubpath(
     points: ReadonlyArray<readonly [number, number]>,
     options: { isClosed?: boolean; isFilled?: boolean; isStroked?: boolean; fillWithStroke?: boolean } = {},
 ): CustomShapeSubpath {
@@ -38,7 +38,7 @@ function polylineSubpath(
     };
 }
 
-function circleSubpath(
+export function circleSubpath(
     cx: number,
     cy: number,
     rx: number,

@@ -8,6 +8,7 @@
 import type { NormalizedShapePoint, ShapeElement } from '../../core/types.ts';
 import type { ShapeRenderGeometry, ShapeStyleConfig } from './types.ts';
 import { getShapePlugin } from './index.ts';
+import { getClosedPathBounds } from './blob.ts';
 import { linearPathBounds } from './handles.ts';
 
 /** Builds the render geometry of `element` for an anchor at (originX, originY) and column width `scale`. */
@@ -110,10 +111,12 @@ export function applyGeometryToShapeElement(
             handleOut: n.handleOut ? { x: toU(n.handleOut.x), y: toV(n.handleOut.y) } : undefined,
             nodeKind: n.nodeKind,
         }));
-        element.startX = element.pathNodes[0].x;
-        element.startY = element.pathNodes[0].y;
-        element.endX = element.pathNodes[element.pathNodes.length - 1].x;
-        element.endY = element.pathNodes[element.pathNodes.length - 1].y;
+        if (!getShapePlugin(element.shapeType).isClosed) {
+            element.startX = element.pathNodes[0].x;
+            element.startY = element.pathNodes[0].y;
+            element.endX = element.pathNodes[element.pathNodes.length - 1].x;
+            element.endY = element.pathNodes[element.pathNodes.length - 1].y;
+        }
     } else {
         delete element.pathNodes;
     }
@@ -126,7 +129,8 @@ export function applyGeometryToShapeElement(
  * curve extrema). Pixel-sized decorations such as arrowheads are left to computeBounds().
  */
 export function refreshShapeElementBounds(element: ShapeElement): void {
-    const geom = getShapePlugin(element.shapeType).normalizeGeometry(shapeElementToGeometry(element, 0, 0, 1));
+    const plugin = getShapePlugin(element.shapeType);
+    const geom = plugin.normalizeGeometry(shapeElementToGeometry(element, 0, 0, 1));
     const xs = [geom.x0, geom.x1];
     const ys = [geom.y0, geom.y1];
     if (geom.vertices) {
@@ -135,7 +139,11 @@ export function refreshShapeElementBounds(element: ShapeElement): void {
             ys.push(v.y);
         }
     }
-    if (geom.controlPoint || geom.pathNodes) {
+    if (geom.pathNodes && geom.pathNodes.length >= 2 && plugin.isClosed) {
+        const closed = getClosedPathBounds(geom.pathNodes);
+        xs.push(closed.minX, closed.maxX);
+        ys.push(closed.minY, closed.maxY);
+    } else if (geom.controlPoint || geom.pathNodes) {
         const curve = linearPathBounds(geom);
         xs.push(curve.minX, curve.maxX);
         ys.push(curve.minY, curve.maxY);

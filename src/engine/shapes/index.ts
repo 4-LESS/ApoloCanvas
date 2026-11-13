@@ -16,6 +16,7 @@ import {
     diamondShapePlugin,
     hexagonShapePlugin,
 } from './custom.ts';
+import { blobShapePlugin } from './blob.ts';
 import {
     capacitorShapePlugin,
     groundShapePlugin,
@@ -25,11 +26,22 @@ import {
     transistorNpnShapePlugin,
     transistorPnpShapePlugin,
 } from './electrical.ts';
+import {
+    gateAndShapePlugin,
+    gateNandShapePlugin,
+    gateNorShapePlugin,
+    gateNotShapePlugin,
+    gateOrShapePlugin,
+    gateXnorShapePlugin,
+    gateXorShapePlugin,
+} from './logic.ts';
 
 export * from './types.ts';
 export * from './common.ts';
 export * from './custom.ts';
+export * from './blob.ts';
 export * from './electrical.ts';
+export * from './logic.ts';
 export * from './handles.ts';
 export * from './element.ts';
 export * from './connectors.ts';
@@ -43,6 +55,7 @@ export {
     diamondShapePlugin,
     hexagonShapePlugin,
     cylinderShapePlugin,
+    blobShapePlugin,
     resistorShapePlugin,
     capacitorShapePlugin,
     powerSourceShapePlugin,
@@ -50,6 +63,13 @@ export {
     transistorNpnShapePlugin,
     transistorPnpShapePlugin,
     transistorMosfetShapePlugin,
+    gateAndShapePlugin,
+    gateOrShapePlugin,
+    gateNotShapePlugin,
+    gateNandShapePlugin,
+    gateNorShapePlugin,
+    gateXorShapePlugin,
+    gateXnorShapePlugin,
 };
 
 export const SHAPE_REGISTRY: Record<string, ShapePlugin> = {
@@ -64,6 +84,7 @@ export const SHAPE_REGISTRY: Record<string, ShapePlugin> = {
     diamond: diamondShapePlugin,
     hexagon: hexagonShapePlugin,
     cylinder: cylinderShapePlugin,
+    blob: blobShapePlugin,
     resistor: resistorShapePlugin,
     capacitor: capacitorShapePlugin,
     'power-source': powerSourceShapePlugin,
@@ -75,6 +96,21 @@ export const SHAPE_REGISTRY: Record<string, ShapePlugin> = {
     pnp: transistorPnpShapePlugin, // Alias
     'transistor-mosfet': transistorMosfetShapePlugin,
     mosfet: transistorMosfetShapePlugin, // Alias
+    'gate-and': gateAndShapePlugin,
+    and: gateAndShapePlugin, // Alias
+    'gate-or': gateOrShapePlugin,
+    or: gateOrShapePlugin, // Alias
+    'gate-not': gateNotShapePlugin,
+    not: gateNotShapePlugin, // Alias
+    inverter: gateNotShapePlugin, // Alias
+    'gate-nand': gateNandShapePlugin,
+    nand: gateNandShapePlugin, // Alias
+    'gate-nor': gateNorShapePlugin,
+    nor: gateNorShapePlugin, // Alias
+    'gate-xor': gateXorShapePlugin,
+    xor: gateXorShapePlugin, // Alias
+    'gate-xnor': gateXnorShapePlugin,
+    xnor: gateXnorShapePlugin, // Alias
 };
 
 /**

@@ -439,7 +439,7 @@ describe('Electrical diagram shapes & terminal snap ports', () => {
         estuche.open(undefined, (globalThis as any).document.createElement('button'));
 
         const pages = estuche.container.querySelectorAll('.shape-page');
-        assert.equal(pages.length, 4);
+        assert.equal(pages.length, 6);
         assert.deepEqual(
             pages[2].querySelectorAll('.shape-btn').map((b: any) => b.getAttribute('data-s')),
             ['resistor', 'capacitor', 'power-source', 'ground'],
