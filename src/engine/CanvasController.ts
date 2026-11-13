@@ -688,6 +688,9 @@ export class CanvasController {
         this.observeSizer();
 
         this.syncBoxElements();
+        if (this.options.readonly) {
+            this.syncPreviewSpacing();
+        }
 
         this.rebuildIndex();
         this.positionLayer();
@@ -695,7 +698,6 @@ export class CanvasController {
         this.paint();
 
         if (this.options.readonly) {
-            this.syncPreviewSpacing();
             window.setTimeout(() => this.reanchorPreview(), 60);
             window.setTimeout(() => this.reanchorPreview(), 200);
             window.setTimeout(() => this.reanchorPreview(), 500);
@@ -4135,12 +4137,13 @@ export class CanvasController {
                         }
                     }
 
+                    const previewLh = this.getPreviewLineHeight();
                     if (prevBlock) {
                         const rect = prevBlock.getBoundingClientRect();
                         const prevBottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
                         const prevEnd = parseInt(prevBlock.dataset.apoloLineEnd || '0', 10);
                         const deltaLines = targetLine - prevEnd;
-                        const estimatedTop = prevBottom + (deltaLines - 1) * 24;
+                        const estimatedTop = prevBottom + Math.max(0, deltaLines - 1) * previewLh;
                         this.blockPositionCache.set(cacheKey, estimatedTop);
                         return estimatedTop;
                     } else if (nextBlock) {
@@ -4148,7 +4151,7 @@ export class CanvasController {
                         const nextTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
                         const nextStart = parseInt(nextBlock.dataset.apoloLineStart || '0', 10);
                         const deltaLines = nextStart - targetLine;
-                        const estimatedTop = Math.max(0, nextTop - deltaLines * 24);
+                        const estimatedTop = Math.max(0, nextTop - deltaLines * previewLh);
                         this.blockPositionCache.set(cacheKey, estimatedTop);
                         return estimatedTop;
                     }
@@ -4191,6 +4194,14 @@ export class CanvasController {
         const lineMatch = blockId.match(/^line:(\d+)$/);
         if (lineMatch) {
             const lineNum = parseInt(lineMatch[1], 10);
+            if (this.options.readonly) {
+                const sectionEl = this.scroller.querySelector<HTMLElement>('.markdown-preview-section')
+                    ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
+                const baseTop = sectionEl
+                    ? (sectionEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                    : 0;
+                return baseTop + lineNum * this.getPreviewLineHeight();
+            }
             const lineCount = Math.max(1, this.editor ? this.editor.lineCount() : 1);
             const avgLineHeight = this.editor ? (this.scroller.scrollHeight / lineCount) : 26;
             return lineNum * avgLineHeight;
@@ -5630,6 +5641,23 @@ export class CanvasController {
         this.schedulePaint();
     }
 
+    private getPreviewLineHeight(): number {
+        const pEl = this.scroller.querySelector<HTMLElement>(
+            '.markdown-preview-section p, .markdown-preview-sizer p, .markdown-preview-section li'
+        );
+        const targetEl = pEl
+            ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-section')
+            ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
+        if (targetEl) {
+            const style = window.getComputedStyle(targetEl);
+            const lh = parseFloat(style.lineHeight);
+            if (!Number.isNaN(lh) && lh > 0) return lh;
+            const fs = parseFloat(style.fontSize);
+            if (!Number.isNaN(fs) && fs > 0) return fs * 1.5;
+        }
+        return 24;
+    }
+
     syncPreviewSpacing(): void {
         if (!this.options.readonly) return;
         const rendered = Array.from(
@@ -5648,13 +5676,7 @@ export class CanvasController {
             return startA - startB;
         });
 
-        let lineHeight = 24;
-        if (topLevelBlocks.length > 0) {
-            const computedLh = parseFloat(window.getComputedStyle(topLevelBlocks[0]).lineHeight);
-            if (!Number.isNaN(computedLh) && computedLh > 0) {
-                lineHeight = computedLh;
-            }
-        }
+        const lineHeight = this.getPreviewLineHeight();
 
         let firstContentLine = 0;
         try {
@@ -5705,11 +5727,13 @@ export class CanvasController {
                 const lines = content.split('\n');
                 const trailingSlice = lines.slice(lastBlockEnd + 1);
                 const areAllTrailingBlank = trailingSlice.length > 0 && trailingSlice.every(l => l.trim() === '');
-                if (areAllTrailingBlank) {
-                    const trailingBlankLines = trailingSlice.length;
-                    lastBlock.style.marginBottom = `${trailingBlankLines * lineHeight}px`;
-                } else {
-                    lastBlock.style.marginBottom = '';
+                const nextMarginBottom = areAllTrailingBlank ? `${trailingSlice.length * lineHeight}px` : '';
+                if (lastBlock.style.marginBottom !== nextMarginBottom) {
+                    lastBlock.style.marginBottom = nextMarginBottom;
+                    this.blockPositionCache.clear();
+                    this.rebuildIndex();
+                    this.renderDirty = true;
+                    this.schedulePaint();
                 }
             }).catch(() => { /* ignore */ });
         }
