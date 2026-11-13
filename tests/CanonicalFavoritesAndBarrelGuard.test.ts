@@ -474,5 +474,156 @@ describe('Canonical Profile Store & Stylus Barrel Guard Narrowing', () => {
 
             controller.destroy();
         });
+
+        test('S-Pen barrel drag on canvas erases existing stroke instead of cycling favorites or drawing ink, even with contextmenu', () => {
+            const { controller, canvas } = setupCanvasController();
+            const docModel = (controller as any).document;
+
+            // Draw a normal stroke first across (50, 100) -> (150, 100)
+            canvas.dispatchEvent({
+                type: 'pointerdown', pointerId: 1, pointerType: 'pen',
+                button: 0, buttons: 1, pressure: 0.5, clientX: 50, clientY: 100,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+            canvas.dispatchEvent({
+                type: 'pointermove', pointerId: 1, pointerType: 'pen',
+                button: 0, buttons: 1, pressure: 0.5, clientX: 150, clientY: 100,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+            canvas.dispatchEvent({
+                type: 'pointerup', pointerId: 1, pointerType: 'pen',
+                button: 0, buttons: 0, pressure: 0, clientX: 150, clientY: 100,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+            assert.strictEqual(docModel.elements.length, 1, 'Initial stroke should be committed');
+
+            // Press S-Pen side barrel button (Android buttons: 2, button: 2) over the stroke
+            canvas.dispatchEvent({
+                type: 'pointerdown', pointerId: 2, pointerType: 'pen',
+                button: 2, buttons: 2, pressure: 0.5, clientX: 100, clientY: 100,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+            assert.strictEqual(controller.isDrawing, false, 'Barrel erase must not report as ink drawing');
+            assert.strictEqual((controller as any).barrelActive, true, 'Barrel eraser session must activate on canvas');
+
+            // Late contextmenu during barrel erase must not cancel active barrel session
+            canvas.dispatchEvent({
+                type: 'contextmenu', pointerType: 'pen',
+                button: 2, buttons: 2, clientX: 100, clientY: 100,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+            assert.strictEqual((controller as any).barrelActive, true, 'Late contextmenu must not abort barrel erase');
+
+            canvas.dispatchEvent({
+                type: 'pointermove', pointerId: 2, pointerType: 'pen',
+                button: 0, buttons: 2, pressure: 0.5, clientX: 110, clientY: 100,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+            canvas.dispatchEvent({
+                type: 'pointerup', pointerId: 2, pointerType: 'pen',
+                button: 2, buttons: 0, pressure: 0, clientX: 110, clientY: 100,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+
+            assert.strictEqual(docModel.elements.length, 0, 'Barrel erase should remove intersected stroke without adding new ink');
+            assert.strictEqual((controller as any).barrelActive, false, 'Barrel session resets on release');
+            controller.destroy();
+        });
+
+        test('S-Pen barrel drag on linear line segment activates segment slide and cleanly clears Ctrl latch', () => {
+            const { controller, canvas } = setupCanvasController();
+            try {
+                // Select shape tool and draw a horizontal line at y = 120 from x = 40 to x = 200
+                controller.setTool('shape');
+                (controller as any).shapeType = 'line';
+                canvas.dispatchEvent({
+                    type: 'pointerdown', pointerId: 10, pointerType: 'pen',
+                    button: 0, buttons: 1, pressure: 0.5, clientX: 40, clientY: 120,
+                    preventDefault: () => {}, stopPropagation: () => {},
+                });
+                canvas.dispatchEvent({
+                    type: 'pointermove', pointerId: 10, pointerType: 'pen',
+                    button: 0, buttons: 1, pressure: 0.5, clientX: 200, clientY: 120,
+                    preventDefault: () => {}, stopPropagation: () => {},
+                });
+                canvas.dispatchEvent({
+                    type: 'pointerup', pointerId: 10, pointerType: 'pen',
+                    button: 0, buttons: 0, pressure: 0, clientX: 200, clientY: 120,
+                    preventDefault: () => {}, stopPropagation: () => {},
+                });
+
+                const docModel = (controller as any).document;
+                assert.strictEqual(docModel.elements.length, 1, 'Line shape should exist');
+                const initialY = docModel.elements[0].startY;
+
+                // Barrel press on middle of the linear segment activates orthogonal segment slide
+                canvas.dispatchEvent({
+                    type: 'pointerdown', pointerId: 11, pointerType: 'pen',
+                    button: 5, buttons: 32, pressure: 0.5, clientX: 120, clientY: 120,
+                    preventDefault: () => {}, stopPropagation: () => {},
+                });
+                assert.strictEqual((controller as any).barrelSegmentSlideLatched, true, 'Barrel segment slide should latch');
+                assert.ok((controller as any).handleDrag, 'Segment slide handleDrag should start on barrel press over line');
+
+                canvas.dispatchEvent({
+                    type: 'pointermove', pointerId: 11, pointerType: 'pen',
+                    button: 0, buttons: 32, pressure: 0.5, clientX: 120, clientY: 170,
+                    preventDefault: () => {}, stopPropagation: () => {},
+                });
+                canvas.dispatchEvent({
+                    type: 'pointerup', pointerId: 11, pointerType: 'pen',
+                    button: 5, buttons: 0, pressure: 0, clientX: 120, clientY: 170,
+                    preventDefault: () => {}, stopPropagation: () => {},
+                });
+
+                assert.strictEqual((controller as any).barrelSegmentSlideLatched, false, 'Segment slide latch must clear on pointerup');
+                assert.strictEqual((controller as any).isCtrlDown, false, 'Synthetic Ctrl latch must clear on pointerup');
+                const slidNodes = (controller as any).getShapeDocGeometry(docModel.elements[0]).pathNodes ?? [];
+                assert.ok(slidNodes.length >= 2 && slidNodes.some((n: any) => n.y > initialY), 'Segment should have slid orthogonally downward');
+            } finally {
+                controller.destroy();
+            }
+        });
+
+        test('Pen mode disables native scroller text selection and blocks selectstart/auxclick until switched to keyboard mode', () => {
+            const { controller } = setupCanvasController();
+            const scroller = (controller as any).scroller;
+
+            assert.strictEqual(scroller.classList.contains('apolo-scroller-pen-active'), true);
+            assert.strictEqual(scroller.style.userSelect, 'none');
+
+            let selectPrevented = false;
+            scroller.dispatchEvent({
+                type: 'selectstart',
+                target: scroller,
+                preventDefault: () => { selectPrevented = true; },
+                stopPropagation: () => {},
+            });
+            assert.strictEqual(selectPrevented, true, 'selectstart must be suppressed while pen mode is active');
+
+            let auxPrevented = false;
+            scroller.dispatchEvent({
+                type: 'auxclick',
+                target: scroller,
+                preventDefault: () => { auxPrevented = true; },
+                stopPropagation: () => {},
+            });
+            assert.strictEqual(auxPrevented, true, 'auxclick must be suppressed while pen mode is active');
+
+            // Switch to keyboard/text mode
+            controller.setPenEnabled(false);
+            assert.strictEqual(scroller.classList.contains('apolo-scroller-pen-active'), false);
+
+            let selectPreventedInTextMode = false;
+            scroller.dispatchEvent({
+                type: 'selectstart',
+                target: scroller,
+                preventDefault: () => { selectPreventedInTextMode = true; },
+                stopPropagation: () => {},
+            });
+            assert.strictEqual(selectPreventedInTextMode, false, 'Text selection must work in keyboard mode');
+
+            controller.destroy();
+        });
     });
 });

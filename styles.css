@@ -235,6 +235,27 @@
   pointer-events: none !important;
 }
 
+.apolo-scroller-pen-active,
+.apolo-scroller-pen-active .cm-editor,
+.apolo-scroller-pen-active .cm-content,
+.apolo-scroller-pen-active .cm-line {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
+.apolo-scroller-pen-active .cm-content,
+.apolo-scroller-pen-active .cm-line {
+  cursor: crosshair !important;
+}
+
+.apolo-scroller-pen-active input,
+.apolo-scroller-pen-active textarea,
+.apolo-scroller-pen-active select {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 /* ==========================================================================
    Main Floating Toolbar (8 Snap Positions: 4 corners + 4 edge centers)
    ========================================================================== */

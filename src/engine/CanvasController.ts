@@ -338,6 +338,8 @@ export class CanvasController {
     private penEnabled: boolean;
     private shapeRecognition: boolean;
     private barrelActive = false;
+    private barrelEraseSession = false;
+    private barrelSegmentSlideLatched = false;
     private penBarrelPressed = false;
     private lastBarrelCycleTime = 0;
     private isPenTipDown = false;
@@ -406,7 +408,7 @@ export class CanvasController {
     private activeStart: Point | null = null;
 
     public get isDrawing(): boolean {
-        return this.activeStart !== null;
+        return this.activeStart !== null && !this.barrelActive && !this.barrelEraseSession;
     }
     private activeAnchor: Anchor | null = null;
     private activeContentLeft = 0;
@@ -597,8 +599,11 @@ export class CanvasController {
             this.scroller.addEventListener('pointerleave', this.onPointerLeave, { capture: true, passive: false });
             this.canvas.addEventListener('pointerleave', this.onPointerLeave, { capture: true, passive: false });
             this.canvas.addEventListener('lostpointercapture', this.onLostPointerCapture);
-            this.scroller.addEventListener('contextmenu', this.onCanvasContextMenu);
-            this.canvas.addEventListener('contextmenu', this.onCanvasContextMenu);
+            this.scroller.addEventListener('contextmenu', this.onCanvasContextMenu, { capture: true, passive: false });
+            this.canvas.addEventListener('contextmenu', this.onCanvasContextMenu, { capture: true, passive: false });
+            this.scroller.addEventListener('selectstart', this.onScrollerSuppressTextSelection, { capture: true, passive: false });
+            this.scroller.addEventListener('dragstart', this.onScrollerSuppressTextSelection, { capture: true, passive: false });
+            this.scroller.addEventListener('auxclick', this.onScrollerSuppressTextSelection, { capture: true, passive: false });
 
             this.input = new InputManager(this.canvas, {
                 palmRejectionCooldownMs: options.palmRejectionCooldownMs,
@@ -712,6 +717,9 @@ export class CanvasController {
         this.layer.classList.toggle('is-pen-disabled', !canDraw);
         this.layer.style.pointerEvents = canDraw ? 'auto' : 'none';
         this.canvas.style.pointerEvents = canDraw ? 'auto' : 'none';
+        this.scroller.classList.toggle('apolo-scroller-pen-active', canDraw);
+        this.scroller.style.userSelect = canDraw ? 'none' : this.originalScrollerUserSelect;
+        (this.scroller.style as unknown as Record<string, string>).webkitUserSelect = canDraw ? 'none' : this.originalScrollerUserSelect;
     }
 
     private mountUiRoot(): void {
@@ -1452,18 +1460,35 @@ export class CanvasController {
         return isConfirmedBarrelPress(e as PointerEvent) || isStylusBarrelButton(e);
     }
 
+    private isEventInUiControl(event: Event): boolean {
+        const target = event.target as { tagName?: string; closest?: (sel: string) => unknown } | null;
+        if (!target) return false;
+        if (typeof Node !== 'undefined' && target instanceof Node && this.uiRoot?.contains(target)) {
+            return true;
+        }
+        if (typeof target.closest === 'function' && target.closest('.apolo-ui')) {
+            return true;
+        }
+        const tag = target.tagName?.toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    }
+
+    private readonly onScrollerSuppressTextSelection = (event: Event): void => {
+        if (!this.penEnabled || this.options.readonly) return;
+        if (this.isEventInUiControl(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
             this.lastPenEventTime = performance.now();
             this.isPenTipDown = true;
             if (isConfirmedBarrelPress(event) || this.isPenBarrelEvent(event)) {
                 this.penBarrelPressed = true;
-                this.handledBoxEvents.add(event);
-                event.preventDefault();
-                event.stopPropagation();
-                event.stopImmediatePropagation?.();
-                this.toggleEstucheFavorites();
-                return;
+                if (!this.isEventInUiControl(event)) {
+                    event.preventDefault();
+                }
             } else {
                 this.penBarrelPressed = false;
             }
@@ -1544,6 +1569,9 @@ export class CanvasController {
             if (barrelHoverActive) {
                 if (!this.penBarrelPressed) {
                     this.penBarrelPressed = true;
+                }
+                if (this.penEnabled && !this.isEventInUiControl(e)) {
+                    this.updateCursor(e, false);
                 }
                 this.updateDebugHud(e, 'hover-barrel');
                 e.preventDefault();
@@ -2928,8 +2956,11 @@ export class CanvasController {
         this.scroller.removeEventListener('pointerleave', this.onPointerLeave, { capture: true });
         this.canvas.removeEventListener('pointerleave', this.onPointerLeave, { capture: true });
         this.canvas.removeEventListener('lostpointercapture', this.onLostPointerCapture);
-        this.scroller.removeEventListener('contextmenu', this.onCanvasContextMenu);
-        this.canvas.removeEventListener('contextmenu', this.onCanvasContextMenu);
+        this.scroller.removeEventListener('contextmenu', this.onCanvasContextMenu, { capture: true });
+        this.canvas.removeEventListener('contextmenu', this.onCanvasContextMenu, { capture: true });
+        this.scroller.removeEventListener('selectstart', this.onScrollerSuppressTextSelection, { capture: true });
+        this.scroller.removeEventListener('dragstart', this.onScrollerSuppressTextSelection, { capture: true });
+        this.scroller.removeEventListener('auxclick', this.onScrollerSuppressTextSelection, { capture: true });
         window.removeEventListener('pointermove', this.onWindowPointerMoveHandleDrag);
         window.removeEventListener('pointerup', this.onWindowPointerUpHandleDrag);
         window.removeEventListener('pointercancel', this.onWindowPointerUpHandleDrag);
@@ -2978,7 +3009,9 @@ export class CanvasController {
         }
         this.scroller.style.position = this.originalScrollerPosition;
         this.scroller.style.overflow = this.originalScrollerOverflow;
+        this.scroller.classList.remove('apolo-scroller-pen-active');
         this.scroller.style.userSelect = this.originalScrollerUserSelect;
+        (this.scroller.style as unknown as Record<string, string>).webkitUserSelect = this.originalScrollerUserSelect;
     }
 
     private isEventInOverlayOrMenuButton(event: PointerEvent | TouchEvent): boolean {
@@ -3166,10 +3199,6 @@ export class CanvasController {
     private shouldAcceptDrawingPointer(event: PointerEvent): boolean {
         if (!this.penEnabled) return false;
 
-        if (event.pointerType === 'pen' && this.isPenBarrelEvent(event)) {
-            return false;
-        }
-
         if (this.findBoxOptionsButtonAt(event.clientX, event.clientY) || this.findBoxHandleAt(event.clientX, event.clientY)) {
             return false;
         }
@@ -3202,7 +3231,8 @@ export class CanvasController {
             return;
         }
 
-        if (event.ctrlKey || event.metaKey || this.isCtrlDown) {
+        const barrelModifierActive = event.pointerType === 'pen' && (this.penBarrelPressed || this.isPenBarrelEvent(event));
+        if (event.ctrlKey || event.metaKey || this.isCtrlDown || barrelModifierActive) {
             const rect = this.canvas.getBoundingClientRect();
             const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
             const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
@@ -3243,9 +3273,6 @@ export class CanvasController {
         if (rawEvent) {
             this.isShiftDown = Boolean(rawEvent.shiftKey);
             this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
-        }
-        if (rawEvent && rawEvent.pointerType === 'pen' && this.isPenBarrelEvent(rawEvent)) {
-            return;
         }
         const screenX = rawEvent ? rawEvent.clientX : rawPoint.x;
         const screenY = rawEvent ? rawEvent.clientY : rawPoint.y;
@@ -3288,6 +3315,8 @@ export class CanvasController {
                     activateSegmentSlide = true;
                     barrel = false;
                     this.barrelActive = false;
+                    this.barrelEraseSession = false;
+                    this.barrelSegmentSlideLatched = true;
                     this.isCtrlDown = true;
                 }
             }
@@ -3341,8 +3370,8 @@ export class CanvasController {
             return;
         }
 
-        // 2. For ink drawing tools, forbid drawing above content top (properties / title)
-        const isDrawingTool = this.tool === 'pen' || this.tool === 'highlighter' || this.tool === 'shape';
+        // 2. For ink drawing tools (not barrel-erasing), forbid drawing above content top (properties / title)
+        const isDrawingTool = !barrel && (this.tool === 'pen' || this.tool === 'highlighter' || this.tool === 'shape');
         if (isDrawingTool) {
             const bounds = this.getDocumentContentBounds();
             const check = isInkAllowedAt(docX, docY, bounds);
@@ -3392,6 +3421,7 @@ export class CanvasController {
             this.emitSelection();
         }
         this.barrelActive = barrel;
+        this.barrelEraseSession = barrel;
 
         this.pushWorldPoint(rawPoint);
         this.clearHoldToSnap();
@@ -3414,7 +3444,7 @@ export class CanvasController {
         if (!this.activeStart) return;
         if (rawEvent) {
             this.isShiftDown = Boolean(rawEvent.shiftKey);
-            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey) || this.barrelSegmentSlideLatched;
         }
         if (this.penDwellTimer && this.activeStart) {
             const lastRaw = rawPoints[rawPoints.length - 1];
@@ -3434,8 +3464,17 @@ export class CanvasController {
             }
             return;
         }
-        this.barrelActive = barrel;
-        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+        if (barrel && !this.barrelEraseSession && this.tool !== 'eraser') {
+            this.recordHistory();
+            this.barrelEraseSession = true;
+            this.points.clear();
+            this.clearHoldToSnap();
+            this.resetLiveBake();
+            this.movingSelection = false;
+            this.moveSelectionSnapshot = null;
+        }
+        this.barrelActive = barrel || this.barrelEraseSession;
+        if (this.straightenLines && !this.barrelActive && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const lastRaw = rawPoints[rawPoints.length - 1];
             const currentDocPt: Point = {
                 x: (lastRaw.x + this.currentScrollLeft) / this.zoom,
@@ -3458,7 +3497,7 @@ export class CanvasController {
             this.trackHoldToSnap();
         }
 
-        if (this.tool === 'eraser' || barrel) {
+        if (this.tool === 'eraser' || this.barrelActive) {
             const worldPoints = rawPoints.map(p => ({
                 x: (p.x + this.currentScrollLeft) / this.zoom,
                 y: (p.y + this.currentScrollTop) / this.zoom,
@@ -3474,7 +3513,7 @@ export class CanvasController {
             this.checkAutoScroll(rawEvent);
         }
 
-        if (this.activeAnchor?.blockId.startsWith('space:')) {
+        if (!this.barrelActive && this.tool !== 'eraser' && this.activeAnchor?.blockId.startsWith('space:')) {
             this.checkAutoGrowth(rawPoints);
         }
 
@@ -3532,7 +3571,7 @@ export class CanvasController {
         if (!this.activeStart) return;
         if (rawEvent) {
             this.isShiftDown = Boolean(rawEvent.shiftKey);
-            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey) || this.barrelSegmentSlideLatched;
         }
         if (this.handleDrag) {
             this.updateHandleDrag({
@@ -3543,8 +3582,9 @@ export class CanvasController {
             this.cancel();
             return;
         }
+        const isBarrelErasing = barrel || this.barrelActive || this.barrelEraseSession;
         const lastMotionAt = this.points.size > 0 ? this.points.getTime(this.points.size - 1) : releasedAt;
-        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+        if (this.straightenLines && !isBarrelErasing && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const currentDocPt: Point = {
                 x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
                 y: (rawPoint.y + this.currentScrollTop) / this.zoom,
@@ -3588,7 +3628,7 @@ export class CanvasController {
             }
         } else if (this.tool === 'lasso') {
             this.selectLasso(raw);
-        } else if (this.tool === 'eraser' || barrel) {
+        } else if (this.tool === 'eraser' || isBarrelErasing) {
             const endDocPt = {
                 x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
                 y: (rawPoint.y + this.currentScrollTop) / this.zoom,
@@ -3634,7 +3674,7 @@ export class CanvasController {
             }
         }
 
-        if (this.activeAnchor?.blockId.startsWith('space:')) {
+        if (!isBarrelErasing && this.tool !== 'eraser' && this.activeAnchor?.blockId.startsWith('space:')) {
             this.checkAutoGrowth([rawPoint]);
             const spaceId = this.activeAnchor.blockId.slice(6);
             const finalHeight = BoxRegistry.getHeight(spaceId);
@@ -3651,6 +3691,11 @@ export class CanvasController {
         this.activeStart = null;
         this.activeAnchor = null;
         this.barrelActive = false;
+        this.barrelEraseSession = false;
+        if (this.barrelSegmentSlideLatched) {
+            this.isCtrlDown = false;
+            this.barrelSegmentSlideLatched = false;
+        }
         this.activeAlignmentGuides = [];
         this.isShiftDown = false;
         this.lastPointerDownTime = 0;
@@ -3681,6 +3726,11 @@ export class CanvasController {
         this.moveSelectionCurrentDx = 0;
         this.moveSelectionCurrentDy = 0;
         this.barrelActive = false;
+        this.barrelEraseSession = false;
+        if (this.barrelSegmentSlideLatched) {
+            this.isCtrlDown = false;
+            this.barrelSegmentSlideLatched = false;
+        }
         this.isShiftDown = false;
         this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
@@ -4601,7 +4651,7 @@ export class CanvasController {
 
         // When Ctrl is held on a linear shape: ALWAYS prioritize segment sliding over handles!
         if (this.isCtrlDown && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
-            if (linearPathHit(geom, { x: docX, y: docY }, hitRadius * 2.5)) {
+            if (linearPathHit(geom, { x: docX, y: docY }, Math.max(hitRadius * 2.5, 24 / this.zoom, 16))) {
                 const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
                 this.points.clear();
                 this.predictor.reset();

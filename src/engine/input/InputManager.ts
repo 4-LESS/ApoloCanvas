@@ -387,7 +387,7 @@ export class InputManager {
             return;
         }
 
-        if (this.activeDrawingPointerId !== null) {
+        if (this.activeDrawingPointerId !== null && !this.activeBarrel) {
             this.cancelActiveDrawing();
         }
     };
