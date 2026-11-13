@@ -489,6 +489,13 @@ export function createFillGlyph(
  * Binds both pointerup (with tap-slop and duration check) and click to an element,
  * ensuring robust responsiveness on mobile/tablet stylus/touch while preventing double-firing.
  */
+let lastGlobalPointerTap: { time: number; x: number; y: number; el: HTMLElement | null } = {
+    time: 0,
+    x: 0,
+    y: 0,
+    el: null,
+};
+
 export function bindTapOrClick(
     el: HTMLElement,
     action: (e?: MouseEvent | PointerEvent) => void,
@@ -510,7 +517,10 @@ export function bindTapOrClick(
 
         // Slop distance for stylus/finger tap: <= 12px, <= 600ms
         if (Math.hypot(dx, dy) <= 12 && dt <= 600) {
+            e.preventDefault?.();
+            e.stopPropagation?.();
             lastTriggerTime = Date.now();
+            lastGlobalPointerTap = { time: lastTriggerTime, x: e.clientX, y: e.clientY, el };
             action(e);
             try {
                 if (e.pointerType === 'touch' || e.pointerType === 'pen') {
@@ -526,12 +536,29 @@ export function bindTapOrClick(
         downPos = null;
     };
 
-    const onClick = (e: MouseEvent) => {
-        if (Date.now() - lastTriggerTime < 400) {
-            e.stopPropagation();
+    const onClick = (e?: MouseEvent) => {
+        const now = Date.now();
+        if (now - lastTriggerTime < 450) {
+            e?.preventDefault?.();
+            e?.stopPropagation?.();
             return;
         }
-        lastTriggerTime = Date.now();
+        const cx = e?.clientX ?? 0;
+        const cy = e?.clientY ?? 0;
+        const sinceGlobal = now - lastGlobalPointerTap.time;
+        const hasCoords = cx !== 0 || cy !== 0;
+        if (
+            lastGlobalPointerTap.el &&
+            lastGlobalPointerTap.el !== el &&
+            sinceGlobal < 450 &&
+            hasCoords &&
+            Math.hypot(cx - lastGlobalPointerTap.x, cy - lastGlobalPointerTap.y) <= 8
+        ) {
+            e?.preventDefault?.();
+            e?.stopPropagation?.();
+            return;
+        }
+        lastTriggerTime = now;
         action(e);
         try {
             el.blur();

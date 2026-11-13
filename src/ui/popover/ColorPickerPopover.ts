@@ -36,6 +36,7 @@ export class ColorPickerPopover implements PopoverInstance {
     private originalOpacity = 100;
     private currentTab: 'samples' | 'spectrum' = 'samples';
     private onConfirmCallback: ColorPickerConfirmCallback | null = null;
+    private recentColorsOverride: string[] | null = null;
 
     private static recentColors: string[] = ColorPickerPopover.loadStoredRecentColors();
 
@@ -70,9 +71,12 @@ export class ColorPickerPopover implements PopoverInstance {
         if (!hex || typeof hex !== 'string') return;
         const clean = hex.trim().toUpperCase();
         if (!/^#[0-9A-F]{3,8}$/.test(clean)) return;
+        if (ColorPickerPopover.recentColors.some((c) => c.toUpperCase() === clean)) {
+            return;
+        }
         ColorPickerPopover.recentColors = [
             clean,
-            ...ColorPickerPopover.recentColors.filter((c) => c.toUpperCase() !== clean),
+            ...ColorPickerPopover.recentColors,
         ].slice(0, 5);
         ColorPickerPopover.saveStoredRecentColors();
     }
@@ -134,7 +138,8 @@ export class ColorPickerPopover implements PopoverInstance {
         initialColor: string,
         onConfirm: ColorPickerConfirmCallback,
         slotIndex: number | null = null,
-        initialOpacity = 100
+        initialOpacity = 100,
+        recentColorsOverride?: string[] | null
     ): void {
         this.openState = true;
         this.el.hidden = false;
@@ -148,10 +153,9 @@ export class ColorPickerPopover implements PopoverInstance {
         this.originalOpacity = Math.max(0, Math.min(100, Number(initialOpacity) || 0));
         this.currentOpacity = this.originalOpacity;
         this.onConfirmCallback = onConfirm;
-
-        if (this.currentColor && this.currentColor.startsWith('#')) {
-            ColorPickerPopover.pushRecentColor(this.currentColor);
-        }
+        this.recentColorsOverride = Array.isArray(recentColorsOverride)
+            ? recentColorsOverride.map((c) => String(c).trim().toUpperCase()).filter((c) => /^#[0-9A-F]{3,8}$/.test(c))
+            : null;
 
         this.render();
         this.reposition(anchorEl, slot, toolbarEl);
@@ -535,7 +539,10 @@ export class ColorPickerPopover implements PopoverInstance {
         if (!this.recentSwatchesEl) return;
         this.recentSwatchesEl.replaceChildren();
 
-        const recents = ColorPickerPopover.recentColors.slice(0, 5);
+        const source = this.recentColorsOverride && this.recentColorsOverride.length > 0
+            ? this.recentColorsOverride
+            : ColorPickerPopover.recentColors;
+        const recents = source.slice(0, 6);
         recents.forEach((col) => {
             const swatch = document.createElement('button');
             swatch.type = 'button';

@@ -10,6 +10,9 @@ import {
     type WorkspaceToolState,
     type ColorCarouselProfile,
 } from '../src/core/types.ts';
+import { setupMockDom } from './helpers/mockDom.ts';
+import { ToolEstuche } from '../src/ui/ToolEstuche.ts';
+import { ColorPickerPopover } from '../src/ui/popover/ColorPickerPopover.ts';
 
 describe('Color Carousels, Profiles & Independent History', () => {
     test('1. DEFAULT_WORKSPACE_COLOR_CAROUSELS has 4 independent contexts with curated slots', () => {
@@ -210,5 +213,270 @@ describe('Color Carousels, Profiles & Independent History', () => {
         const cloned = cloneColorCarousels(carousels);
         assert.ok(!cloned.pen.profiles.some(p => p.id === 'empty-pen-profile'));
         assert.ok(!cloned.globalProfiles?.some(p => p.id === 'empty-global-profile'));
+    });
+
+    test('8. Tapping a recent swatch keeps existing order unchanged, selects exact color without off-by-one shift, and leaves pressureSensitivity intact', () => {
+        const { teardown, mockDoc } = setupMockDom();
+        try {
+            const paletteOrder = ['#FFA726', '#FFEE58', '#9E9E9E', '#1E88E5', '#43A047', '#8E24AA'];
+            const carousels = cloneColorCarousels();
+            carousels.pen.recentColors = paletteOrder.map((color) => ({ color, opacity: 100 }));
+
+            const root = mockDoc.createElement('div');
+            let currentColor = '#FFA726';
+            const selectedColors: string[] = [];
+
+            const estuche = new ToolEstuche(
+                {
+                    tool: 'pen',
+                    slot: 'tc',
+                    color: currentColor,
+                    width: 3,
+                    profileId: 'fountain',
+                    smoothing: 0.4,
+                    pressureSensitivity: 0.65,
+                    opacity: 1,
+                    favorites: [],
+                    eraserMode: 'whole',
+                    eraserRadius: 15,
+                    scribbleToErase: false,
+                    lassoMode: 'free',
+                    shapeType: 'rect',
+                    snapGrid: false,
+                    colorCarousels: carousels,
+                },
+                {
+                    onSelectProfile: () => {},
+                    onChangeColor: (c) => {
+                        currentColor = c;
+                        selectedColors.push(c);
+                        estuche.updateState({ color: c });
+                    },
+                    onChangeWidth: () => {},
+                    onChangeSmoothing: () => {},
+                    onChangePressure: () => {},
+                    onUseFavorite: () => {},
+                    onSaveFavorite: () => {},
+                    onSelectEraserMode: () => {},
+                    onChangeEraserRadius: () => {},
+                    onToggleScribble: () => {},
+                    onSelectLassoMode: () => {},
+                    onSelectShapeType: () => {},
+                    onToggleSnapGrid: () => {},
+                    onClose: () => {},
+                },
+                root,
+            );
+
+            estuche.open(undefined, mockDoc.createElement('button'));
+
+            const swatches = root.querySelectorAll('.popover-swatch-circle');
+            assert.equal(swatches.length, 6);
+            const blueBtn = swatches[3]; // Azul (#1E88E5), after Gris (#9E9E9E)
+
+            // Stylus tap followed by Chromium compatibility synthetic click at same coords
+            blueBtn.dispatchEvent({
+                type: 'pointerdown', button: 0, pointerType: 'pen',
+                clientX: 200, clientY: 120, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            blueBtn.dispatchEvent({
+                type: 'pointerup', button: 0, pointerType: 'pen',
+                clientX: 200, clientY: 120, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            const postTapSwatches = root.querySelectorAll('.popover-swatch-circle');
+            // Swatch DOM was updated in-place rather than rebuilt
+            assert.equal(postTapSwatches[3], blueBtn);
+            postTapSwatches[3].dispatchEvent({
+                type: 'click', detail: 1, clientX: 200, clientY: 120,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+
+            assert.equal(currentColor.toUpperCase(), '#1E88E5', 'Blue slot must select #1E88E5, not shift to gray');
+            assert.deepEqual(selectedColors, ['#1E88E5']);
+            assert.deepEqual(
+                ((estuche as any).colorCarousels.pen.recentColors as Array<{ color: string }>).map((s) => s.color),
+                paletteOrder,
+                'Existing recent colors order must remain unchanged when picking an already-present color',
+            );
+            assert.equal((estuche as any).state.pressureSensitivity, 0.65, 'Color opacity must not overwrite pressureSensitivity');
+            assert.equal((estuche as any).colorPicker.isOpen(), false, 'First tap selects without opening picker');
+
+            // Second tap on active slot opens ColorPickerPopover
+            blueBtn.dispatchEvent({
+                type: 'pointerdown', button: 0, pointerType: 'pen',
+                clientX: 200, clientY: 120, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            blueBtn.dispatchEvent({
+                type: 'pointerup', button: 0, pointerType: 'pen',
+                clientX: 200, clientY: 120, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            assert.equal((estuche as any).colorPicker.isOpen(), true, 'Second tap on active swatch must open ColorPickerPopover');
+
+            estuche.destroy();
+        } finally {
+            teardown();
+        }
+    });
+
+    test('9. Saved palette page: 1st tap selects color & adds to recentColors without opening picker; 2nd tap opens picker', () => {
+        const { teardown, mockDoc } = setupMockDom();
+        try {
+            const carousels = cloneColorCarousels();
+            carousels.pen.profiles = [
+                {
+                    id: 'custom-saved-palette',
+                    name: 'Custom Palette',
+                    slots: [{ color: '#112233', opacity: 100 }, { color: '#445566', opacity: 100 }],
+                },
+            ];
+
+            const root = mockDoc.createElement('div');
+            let currentColor = '#E53935';
+            let updatedCarousels: WorkspaceColorCarousels | null = null;
+
+            const estuche = new ToolEstuche(
+                {
+                    tool: 'pen',
+                    slot: 'tc',
+                    color: currentColor,
+                    width: 3,
+                    profileId: 'fountain',
+                    smoothing: 0.4,
+                    pressureSensitivity: 0.7,
+                    opacity: 1,
+                    favorites: [],
+                    eraserMode: 'whole',
+                    eraserRadius: 15,
+                    scribbleToErase: false,
+                    lassoMode: 'free',
+                    shapeType: 'rect',
+                    snapGrid: false,
+                    colorCarousels: carousels,
+                },
+                {
+                    onSelectProfile: () => {},
+                    onChangeColor: (c) => {
+                        currentColor = c;
+                        estuche.updateState({ color: c });
+                    },
+                    onUpdateColorCarousels: (c) => {
+                        updatedCarousels = c;
+                    },
+                    onChangeWidth: () => {},
+                    onChangeSmoothing: () => {},
+                    onChangePressure: () => {},
+                    onUseFavorite: () => {},
+                    onSaveFavorite: () => {},
+                    onSelectEraserMode: () => {},
+                    onChangeEraserRadius: () => {},
+                    onToggleScribble: () => {},
+                    onSelectLassoMode: () => {},
+                    onSelectShapeType: () => {},
+                    onToggleSnapGrid: () => {},
+                    onClose: () => {},
+                },
+                root,
+            );
+
+            estuche.open(undefined, mockDoc.createElement('button'));
+
+            // Switch to saved palette page (index 1) via pagination dots
+            const dots = root.querySelectorAll('.popover-pag-dot');
+            assert.ok(dots.length >= 2);
+            dots[1].click();
+
+            const paletteSwatches = root.querySelectorAll('.popover-swatch-circle');
+            const customSwatch = paletteSwatches[0]; // #112233
+
+            // First tap (including trailing synthetic click from Android WebView)
+            customSwatch.dispatchEvent({
+                type: 'pointerdown', button: 0, pointerType: 'pen',
+                clientX: 180, clientY: 140, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            customSwatch.dispatchEvent({
+                type: 'pointerup', button: 0, pointerType: 'pen',
+                clientX: 180, clientY: 140, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            customSwatch.dispatchEvent({
+                type: 'click', detail: 1, clientX: 180, clientY: 140,
+                preventDefault: () => {}, stopPropagation: () => {},
+            });
+
+            assert.equal(currentColor.toUpperCase(), '#112233', 'First tap selects saved palette color');
+            assert.equal((estuche as any).colorPicker.isOpen(), false, 'First tap must NOT immediately open ColorPickerPopover');
+            assert.equal(updatedCarousels?.pen.recentColors[0].color, '#112233', 'New color must be added to front of recentColors');
+            assert.equal(customSwatch.classList.contains('is-active'), true, 'Selected swatch is active in-place');
+
+            // Second tap opens ColorPickerPopover
+            customSwatch.dispatchEvent({
+                type: 'pointerdown', button: 0, pointerType: 'pen',
+                clientX: 180, clientY: 140, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            customSwatch.dispatchEvent({
+                type: 'pointerup', button: 0, pointerType: 'pen',
+                clientX: 180, clientY: 140, preventDefault: () => {}, stopPropagation: () => {},
+            });
+            assert.equal((estuche as any).colorPicker.isOpen(), true, 'Second tap opens ColorPickerPopover');
+
+            estuche.destroy();
+        } finally {
+            teardown();
+        }
+    });
+
+    test('10. ColorPickerPopover preserves recent order for existing color & ToolEstuche scales normalized 0..1 opacity correctly', () => {
+        const { teardown, mockDoc } = setupMockDom();
+        try {
+            ColorPickerPopover.pushRecentColor('#ABCDEF');
+            const initial = ColorPickerPopover.getRecentColors();
+            const existingLast = initial[initial.length - 1];
+            ColorPickerPopover.pushRecentColor(existingLast);
+            assert.deepEqual(ColorPickerPopover.getRecentColors(), initial, 'Pushing existing color in ColorPickerPopover must not reorder');
+
+            const estuche = new ToolEstuche(
+                {
+                    tool: 'highlighter',
+                    slot: 'tc',
+                    color: '#FDD835',
+                    width: 12,
+                    profileId: 'fountain',
+                    smoothing: 0.4,
+                    pressureSensitivity: 0.5,
+                    opacity: 0.75,
+                    favorites: [],
+                    eraserMode: 'whole',
+                    eraserRadius: 15,
+                    scribbleToErase: false,
+                    lassoMode: 'free',
+                    shapeType: 'rect',
+                    snapGrid: false,
+                },
+                {
+                    onSelectProfile: () => {},
+                    onChangeColor: () => {},
+                    onChangeWidth: () => {},
+                    onChangeSmoothing: () => {},
+                    onChangePressure: () => {},
+                    onChangeOpacity: () => {},
+                    onUseFavorite: () => {},
+                    onSaveFavorite: () => {},
+                    onSelectEraserMode: () => {},
+                    onChangeEraserRadius: () => {},
+                    onToggleScribble: () => {},
+                    onSelectLassoMode: () => {},
+                    onSelectShapeType: () => {},
+                    onToggleSnapGrid: () => {},
+                    onClose: () => {},
+                },
+                mockDoc.createElement('div'),
+            );
+
+            estuche.open(undefined, mockDoc.createElement('button'));
+            estuche.updateState({ opacity: 0.45 });
+            assert.equal((estuche as any).opacityInput?.value, '45', '0..1 opacity update must display as 45% on slider');
+            estuche.destroy();
+        } finally {
+            teardown();
+        }
     });
 });
