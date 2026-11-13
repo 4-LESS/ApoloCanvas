@@ -6,7 +6,7 @@
  * and Fusion 360-style point/height alignment guides for lines, vertices, and transformations.
  */
 
-import type { ShapeRenderGeometry } from './types.ts';
+import type { ShapeRenderGeometry, ShapeSnapPort } from './types.ts';
 import { rotatePoint } from './handles.ts';
 
 export interface AlignmentGuide {
@@ -215,7 +215,10 @@ export function computePointAlignmentGuides(
  * Extracts key alignment reference points from a shape's document geometry.
  * Correctly accounts for rotation, linear nodes, and polygon vertices.
  */
-export function getShapeKeyPoints(geom: ShapeRenderGeometry): ReferencePoint[] {
+export function getShapeKeyPoints(
+    geom: ShapeRenderGeometry,
+    snapPorts?: readonly ShapeSnapPort[],
+): ReferencePoint[] {
     const points: ReferencePoint[] = [];
     const minX = Math.min(geom.x0, geom.x1);
     const maxX = Math.max(geom.x0, geom.x1);
@@ -257,6 +260,14 @@ export function getShapeKeyPoints(geom: ShapeRenderGeometry): ReferencePoint[] {
 
     for (const p of corners) {
         points.push(rot !== 0 ? rotatePoint(p.x, p.y, cx, cy, rot) : p);
+    }
+
+    if (snapPorts) {
+        for (const port of snapPorts) {
+            if (!points.some(pt => Math.abs(pt.x - port.x) < 0.01 && Math.abs(pt.y - port.y) < 0.01)) {
+                points.push({ x: port.x, y: port.y });
+            }
+        }
     }
 
     return points;

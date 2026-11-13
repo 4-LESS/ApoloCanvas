@@ -35,6 +35,7 @@ import {
 } from './handles.ts';
 import {
     applyCanvasFill,
+    escapeXml,
     getStrokeDashArray,
     getSvgFillAttributes,
     getSvgStrokeAttributes,
@@ -162,6 +163,7 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
         id: def.id,
         name: def.name,
         isClosed,
+        category: def.category,
         iconSvgPaths: def.iconSvgPaths ?? [],
 
         normalizeGeometry(geom: ShapeRenderGeometry): ShapeRenderGeometry {
@@ -213,6 +215,17 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             }
             ctx.stroke();
 
+            // 3. Always-solid accents (e.g. solid BJT/MOSFET transistor arrow heads)
+            const solidStrokeSubpaths = subpaths.filter(sp => sp.fillWithStroke);
+            if (solidStrokeSubpaths.length > 0 && w > 0 && h > 0) {
+                ctx.fillStyle = strokeColor;
+                ctx.beginPath();
+                for (const sp of solidStrokeSubpaths) {
+                    renderCommandsToCanvas(ctx, sp.commands, minX, minY, w, h);
+                }
+                ctx.fill();
+            }
+
             ctx.restore();
         },
 
@@ -247,7 +260,19 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
             const strokeD = strokeSubpaths
                 .map(sp => renderCommandsToSvgPath(sp.commands, minX, minY, w, h))
                 .join(' ');
-            bodies.push(`<path d="${strokeD}" ${strokeAttrs} fill="none"/>`);
+            if (strokeD) {
+                bodies.push(`<path d="${strokeD}" ${strokeAttrs} fill="none"/>`);
+            }
+
+            const solidStrokeSubpaths = subpaths.filter(sp => sp.fillWithStroke);
+            if (solidStrokeSubpaths.length > 0) {
+                const solidD = solidStrokeSubpaths
+                    .map(sp => renderCommandsToSvgPath(sp.commands, minX, minY, w, h))
+                    .join(' ');
+                const strokeColor = escapeXml(style.strokeColor || '#1F4FD8');
+                const strokeOpacity = style.strokeOpacity !== undefined ? style.strokeOpacity : 1;
+                bodies.push(`<path d="${solidD}" fill="${strokeColor}" fill-opacity="${strokeOpacity}" stroke="none"/>`);
+            }
 
             return {
                 defs: allDefs,
@@ -338,6 +363,29 @@ export function createCustomShapePlugin(def: CustomShapeDefinition): ShapePlugin
 
         getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[] {
             const norm = this.normalizeGeometry(geom);
+            if (def.snapPorts) {
+                const specs = typeof def.snapPorts === 'function' ? def.snapPorts(norm) : def.snapPorts;
+                const minX = Math.min(norm.x0, norm.x1);
+                const minY = Math.min(norm.y0, norm.y1);
+                const w = Math.abs(norm.x1 - norm.x0);
+                const h = Math.abs(norm.y1 - norm.y0);
+                const cx = minX + w / 2;
+                const cy = minY + h / 2;
+                const rot = norm.rotation ?? 0;
+                const cos = rot ? Math.cos(rot) : 1;
+                const sin = rot ? Math.sin(rot) : 0;
+                return specs.map(spec => {
+                    const rawX = minX + spec.u * w;
+                    const rawY = minY + spec.v * h;
+                    const pos = rot ? rotatePoint(rawX, rawY, cx, cy, rot) : { x: rawX, y: rawY };
+                    if (spec.nx !== undefined && spec.ny !== undefined) {
+                        const nx = rot ? spec.nx * cos - spec.ny * sin : spec.nx;
+                        const ny = rot ? spec.nx * sin + spec.ny * cos : spec.ny;
+                        return { id: spec.id, x: pos.x, y: pos.y, nx, ny };
+                    }
+                    return { id: spec.id, x: pos.x, y: pos.y };
+                });
+            }
             return isClosed ? boxSnapPorts(norm) : linearSnapPorts(norm);
         },
 

@@ -16,10 +16,20 @@ import {
     diamondShapePlugin,
     hexagonShapePlugin,
 } from './custom.ts';
+import {
+    capacitorShapePlugin,
+    groundShapePlugin,
+    powerSourceShapePlugin,
+    resistorShapePlugin,
+    transistorMosfetShapePlugin,
+    transistorNpnShapePlugin,
+    transistorPnpShapePlugin,
+} from './electrical.ts';
 
 export * from './types.ts';
 export * from './common.ts';
 export * from './custom.ts';
+export * from './electrical.ts';
 export * from './handles.ts';
 export * from './element.ts';
 export * from './connectors.ts';
@@ -33,6 +43,13 @@ export {
     diamondShapePlugin,
     hexagonShapePlugin,
     cylinderShapePlugin,
+    resistorShapePlugin,
+    capacitorShapePlugin,
+    powerSourceShapePlugin,
+    groundShapePlugin,
+    transistorNpnShapePlugin,
+    transistorPnpShapePlugin,
+    transistorMosfetShapePlugin,
 };
 
 export const SHAPE_REGISTRY: Record<string, ShapePlugin> = {
@@ -47,6 +64,17 @@ export const SHAPE_REGISTRY: Record<string, ShapePlugin> = {
     diamond: diamondShapePlugin,
     hexagon: hexagonShapePlugin,
     cylinder: cylinderShapePlugin,
+    resistor: resistorShapePlugin,
+    capacitor: capacitorShapePlugin,
+    'power-source': powerSourceShapePlugin,
+    'voltage-source': powerSourceShapePlugin, // Alias
+    ground: groundShapePlugin,
+    'transistor-npn': transistorNpnShapePlugin,
+    npn: transistorNpnShapePlugin, // Alias
+    'transistor-pnp': transistorPnpShapePlugin,
+    pnp: transistorPnpShapePlugin, // Alias
+    'transistor-mosfet': transistorMosfetShapePlugin,
+    mosfet: transistorMosfetShapePlugin, // Alias
 };
 
 /**

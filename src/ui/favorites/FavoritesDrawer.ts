@@ -61,7 +61,9 @@ export function getPresetIcon(preset: ToolFavoritePreset): string {
         const shapes = ICONS.shapes as Record<string, string>;
         const type = (preset as ShapeFavoritePreset).shapeType;
         const key = type === 'ellipse' ? 'circle' : type === 'rounded-rect' ? 'rect' : type;
-        return shapes[key] ?? shapes.rect;
+        if (shapes[key]) return shapes[key];
+        const plugin = getShapePlugin(type);
+        return plugin.iconSvgPaths.length > 0 ? plugin.iconSvgPaths.join(' ') : shapes.rect;
     }
     const profileId = (preset as PenFavoritePreset | HighlighterFavoritePreset).profileId;
     const map: Record<string, string> = {

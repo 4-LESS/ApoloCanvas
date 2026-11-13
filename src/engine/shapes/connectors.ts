@@ -86,14 +86,14 @@ export function resolveBindingPoint(
  * Dangling bindings (deleted target / unknown port) are cleared. Returns the connectors updated.
  */
 
-/** Outward unit normal vector for cardinal perimeter ports ('n', 'e', 's', 'w'). */
+/** Outward unit normal vector for cardinal perimeter and electrical terminal ports. */
 export function getPortNormal(portId: string, rotation = 0): { nx: number; ny: number } {
     let nx = 0;
     let ny = 0;
-    if (portId === 'n') { nx = 0; ny = -1; }
+    if (portId === 'n' || portId === 'collector' || portId === 'drain') { nx = 0; ny = -1; }
     else if (portId === 'e') { nx = 1; ny = 0; }
-    else if (portId === 's') { nx = 0; ny = 1; }
-    else if (portId === 'w') { nx = -1; ny = 0; }
+    else if (portId === 's' || portId === 'emitter' || portId === 'source') { nx = 0; ny = 1; }
+    else if (portId === 'w' || portId === 'base' || portId === 'gate') { nx = -1; ny = 0; }
     else { nx = 0; ny = 0; }
 
     if (rotation !== 0 && (nx !== 0 || ny !== 0)) {
@@ -138,7 +138,12 @@ export function autoAlignConnectorTangents(
         const target = elements.find(el => el.id === startBinding.elementId);
         if (target && target.type === 'shape') {
             const rot = target.rotation ?? 0;
-            startNormal = getPortNormal(startBinding.portId, rot);
+            const port = getShapePlugin(target.shapeType)
+                .getSnapPorts(_adapter.getGeometry(target))
+                .find(p => p.id === startBinding.portId);
+            startNormal = (port && port.nx !== undefined && port.ny !== undefined)
+                ? { nx: port.nx, ny: port.ny }
+                : getPortNormal(startBinding.portId, rot);
         }
     }
 
@@ -146,7 +151,12 @@ export function autoAlignConnectorTangents(
         const target = elements.find(el => el.id === endBinding.elementId);
         if (target && target.type === 'shape') {
             const rot = target.rotation ?? 0;
-            endNormal = getPortNormal(endBinding.portId, rot);
+            const port = getShapePlugin(target.shapeType)
+                .getSnapPorts(_adapter.getGeometry(target))
+                .find(p => p.id === endBinding.portId);
+            endNormal = (port && port.nx !== undefined && port.ny !== undefined)
+                ? { nx: port.nx, ny: port.ny }
+                : getPortNormal(endBinding.portId, rot);
         }
     }
 

@@ -190,7 +190,7 @@ describe('Shapes Suite (Stages 1–4)', () => {
     // Stage 1
     // =======================================================================
     describe('Stage 1 — Shapes estuche, toolbar icon & multi-face 3D fills', () => {
-        test('carousel shows base shapes on page 1 and diamond / hexagon / cylinder on page 2', async () => {
+        test('carousel shows base shapes on page 1, extended on page 2, and electrical circuits + transistors on pages 3–4', async () => {
             installDom();
             const { ToolEstuche } = await import('../src/ui/ToolEstuche.ts');
             const selected: string[] = [];
@@ -211,17 +211,25 @@ describe('Shapes Suite (Stages 1–4)', () => {
             estuche.open(undefined, (globalThis as any).document.createElement('button'));
 
             const pages = estuche.container.querySelectorAll('.shape-page');
-            assert.equal(pages.length, 2);
+            assert.equal(pages.length, 4);
             assert.deepEqual(pages[0].querySelectorAll('.shape-btn').map((b: any) => b.getAttribute('data-s')), ['line', 'arrow', 'rect', 'ellipse', 'triangle']);
             assert.deepEqual(pages[1].querySelectorAll('.shape-btn').map((b: any) => b.getAttribute('data-s')), ['diamond', 'hexagon', 'cylinder']);
             assert.equal(pages[1].querySelectorAll('.shape-slot-empty').length, 2, 'Partial pages keep the 5-column grid');
+            assert.deepEqual(pages[2].querySelectorAll('.shape-btn').map((b: any) => b.getAttribute('data-s')), ['resistor', 'capacitor', 'power-source', 'ground']);
+            assert.equal(pages[2].querySelectorAll('.shape-slot-empty').length, 1);
+            assert.deepEqual(pages[3].querySelectorAll('.shape-btn').map((b: any) => b.getAttribute('data-s')), ['transistor-npn', 'transistor-pnp', 'transistor-mosfet']);
+            assert.equal(pages[3].querySelectorAll('.shape-slot-empty').length, 2);
 
             // The armed extended shape is the only active button and its page is the active pager dot
             const active = estuche.container.querySelectorAll('.shape-btn.is-active');
             assert.equal(active.length, 1);
             assert.equal(active[0].getAttribute('data-s'), 'cylinder');
             const dots = estuche.container.querySelector('.shape-pager').querySelectorAll('.dot');
+            assert.equal(dots.length, 4);
             assert.ok(dots[1].classList.contains('is-active'));
+            assert.equal(estuche.container.querySelector('.shape-pager-next').disabled, false, 'Middle pages keep the next arrow enabled');
+            estuche.container.querySelector('.shape-pager-next').click();
+            estuche.container.querySelector('.shape-pager-next').click();
             assert.ok(estuche.container.querySelector('.shape-pager-next').disabled, 'Last page disables the next arrow');
 
             pages[0].querySelectorAll('.shape-btn')[1].click();

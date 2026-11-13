@@ -66,6 +66,22 @@ export interface ShapeSnapPort {
     readonly id: string;
     readonly x: number;
     readonly y: number;
+    /** Optional outward unit normal in document space (used for smooth curved connectors). */
+    readonly nx?: number;
+    readonly ny?: number;
+}
+
+export type ShapeCategory = 'geometric' | 'electrical-basic' | 'electrical-transistor';
+
+export interface CustomShapePortSpec {
+    readonly id: string;
+    /** Normalized [0..1] X coordinate within the shape bounding box. */
+    readonly u: number;
+    /** Normalized [0..1] Y coordinate within the shape bounding box. */
+    readonly v: number;
+    /** Optional unrotated outward unit normal X component. */
+    readonly nx?: number;
+    readonly ny?: number;
 }
 
 export interface ShapeStyleConfig {
@@ -84,6 +100,7 @@ export interface ShapePlugin {
     readonly id: ShapeType;
     readonly name: string;
     readonly isClosed: boolean; // true for rectangle, ellipse, triangle, diamond, etc.; false for line, arrow
+    readonly category?: ShapeCategory;
     readonly iconSvgPaths: readonly string[]; // Normalized 24x24 icon paths for UI buttons
     normalizeGeometry(geom: ShapeRenderGeometry): ShapeRenderGeometry;
     renderCanvas(ctx: CanvasRenderingContext2D, geom: ShapeRenderGeometry, style: ShapeStyleConfig): void;
@@ -121,6 +138,8 @@ export interface CustomShapeSubpath {
     isClosed?: boolean;
     isFilled?: boolean;
     isStroked?: boolean;
+    /** When true, always fills the subpath with the active stroke color (e.g. solid transistor arrowheads). */
+    fillWithStroke?: boolean;
     fillOptions?: ShapeFaceFillOptions;
 }
 
@@ -128,10 +147,12 @@ export interface CustomShapeDefinition {
     id: ShapeType;
     name: string;
     isClosed?: boolean;
+    category?: ShapeCategory;
     iconSvgPaths?: readonly string[];
     polygon?: NormalizedPoint[] | ((geom: ShapeRenderGeometry) => NormalizedPoint[]);
     commands?: CustomPathSegment[];
     subpaths?: CustomShapeSubpath[] | ((geom: ShapeRenderGeometry) => CustomShapeSubpath[]);
+    snapPorts?: readonly CustomShapePortSpec[] | ((geom: ShapeRenderGeometry) => readonly CustomShapePortSpec[]);
     extraControlHandles?: (geom: ShapeRenderGeometry) => ShapeHandle[];
     applyParamDrag?: (geom: ShapeRenderGeometry, handleId: string, point: ShapePoint) => ShapeRenderGeometry | null;
 }

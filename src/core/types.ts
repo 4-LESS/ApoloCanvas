@@ -28,7 +28,22 @@ export interface StrokeStyle {
     isHighlighter?: boolean;
 }
 
-export type BuiltInShapeType = 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'cylinder';
+export type BuiltInShapeType =
+    | 'line'
+    | 'arrow'
+    | 'rectangle'
+    | 'ellipse'
+    | 'triangle'
+    | 'diamond'
+    | 'hexagon'
+    | 'cylinder'
+    | 'resistor'
+    | 'capacitor'
+    | 'power-source'
+    | 'ground'
+    | 'transistor-npn'
+    | 'transistor-pnp'
+    | 'transistor-mosfet';
 export type ShapeType = BuiltInShapeType | (string & {});
 export type ShapeFillPattern = 'solid' | 'hachure' | 'cross-hatch' | 'dots';
 
@@ -990,7 +1005,12 @@ export interface NormalizedShapePoint {
 }
 
 /** Magnetic snap ports exposed by shapes ('start' / 'end' for linear shapes). */
-export type ShapePortId = 'n' | 's' | 'e' | 'w' | 'center' | 'v0' | 'v1' | 'v2' | 'start' | 'end';
+export type ShapePortId =
+    | 'n' | 's' | 'e' | 'w' | 'center'
+    | 'v0' | 'v1' | 'v2'
+    | 'start' | 'end'
+    | 'base' | 'collector' | 'emitter'
+    | 'gate' | 'drain' | 'source';
 
 export interface ShapeConnectorBinding {
     elementId: string;

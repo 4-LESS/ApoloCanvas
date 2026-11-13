@@ -46,6 +46,7 @@ interface ShapeSelectorItem {
     type: ShapeType;
     label: string;
     iconD: string;
+    pageTitle?: string;
 }
 
 const BASE_SHAPE_ITEMS: ShapeSelectorItem[] = [
@@ -56,19 +57,42 @@ const BASE_SHAPE_ITEMS: ShapeSelectorItem[] = [
     { type: 'triangle', label: 'Triángulo', iconD: ICONS.shapes.triangle },
 ];
 
-/** Page 1 holds the 5 base shapes; every other registered plugin is grouped 5 per page. */
+const SHAPE_PAGE_GROUPS: ReadonlyArray<{
+    title: string;
+    match: (plugin: ReturnType<typeof getShapePlugin>) => boolean;
+}> = [
+    {
+        title: 'Formas extendidas',
+        match: (p) => !p.category || p.category === 'geometric',
+    },
+    {
+        title: 'Circuitos básicos',
+        match: (p) => p.category === 'electrical-basic',
+    },
+    {
+        title: 'Transistores',
+        match: (p) => p.category === 'electrical-transistor',
+    },
+];
+
+/** Page 1 holds base shapes; subsequent pages group extended geometric, electrical, and transistor symbols (5 per page). */
 function buildShapeSelectorPages(): ShapeSelectorItem[][] {
     const basePlugins = new Set(BASE_SHAPE_ITEMS.map(item => getShapePlugin(item.type)));
-    const extended = listShapePlugins()
-        .filter(plugin => !basePlugins.has(plugin))
-        .map(plugin => ({
-            type: plugin.id,
-            label: plugin.name,
-            iconD: plugin.iconSvgPaths.length > 0 ? plugin.iconSvgPaths.join(' ') : ICONS.shapes.rect,
-        }));
+    const extendedPlugins = listShapePlugins().filter(plugin => !basePlugins.has(plugin));
     const pages: ShapeSelectorItem[][] = [BASE_SHAPE_ITEMS];
-    for (let i = 0; i < extended.length; i += SHAPES_PER_PAGE) {
-        pages.push(extended.slice(i, i + SHAPES_PER_PAGE));
+
+    for (const group of SHAPE_PAGE_GROUPS) {
+        const items: ShapeSelectorItem[] = extendedPlugins
+            .filter(group.match)
+            .map(plugin => ({
+                type: plugin.id,
+                label: plugin.name,
+                iconD: plugin.iconSvgPaths.length > 0 ? plugin.iconSvgPaths.join(' ') : ICONS.shapes.rect,
+                pageTitle: group.title,
+            }));
+        for (let i = 0; i < items.length; i += SHAPES_PER_PAGE) {
+            pages.push(items.slice(i, i + SHAPES_PER_PAGE));
+        }
     }
     return pages;
 }
@@ -1327,7 +1351,10 @@ export class ToolEstuche implements PopoverInstance {
             const pageEl = document.createElement('div');
             pageEl.className = pIdx === 0 ? 'shape-page shape-grid shape-grid-selector' : 'shape-page';
             pageEl.setAttribute('role', 'radiogroup');
-            pageEl.setAttribute('aria-label', pIdx === 0 ? 'Formas base' : `Formas extendidas, página ${pIdx + 1}`);
+            const pageLabel = pIdx === 0
+                ? 'Formas base'
+                : page[0]?.pageTitle ?? `Formas extendidas, página ${pIdx + 1}`;
+            pageEl.setAttribute('aria-label', pageLabel);
             for (const item of page) {
                 pageEl.appendChild(this.createShapeButton(item));
             }

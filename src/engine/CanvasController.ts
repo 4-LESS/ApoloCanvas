@@ -380,6 +380,7 @@ export class CanvasController {
     private dwellTimer: ReturnType<typeof setTimeout> | null = null;
     private dwellAnchor: { x: number; y: number } | null = null;
     private snapPreview: RecognizedShape | null = null;
+    private hoverSnapPort: SnapPortHit | null = null;
     private lastShapeStyleEdit = { at: 0, key: '' };
     private suppressSelectionStyleSync = false;
     /** Anchor-aware document geometry access for magnetic connectors. */
@@ -929,10 +930,12 @@ export class CanvasController {
                 onSelectShapeType: (shapeType) => {
                     this.shapeType = shapeType;
                     this.toolState.shape.shapeType = shapeType;
+                    this.hoverSnapPort = null;
                     this.toolbar?.setShape(shapeType);
                     this.toolbar?.setTool('shape', shapeType);
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
+                    this.schedulePaint();
                 },
                 onToggleSnapGrid: (enabled) => {
                     this.snapGrid = enabled;
@@ -2721,6 +2724,7 @@ export class CanvasController {
     setTool(tool: ToolType, notify = true): void {
         this.tool = tool;
         this.toolState.activeTool = tool;
+        this.hoverSnapPort = null;
 
         if (tool === 'pen') {
             const slice = this.toolState.pen;
@@ -3175,20 +3179,40 @@ export class CanvasController {
     private updateCursor(event: PointerEvent): void {
         if (!this.penEnabled) {
             this.canvas.style.cursor = '';
+            if (this.hoverSnapPort) {
+                this.hoverSnapPort = null;
+                this.schedulePaint();
+            }
             return;
         }
 
         const isForbidden = !this.shouldAcceptDrawingPointer(event);
         if (isForbidden) {
             this.canvas.style.cursor = 'not-allowed';
+            if (this.hoverSnapPort) {
+                this.hoverSnapPort = null;
+                this.schedulePaint();
+            }
             return;
+        }
+
+        const rect = this.canvas.getBoundingClientRect();
+        const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+        const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+
+        const nextHoverSnap = !this.activeStart && !this.handleDrag && this.tool === 'shape' && !getShapePlugin(this.shapeType).isClosed
+            ? this.findSnapPort({ x: docX, y: docY })
+            : null;
+        if (
+            nextHoverSnap?.elementId !== this.hoverSnapPort?.elementId ||
+            nextHoverSnap?.portId !== this.hoverSnapPort?.portId
+        ) {
+            this.hoverSnapPort = nextHoverSnap;
+            this.schedulePaint();
         }
 
         const barrelModifierActive = event.pointerType === 'pen' && (this.penBarrelPressed || this.isPenBarrelEvent(event));
         if (event.ctrlKey || event.metaKey || this.isCtrlDown || barrelModifierActive) {
-            const rect = this.canvas.getBoundingClientRect();
-            const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
-            const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
             let shape = this.getSelectedShape();
             if (!shape || (shape.shapeType !== 'line' && shape.shapeType !== 'arrow')) {
                 const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
@@ -3218,6 +3242,10 @@ export class CanvasController {
 
     private resetCursor(): void {
         this.canvas.style.cursor = this.penEnabled ? 'crosshair' : '';
+        if (this.hoverSnapPort) {
+            this.hoverSnapPort = null;
+            this.schedulePaint();
+        }
     }
 
     // Drawing input lifecycle (normalized to content column width & anchor block)
@@ -3639,6 +3667,7 @@ export class CanvasController {
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
+        this.hoverSnapPort = null;
         this.barrelActive = false;
         this.barrelEraseSession = false;
         if (this.barrelSegmentSlideLatched) {
@@ -3668,6 +3697,7 @@ export class CanvasController {
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
+        this.hoverSnapPort = null;
         this.movingSelection = false;
         this.moveSelectionSnapshot = null;
         this.moveSelectionStartPt = null;
@@ -4479,7 +4509,8 @@ export class CanvasController {
             if (el.id === excludeElementId || selSet.has(el.id)) continue;
             if (el.type === 'shape') {
                 const geom = this.getShapeDocGeometry(el);
-                points.push(...getShapeKeyPoints(geom));
+                const ports = getShapePlugin(el.shapeType).getSnapPorts(geom);
+                points.push(...getShapeKeyPoints(geom, ports));
             }
         }
         return points;
@@ -5984,6 +6015,10 @@ export class CanvasController {
             }
         }
 
+        if (this.hoverSnapPort && !this.activeStart && !this.handleDrag && this.tool === 'shape' && !getShapePlugin(this.shapeType).isClosed) {
+            this.paintSnapTargets([this.hoverSnapPort]);
+        }
+
         if (this.selection.length) this.paintSelection();
         this.paintAlignmentGuides();
         this.context.setTransform(1, 0, 0, 1, 0, 0);
@@ -6666,6 +6701,22 @@ export class CanvasController {
 
         if (this.handleDrag?.elementId === shape.id && this.handleDrag.snap) {
             this.paintSnapTargets([this.handleDrag.snap]);
+        }
+
+        // Highlight exact electrical terminal snap ports when an electrical component is selected
+        if (plugin.category?.startsWith('electrical')) {
+            ctx.save();
+            const pinR = 3.2 / this.zoom;
+            ctx.fillStyle = '#00A3FF';
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 1.5 / this.zoom;
+            for (const port of plugin.getSnapPorts(geom)) {
+                ctx.beginPath();
+                ctx.arc(port.x, port.y, pinR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+            ctx.restore();
         }
     }
 
