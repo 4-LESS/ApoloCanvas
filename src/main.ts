@@ -1,4 +1,4 @@
-import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, editorLivePreviewField, FileView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf } from 'obsidian';
 import { EngineEventBus } from './core/events.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, StrokeFavoriteProfile, ShapeFavoriteProfile, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
 import { DEFAULT_WORKSPACE_TOOL_STATE, DEFAULT_STROKE_FAVORITE_PROFILES, DEFAULT_SHAPE_FAVORITE_PROFILES, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
@@ -23,6 +23,19 @@ import {
 } from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
 import { PersistenceQueue, syncBoxPreviewSvg } from './io/PersistenceQueue.ts';
+import {
+    applyFileExplorerCloaking,
+    clearKnownApnotes,
+    exportAsPortableApnote,
+    getApnoteTriggerPath,
+    importPortableApnote,
+    isZipApnote,
+    parseSatelliteFilename,
+    registerKnownApnote,
+    removeFileExplorerCloaking,
+    resolveMdFromTrigger,
+    splitNotePath,
+} from './io/ApnoteBundle.ts';
 import { createDotsIcon, DEFAULT_FAVORITES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
@@ -98,6 +111,33 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     defaultBoxAccentColor: 'purple',
 };
 
+const APOLO_NOTE_VIEW_TYPE = 'apolo-note-view';
+
+class ApoloNoteRedirectView extends FileView {
+    constructor(leaf: WorkspaceLeaf, private readonly plugin: ApoloCanvasPlugin) {
+        super(leaf);
+        this.allowNoFile = false;
+        this.navigation = true;
+    }
+
+    getViewType(): string {
+        return APOLO_NOTE_VIEW_TYPE;
+    }
+
+    getDisplayText(): string {
+        return this.file?.basename || 'Apolo Note';
+    }
+
+    canAcceptExtension(extension: string): boolean {
+        return extension.toLowerCase() === 'apnote';
+    }
+
+    async onLoadFile(file: TFile): Promise<void> {
+        await super.onLoadFile(file);
+        await this.plugin.handleApnoteFileOpen(file, this.leaf);
+    }
+}
+
 export default class ApoloCanvasPlugin extends Plugin {
     settings: ApoloCanvasSettings = { ...DEFAULT_SETTINGS };
     readonly eventBus = new EngineEventBus();
@@ -110,6 +150,11 @@ export default class ApoloCanvasPlugin extends Plugin {
     private saveStatusBarItem: HTMLElement | null = null;
     private isShuttingDown = false;
     private mountPromise: Promise<void> = Promise.resolve();
+    private explorerObserver: MutationObserver | null = null;
+    private explorerObservedContainers = new WeakSet<Node>();
+    private cloakingRafId: number | null = null;
+    private syncingRenames = new Set<string>();
+    private syncingDeletes = new Set<string>();
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -121,9 +166,14 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.persistence.setCompanionSvgEnabled(this.settings.companionSvgExport);
         BoxRegistry.setDefaultBgTheme(this.settings.defaultBoxBgTheme || 'default');
 
-        await ensureFolder(this.app, '.apolocanvas');
-        await ensureFolder(this.app, '.apolocanvas/boxes');
-        await ensureFolder(this.app, '.apolocanvas/notes');
+        // Register .apnote bundle trigger handler (unpacks portable ZIPs or redirects JSON manifests to .md)
+        this.registerView(APOLO_NOTE_VIEW_TYPE, (leaf) => new ApoloNoteRedirectView(leaf, this));
+        this.registerExtensions(['apnote'], APOLO_NOTE_VIEW_TYPE);
+        for (const f of this.app.vault.getFiles()) {
+            if (f.path.toLowerCase().endsWith('.apnote')) {
+                registerKnownApnote(f.path);
+            }
+        }
 
         // Register CM6 Live Preview widget extension for apolo-space blocks
         this.registerEditorExtension(createApoloSpaceExtension(editorLivePreviewField));
@@ -171,6 +221,27 @@ export default class ApoloCanvasPlugin extends Plugin {
 
         // Register Reading mode section info post-processor for precise paragraph anchoring
         this.registerMarkdownPostProcessor((el, ctx) => {
+            // Suppress native fallback satellite embeds (`![[.<BaseName>.<boxId>.svg]]`) while plugin is active
+            const sourceBaseName = ctx?.sourcePath ? splitNotePath(ctx.sourcePath).baseName : '';
+            const embedCandidates: HTMLElement[] = [];
+            if (el.matches?.('.internal-embed')) {
+                embedCandidates.push(el);
+            }
+            const foundEmbeds = el.querySelectorAll<HTMLElement>('.internal-embed');
+            for (let i = 0; i < foundEmbeds.length; i++) {
+                embedCandidates.push(foundEmbeds[i]);
+            }
+            for (const embedEl of embedCandidates) {
+                const src = embedEl.getAttribute('src') || '';
+                const filename = src.split(/[\\/]/).pop() || '';
+                const isFallbackSvg = sourceBaseName
+                    ? filename.toLowerCase().startsWith(`.${sourceBaseName.toLowerCase()}.`) && filename.toLowerCase().endsWith('.svg')
+                    : /^\.[^/\\]+\.svg$/i.test(filename);
+                if (isFallbackSvg) {
+                    embedEl.addClass('apolo-fallback-embed-hidden');
+                }
+            }
+
             const spaceCandidates: HTMLElement[] = [];
             if (el.matches?.('.apolo-space, [data-apolo-space], [data-apolo-space-id]')) {
                 spaceCandidates.push(el);
@@ -370,36 +441,134 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.registerCommands();
 
         this.registerEvent(this.app.workspace.on('active-leaf-change', () => { void this.mountActiveEditor(); }));
-        this.registerEvent(this.app.workspace.on('layout-change', () => { void this.mountActiveEditor(); }));
+        this.registerEvent(this.app.workspace.on('layout-change', () => {
+            void this.mountActiveEditor();
+            this.scheduleFileExplorerCloaking();
+        }));
         this.registerEvent(this.app.workspace.on('editor-change', () => this.controller?.onEditorChange()));
-        this.registerEvent(this.app.workspace.on('file-open', () => { void this.mountActiveEditor(); }));
-
-        // Vault note renaming: preserve ink document association and rename companion SVG without data loss
-        this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
-            if (!(file instanceof TFile)) return;
-            try {
-                this.controller?.commitActiveStroke();
-                await this.persistence?.flush();
-            } catch (err) {
-                console.error('[ApoloCanvas] Flush failed before rename:', err);
+        this.registerEvent(this.app.workspace.on('file-open', (openedFile) => {
+            void this.mountActiveEditor();
+            if (openedFile instanceof TFile && openedFile.extension.toLowerCase() === 'apnote') {
+                registerKnownApnote(openedFile.path);
             }
-            if (this.mountedFilePath === oldPath) {
-                this.mountedFilePath = file.path;
-            }
-            this.controller?.onFileRenamed(file, oldPath);
-            await this.persistence?.onFileRenamed(oldPath, file);
+            this.scheduleFileExplorerCloaking();
         }));
 
-        // Vault note deletion: clean up note-level ink storage (boxes kept as orphans)
+        this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+            if (!(file instanceof TFile)) return;
+            const ext = file.extension.toLowerCase();
+            if (ext !== 'md' && ext !== 'apnote') return;
+            menu.addItem((item) => {
+                item.setTitle('Export note as portable .apnote package')
+                    .setIcon('package')
+                    .onClick(() => {
+                        void this.exportNoteAsPortablePackage(file);
+                    });
+            });
+        }));
+
+        this.registerEvent(this.app.vault.on('create', (file) => {
+            if (!(file instanceof TFile)) return;
+            const ext = file.extension.toLowerCase();
+            if (ext === 'apnote') {
+                registerKnownApnote(file.path);
+                this.scheduleFileExplorerCloaking();
+            } else if (ext === 'md') {
+                this.scheduleFileExplorerCloaking();
+            }
+        }));
+
+        // Vault atomic rename/move: keep .md, .apnote, .global.json, .*.svg, and embed links synchronized
+        this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
+            if (!(file instanceof TFile)) return;
+            if (this.syncingRenames.has(oldPath) || this.syncingRenames.has(file.path)) return;
+
+            const parsedOld = parseSatelliteFilename(oldPath);
+            const parsedNew = parseSatelliteFilename(file.path);
+            const isPrimaryNoteOrTrigger =
+                (parsedOld && (parsedOld.kind === 'md' || parsedOld.kind === 'apnote')) ||
+                (parsedNew && (parsedNew.kind === 'md' || parsedNew.kind === 'apnote'));
+
+            if (!isPrimaryNoteOrTrigger) {
+                this.scheduleFileExplorerCloaking();
+                return;
+            }
+
+            const oldMdPath = parsedOld?.mdPath ?? oldPath;
+            const newMdPath = parsedNew?.mdPath ?? file.path;
+            const oldApnotePath = parsedOld?.apnotePath ?? getApnoteTriggerPath(oldPath);
+            const newApnotePath = parsedNew?.apnotePath ?? getApnoteTriggerPath(file.path);
+
+            this.syncingRenames.add(oldPath);
+            this.syncingRenames.add(file.path);
+            this.syncingRenames.add(oldMdPath);
+            this.syncingRenames.add(newMdPath);
+            this.syncingRenames.add(oldApnotePath);
+            this.syncingRenames.add(newApnotePath);
+
+            try {
+                try {
+                    this.controller?.commitActiveStroke();
+                    await this.persistence?.flush();
+                } catch (err) {
+                    console.error('[ApoloCanvas] Flush failed before rename:', err);
+                }
+
+                if (this.mountedFilePath === oldMdPath || this.mountedFilePath === oldPath) {
+                    this.mountedFilePath = newMdPath;
+                }
+
+                await this.persistence?.onFileRenamed(oldPath, file);
+
+                const movedMdFile = this.app.vault.getAbstractFileByPath(newMdPath);
+                if (movedMdFile instanceof TFile) {
+                    this.controller?.onFileRenamed(movedMdFile, oldMdPath);
+                } else {
+                    this.controller?.onFileRenamed(file, oldMdPath);
+                }
+            } finally {
+                this.syncingRenames.delete(oldPath);
+                this.syncingRenames.delete(file.path);
+                this.syncingRenames.delete(oldMdPath);
+                this.syncingRenames.delete(newMdPath);
+                this.syncingRenames.delete(oldApnotePath);
+                this.syncingRenames.delete(newApnotePath);
+                this.scheduleFileExplorerCloaking();
+            }
+        }));
+
+        // Vault note or .apnote deletion: clean up all note-local satellites atomically
         this.registerEvent(this.app.vault.on('delete', async (file) => {
             if (!(file instanceof TFile)) return;
-            if (this.mountedFilePath === file.path) {
-                await this.destroyController();
+            if (this.syncingDeletes.has(file.path)) return;
+
+            const parsed = parseSatelliteFilename(file.path);
+            if (!parsed || (parsed.kind !== 'md' && parsed.kind !== 'apnote')) {
+                this.scheduleFileExplorerCloaking();
+                return;
             }
-            await this.persistence?.onFileDeleted(file.path);
+
+            this.syncingDeletes.add(parsed.mdPath);
+            this.syncingDeletes.add(parsed.apnotePath);
+            try {
+                if (this.mountedFilePath === parsed.mdPath || this.mountedFilePath === file.path) {
+                    await this.destroyController();
+                }
+                await this.persistence?.onFileDeleted(file.path);
+            } finally {
+                this.syncingDeletes.delete(parsed.mdPath);
+                this.syncingDeletes.delete(parsed.apnotePath);
+                this.scheduleFileExplorerCloaking();
+            }
         }));
 
         this.app.workspace.onLayoutReady(() => {
+            for (const f of this.app.vault.getFiles()) {
+                if (f.path.toLowerCase().endsWith('.apnote')) {
+                    registerKnownApnote(f.path);
+                }
+            }
+            this.refreshFileExplorerCloaking();
             void this.mountActiveEditor();
             this.showFirstTimeNoticeIfNeeded();
         });
@@ -417,12 +586,142 @@ export default class ApoloCanvasPlugin extends Plugin {
         });
 
         this.registerDomEvent(window, 'keydown', this.onKeyDown, true);
-        console.log('[ApoloCanvas] Ready: S-Pen input, editor overlay and sidecar persistence enabled.');
+        console.log('[ApoloCanvas] Ready: S-Pen input, editor overlay and .apnote satellite persistence enabled.');
     }
 
     onunload(): void {
+        if (this.cloakingRafId !== null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this.cloakingRafId);
+            this.cloakingRafId = null;
+        }
+        if (this.explorerObserver) {
+            this.explorerObserver.disconnect();
+            this.explorerObserver = null;
+        }
+        if (typeof document !== 'undefined') {
+            removeFileExplorerCloaking(document);
+            const hiddenEmbeds = document.querySelectorAll('.apolo-fallback-embed-hidden');
+            for (let i = 0; i < hiddenEmbeds.length; i++) {
+                hiddenEmbeds[i].classList.remove('apolo-fallback-embed-hidden');
+            }
+        }
+        clearKnownApnotes();
         void this.flushAndDestroy();
         console.log('[ApoloCanvas] Unloaded.');
+    }
+
+    private scheduleFileExplorerCloaking(): void {
+        if (this.isShuttingDown || typeof document === 'undefined') return;
+        if (typeof requestAnimationFrame !== 'function') {
+            this.refreshFileExplorerCloaking();
+            return;
+        }
+        if (this.cloakingRafId !== null) return;
+        this.cloakingRafId = requestAnimationFrame(() => {
+            this.cloakingRafId = null;
+            this.refreshFileExplorerCloaking();
+        });
+    }
+
+    private refreshFileExplorerCloaking(): void {
+        if (this.isShuttingDown || typeof document === 'undefined') return;
+        applyFileExplorerCloaking(document, this.app.vault);
+
+        if (typeof MutationObserver === 'undefined') return;
+        if (!this.explorerObserver) {
+            this.explorerObserver = new MutationObserver(() => {
+                this.scheduleFileExplorerCloaking();
+            });
+        }
+        const containers = document.querySelectorAll('.nav-files-container');
+        for (let i = 0; i < containers.length; i++) {
+            const container = containers[i];
+            if (!this.explorerObservedContainers.has(container)) {
+                this.explorerObservedContainers.add(container);
+                this.explorerObserver.observe(container, { childList: true, subtree: true });
+            }
+        }
+    }
+
+    async handleApnoteFileOpen(file: TFile, leaf: WorkspaceLeaf): Promise<void> {
+        try {
+            registerKnownApnote(file.path);
+            let bytes: ArrayBuffer;
+            if (typeof this.app.vault.readBinary === 'function') {
+                bytes = await this.app.vault.readBinary(file);
+            } else {
+                bytes = await this.app.vault.adapter.readBinary(file.path);
+            }
+
+            let targetMdPath = resolveMdFromTrigger(file.path);
+            if (isZipApnote(bytes)) {
+                const { dir, baseName } = splitNotePath(file.path);
+                targetMdPath = await importPortableApnote(this.app.vault, bytes, dir, baseName);
+                registerKnownApnote(getApnoteTriggerPath(targetMdPath));
+                this.scheduleFileExplorerCloaking();
+                new Notice(`Apolo Canvas: Paquete .apnote importado (${baseName}).`);
+            }
+
+            let targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
+            if (!(targetFile instanceof TFile)) {
+                await new Promise(resolve => setTimeout(resolve, 60));
+                targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
+            }
+
+            if (targetFile instanceof TFile) {
+                await leaf.openFile(targetFile);
+            } else {
+                new Notice(`Apolo Canvas: No se encontró la nota Markdown asociada (${targetMdPath}).`);
+            }
+        } catch (err) {
+            console.error('[ApoloCanvas] Error opening .apnote file:', err);
+            new Notice('Apolo Canvas: No se pudo abrir el archivo .apnote.');
+        }
+    }
+
+    async exportNoteAsPortablePackage(targetFile?: TFile | null): Promise<void> {
+        let sourceFile = targetFile ?? this.app.workspace.getActiveViewOfType(MarkdownView)?.file ?? this.app.workspace.getActiveFile();
+        if (!sourceFile) {
+            new Notice('Apolo Canvas: Abre o selecciona una nota para exportar como .apnote.');
+            return;
+        }
+
+        const ext = sourceFile.extension.toLowerCase();
+        if (ext !== 'md' && ext !== 'apnote') {
+            new Notice('Apolo Canvas: Solo se pueden exportar notas Markdown o manifiestos .apnote.');
+            return;
+        }
+
+        const mdPath = ext === 'apnote' ? resolveMdFromTrigger(sourceFile.path) : sourceFile.path;
+        const { baseName } = splitNotePath(mdPath);
+
+        try {
+            this.controller?.commitActiveStroke();
+            await this.persistence?.flush();
+            const zipBuffer = await exportAsPortableApnote(this.app.vault, mdPath);
+
+            if (
+                typeof document !== 'undefined' &&
+                typeof Blob !== 'undefined' &&
+                typeof URL !== 'undefined' &&
+                typeof URL.createObjectURL === 'function'
+            ) {
+                const blob = new Blob([zipBuffer], { type: 'application/zip' });
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = `${baseName}.apnote`;
+                document.body.appendChild(anchor);
+                anchor.click();
+                anchor.remove();
+                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }
+
+            new Notice(`Apolo Canvas: Paquete portátil ${baseName}.apnote exportado (${zipBuffer.byteLength} bytes).`);
+        } catch (err) {
+            console.error('[ApoloCanvas] Failed to export portable .apnote package:', err);
+            new Notice('Apolo Canvas: Error al exportar el paquete portátil .apnote.');
+        }
     }
 
     private showFirstTimeNoticeIfNeeded(): void {
@@ -794,6 +1093,14 @@ export default class ApoloCanvasPlugin extends Plugin {
         });
 
         this.addCommand({
+            id: 'apolo-export-portable-apnote',
+            name: 'Export note as portable .apnote package',
+            callback: () => {
+                void this.exportNoteAsPortablePackage();
+            },
+        });
+
+        this.addCommand({
             id: 'apolo-open-local-graph',
             name: 'Apolo Canvas: Abrir grafo local',
             callback: () => openLocalGraph(this.app),
@@ -926,9 +1233,9 @@ export default class ApoloCanvasPlugin extends Plugin {
             view.addAction('git-fork', 'Apolo Canvas: Grafo local', () => {
                 openLocalGraph(this.app);
             });
-            view.addAction('file-down', 'Apolo Canvas: Exportar SVG companion', () => {
+            view.addAction('file-down', 'Apolo Canvas: Exportar paquete portátil .apnote', () => {
                 void this.persistence.flush().then(() => {
-                    new Notice('Apolo Canvas: SVG companion sincronizado en assets/ink');
+                    new Notice('Apolo Canvas: Manifiesto .apnote y satélites sincronizados.');
                 });
             });
         }
@@ -1137,28 +1444,6 @@ export default class ApoloCanvasPlugin extends Plugin {
                 el.style.removeProperty('background-color');
             }
         }
-
-        // 4. Update all vault box persistence files (.apolocanvas/boxes/*.json) retroactively
-        try {
-            const adapter = this.app.vault.adapter;
-            if (await adapter.exists('.apolocanvas/boxes')) {
-                const listing = await adapter.list('.apolocanvas/boxes');
-                for (const filePath of listing.files) {
-                    if (filePath.endsWith('.json')) {
-                        try {
-                            const raw = await adapter.read(filePath);
-                            const parsed = JSON.parse(raw);
-                            if (parsed && typeof parsed === 'object') {
-                                parsed.bgTheme = newTheme;
-                                await adapter.write(filePath, JSON.stringify(parsed));
-                            }
-                        } catch { /* skip invalid */ }
-                    }
-                }
-            }
-        } catch (err) {
-            console.error('[ApoloCanvas] Failed to update vault boxes retroactively:', err);
-        }
     }
 
     setDefaultBoxAccentColor(accent: BoxAccentColor): void {
@@ -1303,8 +1588,8 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Exportación companion SVG')
-            .setDesc('Mantener copia SVG vectorial nativa en assets/ink sincronizada.')
+            .setName('Sincronización SVG satélite local')
+            .setDesc('Mantener archivos SVG satélites locales sincronizados junto a cada nota.')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.companionSvgExport)
                 .onChange(async value => {
@@ -1497,9 +1782,4 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
     }
-}
-
-async function ensureFolder(app: App, path: string): Promise<void> {
-    const adapter = app.vault.adapter;
-    if (!(await adapter.exists(path))) await adapter.mkdir(path);
 }

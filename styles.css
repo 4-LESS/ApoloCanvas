@@ -6292,3 +6292,21 @@ button.apolo-profile-cancel-btn,
   opacity: 0.7;
   pointer-events: auto;
 }
+
+/* .apnote Satellite Cloaking & Native Fallback Embed Suppression */
+.apolo-satellite-hidden {
+  display: none;
+}
+
+.apolo-fallback-embed-hidden {
+  display: none;
+}
+
+.apolo-apnote-item .apolo-apnote-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  color: var(--interactive-accent);
+  vertical-align: middle;
+}

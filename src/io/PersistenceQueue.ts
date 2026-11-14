@@ -450,9 +450,10 @@ export class PersistenceQueue {
     }
 
     /** Discharges pending writes immediately and synchronizes all note-local satellites on rename/move. */
-    async onFileRenamed(oldPath: string, newFile: TFile): Promise<void> {
+    async onFileRenamed(oldPath: string, newFileOrPath: TFile | string): Promise<void> {
+        const newPath = typeof newFileOrPath === 'string' ? newFileOrPath : newFileOrPath.path;
         const oldSplit = splitNotePath(oldPath);
-        const newSplit = splitNotePath(newFile.path);
+        const newSplit = splitNotePath(newPath);
 
         const cachedKeys = Array.from(this.cacheByPageId.keys());
         for (const key of cachedKeys) {
@@ -467,7 +468,10 @@ export class PersistenceQueue {
         }
 
         if (this.pending && (this.pending.file.path === oldPath || this.pending.file.path === oldSplit.mdPath)) {
-            const targetMdFile = (this.app.vault.getAbstractFileByPath?.(newSplit.mdPath) as TFile | null) ?? newFile;
+            const fallbackFile = typeof newFileOrPath === 'string'
+                ? ({ path: newSplit.mdPath } as TFile)
+                : newFileOrPath;
+            const targetMdFile = (this.app.vault.getAbstractFileByPath?.(newSplit.mdPath) as TFile | null) ?? fallbackFile;
             this.pending.file = targetMdFile;
             this.pending.pageId = newSplit.mdPath;
             this.pending.document.notePath = newSplit.mdPath;
@@ -475,7 +479,7 @@ export class PersistenceQueue {
         }
 
         try {
-            await syncAtomicRename(this.app.vault, oldPath, newFile.path);
+            await syncAtomicRename(this.app.vault, oldPath, newPath);
         } catch (err) {
             console.warn('[ApoloCanvas] Could not synchronize satellite rename:', err);
         }
