@@ -261,7 +261,6 @@ export class PersistenceQueue {
     private pending: { document: PageDocument; file: TFile; pageId: string } | null = null;
     private chain: Promise<void> = Promise.resolve();
     private debounceMs: number;
-    private companionSvgEnabled = true;
     private autoBundleNoteFolder = false;
     private readonly internalRenamePaths = new Set<string>();
     private onPersistComplete?: (mdPath: string, apnotePath: string) => void;
@@ -276,8 +275,6 @@ export class PersistenceQueue {
     }
 
     setDebounceMs(value: number): void { this.debounceMs = Math.max(50, value); }
-    setCompanionSvgEnabled(value: boolean): void { this.companionSvgEnabled = value; }
-    isCompanionSvgEnabled(): boolean { return this.companionSvgEnabled; }
     setAutoBundleNoteFolder(enabled: boolean): void { this.autoBundleNoteFolder = enabled; }
     setOnPersistComplete(cb?: (mdPath: string, apnotePath: string) => void): void { this.onPersistComplete = cb; }
     isInternalRename(oldPath: string, newPath?: string): boolean {

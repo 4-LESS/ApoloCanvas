@@ -1,4 +1,4 @@
-import { App, editorLivePreviewField, FileView, Keymap, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
+import { App, editorLivePreviewField, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 import { EngineEventBus } from './core/events.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, StrokeFavoriteProfile, ShapeFavoriteProfile, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
 import { DEFAULT_WORKSPACE_TOOL_STATE, DEFAULT_STROKE_FAVORITE_PROFILES, DEFAULT_SHAPE_FAVORITE_PROFILES, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
@@ -23,29 +23,8 @@ import {
 } from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
 import { PersistenceQueue, syncBoxPreviewSvg } from './io/PersistenceQueue.ts';
-import {
-    applyFileExplorerCloaking,
-    attachMakeMdBridge,
-    clearKnownApnotes,
-    ensureDirectory,
-    ensureNoteInBundleFolder,
-    exportAsPortableApnote,
-    getApnoteTriggerPath,
-    getBundledMdPath,
-    getNoteBundleFolderPath,
-    importPortableApnote,
-    isInsideNoteBundleFolder,
-    isZipApnote,
-    normalizeVaultNotePath,
-    parseApnoteManifest,
-    parseSatelliteFilename,
-    registerKnownApnote,
-    removeFileExplorerCloaking,
-    resolveBundleFolderPaths,
-    resolveMdFromTrigger,
-    splitNotePath,
-    syncMakeMdBundleState,
-} from './io/ApnoteBundle.ts';
+import { splitNotePath } from './io/ApnoteBundle.ts';
+import { ApnoteWorkspaceCoordinator } from './io/ApnoteWorkspace.ts';
 import { createDotsIcon, DEFAULT_FAVORITES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
@@ -56,7 +35,6 @@ export interface ApoloCanvasSettings {
     defaultPenWidth: number;
     palmRejectionCooldownMs: number;
     autoSaveDebounceMs: number;
-    companionSvgExport: boolean;
     penInputEnabled: boolean;
     enableMouseDrawing: boolean;
     shapeRecognition: boolean;
@@ -82,7 +60,6 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     defaultPenWidth: 3,
     palmRejectionCooldownMs: 400,
     autoSaveDebounceMs: 500,
-    companionSvgExport: true,
     penInputEnabled: true,
     enableMouseDrawing: false,
     shapeRecognition: true,
@@ -121,35 +98,6 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     defaultBoxAccentColor: 'purple',
 };
 
-const APOLO_NOTE_VIEW_TYPE = 'apolo-note-view';
-
-class ApoloNoteRedirectView extends FileView {
-    constructor(leaf: WorkspaceLeaf, private readonly plugin: ApoloCanvasPlugin) {
-        super(leaf);
-        this.allowNoFile = false;
-        this.navigation = true;
-    }
-
-    getViewType(): string {
-        return APOLO_NOTE_VIEW_TYPE;
-    }
-
-    getDisplayText(): string {
-        return this.file?.basename || 'Apolo Note';
-    }
-
-    canAcceptExtension(extension: string): boolean {
-        return extension.toLowerCase() === 'apnote';
-    }
-
-    async onLoadFile(file: TFile): Promise<void> {
-        await super.onLoadFile(file);
-        window.setTimeout(() => {
-            void this.plugin.handleApnoteFileOpen(file, this.leaf);
-        }, 0);
-    }
-}
-
 export default class ApoloCanvasPlugin extends Plugin {
     settings: ApoloCanvasSettings = { ...DEFAULT_SETTINGS };
     readonly eventBus = new EngineEventBus();
@@ -162,13 +110,7 @@ export default class ApoloCanvasPlugin extends Plugin {
     private saveStatusBarItem: HTMLElement | null = null;
     private isShuttingDown = false;
     private mountPromise: Promise<void> = Promise.resolve();
-    private explorerObserver: MutationObserver | null = null;
-    private explorerObservedContainers = new WeakSet<Node>();
-    private cloakingRafId: number | null = null;
-    private cleanupMakeMdBridge: (() => void) | null = null;
-    private redirectingMakeMdLeaves = new WeakSet<WorkspaceLeaf>();
-    private syncingRenames = new Set<string>();
-    private syncingDeletes = new Set<string>();
+    private apnoteWorkspace: ApnoteWorkspaceCoordinator | null = null;
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -177,19 +119,26 @@ export default class ApoloCanvasPlugin extends Plugin {
             this.settings.autoSaveDebounceMs,
             () => new Notice('Apolo Canvas: El guardado falló; revisa la consola para más detalles.'),
         );
-        this.persistence.setCompanionSvgEnabled(this.settings.companionSvgExport);
         this.persistence.setAutoBundleNoteFolder(true);
-        this.persistence.setOnPersistComplete(() => this.scheduleFileExplorerCloaking());
+        this.persistence.setOnPersistComplete(() => this.apnoteWorkspace?.scheduleCloaking());
         BoxRegistry.setDefaultBgTheme(this.settings.defaultBoxBgTheme || 'default');
 
-        // Register .apnote bundle trigger handler (unpacks portable ZIPs or redirects JSON manifests to .md)
-        this.registerView(APOLO_NOTE_VIEW_TYPE, (leaf) => new ApoloNoteRedirectView(leaf, this));
-        this.registerExtensions(['apnote'], APOLO_NOTE_VIEW_TYPE);
-        for (const f of this.app.vault.getFiles()) {
-            if (f.path.toLowerCase().endsWith('.apnote')) {
-                registerKnownApnote(f.path);
-            }
-        }
+        this.apnoteWorkspace = new ApnoteWorkspaceCoordinator({
+            plugin: this,
+            app: this.app,
+            isShuttingDown: () => this.isShuttingDown,
+            getPersistence: () => this.persistence,
+            getController: () => this.controller,
+            getMountedFilePath: () => this.mountedFilePath,
+            setMountedFilePath: (path) => { this.mountedFilePath = path; },
+            destroyController: () => this.destroyController(),
+            mountActiveEditor: () => this.mountActiveEditor(),
+            onLayoutReadyMount: () => {
+                void this.mountActiveEditor();
+                this.showFirstTimeNoticeIfNeeded();
+            },
+        });
+        this.apnoteWorkspace.register();
 
         // Register CM6 Live Preview widget extension for apolo-space blocks
         this.registerEditorExtension(createApoloSpaceExtension(editorLivePreviewField));
@@ -503,338 +452,7 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.addSettingTab(new ApoloCanvasSettingsTab(this.app, this));
         this.registerCommands();
 
-        this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
-            this.redirectMakeMdBundleLeaves();
-            void this.mountActiveEditor();
-            this.scheduleFileExplorerCloaking();
-        }));
-        this.registerEvent(this.app.workspace.on('layout-change', () => {
-            this.redirectMakeMdBundleLeaves();
-            void this.mountActiveEditor();
-            this.scheduleFileExplorerCloaking();
-        }));
         this.registerEvent(this.app.workspace.on('editor-change', () => this.controller?.onEditorChange()));
-        this.registerEvent(this.app.workspace.on('file-open', (openedFile) => {
-            void this.mountActiveEditor();
-            if (openedFile instanceof TFile && openedFile.extension.toLowerCase() === 'apnote') {
-                registerKnownApnote(openedFile.path);
-            }
-            this.scheduleFileExplorerCloaking();
-        }));
-
-        this.registerEvent(this.app.workspace.on('file-menu', (menu, abstractFile) => {
-            let targetFile: TFile | null = null;
-            if (abstractFile instanceof TFile) {
-                const ext = abstractFile.extension.toLowerCase();
-                if (ext === 'md' || ext === 'apnote') {
-                    targetFile = abstractFile;
-                }
-            } else if (abstractFile instanceof TFolder) {
-                const bundle = resolveBundleFolderPaths(abstractFile.path, this.app.vault);
-                if (bundle) {
-                    const md = this.app.vault.getAbstractFileByPath(bundle.mdPath);
-                    if (md instanceof TFile) {
-                        targetFile = md;
-                    }
-                }
-            }
-            if (!targetFile) return;
-            const exportFile = targetFile;
-            menu.addItem((item) => {
-                item.setTitle('Export note as portable .apnote package')
-                    .setIcon('package')
-                    .onClick(() => {
-                        void this.exportNoteAsPortablePackage(exportFile);
-                    });
-            });
-        }));
-
-        this.registerEvent(this.app.vault.on('create', (file) => {
-            if (!(file instanceof TFile)) return;
-            const ext = file.extension.toLowerCase();
-            if (ext === 'apnote') {
-                registerKnownApnote(file.path);
-                this.scheduleFileExplorerCloaking();
-            } else if (ext === 'md') {
-                this.scheduleFileExplorerCloaking();
-            }
-        }));
-
-        // Vault atomic rename/move: keep single-note bundle folder, .md, .apnote, .global.json, .*.svg, and embed links synchronized
-        this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
-            if (this.persistence?.isInternalRename(oldPath, file.path)) {
-                if (this.mountedFilePath === oldPath) {
-                    this.mountedFilePath = file.path;
-                }
-                if (file instanceof TFile) {
-                    this.controller?.onFileRenamed(file, oldPath);
-                }
-                this.scheduleFileExplorerCloaking();
-                return;
-            }
-
-            if (file instanceof TFolder) {
-                const normOld = normalizeVaultNotePath(oldPath);
-                const normNew = normalizeVaultNotePath(file.path);
-                const oldFolderName = normOld.includes('/') ? normOld.slice(normOld.lastIndexOf('/') + 1) : normOld;
-                const newFolderName = normNew.includes('/') ? normNew.slice(normNew.lastIndexOf('/') + 1) : normNew;
-                if (oldFolderName && newFolderName && oldFolderName !== newFolderName) {
-                    const currentApnotePath = `${normNew}/${oldFolderName}.apnote`;
-                    const currentMdPath = `${normNew}/${oldFolderName}.md`;
-                    const nextMdPath = `${normNew}/${newFolderName}.md`;
-                    const nextApnotePath = `${normNew}/${newFolderName}.apnote`;
-                    const oldOriginalMdPath = `${normOld}/${oldFolderName}.md`;
-                    const hasInnerApnote = await this.app.vault.adapter.exists(currentApnotePath);
-                    const hasInnerMd = await this.app.vault.adapter.exists(currentMdPath);
-                    if ((hasInnerApnote || hasInnerMd) && !this.syncingRenames.has(currentMdPath) && !this.syncingRenames.has(nextMdPath)) {
-                        this.syncingRenames.add(oldPath);
-                        this.syncingRenames.add(file.path);
-                        this.syncingRenames.add(oldOriginalMdPath);
-                        this.syncingRenames.add(currentMdPath);
-                        this.syncingRenames.add(nextMdPath);
-                        this.syncingRenames.add(currentApnotePath);
-                        this.syncingRenames.add(nextApnotePath);
-                        try {
-                            try {
-                                this.controller?.commitActiveStroke();
-                                await this.persistence?.flush();
-                            } catch (err) {
-                                console.error('[ApoloCanvas] Flush failed before bundle folder rename:', err);
-                            }
-                            if (this.mountedFilePath === oldOriginalMdPath || this.mountedFilePath === currentMdPath) {
-                                this.mountedFilePath = nextMdPath;
-                            }
-                            await this.persistence?.onFileRenamed(currentMdPath, nextMdPath);
-                            const movedMdFile = this.app.vault.getAbstractFileByPath(nextMdPath);
-                            if (movedMdFile instanceof TFile) {
-                                this.controller?.onFileRenamed(movedMdFile, oldOriginalMdPath);
-                            }
-                        } finally {
-                            this.syncingRenames.delete(oldPath);
-                            this.syncingRenames.delete(file.path);
-                            this.syncingRenames.delete(oldOriginalMdPath);
-                            this.syncingRenames.delete(currentMdPath);
-                            this.syncingRenames.delete(nextMdPath);
-                            this.syncingRenames.delete(currentApnotePath);
-                            this.syncingRenames.delete(nextApnotePath);
-                            this.scheduleFileExplorerCloaking();
-                        }
-                    }
-                } else {
-                    this.scheduleFileExplorerCloaking();
-                }
-                return;
-            }
-
-            if (!(file instanceof TFile)) return;
-            if (this.syncingRenames.has(oldPath) || this.syncingRenames.has(file.path)) return;
-
-            const parsedOld = parseSatelliteFilename(oldPath);
-            const parsedNew = parseSatelliteFilename(file.path);
-            const isPrimaryNoteOrTrigger =
-                (parsedOld && (parsedOld.kind === 'md' || parsedOld.kind === 'apnote')) ||
-                (parsedNew && (parsedNew.kind === 'md' || parsedNew.kind === 'apnote'));
-
-            if (!isPrimaryNoteOrTrigger) {
-                this.scheduleFileExplorerCloaking();
-                return;
-            }
-
-            let sourceForSync = oldPath;
-            let effectiveNewPath = file.path;
-            if (isInsideNoteBundleFolder(oldPath)) {
-                const oldSplit = splitNotePath(oldPath);
-                const newSplit = splitNotePath(file.path);
-                if (oldSplit.baseName === newSplit.baseName && !isInsideNoteBundleFolder(file.path) && newSplit.dir) {
-                    const newFolderName = newSplit.dir.slice(newSplit.dir.lastIndexOf('/') + 1);
-                    effectiveNewPath = `${newSplit.dir}/${newFolderName}.md`;
-                    if (await this.app.vault.adapter.exists(file.path)) {
-                        sourceForSync = file.path;
-                    }
-                } else if (oldSplit.dir === newSplit.dir && oldSplit.baseName !== newSplit.baseName) {
-                    const oldParentDir = oldSplit.dir.includes('/') ? oldSplit.dir.slice(0, oldSplit.dir.lastIndexOf('/')) : '';
-                    effectiveNewPath = `${oldParentDir ? `${oldParentDir}/` : ''}${newSplit.baseName}/${newSplit.baseName}.md`;
-                }
-            }
-
-            const parsedTarget = parseSatelliteFilename(effectiveNewPath);
-            const oldMdPath = parsedOld?.mdPath ?? oldPath;
-            const newMdPath = parsedTarget?.mdPath ?? effectiveNewPath;
-            const oldApnotePath = parsedOld?.apnotePath ?? getApnoteTriggerPath(oldPath);
-            const newApnotePath = parsedTarget?.apnotePath ?? getApnoteTriggerPath(effectiveNewPath);
-
-            this.syncingRenames.add(oldPath);
-            this.syncingRenames.add(file.path);
-            this.syncingRenames.add(sourceForSync);
-            this.syncingRenames.add(oldMdPath);
-            this.syncingRenames.add(newMdPath);
-            this.syncingRenames.add(oldApnotePath);
-            this.syncingRenames.add(newApnotePath);
-
-            try {
-                try {
-                    this.controller?.commitActiveStroke();
-                    await this.persistence?.flush();
-                } catch (err) {
-                    console.error('[ApoloCanvas] Flush failed before rename:', err);
-                }
-
-                if (effectiveNewPath !== file.path && (await this.app.vault.adapter.exists(file.path)) && !(await this.app.vault.adapter.exists(newMdPath))) {
-                    const targetDir = newMdPath.includes('/') ? newMdPath.slice(0, newMdPath.lastIndexOf('/')) : '';
-                    if (targetDir) {
-                        await ensureDirectory(this.app.vault.adapter, targetDir);
-                    }
-                    await this.app.vault.rename(file, newMdPath);
-                }
-
-                if (this.mountedFilePath === oldMdPath || this.mountedFilePath === oldPath || this.mountedFilePath === file.path) {
-                    this.mountedFilePath = newMdPath;
-                }
-
-                await this.persistence?.onFileRenamed(sourceForSync, newMdPath);
-
-                const movedMdFile = this.app.vault.getAbstractFileByPath(newMdPath);
-                if (movedMdFile instanceof TFile) {
-                    this.controller?.onFileRenamed(movedMdFile, oldMdPath);
-                } else {
-                    this.controller?.onFileRenamed(file, oldMdPath);
-                }
-            } finally {
-                this.syncingRenames.delete(oldPath);
-                this.syncingRenames.delete(file.path);
-                this.syncingRenames.delete(sourceForSync);
-                this.syncingRenames.delete(oldMdPath);
-                this.syncingRenames.delete(newMdPath);
-                this.syncingRenames.delete(oldApnotePath);
-                this.syncingRenames.delete(newApnotePath);
-                this.scheduleFileExplorerCloaking();
-            }
-        }));
-
-        // Vault note or .apnote deletion: clean up all note-local satellites atomically
-        this.registerEvent(this.app.vault.on('delete', async (file) => {
-            if (!(file instanceof TFile)) return;
-            if (this.syncingDeletes.has(file.path)) return;
-
-            const parsed = parseSatelliteFilename(file.path);
-            if (!parsed || (parsed.kind !== 'md' && parsed.kind !== 'apnote')) {
-                this.scheduleFileExplorerCloaking();
-                return;
-            }
-
-            this.syncingDeletes.add(parsed.mdPath);
-            this.syncingDeletes.add(parsed.apnotePath);
-            try {
-                if (this.mountedFilePath === parsed.mdPath || this.mountedFilePath === file.path) {
-                    await this.destroyController();
-                }
-                await this.persistence?.onFileDeleted(file.path);
-            } finally {
-                this.syncingDeletes.delete(parsed.mdPath);
-                this.syncingDeletes.delete(parsed.apnotePath);
-                this.scheduleFileExplorerCloaking();
-            }
-        }));
-
-        this.app.workspace.onLayoutReady(() => {
-            for (const f of this.app.vault.getFiles()) {
-                if (f.path.toLowerCase().endsWith('.apnote')) {
-                    registerKnownApnote(f.path);
-                }
-            }
-            this.ensureMakeMdIntegration();
-            this.redirectMakeMdBundleLeaves();
-            this.refreshFileExplorerCloaking();
-            void this.mountActiveEditor();
-            this.showFirstTimeNoticeIfNeeded();
-
-            void (async () => {
-                for (const f of this.app.vault.getFiles()) {
-                    if (f.path.toLowerCase().endsWith('.apnote')) {
-                        registerKnownApnote(f.path);
-                        if (!isInsideNoteBundleFolder(f.path)) {
-                            const targetMd = getBundledMdPath(f.path);
-                            this.syncingRenames.add(f.path);
-                            this.syncingRenames.add(targetMd);
-                            try {
-                                await ensureNoteInBundleFolder(this.app.vault, f.path);
-                            } catch (err) {
-                                console.warn('[ApoloCanvas] Bundle folder migration skipped for', f.path, err);
-                            } finally {
-                                this.syncingRenames.delete(f.path);
-                                this.syncingRenames.delete(targetMd);
-                            }
-                        }
-                    }
-                }
-                this.ensureMakeMdIntegration();
-                this.redirectMakeMdBundleLeaves();
-                this.scheduleFileExplorerCloaking();
-
-                // Redirect any .apnote tabs restored from Obsidian's workspace.json directly to their .md note
-                const apnoteLeaves = this.app.workspace.getLeavesOfType(APOLO_NOTE_VIEW_TYPE);
-                for (const leaf of apnoteLeaves) {
-                    const viewFile = (leaf.view as FileView | undefined)?.file;
-                    const stateFilePath = (leaf.getViewState()?.state as { file?: string } | undefined)?.file;
-                    const candidatePath = viewFile instanceof TFile ? viewFile.path : stateFilePath;
-                    if (!candidatePath) continue;
-                    const bundledApnotePath = !isInsideNoteBundleFolder(candidatePath)
-                        ? getApnoteTriggerPath(getBundledMdPath(candidatePath))
-                        : candidatePath;
-                    const targetApnote = this.app.vault.getAbstractFileByPath(candidatePath)
-                        ?? this.app.vault.getAbstractFileByPath(bundledApnotePath);
-                    if (targetApnote instanceof TFile) {
-                        void this.handleApnoteFileOpen(targetApnote, leaf);
-                    }
-                }
-            })();
-        });
-
-        // Direct click interception on File Explorer & Make.md bundle folders / .apnote items so notes open seamlessly in MarkdownView
-        if (typeof document !== 'undefined') {
-            this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-                if (evt.button !== 0 || evt.defaultPrevented) return;
-                const target = evt.target instanceof Element ? evt.target : null;
-                if (!target || target.closest('input')) return;
-                const inExplorer = Boolean(target.closest('.nav-files-container, .mk-path-tree'));
-                const titleEl = inExplorer
-                    ? target.closest<HTMLElement>('[data-path]')
-                    : target.closest<HTMLElement>('.nav-file-title[data-path], .nav-folder-title[data-path], .tree-item-self[data-path], .mk-tree-item[data-path]');
-                if (!titleEl || titleEl.classList.contains('is-being-renamed')) return;
-                const rawPath = titleEl.dataset.path || titleEl.getAttribute('data-path') || '';
-                if (!rawPath) return;
-
-                const bundle = resolveBundleFolderPaths(rawPath, this.app.vault);
-                if (bundle) {
-                    evt.preventDefault();
-                    evt.stopPropagation();
-                    evt.stopImmediatePropagation();
-                    registerKnownApnote(bundle.apnotePath);
-                    const leaf = this.app.workspace.getLeaf(Keymap.isModEvent(evt));
-                    const mdFile = this.app.vault.getAbstractFileByPath(bundle.mdPath);
-                    if (mdFile instanceof TFile) {
-                        void leaf.openFile(mdFile);
-                    } else {
-                        const apnoteFile = this.app.vault.getAbstractFileByPath(bundle.apnotePath);
-                        if (apnoteFile instanceof TFile) {
-                            void this.handleApnoteFileOpen(apnoteFile, leaf);
-                        }
-                    }
-                    return;
-                }
-
-                if (!rawPath.toLowerCase().endsWith('.apnote')) return;
-
-                const apnoteFile = this.app.vault.getAbstractFileByPath(rawPath);
-                if (!(apnoteFile instanceof TFile)) return;
-
-                evt.preventDefault();
-                evt.stopPropagation();
-                registerKnownApnote(apnoteFile.path);
-                const leaf = this.app.workspace.getLeaf(Keymap.isModEvent(evt));
-                void this.handleApnoteFileOpen(apnoteFile, leaf);
-            }, true);
-        }
 
         // App closing / tab hiding / lifecycle hooks: ensure immediate flush of all pending ink data
         this.registerDomEvent(window, 'beforeunload', () => {
@@ -853,215 +471,10 @@ export default class ApoloCanvasPlugin extends Plugin {
     }
 
     onunload(): void {
-        if (this.cleanupMakeMdBridge) {
-            this.cleanupMakeMdBridge();
-            this.cleanupMakeMdBridge = null;
-        }
-        if (this.cloakingRafId !== null && typeof cancelAnimationFrame === 'function') {
-            cancelAnimationFrame(this.cloakingRafId);
-            this.cloakingRafId = null;
-        }
-        if (this.explorerObserver) {
-            this.explorerObserver.disconnect();
-            this.explorerObserver = null;
-        }
-        if (typeof document !== 'undefined') {
-            removeFileExplorerCloaking(document);
-            const hiddenEmbeds = document.querySelectorAll('.apolo-fallback-embed-hidden');
-            for (let i = 0; i < hiddenEmbeds.length; i++) {
-                hiddenEmbeds[i].classList.remove('apolo-fallback-embed-hidden');
-            }
-        }
-        clearKnownApnotes();
+        this.apnoteWorkspace?.destroy();
+        this.apnoteWorkspace = null;
         void this.flushAndDestroy();
         console.log('[ApoloCanvas] Unloaded.');
-    }
-
-    private ensureMakeMdIntegration(): void {
-        if (this.isShuttingDown) return;
-        const makeMd = (this.app as unknown as {
-            plugins?: { plugins?: Record<string, { superstate?: { dispatchEvent?: (event: string, payload?: unknown) => void } }> };
-        })?.plugins?.plugins?.['make-md'];
-        if (!makeMd?.superstate) return;
-
-        if (!this.cleanupMakeMdBridge) {
-            this.cleanupMakeMdBridge = attachMakeMdBridge(this.app, this.app.vault);
-        } else if (syncMakeMdBundleState(this.app, this.app.vault)) {
-            makeMd.superstate.dispatchEvent?.('superstateUpdated', null);
-        }
-    }
-
-    private redirectMakeMdBundleLeaves(): void {
-        if (this.isShuttingDown) return;
-        for (const viewType of ['mk-space', 'mk-flow']) {
-            const leaves = this.app.workspace.getLeavesOfType(viewType);
-            for (const leaf of leaves) {
-                if (this.redirectingMakeMdLeaves.has(leaf)) continue;
-                const statePath = (leaf.getViewState()?.state as { path?: unknown } | undefined)?.path;
-                if (typeof statePath !== 'string' || !statePath) continue;
-                const bundle = resolveBundleFolderPaths(statePath, this.app.vault);
-                if (!bundle) continue;
-                const mdFile = this.app.vault.getAbstractFileByPath(bundle.mdPath);
-                if (!(mdFile instanceof TFile)) continue;
-                this.redirectingMakeMdLeaves.add(leaf);
-                void Promise.resolve(leaf.openFile(mdFile)).finally(() => {
-                    this.redirectingMakeMdLeaves.delete(leaf);
-                });
-            }
-        }
-    }
-
-    private scheduleFileExplorerCloaking(): void {
-        if (this.isShuttingDown || typeof document === 'undefined') return;
-        if (typeof requestAnimationFrame !== 'function') {
-            this.refreshFileExplorerCloaking();
-            return;
-        }
-        if (this.cloakingRafId !== null) return;
-        this.cloakingRafId = requestAnimationFrame(() => {
-            this.cloakingRafId = null;
-            this.refreshFileExplorerCloaking();
-        });
-    }
-
-    private refreshFileExplorerCloaking(): void {
-        if (this.isShuttingDown || typeof document === 'undefined') return;
-        this.ensureMakeMdIntegration();
-        applyFileExplorerCloaking(document, this.app.vault, this.app.workspace.getActiveFile()?.path);
-
-        if (typeof MutationObserver === 'undefined') return;
-        if (!this.explorerObserver) {
-            this.explorerObserver = new MutationObserver(() => {
-                this.scheduleFileExplorerCloaking();
-            });
-        }
-        const containers = document.querySelectorAll('.nav-files-container, .mk-path-tree, .view-header-title-container');
-        for (let i = 0; i < containers.length; i++) {
-            const container = containers[i];
-            if (!this.explorerObservedContainers.has(container)) {
-                this.explorerObservedContainers.add(container);
-                this.explorerObserver.observe(container, { childList: true, subtree: true });
-            }
-        }
-    }
-
-    async handleApnoteFileOpen(file: TFile, leaf: WorkspaceLeaf): Promise<void> {
-        try {
-            registerKnownApnote(file.path);
-            let bytes: ArrayBuffer;
-            if (typeof this.app.vault.readBinary === 'function') {
-                bytes = await this.app.vault.readBinary(file);
-            } else {
-                bytes = await this.app.vault.adapter.readBinary(file.path);
-            }
-
-            let targetMdPath = resolveMdFromTrigger(file.path);
-            if (isZipApnote(bytes)) {
-                const { baseName } = splitNotePath(file.path);
-                const bundleDir = getNoteBundleFolderPath(file.path);
-                targetMdPath = await importPortableApnote(this.app.vault, bytes, bundleDir, baseName);
-                const bundledApnotePath = `${bundleDir}/${baseName}.apnote`;
-                registerKnownApnote(getApnoteTriggerPath(targetMdPath));
-                if (file.path !== bundledApnotePath) {
-                    try {
-                        await this.app.vault.delete(file);
-                    } catch {
-                        if (await this.app.vault.adapter.exists(file.path)) {
-                            await this.app.vault.adapter.remove(file.path);
-                        }
-                    }
-                }
-                this.scheduleFileExplorerCloaking();
-                new Notice(`Apolo Canvas: Paquete .apnote importado (${baseName}).`);
-            } else if (typeof TextDecoder !== 'undefined') {
-                const rawText = new TextDecoder().decode(bytes);
-                const manifest = parseApnoteManifest(rawText);
-                if (manifest?.markdown) {
-                    const { dir } = splitNotePath(file.path);
-                    const manifestMd = normalizeVaultNotePath(dir ? `${dir}/${manifest.markdown}` : manifest.markdown);
-                    if (manifestMd.toLowerCase().endsWith('.md')) {
-                        targetMdPath = manifestMd;
-                    }
-                }
-            }
-
-            let targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
-            if (!(targetFile instanceof TFile)) {
-                await new Promise(resolve => setTimeout(resolve, 60));
-                targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
-            }
-            if (!(targetFile instanceof TFile)) {
-                if (await this.app.vault.adapter.exists(targetMdPath)) {
-                    await new Promise(resolve => setTimeout(resolve, 80));
-                    targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
-                } else {
-                    try {
-                        targetFile = await this.app.vault.create(targetMdPath, '');
-                    } catch {
-                        targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
-                    }
-                }
-            }
-
-            for (let i = 0; i < 30 && (leaf as { working?: boolean }).working; i++) {
-                await new Promise(resolve => setTimeout(resolve, 15));
-            }
-
-            if (targetFile instanceof TFile) {
-                await leaf.openFile(targetFile);
-                this.scheduleFileExplorerCloaking();
-            } else {
-                new Notice(`Apolo Canvas: No se encontró la nota Markdown asociada (${targetMdPath}).`);
-            }
-        } catch (err) {
-            console.error('[ApoloCanvas] Error opening .apnote file:', err);
-            new Notice('Apolo Canvas: No se pudo abrir el archivo .apnote.');
-        }
-    }
-
-    async exportNoteAsPortablePackage(targetFile?: TFile | null): Promise<void> {
-        let sourceFile = targetFile ?? this.app.workspace.getActiveViewOfType(MarkdownView)?.file ?? this.app.workspace.getActiveFile();
-        if (!sourceFile) {
-            new Notice('Apolo Canvas: Abre o selecciona una nota para exportar como .apnote.');
-            return;
-        }
-
-        const ext = sourceFile.extension.toLowerCase();
-        if (ext !== 'md' && ext !== 'apnote') {
-            new Notice('Apolo Canvas: Solo se pueden exportar notas Markdown o manifiestos .apnote.');
-            return;
-        }
-
-        const mdPath = ext === 'apnote' ? resolveMdFromTrigger(sourceFile.path) : sourceFile.path;
-        const { baseName } = splitNotePath(mdPath);
-
-        try {
-            this.controller?.commitActiveStroke();
-            await this.persistence?.flush();
-            const zipBuffer = await exportAsPortableApnote(this.app.vault, mdPath);
-
-            if (
-                typeof document !== 'undefined' &&
-                typeof Blob !== 'undefined' &&
-                typeof URL !== 'undefined' &&
-                typeof URL.createObjectURL === 'function'
-            ) {
-                const blob = new Blob([zipBuffer], { type: 'application/zip' });
-                const url = URL.createObjectURL(blob);
-                const anchor = document.createElement('a');
-                anchor.href = url;
-                anchor.download = `${baseName}.apnote`;
-                document.body.appendChild(anchor);
-                anchor.click();
-                anchor.remove();
-                window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-            }
-
-            new Notice(`Apolo Canvas: Paquete portátil ${baseName}.apnote exportado (${zipBuffer.byteLength} bytes).`);
-        } catch (err) {
-            console.error('[ApoloCanvas] Failed to export portable .apnote package:', err);
-            new Notice('Apolo Canvas: Error al exportar el paquete portátil .apnote.');
-        }
     }
 
     private showFirstTimeNoticeIfNeeded(): void {
@@ -1161,7 +574,6 @@ export default class ApoloCanvasPlugin extends Plugin {
     }
 
     setAutoSaveDelay(value: number): void { this.persistence?.setDebounceMs(value); }
-    setCompanionExport(value: boolean): void { this.persistence?.setCompanionSvgEnabled(value); }
     setShapeRecognition(value: boolean): void { this.controller?.setShapeRecognition(value); }
     setStraightenLines(value: boolean): void {
         this.settings.straightenLines = value;
@@ -1436,7 +848,7 @@ export default class ApoloCanvasPlugin extends Plugin {
             id: 'apolo-export-portable-apnote',
             name: 'Export note as portable .apnote package',
             callback: () => {
-                void this.exportNoteAsPortablePackage();
+                void this.apnoteWorkspace?.exportNoteAsPortablePackage();
             },
         });
 
@@ -1694,7 +1106,7 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.mountedScroller = scroller;
         this.mountedFilePath = file.path;
         this.mountedMode = mode;
-        this.scheduleFileExplorerCloaking();
+        this.apnoteWorkspace?.scheduleCloaking();
 
         if (mode === 'source') {
             this.applyWorkspaceToolStateToController(this.controller);
@@ -1925,17 +1337,6 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.enableMouseDrawing)
                 .onChange(async value => {
                     this.plugin.setMouseDrawing(value);
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Sincronización SVG satélite local')
-            .setDesc('Mantener archivos SVG satélites locales sincronizados junto a cada nota.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.companionSvgExport)
-                .onChange(async value => {
-                    this.plugin.settings.companionSvgExport = value;
-                    this.plugin.setCompanionExport(value);
                     await this.plugin.saveSettings();
                 }));
 
