@@ -31,7 +31,6 @@ import {
     getBoxSvgPath,
     getBundledMdPath,
     getGlobalInkPath,
-    getLegacyDotBoxSvgPath,
     isInsideNoteBundleFolder,
     isSatelliteFile,
     normalizeVaultNotePath,
@@ -400,28 +399,15 @@ export class PersistenceQueue {
             }
         }
 
-        // 4. Load boxes from <dir>/<BaseName>.<boxId>.svg (migrating legacy dot-prefixed files on read)
+        // 4. Load boxes from <dir>/<BaseName>.<boxId>.svg
         const boxElements: CanvasElement[] = [];
         const boxesMeta: Record<string, BoxMetadata> = {};
 
         for (const boxId of boxIds) {
             const boxSvgFile = getBoxSvgPath(filePath, boxId);
-            const legacyDotSvgFile = getLegacyDotBoxSvgPath(filePath, boxId);
-            const hasPrimary = await adapter.exists(boxSvgFile);
-            const sourceSvgFile = hasPrimary
-                ? boxSvgFile
-                : ((await adapter.exists(legacyDotSvgFile)) ? legacyDotSvgFile : null);
-            if (sourceSvgFile) {
+            if (await adapter.exists(boxSvgFile)) {
                 try {
-                    const rawSvg = await adapter.read(sourceSvgFile);
-                    if (!hasPrimary && sourceSvgFile === legacyDotSvgFile) {
-                        try {
-                            await this.writeIndexedFile(boxSvgFile, rawSvg);
-                            await adapter.remove(legacyDotSvgFile);
-                        } catch {
-                            // Best-effort auto-migration of legacy dotfile
-                        }
-                    }
+                    const rawSvg = await adapter.read(boxSvgFile);
                     const boxData = parseBoxSvg(rawSvg, boxId);
                     if (!boxData) continue;
 
@@ -688,22 +674,12 @@ export class PersistenceQueue {
             const boxSvgPath = getBoxSvgPath(split.mdPath, boxId);
             const boxSvgContent = renderBoxSvg(boxId, elements, 800, boxH, renderMeta);
             await this.writeIndexedFile(boxSvgPath, boxSvgContent);
-            const legacyDotPath = getLegacyDotBoxSvgPath(split.mdPath, boxId);
-            if (legacyDotPath !== boxSvgPath && (await adapter.exists(legacyDotPath))) {
-                try {
-                    await adapter.remove(legacyDotPath);
-                } catch {
-                    // Best-effort cleanup of superseded legacy dotfile
-                }
-            }
         }
 
-        // 6. Delete stale <BaseName>.<oldBoxId>.svg or legacy dot-prefixed files for removed boxes
+        // 6. Delete stale <BaseName>.<oldBoxId>.svg files for removed boxes
         for (const oldSvgPath of existingSvgPaths) {
             const parsed = parseSatelliteFilename(oldSvgPath);
-            const fileName = oldSvgPath.slice(oldSvgPath.lastIndexOf('/') + 1);
-            const isLegacyDot = fileName.startsWith('.');
-            if (parsed?.boxId && (!activeSafeIds.has(parsed.boxId) || isLegacyDot)) {
+            if (parsed?.boxId && !activeSafeIds.has(parsed.boxId)) {
                 try {
                     if (await adapter.exists(oldSvgPath)) {
                         await adapter.remove(oldSvgPath);

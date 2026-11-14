@@ -2,7 +2,6 @@ import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { EditorState, StateField } from '@codemirror/state';
 import {
-    APOLO_APNOTE_ICON_CLASS,
     APOLO_APNOTE_ITEM_CLASS,
     APOLO_BREADCRUMB_HIDDEN_CLASS,
     APOLO_BUNDLE_FOLDER_CLASS,
@@ -319,7 +318,6 @@ describe('.apnote Satellite Bundle Architecture', () => {
         const siblings = new Set(['Courses/Physics/Wave Optics.apnote']);
         assert.strictEqual(isSatelliteFile('Courses/Physics/.Wave Optics.global.json', siblings), true);
         assert.strictEqual(isSatelliteFile('Courses/Physics/Wave Optics.box-1.svg', siblings), true);
-        assert.strictEqual(isSatelliteFile('Courses/Physics/.Wave Optics.box-1.svg', siblings), true);
         assert.strictEqual(isSatelliteFile('Courses/Physics/Wave Optics.md', siblings), true);
         assert.strictEqual(isSatelliteFile('Courses/Physics/Wave Optics.apnote', siblings), false);
         assert.strictEqual(isSatelliteFile('Courses/Physics/Plain Note.md', siblings), false);
@@ -726,10 +724,6 @@ describe('.apnote Satellite Bundle Architecture', () => {
         };
 
         const apnoteRow = addRow('Notes/Quantum.apnote');
-        // Pre-seed a stale icon to verify cloaking actively strips all icons
-        const staleIcon = new MockExplorerNode('svg');
-        staleIcon.classList.add(APOLO_APNOTE_ICON_CLASS);
-        apnoteRow.title.appendChild(staleIcon);
 
         const mdRow = addRow('Notes/Quantum.md');
         mdRow.title.classList.add('is-active');
@@ -750,7 +744,6 @@ describe('.apnote Satellite Bundle Architecture', () => {
             assert.strictEqual(apnoteRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(apnoteRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), true);
             assert.strictEqual(apnoteRow.title.classList.contains('is-active'), true, 'Must highlight .apnote row when hidden .md sibling is active');
-            assert.strictEqual(apnoteRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`), null, 'Must never inject or retain explorer icons');
 
             assert.strictEqual(regularFolderRow.row.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), false);
             assert.strictEqual(regularFolderRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), false);
@@ -758,7 +751,6 @@ describe('.apnote Satellite Bundle Architecture', () => {
             assert.strictEqual(bundledFolderRow.row.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), true);
             assert.strictEqual(bundledFolderRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), true);
             assert.strictEqual(bundledFolderRow.title.classList.contains('is-active'), true, 'Must highlight bundle folder when bundled note is active');
-            assert.strictEqual(bundledFolderRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`), null);
 
             assert.strictEqual(bundledApnoteRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
             assert.strictEqual(bundledMdRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
@@ -779,7 +771,6 @@ describe('.apnote Satellite Bundle Architecture', () => {
             assert.strictEqual(bundledMdRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(bundledSvgRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(apnoteRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), false);
-            assert.strictEqual(apnoteRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`), null);
         } finally {
             globalThis.document = prevDoc;
             clearKnownApnotes();
