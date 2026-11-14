@@ -69,7 +69,6 @@ export class InputManager {
     private activeDrawingPointerId: number | null = null;
     private activeDrawingPointerType: 'pen' | 'mouse' | null = null;
     private activeBarrel = false;
-    private lastPointerDownTime = 0;
     private pointerDownStartPos: { x: number; y: number } | null = null;
     private readonly previousTouchAction: string;
     private readonly previousUserSelect: string;
@@ -170,7 +169,6 @@ export class InputManager {
             this.options.onPenHoverOrContact?.(event);
         }
 
-        this.lastPointerDownTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
         this.pointerDownStartPos = { x: event.clientX, y: event.clientY };
 
         if (this.isDrawingStart(event)) {
@@ -321,7 +319,6 @@ export class InputManager {
         this.activeDrawingPointerId = null;
         this.activeDrawingPointerType = null;
         this.activeBarrel = false;
-        this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
         if (event.pointerType === 'pen') this.lastPenContactAt = Date.now();
     };
@@ -344,7 +341,6 @@ export class InputManager {
         this.activeDrawingPointerId = null;
         this.activeDrawingPointerType = null;
         this.activeBarrel = false;
-        this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
         if (event.pointerType === 'pen') this.lastPenContactAt = Date.now();
         this.options.onStrokeCancel?.();
@@ -355,7 +351,6 @@ export class InputManager {
             this.activeDrawingPointerId = null;
             this.activeDrawingPointerType = null;
             this.activeBarrel = false;
-            this.lastPointerDownTime = 0;
             this.pointerDownStartPos = null;
             this.options.onStrokeCancel?.();
         }
@@ -387,7 +382,7 @@ export class InputManager {
             return;
         }
 
-        if (this.activeDrawingPointerId !== null) {
+        if (this.activeDrawingPointerId !== null && !this.activeBarrel) {
             this.cancelActiveDrawing();
         }
     };

@@ -3,8 +3,6 @@ import { EngineEventBus } from './core/events.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, StrokeFavoriteProfile, ShapeFavoriteProfile, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
 import { DEFAULT_WORKSPACE_TOOL_STATE, DEFAULT_STROKE_FAVORITE_PROFILES, DEFAULT_SHAPE_FAVORITE_PROFILES, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
 import {
-    computeFavoriteFingerprint,
-    findMatchingFavorite,
     getNextFavoritePreset,
     toggleFavoritePreset,
     removeFavoriteById,
@@ -19,19 +17,16 @@ import {
     deleteStrokeProfile,
     renameShapeProfile,
     deleteShapeProfile,
-    renameFavoritePreset,
     setCanonicalFavorites,
     getCanonicalFavorites,
     type ToolFavoritePreset,
-    type PenFavoritePreset,
-    type HighlighterFavoritePreset,
-    type ShapeFavoritePreset,
 } from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
-import { PersistenceQueue, renderBoxSvg } from './io/PersistenceQueue.ts';
-import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES } from './ui/theme.ts';
+import { PersistenceQueue, syncBoxPreviewSvg } from './io/PersistenceQueue.ts';
+import { createDotsIcon, DEFAULT_FAVORITES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
 import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
+import { ColorPaletteManager } from './ui/settings/ColorPaletteManager.ts';
 
 export interface ApoloCanvasSettings {
     defaultPenColor: string;
@@ -269,21 +264,8 @@ export default class ApoloCanvasPlugin extends Plugin {
                     if (id) {
                         const doc = this.controller?.getDocument() ?? (this.mountedFilePath ? this.persistence?.getDocument(this.mountedFilePath) : null);
                         const boxElements = doc?.elements.filter(e => e.blockId === `space:${id}`) || [];
-                        let previewSvgWrap = s.querySelector<HTMLElement>('.apolo-box-preview-svg');
-                        if (boxElements.length > 0) {
-                            if (!previewSvgWrap) {
-                                previewSvgWrap = document.createElement('div');
-                                previewSvgWrap.className = 'apolo-box-preview-svg';
-                                s.appendChild(previewSvgWrap);
-                            }
-                            const boxW = Math.round(s.clientWidth || s.offsetWidth || 800);
-                            const svgMarkup = renderBoxSvg(id, boxElements, boxW, h);
-                            const parsedSvg = createSvgFromMarkup(svgMarkup);
-                            previewSvgWrap.replaceChildren(parsedSvg);
-                            previewSvgWrap.dataset.apoloSvgHash = `${boxElements.length}:${boxW}:${h}`;
-                        } else if (previewSvgWrap) {
-                            previewSvgWrap.remove();
-                        }
+                        const boxW = Math.round(s.clientWidth || s.offsetWidth || 800);
+                        syncBoxPreviewSvg(s, id, boxElements, boxW, h, doc?.boxes?.[id]);
                     }
                 } else if (id) {
                     if (!existingOptions) {
@@ -530,6 +512,12 @@ export default class ApoloCanvasPlugin extends Plugin {
     applyWorkspaceToolStateToController(controller: CanvasController): void {
         if (this.settings.toolState) {
             controller.applyWorkspaceToolState(this.settings.toolState, true);
+        }
+    }
+
+    public syncActiveControllerToolState(): void {
+        if (this.controller && this.settings.toolState) {
+            this.controller.applyWorkspaceToolState(this.settings.toolState, true);
         }
     }
 
@@ -1028,13 +1016,13 @@ export default class ApoloCanvasPlugin extends Plugin {
                 onToggleFavorite: () => {
                     this.debouncedSaveSettings();
                 },
-                onApplyFavorite: (preset: ToolFavoritePreset) => {
+                onApplyFavorite: (_preset: ToolFavoritePreset) => {
                     this.debouncedSaveSettings();
                 },
-                onDeleteFavorite: (presetId: string) => {
+                onDeleteFavorite: (_presetId: string) => {
                     this.debouncedSaveSettings();
                 },
-                onReorderFavorites: (fromIndex: number, toIndex: number) => {
+                onReorderFavorites: (_fromIndex: number, _toIndex: number) => {
                     this.debouncedSaveSettings();
                 },
                 toolState: this.settings.toolState,
@@ -1207,10 +1195,17 @@ export default class ApoloCanvasPlugin extends Plugin {
 
 class ApoloCanvasSettingsTab extends PluginSettingTab {
     private readonly plugin: ApoloCanvasPlugin;
+    private colorPaletteManager?: ColorPaletteManager;
 
     constructor(app: App, plugin: ApoloCanvasPlugin) {
         super(app, plugin);
         this.plugin = plugin;
+    }
+
+    override hide(): void {
+        super.hide();
+        this.colorPaletteManager?.destroy();
+        this.colorPaletteManager = undefined;
     }
 
     display(): void {
@@ -1320,7 +1315,7 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Hold-to-snap (Formas automáticas)')
-            .setDesc('Líneas rectas y formas geométricas al mantener quieto 300 ms el trazo.')
+            .setDesc('Al mantener quieto el lápiz ~360 ms al final del trazo, se convierte en una forma editable (línea, flecha, rectángulo, elipse, triángulo o diamante).')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.shapeRecognition)
                 .onChange(async value => {
@@ -1392,6 +1387,11 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
             (id) => this.plugin.deleteShapeProfile(id),
             (name) => this.plugin.createShapeProfile(name),
         );
+
+        this.colorPaletteManager?.destroy();
+        this.colorPaletteManager = new ColorPaletteManager(this.plugin);
+        const paletteContainer = containerEl.createDiv();
+        this.colorPaletteManager.render(paletteContainer);
 
         containerEl.createEl('h3', { text: 'Cajas de Dibujo (Canvas)' });
 

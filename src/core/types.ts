@@ -28,7 +28,32 @@ export interface StrokeStyle {
     isHighlighter?: boolean;
 }
 
-export type ShapeType = 'line' | 'arrow' | 'rect' | 'rounded-rect' | 'ellipse' | 'triangle';
+export type BuiltInShapeType =
+    | 'line'
+    | 'arrow'
+    | 'rectangle'
+    | 'ellipse'
+    | 'triangle'
+    | 'diamond'
+    | 'hexagon'
+    | 'cylinder'
+    | 'blob'
+    | 'resistor'
+    | 'capacitor'
+    | 'power-source'
+    | 'ground'
+    | 'transistor-npn'
+    | 'transistor-pnp'
+    | 'transistor-mosfet'
+    | 'gate-and'
+    | 'gate-or'
+    | 'gate-not'
+    | 'gate-nand'
+    | 'gate-nor'
+    | 'gate-xor'
+    | 'gate-xnor';
+export type ShapeType = BuiltInShapeType | (string & {});
+export type ShapeFillPattern = 'solid' | 'hachure' | 'cross-hatch' | 'dots';
 
 export type ToolType = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'shape' | 'link';
 
@@ -80,9 +105,12 @@ export interface HighlighterFavoritePreset extends BaseFavoritePreset {
 export interface ShapeFavoritePreset extends BaseFavoritePreset {
     tool: 'shape';
     shapeType: ShapeType;
+    regularize?: boolean;
     fillEnabled?: boolean;
     fillColor?: string;
     fillOpacity?: number;
+    fillPattern?: ShapeFillPattern;
+    fillDensity?: number;
 }
 
 export type ToolFavoritePreset =
@@ -140,9 +168,12 @@ export interface WorkspaceToolState {
         width: number;
         opacity: number;
         pattern: StrokePattern;
+        regularize?: boolean;
         fillEnabled?: boolean;
         fillColor?: string;
         fillOpacity?: number;
+        fillPattern?: ShapeFillPattern;
+        fillDensity?: number;
         activeSlotIndex: number;
         palette: { colors: string[]; opacities: number[] };
     };
@@ -161,6 +192,250 @@ export interface WorkspaceToolState {
     shapeFavoriteProfiles: ShapeFavoriteProfile[];
     activeShapeProfileId: string;
     syncFavoriteProfiles: boolean;
+    colorCarousels?: WorkspaceColorCarousels;
+}
+
+export interface ColorProfileSlot {
+    color: string;
+    opacity: number; // 0..100
+}
+
+export interface ColorCarouselProfile {
+    id: string;
+    name?: string;
+    slots: ColorProfileSlot[];
+}
+
+export interface ColorCarouselContextState {
+    recentColors: ColorProfileSlot[];
+    profiles: ColorCarouselProfile[];
+}
+
+export interface WorkspaceColorCarousels {
+    pen: ColorCarouselContextState;
+    highlighter: ColorCarouselContextState;
+    shapeStroke: ColorCarouselContextState;
+    shapeFill: ColorCarouselContextState;
+    globalProfiles?: ColorCarouselProfile[];
+}
+
+export const DEFAULT_WORKSPACE_COLOR_CAROUSELS: WorkspaceColorCarousels = {
+    globalProfiles: [],
+    pen: {
+        recentColors: [
+            { color: '#E53935', opacity: 100 },
+            { color: '#FFA726', opacity: 100 },
+            { color: '#FFEE58', opacity: 100 },
+            { color: '#26A69A', opacity: 100 },
+            { color: '#1E88E5', opacity: 100 },
+            { color: '#7E57C2', opacity: 100 },
+        ],
+        profiles: [
+            {
+                id: 'pen-profile-1',
+                name: 'Primarios',
+                slots: [
+                    { color: '#E53935', opacity: 100 },
+                    { color: '#FFA726', opacity: 100 },
+                    { color: '#FFEE58', opacity: 100 },
+                    { color: '#26A69A', opacity: 100 },
+                    { color: '#1E88E5', opacity: 100 },
+                    { color: '#7E57C2', opacity: 100 },
+                ],
+            },
+            {
+                id: 'pen-profile-2',
+                name: 'Intensos',
+                slots: [
+                    { color: '#D32F2F', opacity: 100 },
+                    { color: '#C2185B', opacity: 100 },
+                    { color: '#7B1FA2', opacity: 100 },
+                    { color: '#512DA8', opacity: 100 },
+                    { color: '#1976D2', opacity: 100 },
+                    { color: '#0097A7', opacity: 100 },
+                ],
+            },
+            {
+                id: 'pen-profile-3',
+                name: 'Monocromo',
+                slots: [
+                    { color: '#212121', opacity: 100 },
+                    { color: '#424242', opacity: 100 },
+                    { color: '#616161', opacity: 100 },
+                    { color: '#9E9E9E', opacity: 100 },
+                    { color: '#E0E0E0', opacity: 100 },
+                    { color: '#FFFFFF', opacity: 100 },
+                ],
+            },
+        ],
+    },
+    highlighter: {
+        recentColors: [
+            { color: '#FDD835', opacity: 75 },
+            { color: '#43A047', opacity: 75 },
+            { color: '#00ACC1', opacity: 75 },
+            { color: '#1E88E5', opacity: 75 },
+            { color: '#8E24AA', opacity: 75 },
+            { color: '#E91E63', opacity: 75 },
+        ],
+        profiles: [
+            {
+                id: 'hl-profile-1',
+                name: 'Neón',
+                slots: [
+                    { color: '#FDD835', opacity: 75 },
+                    { color: '#43A047', opacity: 75 },
+                    { color: '#00ACC1', opacity: 75 },
+                    { color: '#1E88E5', opacity: 75 },
+                    { color: '#8E24AA', opacity: 75 },
+                    { color: '#E91E63', opacity: 75 },
+                ],
+            },
+            {
+                id: 'hl-profile-2',
+                name: 'Suaves',
+                slots: [
+                    { color: '#FFEE58', opacity: 75 },
+                    { color: '#66BB6A', opacity: 75 },
+                    { color: '#26C6DA', opacity: 75 },
+                    { color: '#42A5F5', opacity: 75 },
+                    { color: '#AB47BC', opacity: 75 },
+                    { color: '#EC407A', opacity: 75 },
+                ],
+            },
+            {
+                id: 'hl-profile-3',
+                name: 'Pasteles',
+                slots: [
+                    { color: '#FFF59D', opacity: 75 },
+                    { color: '#A5D6A7', opacity: 75 },
+                    { color: '#80DEEA', opacity: 75 },
+                    { color: '#90CAF9', opacity: 75 },
+                    { color: '#CE93D8', opacity: 75 },
+                    { color: '#F48FB1', opacity: 75 },
+                ],
+            },
+        ],
+    },
+    shapeStroke: {
+        recentColors: [
+            { color: '#E53935', opacity: 100 },
+            { color: '#FFA726', opacity: 100 },
+            { color: '#FFEE58', opacity: 100 },
+            { color: '#26A69A', opacity: 100 },
+            { color: '#1E88E5', opacity: 100 },
+            { color: '#7E57C2', opacity: 100 },
+        ],
+        profiles: [
+            {
+                id: 'shape-stroke-1',
+                name: 'Básicos',
+                slots: [
+                    { color: '#E53935', opacity: 100 },
+                    { color: '#FFA726', opacity: 100 },
+                    { color: '#FFEE58', opacity: 100 },
+                    { color: '#26A69A', opacity: 100 },
+                    { color: '#1E88E5', opacity: 100 },
+                    { color: '#7E57C2', opacity: 100 },
+                ],
+            },
+            {
+                id: 'shape-stroke-2',
+                name: 'Profundos',
+                slots: [
+                    { color: '#D32F2F', opacity: 100 },
+                    { color: '#C2185B', opacity: 100 },
+                    { color: '#7B1FA2', opacity: 100 },
+                    { color: '#512DA8', opacity: 100 },
+                    { color: '#1976D2', opacity: 100 },
+                    { color: '#0097A7', opacity: 100 },
+                ],
+            },
+            {
+                id: 'shape-stroke-3',
+                name: 'Monocromo',
+                slots: [
+                    { color: '#212121', opacity: 100 },
+                    { color: '#424242', opacity: 100 },
+                    { color: '#616161', opacity: 100 },
+                    { color: '#9E9E9E', opacity: 100 },
+                    { color: '#E0E0E0', opacity: 100 },
+                    { color: '#FFFFFF', opacity: 100 },
+                ],
+            },
+        ],
+    },
+    shapeFill: {
+        recentColors: [
+            { color: '#E53935', opacity: 50 },
+            { color: '#FFA726', opacity: 50 },
+            { color: '#FFEE58', opacity: 50 },
+            { color: '#26A69A', opacity: 50 },
+            { color: '#1E88E5', opacity: 50 },
+            { color: '#7E57C2', opacity: 50 },
+        ],
+        profiles: [
+            {
+                id: 'shape-fill-1',
+                name: 'Translúcidos',
+                slots: [
+                    { color: '#E53935', opacity: 50 },
+                    { color: '#FFA726', opacity: 50 },
+                    { color: '#FFEE58', opacity: 50 },
+                    { color: '#26A69A', opacity: 50 },
+                    { color: '#1E88E5', opacity: 50 },
+                    { color: '#7E57C2', opacity: 50 },
+                ],
+            },
+            {
+                id: 'shape-fill-2',
+                name: 'Suaves',
+                slots: [
+                    { color: '#FFCDD2', opacity: 30 },
+                    { color: '#F8BBD0', opacity: 30 },
+                    { color: '#E1BEE7', opacity: 30 },
+                    { color: '#D1C4E9', opacity: 30 },
+                    { color: '#BBDEFB', opacity: 30 },
+                    { color: '#B2EBF2', opacity: 30 },
+                ],
+            },
+            {
+                id: 'shape-fill-3',
+                name: 'Intensos',
+                slots: [
+                    { color: '#D32F2F', opacity: 70 },
+                    { color: '#C2185B', opacity: 70 },
+                    { color: '#7B1FA2', opacity: 70 },
+                    { color: '#512DA8', opacity: 70 },
+                    { color: '#1976D2', opacity: 70 },
+                    { color: '#0097A7', opacity: 70 },
+                ],
+            },
+        ],
+    },
+};
+
+export function cloneColorCarousels(source?: WorkspaceColorCarousels): WorkspaceColorCarousels {
+    const src = source ?? DEFAULT_WORKSPACE_COLOR_CAROUSELS;
+    const cloneProfile = (p: ColorCarouselProfile): ColorCarouselProfile => ({
+        id: p.id,
+        name: p.name,
+        slots: (p.slots ?? []).map(s => ({ color: s.color, opacity: s.opacity })),
+    });
+    const cloneContext = (ctx?: ColorCarouselContextState, fallbackCtx?: ColorCarouselContextState): ColorCarouselContextState => {
+        const c = ctx ?? fallbackCtx ?? { recentColors: [], profiles: [] };
+        return {
+            recentColors: (c.recentColors ?? []).map(s => ({ color: s.color, opacity: s.opacity })),
+            profiles: (c.profiles ?? []).filter(p => p.slots && p.slots.length > 0).map(cloneProfile),
+        };
+    };
+    return {
+        pen: cloneContext(src.pen, DEFAULT_WORKSPACE_COLOR_CAROUSELS.pen),
+        highlighter: cloneContext(src.highlighter, DEFAULT_WORKSPACE_COLOR_CAROUSELS.highlighter),
+        shapeStroke: cloneContext(src.shapeStroke, DEFAULT_WORKSPACE_COLOR_CAROUSELS.shapeStroke),
+        shapeFill: cloneContext(src.shapeFill, DEFAULT_WORKSPACE_COLOR_CAROUSELS.shapeFill),
+        globalProfiles: (src.globalProfiles ?? []).filter(p => p.slots && p.slots.length > 0).map(cloneProfile),
+    };
 }
 
 export type FavoriteTool = 'pen' | 'highlighter' | 'shape';
@@ -310,9 +585,12 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
         width: 3,
         opacity: 1,
         pattern: 'solid',
+        regularize: false,
         fillEnabled: false,
         fillColor: '',
-        fillOpacity: 1,
+        fillOpacity: 0.2,
+        fillPattern: 'solid',
+        fillDensity: 3,
         activeSlotIndex: 0,
         palette: {
             colors: ['#2F6BFF', '#111827', '#FFA726', '#10B981'],
@@ -346,6 +624,7 @@ export const DEFAULT_WORKSPACE_TOOL_STATE: WorkspaceToolState = {
     ],
     activeShapeProfileId: 'general',
     syncFavoriteProfiles: false,
+    colorCarousels: cloneColorCarousels(DEFAULT_WORKSPACE_COLOR_CAROUSELS),
 };
 syncLegacyFavoritesSlice(DEFAULT_WORKSPACE_TOOL_STATE);
 
@@ -496,9 +775,12 @@ export function hydrateFromSavedState(
             width: saved.shape?.width ?? fallback.shape.width,
             opacity: saved.shape?.opacity ?? fallback.shape.opacity,
             pattern: saved.shape?.pattern ?? fallback.shape.pattern,
+            regularize: saved.shape?.regularize ?? fallback.shape.regularize ?? false,
             fillEnabled: saved.shape?.fillEnabled ?? fallback.shape.fillEnabled,
             fillColor: saved.shape?.fillColor ?? fallback.shape.fillColor,
             fillOpacity: saved.shape?.fillOpacity ?? fallback.shape.fillOpacity,
+            fillPattern: saved.shape?.fillPattern ?? fallback.shape.fillPattern ?? 'solid',
+            fillDensity: saved.shape?.fillDensity ?? fallback.shape.fillDensity ?? 3,
             activeSlotIndex: saved.shape?.activeSlotIndex ?? fallback.shape.activeSlotIndex,
             palette: {
                 colors: saved.shape?.palette?.colors?.length === 4
@@ -528,6 +810,7 @@ export function hydrateFromSavedState(
         shapeFavoriteProfiles: shapeProfiles,
         activeShapeProfileId: activeShapeId,
         syncFavoriteProfiles: Boolean(saved.syncFavoriteProfiles ?? fallback.syncFavoriteProfiles ?? false),
+        colorCarousels: cloneColorCarousels(saved.colorCarousels ?? fallback.colorCarousels),
     };
 
     // Attach dynamic read-only getter and self-healing setter projection
@@ -600,9 +883,12 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
             width: state.shape.width,
             opacity: state.shape.opacity,
             pattern: state.shape.pattern,
+            regularize: state.shape.regularize,
             fillEnabled: state.shape.fillEnabled,
             fillColor: state.shape.fillColor,
             fillOpacity: state.shape.fillOpacity,
+            fillPattern: state.shape.fillPattern,
+            fillDensity: state.shape.fillDensity ?? 3,
             activeSlotIndex: state.shape.activeSlotIndex,
             palette: {
                 colors: [...state.shape.palette.colors],
@@ -628,6 +914,7 @@ export function cloneWorkspaceToolState(state: WorkspaceToolState): WorkspaceToo
         shapeFavoriteProfiles: shapeProfiles,
         activeShapeProfileId: activeShapeId,
         syncFavoriteProfiles: Boolean(state.syncFavoriteProfiles),
+        colorCarousels: cloneColorCarousels(state.colorCarousels),
     };
 
     // Attach dynamic read-only getter and self-healing setter projection
@@ -672,6 +959,27 @@ export interface StrokeElement extends InkElementBase {
     cacheCanvas?: HTMLCanvasElement;
 }
 
+export type PathNodeKind = 'sharp' | 'smooth' | 'symmetric';
+
+export interface ShapePathNode {
+    /** Anchor point in world/normalized coordinates */
+    x: number;
+    y: number;
+    /** Optional incoming cubic Bezier tangent control point (absolute coords) */
+    handleIn?: { x: number; y: number } | null;
+    /** Optional outgoing cubic Bezier tangent control point (absolute coords) */
+    handleOut?: { x: number; y: number } | null;
+    /** Node continuity mode: 'sharp' (cusp/corner), 'smooth' (collinear tangents), 'symmetric' (equal length collinear tangents) */
+    nodeKind?: PathNodeKind;
+}
+
+export interface ShapeCustomParams {
+    /** Cylinder top-cap vertical aspect ratio (default 0.22, range 0.08..0.48) */
+    capRatio?: number;
+    /** Hexagon horizontal bevel inset ratio (default 0.25, range 0.10..0.50) */
+    bevelRatio?: number;
+}
+
 export interface ShapeElement extends InkElementBase {
     type: 'shape';
     shapeType: ShapeType;
@@ -681,8 +989,41 @@ export interface ShapeElement extends InkElementBase {
     endY: number;           // v1 normalized by column width
     style: StrokeStyle;
     fillColor?: string;
-    rotation?: number;      // Radians
+    fillEnabled?: boolean;
+    fillOpacity?: number;
+    fillPattern?: ShapeFillPattern;
+    fillDensity?: number;
+    regularize?: boolean;
+    rotation?: number;      // Radians clockwise around center
+    // Parametric edits (all normalized by column width, like startX..endY)
+    cornerRadius?: number;  // Rectangle corner radius, 0..min(w, h) / 2
+    controlPoint?: NormalizedShapePoint; // Quadratic Bezier control point for curved 'line' / 'arrow'
+    vertices?: NormalizedShapePoint[];   // Independent vertex overrides (e.g. 3 detached triangle vertices)
+    pathNodes?: ShapePathNode[];        // Multi-segment straight/curved Bezier path nodes (normalized)
+    shapeParams?: ShapeCustomParams;    // Custom shape parametric modifiers (capRatio, bevelRatio)
+    // Magnetic auto-connect ('line' / 'arrow' only): endpoint glued to a port of another shape
+    startBinding?: ShapeConnectorBinding | null;
+    endBinding?: ShapeConnectorBinding | null;
     bounds: BoundingBox;    // Normalized bounds: minU, minV, maxU, maxV
+}
+
+export interface NormalizedShapePoint {
+    x: number;
+    y: number;
+}
+
+/** Magnetic snap ports exposed by shapes ('start' / 'end' for linear shapes). */
+export type ShapePortId =
+    | 'n' | 's' | 'e' | 'w' | 'center'
+    | 'v0' | 'v1' | 'v2'
+    | 'start' | 'end'
+    | 'base' | 'collector' | 'emitter'
+    | 'gate' | 'drain' | 'source'
+    | 'in' | 'in1' | 'in2' | 'out';
+
+export interface ShapeConnectorBinding {
+    elementId: string;
+    portId: string;
 }
 
 export type CanvasElement = StrokeElement | ShapeElement;
@@ -734,11 +1075,24 @@ export function cloneElements(elements: readonly CanvasElement[]): CanvasElement
                 bounds: { ...el.bounds },
             };
         } else {
-            return {
+            const shape: ShapeElement = {
                 ...el,
                 style: { ...el.style },
                 bounds: { ...el.bounds },
             };
+            if (el.controlPoint) shape.controlPoint = { ...el.controlPoint };
+            if (el.vertices) shape.vertices = el.vertices.map(v => ({ ...v }));
+            if (el.shapeParams) shape.shapeParams = { ...el.shapeParams };
+            if (el.pathNodes) {
+                shape.pathNodes = el.pathNodes.map(n => ({
+                    ...n,
+                    handleIn: n.handleIn ? { ...n.handleIn } : n.handleIn,
+                    handleOut: n.handleOut ? { ...n.handleOut } : n.handleOut,
+                }));
+            }
+            if (el.startBinding) shape.startBinding = { ...el.startBinding };
+            if (el.endBinding) shape.endBinding = { ...el.endBinding };
+            return shape;
         }
     });
 }

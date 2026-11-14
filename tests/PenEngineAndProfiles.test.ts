@@ -9,148 +9,16 @@ import {
 } from '../src/engine/PatternedStrokeRenderer.ts';
 import { getPenPlugin } from '../src/engine/pens/index.ts';
 import type { PenProfileId, Point, StrokeStyle } from '../src/core/types.ts';
+import { setupMockDom } from './helpers/mockDom.ts';
 
-function createMockEnvironment() {
-    const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
-    const mockWindow = {
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: null,
-        addEventListener: (event: string, listener: Function, options?: any) => {
-            if (!listeners.has(event)) listeners.set(event, []);
-            listeners.get(event)!.push({ listener, options });
-        },
-        removeEventListener: (event: string, listener: Function) => {
-            const list = listeners.get(event);
-            if (list) {
-                const idx = list.findIndex(item => item.listener === listener);
-                if (idx !== -1) list.splice(idx, 1);
-            }
-        },
-        dispatch: (event: string, evObj: any) => {
-            const list = listeners.get(event) || [];
-            for (const item of [...list]) {
-                item.listener(evObj);
-            }
-        },
-    };
-
-    const createElement = (tag: string) => {
-        const children: any[] = [];
-        const classes = new Set<string>();
-        const attributes = new Map<string, string>();
-        const elementListeners = new Map<string, Function[]>();
-        const styleObj: any = {
-            display: '',
-            zIndex: '',
-            position: '',
-            left: '',
-            top: '',
-            width: '',
-            height: '',
-            transform: '',
-            transformOrigin: '',
-            setProperty: (k: string, v: string) => { styleObj[k] = v; },
-            getPropertyValue: (k: string) => styleObj[k] ?? '',
-        };
-        const el: any = {
-            tagName: tag.toUpperCase(),
-            style: styleObj,
-            dataset: {},
-            hidden: false,
-            className: '',
-            children,
-            title: '',
-            type: '',
-            value: '',
-            classList: {
-                add: (...items: string[]) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    for (const item of items) set.add(item);
-                    el.className = [...set].join(' ');
-                },
-                remove: (...items: string[]) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    for (const item of items) set.delete(item);
-                    el.className = [...set].join(' ');
-                },
-                contains: (c: string) => el.className.split(/\s+/).filter(Boolean).includes(c),
-                toggle: (c: string, force?: boolean) => {
-                    const set = new Set(el.className.split(/\s+/).filter(Boolean));
-                    const next = force !== undefined ? force : !set.has(c);
-                    if (next) set.add(c); else set.delete(c);
-                    el.className = [...set].join(' ');
-                    return next;
-                },
-            },
-            setAttribute: (k: string, v: string) => { attributes.set(k, String(v)); },
-            getAttribute: (k: string) => attributes.get(k) ?? null,
-            hasAttribute: (k: string) => attributes.has(k),
-            removeAttribute: (k: string) => { attributes.delete(k); },
-            appendChild: (child: any) => { children.push(child); child.parentElement = el; return child; },
-            append: (...args: any[]) => { children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            replaceChildren: (...args: any[]) => { children.length = 0; children.push(...args); for (const c of args) if (c) c.parentElement = el; },
-            remove: () => {
-                if (el.parentElement?.children) {
-                    const idx = el.parentElement.children.indexOf(el);
-                    if (idx !== -1) el.parentElement.children.splice(idx, 1);
-                }
-            },
-            contains: (target: any) => target === el || children.some(c => c === target || c?.contains?.(target)),
-            addEventListener: (type: string, fn: Function) => {
-                if (!elementListeners.has(type)) elementListeners.set(type, []);
-                elementListeners.get(type)!.push(fn);
-            },
-            removeEventListener: (type: string, fn: Function) => {
-                const list = elementListeners.get(type);
-                if (list) {
-                    const idx = list.indexOf(fn);
-                    if (idx !== -1) list.splice(idx, 1);
-                }
-            },
-            dispatch: (ev: any) => {
-                const list = elementListeners.get(ev.type) || [];
-                for (const fn of list) fn(ev);
-                return true;
-            },
-            closest: (sel: string) => {
-                if (sel.includes('data-apolo-popover-trigger') && attributes.has('data-apolo-popover-trigger')) {
-                    return el;
-                }
-                return null;
-            },
-            getBoundingClientRect: () => ({ left: 200, top: 100, right: 244, bottom: 144, width: 44, height: 44 }),
-            querySelectorAll: (sel: string) => {
-                const matches: any[] = [];
-                const check = (node: any) => {
-                    if (sel.includes('button') && node.tagName === 'BUTTON') matches.push(node);
-                    for (const c of node.children || []) check(c);
-                };
-                check(el);
-                return matches;
-            },
-        };
-        return el;
-    };
-
-    const mockDocument = {
-        body: createElement('body'),
-        createElement,
-        createElementNS: (_ns: string, tag: string) => createElement(tag),
-        elementsFromPoint: () => [],
-    };
-
-    return { mockWindow, mockDocument };
-}
+const PEN_DOM_OPTS = {
+    defaultRect: { left: 200, top: 100, right: 244, bottom: 144, width: 44, height: 44 },
+};
 
 describe('Pen Engine, Profiles & Ruler Mode with Magnetic Snapping', () => {
 
     test('Pen estuche displays fountain, calli, ball, pencil profiles and not hlr', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(PEN_DOM_OPTS);
 
         try {
             const popoverController = new PopoverController();
@@ -249,17 +117,12 @@ describe('Pen Engine, Profiles & Ruler Mode with Magnetic Snapping', () => {
             estuche.destroy();
             popoverController.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 
     test('Selecting dashed or dotted in ToolEstuche updates StrokeStyle pattern', () => {
-        const { mockWindow, mockDocument } = createMockEnvironment();
-        const prevWin = (globalThis as any).window;
-        const prevDoc = (globalThis as any).document;
-        (globalThis as any).window = mockWindow;
-        (globalThis as any).document = mockDocument;
+        const { mockDoc: mockDocument, teardown } = setupMockDom(PEN_DOM_OPTS);
 
         try {
             const popoverController = new PopoverController();
@@ -365,8 +228,7 @@ describe('Pen Engine, Profiles & Ruler Mode with Magnetic Snapping', () => {
             estuche.destroy();
             popoverController.destroy();
         } finally {
-            (globalThis as any).window = prevWin;
-            (globalThis as any).document = prevDoc;
+            teardown();
         }
     });
 

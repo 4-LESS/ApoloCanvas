@@ -146,4 +146,14 @@ describe('SmartAnchor - findBestMatchingPreviewBlock', () => {
         const matched = findBestMatchingPreviewBlock(blocks, 'Si', 10);
         assert.strictEqual(matched, mockEl2, 'Must match exact "Si", not "El diseño..."');
     });
+
+    test('returns null for out-of-range lines with no text match instead of collapsing onto nearest block', () => {
+        const mockSpace = { id: 'space-0' } as unknown as HTMLElement;
+        const blocks: PreviewBlockInfo[] = [
+            { el: mockSpace, start: 0, end: 0, text: '' },
+        ];
+
+        const matched = findBestMatchingPreviewBlock(blocks, '<div class="apolo-space-block"></div>', 15);
+        assert.strictEqual(matched, null, 'Out-of-range line without text match must return null so line-offset interpolation runs');
+    });
 });

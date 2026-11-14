@@ -90,7 +90,7 @@ export class LinkSuggestModal extends SuggestModal<LinkItem> {
         }
     }
 
-    async onChooseSuggestion(item: LinkItem, evt: MouseEvent | KeyboardEvent): Promise<void> {
+    async onChooseSuggestion(item: LinkItem, _evt: MouseEvent | KeyboardEvent): Promise<void> {
         if (item.file) {
             this.onChoose(item.file.basename);
             return;

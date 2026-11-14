@@ -1,31 +1,12 @@
-import type { BoundingBox, CanvasElement, Point, ShapeElement, StrokeElement } from '../../core/types.ts';
+import type { Point, ShapeElement, StrokeElement } from '../../core/types.ts';
+import {
+    distToSegmentSquared,
+    getShapePlugin,
+    sampleLinearPath,
+    shapeElementToGeometry,
+} from '../shapes/index.ts';
 
-/**
- * Calculates squared distance from a point to a 2D line segment.
- */
-export function distToSegmentSquared(
-    px: number,
-    py: number,
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-): number {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq === 0) {
-        const ex = px - x1;
-        const ey = py - y1;
-        return ex * ex + ey * ey;
-    }
-    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
-    const projX = x1 + t * dx;
-    const projY = y1 + t * dy;
-    const ex = px - projX;
-    const ey = py - projY;
-    return ex * ex + ey * ey;
-}
+export { distToSegmentSquared };
 
 /**
  * Checks whether two 2D line segments intersect.
@@ -169,42 +150,25 @@ export function shapeHitDoc(
 ): boolean {
     if (eraser.length === 0) return false;
 
-    const startX = contentLeft + shape.startX * contentWidth;
-    const startY = blockTop + shape.startY * contentWidth;
-    const endX = contentLeft + shape.endX * contentWidth;
-    const endY = blockTop + shape.endY * contentWidth;
-
+    const plugin = getShapePlugin(shape.shapeType);
+    const geom = shapeElementToGeometry(shape, contentLeft, blockTop, contentWidth);
+    const path = plugin.id === 'line' || plugin.id === 'arrow'
+        ? sampleLinearPath(plugin.normalizeGeometry(geom))
+        : null;
     const effectiveRadius = radius + (shape.style.width || 2) / 2;
     const effectiveRadiusSq = effectiveRadius * effectiveRadius;
 
-    // Line and arrow: test against the central line segment
-    if (shape.shapeType === 'line' || shape.shapeType === 'arrow') {
-        for (let j = 0; j < eraser.length; j++) {
-            const ep = eraser[j];
-            if (distToSegmentSquared(ep.x, ep.y, startX, startY, endX, endY) <= effectiveRadiusSq) {
-                return true;
-            }
-            if (j > 0) {
-                const prev = eraser[j - 1];
-                if (minDistanceBetweenSegmentsSquared(startX, startY, endX, endY, prev.x, prev.y, ep.x, ep.y) <= effectiveRadiusSq) {
+    for (let j = 0; j < eraser.length; j++) {
+        if (plugin.hitTest(geom, eraser[j], effectiveRadius)) {
+            return true;
+        }
+        if (j > 0 && path) {
+            const prev = eraser[j - 1];
+            for (let k = 1; k < path.length; k++) {
+                if (minDistanceBetweenSegmentsSquared(path[k - 1].x, path[k - 1].y, path[k].x, path[k].y, prev.x, prev.y, eraser[j].x, eraser[j].y) <= effectiveRadiusSq) {
                     return true;
                 }
             }
-        }
-        return false;
-    }
-
-    // Rect, Ellipse, Triangle: test perimeter segments and inside bounds
-    const rxMin = Math.min(startX, endX);
-    const rxMax = Math.max(startX, endX);
-    const ryMin = Math.min(startY, endY);
-    const ryMax = Math.max(startY, endY);
-
-    for (let j = 0; j < eraser.length; j++) {
-        const ep = eraser[j];
-        if (ep.x >= rxMin - effectiveRadius && ep.x <= rxMax + effectiveRadius &&
-            ep.y >= ryMin - effectiveRadius && ep.y <= ryMax + effectiveRadius) {
-            return true;
         }
     }
 

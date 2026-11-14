@@ -233,16 +233,5 @@ export function findBestMatchingPreviewBlock(
         }
     }
 
-    // 3. Nearest block by line distance
-    let nearest: HTMLElement | null = null;
-    let minLineDiff = Number.POSITIVE_INFINITY;
-    for (const b of blocks) {
-        const diff = Math.min(Math.abs(b.start - expectedLine), Math.abs(b.end - expectedLine));
-        if (diff < minLineDiff) {
-            minLineDiff = diff;
-            nearest = b.el;
-        }
-    }
-
-    return nearest;
+    return null;
 }

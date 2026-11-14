@@ -1,6 +1,5 @@
 import test, { describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { ToolEstuche, type ToolEstucheState, type ToolEstucheCallbacks } from '../src/ui/ToolEstuche.ts';
 import {
     createFavoritePreset,
     toggleFavoritePreset,
@@ -18,7 +17,7 @@ import {
     cloneWorkspaceToolState,
     type WorkspaceToolState,
 } from '../src/core/types.ts';
-import { setupMockDom } from './helpers/mockDom.ts';
+import { createTestEstuche, setupMockDom } from './helpers/mockDom.ts';
 
 describe('ToolEstuche Favorites Integration (Task 3 of 4)', () => {
     let cleanup: () => void;
@@ -31,56 +30,6 @@ describe('ToolEstuche Favorites Integration (Task 3 of 4)', () => {
     afterEach(() => {
         cleanup?.();
     });
-
-    function createTestEstuche(initialOverrides?: Partial<ToolEstucheState>, callbackOverrides?: Partial<ToolEstucheCallbacks>) {
-        const root = (globalThis as any).document.createElement('div');
-        const state: ToolEstucheState = {
-            tool: 'pen',
-            slot: 'tc',
-            color: '#1F4FD8',
-            width: 3,
-            profileId: 'fountain',
-            smoothing: 0.6,
-            pressureSensitivity: 0.5,
-            opacity: 1,
-            lineStyle: 'solid',
-            pattern: 'solid',
-            straightenLines: false,
-            favorites: [],
-            eraserMode: 'whole',
-            eraserRadius: 20,
-            scribbleToErase: false,
-            lassoMode: 'freeform',
-            shapeType: 'rect',
-            snapGrid: false,
-            isCurrentFavorite: false,
-            showingFavorites: false,
-            ...initialOverrides,
-        };
-
-        const callbacks: ToolEstucheCallbacks = {
-            onSelectProfile: () => {},
-            onChangeColor: () => {},
-            onChangeWidth: () => {},
-            onChangeSmoothing: () => {},
-            onChangePressure: () => {},
-            onChangeLineStyle: () => {},
-            onUseFavorite: () => {},
-            onSaveFavorite: () => {},
-            onSelectEraserMode: () => {},
-            onChangeEraserRadius: () => {},
-            onToggleScribble: () => {},
-            onSelectLassoMode: () => {},
-            onSelectShapeType: () => {},
-            onToggleSnapGrid: () => {},
-            onToggleStraighten: () => {},
-            onClose: () => {},
-            ...callbackOverrides,
-        };
-
-        const estuche = new ToolEstuche(state, callbacks, root);
-        return { estuche, root };
-    }
 
     test('1. Star button visually reflects isCurrentFavorite state (inactive when false, active when true)', () => {
         const { estuche, root } = createTestEstuche({ isCurrentFavorite: false });

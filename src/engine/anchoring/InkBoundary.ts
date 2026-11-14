@@ -64,7 +64,7 @@ export const FORBIDDEN_DOM_SELECTORS = [
  * while permitting free drawing anywhere below (including empty space below text).
  */
 export function isInkAllowedAt(
-    docX: number,
+    _docX: number,
     docY: number,
     bounds: DocumentContentBounds,
     limits: InkLimits = DEFAULT_INK_LIMITS,

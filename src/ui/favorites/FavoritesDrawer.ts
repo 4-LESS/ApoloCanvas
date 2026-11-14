@@ -10,7 +10,8 @@ import {
     DEFAULT_SHAPE_FAVORITE_PROFILES,
 } from '../../core/types.ts';
 import { computeFavoriteFingerprint, inferTool } from './FavoritesStore.ts';
-import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark, setAccessibleTooltip } from '../theme.ts';
+import { getShapePlugin, type ShapeSvgOutput } from '../../engine/shapes/index.ts';
+import { ICONS, createSvg, createStrokeWavePreview, mapInkColorForDark, setAccessibleTooltip, bindTapOrClick } from '../theme.ts';
 
 export type DrawerDragState = 'idle' | 'dragging' | 'drag-out' | 'dropping' | 'cancelled';
 
@@ -46,10 +47,11 @@ export function getPresetLabel(preset: ToolFavoritePreset): string {
     }
     if (preset.tool === 'shape') {
         const labels: Record<string, string> = {
-            rect: 'Rectángulo', 'rounded-rect': 'Rectángulo redondeado',
+            rect: 'Rectángulo', rectangle: 'Rectángulo', 'rounded-rect': 'Rectángulo redondeado',
             ellipse: 'Círculo', triangle: 'Triángulo', line: 'Línea', arrow: 'Flecha',
         };
-        return labels[(preset as ShapeFavoritePreset).shapeType] || 'Forma';
+        const shapeType = (preset as ShapeFavoritePreset).shapeType;
+        return labels[shapeType] || getShapePlugin(shapeType).name || 'Forma';
     }
     return 'Favorito';
 }
@@ -59,7 +61,9 @@ export function getPresetIcon(preset: ToolFavoritePreset): string {
         const shapes = ICONS.shapes as Record<string, string>;
         const type = (preset as ShapeFavoritePreset).shapeType;
         const key = type === 'ellipse' ? 'circle' : type === 'rounded-rect' ? 'rect' : type;
-        return shapes[key] ?? shapes.rect;
+        if (shapes[key]) return shapes[key];
+        const plugin = getShapePlugin(type);
+        return plugin.iconSvgPaths.length > 0 ? plugin.iconSvgPaths.join(' ') : shapes.rect;
     }
     const profileId = (preset as PenFavoritePreset | HighlighterFavoritePreset).profileId;
     const map: Record<string, string> = {
@@ -130,6 +134,32 @@ export function createShapePreview(
         svg.appendChild(el);
     };
 
+    // Extended shapes and patterned fills (hachure / cross-hatch / dots) go through the plugin renderer
+    // so the preview matches the canvas, including the cylinder's multi-face contrast.
+    const fillPattern = preset.fillPattern ?? 'solid';
+    const plugin = getShapePlugin(preset.shapeType);
+    const usesPluginRenderer = !PRIMITIVE_PREVIEW_SHAPES.has(preset.shapeType) ||
+        Boolean(preset.fillEnabled && fillPattern !== 'solid' && plugin.isClosed);
+    if (usesPluginRenderer) {
+        const pad = isSquare ? 10 : 8;
+        const rendered = plugin.renderSvg(
+            { x0: pad, y0: pad, x1: width - pad, y1: height - pad },
+            {
+                strokeColor,
+                strokeWidth,
+                strokeOpacity,
+                strokePattern: pattern,
+                fillEnabled: preset.fillEnabled,
+                fillColor: fill,
+                fillOpacity,
+                fillPattern,
+                fillDensity: preset.fillDensity,
+            },
+        );
+        appendRenderedShapeSvg(svg, rendered);
+        return svg;
+    }
+
     switch (preset.shapeType) {
         case 'line':
             addWithCommon('line', isSquare
@@ -176,6 +206,35 @@ export function createShapePreview(
     return svg;
 }
 
+/** Shapes drawn with hand-tuned primitives in the favorites preview; everything else uses its plugin. */
+const PRIMITIVE_PREVIEW_SHAPES = new Set<string>(['line', 'arrow', 'ellipse', 'circle', 'rect', 'rectangle', 'rounded-rect', 'triangle']);
+
+function appendRenderedShapeSvg(svg: SVGSVGElement, rendered: ShapeSvgOutput): void {
+    if (rendered.defs && Object.keys(rendered.defs).length > 0) {
+        let defsEl = svg.querySelector('defs');
+        if (!defsEl) {
+            defsEl = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            if (typeof svg.prepend === 'function') {
+                svg.prepend(defsEl);
+            } else if (typeof svg.insertBefore === 'function') {
+                svg.insertBefore(defsEl, svg.firstChild);
+            } else {
+                svg.appendChild(defsEl);
+            }
+        }
+        const defsContainer = createSvg(`<svg>${Object.values(rendered.defs).join('')}</svg>`);
+        for (const child of Array.from(defsContainer.children ?? [])) {
+            defsEl.appendChild(child);
+        }
+    }
+    if (rendered.body) {
+        const bodyContainer = createSvg(`<svg>${rendered.body}</svg>`);
+        for (const child of Array.from(bodyContainer.children ?? [])) {
+            svg.appendChild(child);
+        }
+    }
+}
+
 export function create6DotGripSvg(): SVGSVGElement {
     const svg = svgEl('svg', { viewBox: '0 0 16 20', fill: 'currentColor', 'aria-hidden': 'true' });
     svg.style.pointerEvents = 'none';
@@ -201,7 +260,6 @@ export class FavoritesDrawer {
     private currentSlice: any = null;
     private profiles: { id: string; name: string }[] = [];
     private activeProfileId: string = '';
-    private syncFavoriteProfiles: boolean = false;
     private isCreatingProfile: boolean = false;
     private lastValidProfileId: string = '';
     private showDotsIndicator: boolean = false;
@@ -220,14 +278,13 @@ export class FavoritesDrawer {
         parent?: HTMLElement,
         initialProfiles?: readonly { id: string; name: string }[],
         initialActiveProfileId?: string,
-        initialSyncProfiles?: boolean,
+        _initialSyncProfiles?: boolean,
         showDotsIndicator?: boolean,
     ) {
         this.callbacks = callbacks;
         this.tool = initialTool;
         this.favorites = [...initialFavorites];
         this.currentSlice = initialSlice ?? null;
-        this.syncFavoriteProfiles = Boolean(initialSyncProfiles);
         this.showDotsIndicator = Boolean(showDotsIndicator);
 
         if (initialProfiles && initialProfiles.length > 0) {
@@ -435,7 +492,7 @@ export class FavoritesDrawer {
         currentSlice?: any,
         profiles?: readonly { id: string; name: string }[],
         activeProfileId?: string,
-        syncFavoriteProfiles?: boolean,
+        _syncFavoriteProfiles?: boolean,
     ): void {
         this.tool = tool;
         this.favorites = [...favorites];
@@ -445,9 +502,6 @@ export class FavoritesDrawer {
         }
         if (activeProfileId !== undefined) {
             this.activeProfileId = activeProfileId;
-        }
-        if (syncFavoriteProfiles !== undefined) {
-            this.syncFavoriteProfiles = syncFavoriteProfiles;
         }
         this.render();
     }
@@ -471,7 +525,6 @@ export class FavoritesDrawer {
             this.profiles = partial.profiles.map(p => ({ id: p.id, name: p.name }));
         }
         if (partial.activeProfileId !== undefined) this.activeProfileId = partial.activeProfileId;
-        if (partial.syncFavoriteProfiles !== undefined) this.syncFavoriteProfiles = partial.syncFavoriteProfiles;
         if (partial.isCreatingProfile !== undefined) this.isCreatingProfile = partial.isCreatingProfile;
         this.render();
     }
@@ -639,7 +692,7 @@ export class FavoritesDrawer {
             setAccessibleTooltip(card, tooltip);
         }
 
-        card.onclick = () => this.callbacks.onSelectFavorite(preset);
+        bindTapOrClick(card, () => this.callbacks.onSelectFavorite(preset));
         card.onkeydown = (e) => {
             if (e.target !== card) return;
             if (e.key === 'Enter' || e.key === ' ') {

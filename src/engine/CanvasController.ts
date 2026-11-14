@@ -1,4 +1,4 @@
-import type { App, Editor, Notice, TFile } from 'obsidian';
+import type { App, Editor, TFile } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
 import type {
@@ -28,6 +28,7 @@ import type {
 } from '../core/types.ts';
 import {
     DEFAULT_WORKSPACE_TOOL_STATE,
+    cloneElements,
     cloneWorkspaceToolState,
 } from '../core/types.ts';
 import { InputManager } from './input/InputManager.ts';
@@ -40,19 +41,58 @@ import {
     getOrCreateStrokeSprite,
     type LiveBakeState,
     renderContinuousSolidStroke,
-    snapLineAngle,
 } from './PatternedStrokeRenderer.ts';
-import { getPenPlugin } from './pens/index.ts';
+import {
+    MAGNETIC_SNAP_RADIUS_PX,
+    applyGeometryToShapeElement,
+    clearDanglingBindings,
+    findNearestSnapPort,
+    followBoundConnectors,
+    isConnectorShape,
+    releaseDetachedBindings,
+    setBinding,
+    type ConnectorGeometryAdapter,
+    type SnapPortHit,
+    getLinearPathNodes,
+    splitLinearSegment,
+    straightenLinearSegment,
+    toggleLinearNodeKind,
+    insertLinearNodeAtPoint,
+    linearPathHit,
+    pointInPolygon,
+    rotatePoint,
+    computeSmartAlignmentGuides,
+    computePointAlignmentGuides,
+    getShapeKeyPoints,
+    findClosestLinearSegment,
+    slideLinearSegment,
+    type AlignmentGuide,
+    type SnapTargetBounds,
+    type ReferencePoint,
+    buildBlobGeometryFromPoints,
+    getShapePlugin,
+    mapShapeElementPoints,
+    refreshShapeElementBounds,
+    shapeElementStyle,
+    shapeElementToGeometry,
+    type ShapeHandleKind,
+    type ShapeRenderGeometry,
+    type ShapeStyleConfig,
+} from './shapes/index.ts';
 import { SpatialGrid } from './spatial/SpatialGrid.ts';
-import { PersistenceQueue, renderBoxSvg } from '../io/PersistenceQueue.ts';
-import { ShapeRecognizer } from '../tools/ShapeRecognizer.ts';
+import { PersistenceQueue, syncBoxPreviewSvg } from '../io/PersistenceQueue.ts';
+import {
+    HOLD_TO_SNAP_DWELL_MS,
+    HOLD_TO_SNAP_MOVE_TOLERANCE_PX,
+    ShapeRecognizer,
+    type RecognizedShape,
+} from '../tools/ShapeRecognizer.ts';
 import { Predictor } from './input/Predictor.ts';
 import { isConfirmedBarrelPress, isStylusBarrelButton, isStylusHoverBarrel, hasDeliberateStylusMovement } from './input/StylusCapabilities.ts';
 import { EngineEventBus } from '../core/events.ts';
 import { Toolbar } from '../ui/Toolbar.ts';
 import { ToolEstuche } from '../ui/ToolEstuche.ts';
 import {
-    computeFavoriteFingerprint,
     findMatchingFavorite,
     getNextFavoritePreset,
     toggleFavoritePreset,
@@ -74,20 +114,17 @@ import {
     deleteShapeProfile,
     renameFavoritePreset,
     type ToolFavoritePreset,
-    type PenFavoritePreset,
-    type HighlighterFavoritePreset,
-    type ShapeFavoritePreset,
 } from '../ui/favorites/FavoritesStore.ts';
 import { LassoMenu } from '../ui/LassoMenu.ts';
 import { BoxMenu, type BoxMenuState } from '../ui/BoxMenu.ts';
 import { ZoomPill } from '../ui/ZoomPill.ts';
 import { Toast } from '../ui/Toast.ts';
 import { PopoverController } from '../ui/kit/index.ts';
-import { createDotsIcon, createSvgFromMarkup, DEFAULT_FAVORITES, DEFAULT_TOOL_PALETTES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
+import { createDotsIcon, DEFAULT_FAVORITES, isDarkTheme, PEN_PROFILES } from '../ui/theme.ts';
 import { smoothPressure } from './input/PressureCurve.ts';
 import { shapeHitDoc, splitStrokeDoc, strokeHitDoc } from './eraser/StrokeEraser.ts';
+import { splitShapeDoc } from './eraser/ShapeEraser.ts';
 import {
-    cleanAnchorText,
     findBestMatchingLine,
     findBestMatchingPreviewBlock,
     type PreviewBlockInfo,
@@ -100,7 +137,7 @@ import {
     normalizeBoxId,
     type SpaceMutation,
 } from '../editor/ApoloSpaceExtension.ts';
-import { insertCanvasIntoMarkdown } from '../editor/CanvasInsertion.ts';
+import { findCanvasInsertionLine, insertCanvasIntoMarkdown } from '../editor/CanvasInsertion.ts';
 import {
     type DocumentContentBounds,
     isInkAllowedAt,
@@ -174,6 +211,43 @@ interface HistorySnapshot {
     elements: CanvasElement[];
     boxHeights?: Record<string, number>;
 }
+
+/** Live drag of one parametric control handle of the selected ShapeElement. */
+interface ShapeHandleDragState {
+    elementId: string;
+    handleId: string;
+    kind: ShapeHandleKind;
+    /** Document-space geometry captured at pointerdown; every move re-applies from it. */
+    startGeom: ShapeRenderGeometry;
+    /** Handle position minus pointer position at grab time, so the handle does not jump. */
+    grabOffsetX: number;
+    grabOffsetY: number;
+    /** Pre-drag state, pushed to the undo stack on pointerup only if something changed. */
+    snapshot: HistorySnapshot;
+    changed: boolean;
+    /** Port the dragged connector endpoint is currently magnetized to (start / end handles only). */
+    snap: SnapPortHit | null;
+}
+
+/** Style fields of a selected shape that ToolEstuche / Toolbar edit reactively. */
+interface ShapeStylePatch {
+    color?: string;
+    width?: number;
+    opacity?: number;
+    pattern?: StrokePattern;
+    fillEnabled?: boolean;
+    fillColor?: string;
+    fillPattern?: ShapeElement['fillPattern'];
+    fillOpacity?: number;
+    fillDensity?: number;
+}
+
+/** Screen-space pick radius of shape control handles. */
+const SHAPE_HANDLE_HIT_RADIUS_PX = 12;
+/** Pointer travel (document px) below which a shape-tool gesture is a tap that selects. */
+const SHAPE_TAP_SLOP_PX = 4;
+/** Consecutive style edits on the same selection within this window share one undo step (slider drags). */
+const SHAPE_STYLE_HISTORY_COALESCE_MS = 700;
 
 /**
  * High-performance engineering canvas controller.
@@ -256,13 +330,24 @@ export class CanvasController {
     private penEnabled: boolean;
     private shapeRecognition: boolean;
     private barrelActive = false;
+    private barrelEraseSession = false;
+    private barrelSegmentSlideLatched = false;
     private penBarrelPressed = false;
-    private lastBarrelCycleTime = 0;
     private isPenTipDown = false;
-    private lastPenEventTime = 0;
     private lastPointerDownTime = 0;
     private pointerDownStartPos: { x: number; y: number } | null = null;
     private strokeStartTime = 0;
+    private isShiftDown = false;
+    private isCtrlDown = false;
+    private touchSlideState: {
+        pointerId: number;
+        elementId: string;
+        segIdx: number;
+        startGeom: ShapeRenderGeometry;
+        snapshot: HistorySnapshot;
+        changed: boolean;
+    } | null = null;
+    private penDwellTimer: number | null = null;
     private showSpenDebugHud = false;
     private debugInputHudEl: HTMLElement | null = null;
     private readonly debugHudLogs: string[] = [];
@@ -274,7 +359,6 @@ export class CanvasController {
     private gridDensity = 32;
     private smoothing = 0.6;
     private pressureSensitivity = 0.75;
-    private previousPenColor = '#1F4FD8';
     private favorites: PenFavorite[];
     private activeFavoriteIndex = 0;
     private toolPalettes: Record<'pen' | 'highlighter' | 'shape', { colors: string[]; opacities: number[] }>;
@@ -287,14 +371,36 @@ export class CanvasController {
 
     // Selection & Manipulation
     private selection: CanvasElement[] = [];
+    private lastHandleTap: { shapeId: string; handleId: string; time: number; x: number; y: number } | null = null;
+    private activeAlignmentGuides: AlignmentGuide[] = [];
+    private handleDrag: ShapeHandleDragState | null = null;
+    private moveSelectionSnapshot: HistorySnapshot | null = null;
+    private moveSelectionStartPt: { x: number; y: number } | null = null;
+    private moveSelectionInitialBounds: SnapTargetBounds | null = null;
+    private moveSelectionCurrentDx = 0;
+    private moveSelectionCurrentDy = 0;
+    // Hold-to-snap: dwell detection at the end of a freehand stroke
+    private dwellTimer: ReturnType<typeof setTimeout> | null = null;
+    private dwellAnchor: { x: number; y: number } | null = null;
+    private snapPreview: RecognizedShape | null = null;
+    private hoverSnapPort: SnapPortHit | null = null;
+    private lastShapeStyleEdit = { at: 0, key: '' };
+    private suppressSelectionStyleSync = false;
+    /** Anchor-aware document geometry access for magnetic connectors. */
+    private readonly connectorAdapter: ConnectorGeometryAdapter = {
+        getGeometry: (element) => this.getShapeDocGeometry(element),
+        setGeometry: (element, geom) => {
+            const anchor = this.getElementAnchorGeometry(element.blockId, element.anchorText);
+            applyGeometryToShapeElement(element, geom, anchor.originX, anchor.originY, anchor.scaleWidth);
+            this.strokeCache.delete(element.id);
+        },
+    };
     private activeStart: Point | null = null;
 
     public get isDrawing(): boolean {
-        return this.activeStart !== null;
+        return this.activeStart !== null && !this.barrelActive && !this.barrelEraseSession;
     }
     private activeAnchor: Anchor | null = null;
-    private activeContentLeft = 0;
-    private activeContentWidth = 1;
     private activeBlockTop = 0;
     private readonly blockPositionCache = new Map<string, number>();
     private movingSelection = false;
@@ -303,14 +409,16 @@ export class CanvasController {
     private hasPrediction = false;
 
     // Live O(1) Incremental Baking Buffer
-    private liveBakeCanvas: HTMLCanvasElement | null = null;
-    private liveBakeCtx: CanvasRenderingContext2D | null = null;
-    private liveBakedIndex = 0;
-    private liveBakeSegState: Record<string, unknown> = {};
-    private liveBakeZoom = -1;
-    private liveBakeScrollLeft = -1;
-    private liveBakeScrollTop = -1;
-    private liveBakeStyleKey = '';
+    private readonly liveBakeState: LiveBakeState = {
+        liveBakeCanvas: null,
+        liveBakeCtx: null,
+        liveBakedIndex: 0,
+        liveBakeSegState: {},
+        liveBakeZoom: -1,
+        liveBakeScrollLeft: -1,
+        liveBakeScrollTop: -1,
+        liveBakeStyleKey: '',
+    };
     private straightenLines = false;
 
     // Zoom & Viewport State (Single Source of Truth: {zoom, scrollLeft, scrollTop})
@@ -422,7 +530,6 @@ export class CanvasController {
             pattern: this.toolState.pen.pattern,
             lineCap: 'round',
         };
-        this.previousPenColor = this.toolState.pen.color;
 
         this.applyWorkspaceToolState(this.toolState, false);
 
@@ -481,8 +588,11 @@ export class CanvasController {
             this.scroller.addEventListener('pointerleave', this.onPointerLeave, { capture: true, passive: false });
             this.canvas.addEventListener('pointerleave', this.onPointerLeave, { capture: true, passive: false });
             this.canvas.addEventListener('lostpointercapture', this.onLostPointerCapture);
-            this.scroller.addEventListener('contextmenu', this.onCanvasContextMenu);
-            this.canvas.addEventListener('contextmenu', this.onCanvasContextMenu);
+            this.scroller.addEventListener('contextmenu', this.onCanvasContextMenu, { capture: true, passive: false });
+            this.canvas.addEventListener('contextmenu', this.onCanvasContextMenu, { capture: true, passive: false });
+            this.scroller.addEventListener('selectstart', this.onScrollerSuppressTextSelection, { capture: true, passive: false });
+            this.scroller.addEventListener('dragstart', this.onScrollerSuppressTextSelection, { capture: true, passive: false });
+            this.scroller.addEventListener('auxclick', this.onScrollerSuppressTextSelection, { capture: true, passive: false });
 
             this.input = new InputManager(this.canvas, {
                 palmRejectionCooldownMs: options.palmRejectionCooldownMs,
@@ -490,7 +600,7 @@ export class CanvasController {
                 shouldAcceptPointer: (event) => this.shouldAcceptDrawingPointer(event),
                 onStrokeStart: (point, barrel, rawEvent) => this.begin(point, barrel, rawEvent),
                 onStrokeMove: (points, barrel, rawEvent) => this.move(points, barrel, rawEvent),
-                onStrokeEnd: (point, barrel, rawEvent) => this.end(point, barrel, rawEvent.timeStamp),
+                onStrokeEnd: (point, barrel, rawEvent) => this.end(point, barrel, rawEvent.timeStamp, rawEvent),
                 onStrokeCancel: () => this.cancel(),
                 onNonDrawingPointerDown: (event) => {
                     if (this.penEnabled) return;
@@ -521,6 +631,7 @@ export class CanvasController {
             window.addEventListener('pointerdown', this.onDocumentPointerDown, { capture: true });
             window.addEventListener('touchstart', this.onDocumentTouchStart, { capture: true });
             window.addEventListener('keydown', this.onDocumentKeyDown);
+            window.addEventListener('keyup', this.onDocumentKeyUp);
         }
 
         this.scrollHandler = (event?: Event) => {
@@ -571,6 +682,9 @@ export class CanvasController {
         this.observeSizer();
 
         this.syncBoxElements();
+        if (this.options.readonly) {
+            this.syncPreviewSpacing();
+        }
 
         this.rebuildIndex();
         this.positionLayer();
@@ -578,7 +692,6 @@ export class CanvasController {
         this.paint();
 
         if (this.options.readonly) {
-            this.syncPreviewSpacing();
             window.setTimeout(() => this.reanchorPreview(), 60);
             window.setTimeout(() => this.reanchorPreview(), 200);
             window.setTimeout(() => this.reanchorPreview(), 500);
@@ -593,6 +706,9 @@ export class CanvasController {
         this.layer.classList.toggle('is-pen-disabled', !canDraw);
         this.layer.style.pointerEvents = canDraw ? 'auto' : 'none';
         this.canvas.style.pointerEvents = canDraw ? 'auto' : 'none';
+        this.scroller.classList.toggle('apolo-scroller-pen-active', canDraw);
+        this.scroller.style.userSelect = canDraw ? 'none' : this.originalScrollerUserSelect;
+        (this.scroller.style as unknown as Record<string, string>).webkitUserSelect = canDraw ? 'none' : this.originalScrollerUserSelect;
     }
 
     private mountUiRoot(): void {
@@ -698,7 +814,7 @@ export class CanvasController {
             profileId: this.penProfileId,
             smoothing: this.smoothing,
             pressureSensitivity: this.pressureSensitivity,
-            opacity: this.style.opacity,
+            opacity: isFavTool && (this.toolState as any)[tool]?.opacity !== undefined ? (this.toolState as any)[tool].opacity : this.style.opacity,
             lineStyle: this.style.pattern,
             pattern: this.style.pattern,
             favorites: isFavTool ? this.getToolFavorites(tool) : this.favorites,
@@ -717,6 +833,13 @@ export class CanvasController {
             snapGrid: this.snapGrid,
             straightenLines: this.straightenLines,
             onlyHighlighter: this.toolState.eraser.onlyHighlighter,
+            regularize: this.toolState.shape.regularize,
+            fillEnabled: this.toolState.shape.fillEnabled,
+            fillColor: this.toolState.shape.fillColor,
+            fillPattern: this.toolState.shape.fillPattern,
+            fillDensity: this.toolState.shape.fillDensity,
+            fillOpacity: this.toolState.shape.fillOpacity,
+            colorCarousels: this.toolState.colorCarousels,
         };
     }
 
@@ -726,7 +849,27 @@ export class CanvasController {
             {
                 onSelectProfile: (profileId) => this.applyPenProfile(profileId),
                 onChangeColor: (color) => this.setInkColor(color),
+                onUpdateColorCarousels: (carousels) => {
+                    this.toolState.colorCarousels = carousels;
+                    this.notifyToolStateChange();
+                },
                 onChangeWidth: (width) => this.setWidth(width),
+                onChangeOpacity: (opacity) => {
+                    const norm = opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity));
+                    this.style.opacity = norm;
+                    if (this.tool === 'pen') {
+                        this.toolState.pen.opacity = norm;
+                    } else if (this.tool === 'highlighter') {
+                        this.toolState.highlighter.opacity = norm;
+                    } else if (this.tool === 'shape') {
+                        this.toolState.shape.opacity = norm;
+                    }
+                    this.applyStyleToSelectedShapes({ opacity: norm });
+                    this.estuche?.updateState({ opacity: norm });
+                    this.renderDirty = true;
+                    this.schedulePaint();
+                    this.notifyToolStateChange();
+                },
                 onChangeSmoothing: (smoothing) => {
                     this.smoothing = smoothing;
                     this.toolState.pen.smoothing = smoothing;
@@ -747,6 +890,7 @@ export class CanvasController {
                     } else if (this.tool === 'shape') {
                         this.toolState.shape.pattern = pattern;
                     }
+                    this.applyStyleToSelectedShapes({ pattern });
                     this.estuche?.updateState({ lineStyle: pattern, pattern });
                     this.options.eventBus?.emit('style:changed', { pattern });
                     this.syncEstucheFavoriteState();
@@ -789,10 +933,12 @@ export class CanvasController {
                 onSelectShapeType: (shapeType) => {
                     this.shapeType = shapeType;
                     this.toolState.shape.shapeType = shapeType;
+                    this.hoverSnapPort = null;
                     this.toolbar?.setShape(shapeType);
                     this.toolbar?.setTool('shape', shapeType);
                     this.syncEstucheFavoriteState();
                     this.notifyToolStateChange();
+                    this.schedulePaint();
                 },
                 onToggleSnapGrid: (enabled) => {
                     this.snapGrid = enabled;
@@ -802,6 +948,29 @@ export class CanvasController {
                     this.schedulePaint();
                     this.notifyToolStateChange();
                 },
+                onToggleRegularize: (enabled) => {
+                    this.toolState.shape.regularize = enabled;
+                    this.estuche?.updateState({ regularize: enabled });
+                    const selected = this.selection.filter((el): el is ShapeElement => el.type === 'shape');
+                    if (selected.length > 0) {
+                        this.recordHistory();
+                        for (const s of selected) {
+                            s.regularize = enabled;
+                            this.strokeCache.delete(s.id);
+                        }
+                        this.rebuildIndex();
+                        this.renderDirty = true;
+                        this.schedulePaint();
+                        this.persistSoon();
+                    }
+                    this.syncEstucheFavoriteState();
+                    this.notifyToolStateChange();
+                },
+                onToggleFillEnabled: (enabled) => this.updateShapeFillState({ fillEnabled: enabled }),
+                onChangeFillColor: (color) => this.updateShapeFillState({ fillColor: color }),
+                onChangeFillPattern: (pattern) => this.updateShapeFillState({ fillPattern: pattern }, { fillEnabled: true, fillPattern: pattern }),
+                onChangeFillDensity: (density) => this.updateShapeFillState({ fillDensity: density }),
+                onChangeFillOpacity: (opacity) => this.updateShapeFillState({ fillOpacity: opacity }),
                 onToggleStraighten: (enabled) => {
                     this.setStraightenLines(enabled);
                     this.options.onToggleStraighten?.(enabled);
@@ -811,6 +980,17 @@ export class CanvasController {
             this.uiRoot,
             this.popoverController,
         );
+    }
+
+    private updateShapeFillState(
+        patch: Partial<Pick<WorkspaceToolState['shape'], 'fillEnabled' | 'fillColor' | 'fillPattern' | 'fillDensity' | 'fillOpacity'>>,
+        selectedPatch: Partial<Pick<WorkspaceToolState['shape'], 'fillEnabled' | 'fillColor' | 'fillPattern' | 'fillDensity' | 'fillOpacity'>> = patch,
+    ): void {
+        Object.assign(this.toolState.shape, patch);
+        this.applyStyleToSelectedShapes(selectedPatch);
+        this.estuche?.updateState(patch);
+        this.syncEstucheFavoriteState();
+        this.notifyToolStateChange();
     }
 
     private initLassoMenu(): void {
@@ -1252,18 +1432,34 @@ export class CanvasController {
         return isConfirmedBarrelPress(e as PointerEvent) || isStylusBarrelButton(e);
     }
 
+    private isEventInUiControl(event: Event): boolean {
+        const target = event.target as { tagName?: string; closest?: (sel: string) => unknown } | null;
+        if (!target) return false;
+        if (typeof Node !== 'undefined' && target instanceof Node && this.uiRoot?.contains(target)) {
+            return true;
+        }
+        if (typeof target.closest === 'function' && target.closest('.apolo-ui')) {
+            return true;
+        }
+        const tag = target.tagName?.toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    }
+
+    private readonly onScrollerSuppressTextSelection = (event: Event): void => {
+        if (!this.penEnabled || this.options.readonly) return;
+        if (this.isEventInUiControl(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+    };
+
     private readonly onCanvasPointerDownHandleCheck = (event: PointerEvent): void => {
         if (event.pointerType === 'pen') {
-            this.lastPenEventTime = performance.now();
             this.isPenTipDown = true;
             if (isConfirmedBarrelPress(event) || this.isPenBarrelEvent(event)) {
                 this.penBarrelPressed = true;
-                this.handledBoxEvents.add(event);
-                event.preventDefault();
-                event.stopPropagation();
-                event.stopImmediatePropagation?.();
-                this.toggleEstucheFavorites();
-                return;
+                if (!this.isEventInUiControl(event)) {
+                    event.preventDefault();
+                }
             } else {
                 this.penBarrelPressed = false;
             }
@@ -1335,8 +1531,6 @@ export class CanvasController {
 
     private readonly onPointerMove = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
-            this.lastPenEventTime = performance.now();
-
             // Stylus barrel detection in hover (Windows Ink / W3C reports buttons & 32 / button 5;
             // Android / DeX reports buttons & 2 / button 2).
             const barrelHoverActive = !this.isPenTipDown && !this.isDrawing && isStylusHoverBarrel(e);
@@ -1344,6 +1538,9 @@ export class CanvasController {
             if (barrelHoverActive) {
                 if (!this.penBarrelPressed) {
                     this.penBarrelPressed = true;
+                }
+                if (this.penEnabled && !this.isEventInUiControl(e)) {
+                    this.updateCursor(e);
                 }
                 this.updateDebugHud(e, 'hover-barrel');
                 e.preventDefault();
@@ -1369,7 +1566,6 @@ export class CanvasController {
     private readonly onPointerUp = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
             this.isPenTipDown = false;
-            this.lastPenEventTime = performance.now();
             if (!this.isPenBarrelEvent(e) || e.buttons === 0) this.penBarrelPressed = false;
         } else if (e.buttons === 0) {
             this.penBarrelPressed = false;
@@ -1380,7 +1576,6 @@ export class CanvasController {
     private readonly onPointerCancel = (e: PointerEvent): void => {
         if (e.pointerType === 'pen') {
             this.isPenTipDown = false;
-            this.lastPenEventTime = performance.now();
         }
         this.penBarrelPressed = false;
         this.updateDebugHud(e);
@@ -1392,8 +1587,6 @@ export class CanvasController {
         if (e.pointerType === 'pen') this.isPenTipDown = false;
         this.updateDebugHud(e);
     };
-
-    private readonly onPointerDown = this.onCanvasPointerDownHandleCheck;
 
     public cancelActiveStroke(): void {
         this.input?.cancelActiveDrawing();
@@ -1668,24 +1861,7 @@ export class CanvasController {
                 if (existingOptions) existingOptions.remove();
 
                 const boxElements = this.document.elements.filter(e => e.blockId === `space:${id}`);
-                let previewSvgWrap = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
-                if (boxElements.length > 0) {
-                    if (!previewSvgWrap) {
-                        previewSvgWrap = document.createElement('div');
-                        previewSvgWrap.className = 'apolo-box-preview-svg';
-                        el.appendChild(previewSvgWrap);
-                    }
-                    const targetW = Math.round(boxWidth || 800);
-                    const svgHash = `${boxElements.length}:${targetW}:${h}`;
-                    if (previewSvgWrap.dataset.apoloSvgHash !== svgHash || previewSvgWrap.children.length === 0) {
-                        const svgMarkup = renderBoxSvg(id, boxElements, targetW, h);
-                        const parsedSvg = createSvgFromMarkup(svgMarkup);
-                        previewSvgWrap.replaceChildren(parsedSvg);
-                        previewSvgWrap.dataset.apoloSvgHash = svgHash;
-                    }
-                } else if (previewSvgWrap) {
-                    previewSvgWrap.remove();
-                }
+                syncBoxPreviewSvg(el, id, boxElements, Math.round(boxWidth || 800), h, this.document.boxes?.[id]);
             } else {
                 const existingPreviewSvg = el.querySelector<HTMLElement>('.apolo-box-preview-svg');
                 if (existingPreviewSvg) existingPreviewSvg.remove();
@@ -1864,6 +2040,7 @@ export class CanvasController {
             const op = (this.toolPalettes.shape.opacities[index] ?? 100) / 100;
             this.style.opacity = op;
             this.toolState.shape.opacity = op;
+            this.applyStyleToSelectedShapes({ opacity: op, color });
         }
         this.setInkColor(color);
         // Note: strictly only changes ink color; does NOT alter current tool, profile, or width
@@ -1885,7 +2062,12 @@ export class CanvasController {
         this.toolState[toolKey].palette.opacities[slotIdx] = opacity;
         this.toolState[toolKey].activeSlotIndex = slotIdx;
         this.toolState[toolKey].color = newColor;
-        this.toolState[toolKey].opacity = opacity / 100;
+        const normOp = opacity > 1 ? opacity / 100 : Math.max(0, Math.min(1, opacity));
+        this.toolState[toolKey].opacity = normOp;
+        this.style.opacity = normOp;
+        if (toolKey === 'shape') {
+            this.applyStyleToSelectedShapes({ opacity: normOp, color: newColor });
+        }
 
         // Keep favorites in sync if pen palette changed
         if (toolKey === 'pen' && this.favorites[slotIdx]) {
@@ -2012,6 +2194,16 @@ export class CanvasController {
     }
 
     public applyToolFavoritePreset(preset: ToolFavoritePreset): void {
+        // Arming a favorite configures the tool; it must not restyle a selected shape.
+        this.suppressSelectionStyleSync = true;
+        try {
+            this.applyToolFavoritePresetInner(preset);
+        } finally {
+            this.suppressSelectionStyleSync = false;
+        }
+    }
+
+    private applyToolFavoritePresetInner(preset: ToolFavoritePreset): void {
         if (this.tool !== preset.tool) this.setTool(preset.tool, false);
 
         if (preset.tool === 'pen' || preset.tool === 'highlighter') {
@@ -2050,6 +2242,9 @@ export class CanvasController {
             if (preset.fillEnabled !== undefined) this.toolState.shape.fillEnabled = preset.fillEnabled;
             if (preset.fillColor !== undefined) this.toolState.shape.fillColor = preset.fillColor;
             if (preset.fillOpacity !== undefined) this.toolState.shape.fillOpacity = preset.fillOpacity;
+            if (preset.fillPattern !== undefined) this.toolState.shape.fillPattern = preset.fillPattern;
+            if (preset.fillDensity !== undefined) this.toolState.shape.fillDensity = preset.fillDensity;
+            if (preset.regularize !== undefined) this.toolState.shape.regularize = preset.regularize;
         }
 
         this.toolbar?.setStyle(this.style.color, this.style.width, this.penProfileId);
@@ -2062,6 +2257,14 @@ export class CanvasController {
             lineStyle: this.style.pattern,
             straightenLines: this.straightenLines,
             shapeType: this.shapeType,
+            ...(preset.tool === 'shape' ? {
+                regularize: this.toolState.shape.regularize,
+                fillEnabled: this.toolState.shape.fillEnabled,
+                fillColor: this.toolState.shape.fillColor,
+                fillPattern: this.toolState.shape.fillPattern,
+                fillDensity: this.toolState.shape.fillDensity,
+                fillOpacity: this.toolState.shape.fillOpacity,
+            } : {}),
         });
         this.syncEstucheFavoriteState();
         this.schedulePaint();
@@ -2311,13 +2514,13 @@ export class CanvasController {
     setInkColor(color: string): void {
         this.style.color = color;
         if (this.tool === 'pen') {
-            this.previousPenColor = color;
             this.toolState.pen.color = color;
         } else if (this.tool === 'highlighter') {
             this.toolState.highlighter.color = color;
         } else if (this.tool === 'shape') {
             this.toolState.shape.color = color;
         }
+        this.applyStyleToSelectedShapes({ color });
         this.toolbar?.setStyle(color, this.style.width, this.penProfileId);
         this.estuche?.updateState({ color });
         this.syncEstucheFavoriteState();
@@ -2335,6 +2538,7 @@ export class CanvasController {
         } else if (this.tool === 'shape') {
             this.toolState.shape.width = width;
         }
+        this.applyStyleToSelectedShapes({ width });
         this.toolbar?.setStyle(this.style.color, width, this.penProfileId);
         this.estuche?.updateState({ width });
         this.syncEstucheFavoriteState();
@@ -2502,9 +2706,9 @@ export class CanvasController {
     }
 
     setTool(tool: ToolType, notify = true): void {
-        const previousTool = this.tool;
         this.tool = tool;
         this.toolState.activeTool = tool;
+        this.hoverSnapPort = null;
 
         if (tool === 'pen') {
             const slice = this.toolState.pen;
@@ -2664,6 +2868,7 @@ export class CanvasController {
         if (this.destroyed) return;
         this.destroyed = true;
 
+        this.clearHoldToSnap();
         this.strokeCache.clear();
         this.input?.destroy();
         if (this.scrollHandler) {
@@ -2698,8 +2903,11 @@ export class CanvasController {
         this.scroller.removeEventListener('pointerleave', this.onPointerLeave, { capture: true });
         this.canvas.removeEventListener('pointerleave', this.onPointerLeave, { capture: true });
         this.canvas.removeEventListener('lostpointercapture', this.onLostPointerCapture);
-        this.scroller.removeEventListener('contextmenu', this.onCanvasContextMenu);
-        this.canvas.removeEventListener('contextmenu', this.onCanvasContextMenu);
+        this.scroller.removeEventListener('contextmenu', this.onCanvasContextMenu, { capture: true });
+        this.canvas.removeEventListener('contextmenu', this.onCanvasContextMenu, { capture: true });
+        this.scroller.removeEventListener('selectstart', this.onScrollerSuppressTextSelection, { capture: true });
+        this.scroller.removeEventListener('dragstart', this.onScrollerSuppressTextSelection, { capture: true });
+        this.scroller.removeEventListener('auxclick', this.onScrollerSuppressTextSelection, { capture: true });
         window.removeEventListener('pointermove', this.onWindowPointerMoveHandleDrag);
         window.removeEventListener('pointerup', this.onWindowPointerUpHandleDrag);
         window.removeEventListener('pointercancel', this.onWindowPointerUpHandleDrag);
@@ -2714,6 +2922,7 @@ export class CanvasController {
         window.removeEventListener('pointerdown', this.onDocumentPointerDown, { capture: true });
         window.removeEventListener('touchstart', this.onDocumentTouchStart, { capture: true });
         window.removeEventListener('keydown', this.onDocumentKeyDown);
+        window.removeEventListener('keyup', this.onDocumentKeyUp);
 
         if (this.frame) cancelAnimationFrame(this.frame);
 
@@ -2747,7 +2956,9 @@ export class CanvasController {
         }
         this.scroller.style.position = this.originalScrollerPosition;
         this.scroller.style.overflow = this.originalScrollerOverflow;
+        this.scroller.classList.remove('apolo-scroller-pen-active');
         this.scroller.style.userSelect = this.originalScrollerUserSelect;
+        (this.scroller.style as unknown as Record<string, string>).webkitUserSelect = this.originalScrollerUserSelect;
     }
 
     private isEventInOverlayOrMenuButton(event: PointerEvent | TouchEvent): boolean {
@@ -2825,10 +3036,31 @@ export class CanvasController {
     };
 
     private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Shift') {
+            this.isShiftDown = true;
+            if (this.tool === 'shape' && this.activeStart) {
+                this.schedulePaint();
+            }
+        }
+        if (event.key === 'Control' || event.key === 'Meta') {
+            this.isCtrlDown = true;
+        }
         if (event.key === 'Escape') {
             this.estuche?.close();
             this.boxMenu?.hide();
             this.lassoMenu?.hide();
+        }
+    };
+
+    private readonly onDocumentKeyUp = (event: KeyboardEvent): void => {
+        if (event.key === 'Shift') {
+            this.isShiftDown = false;
+            if (this.tool === 'shape' && this.activeStart) {
+                this.schedulePaint();
+            }
+        }
+        if (event.key === 'Control' || event.key === 'Meta') {
+            this.isCtrlDown = false;
         }
     };
 
@@ -2860,13 +3092,7 @@ export class CanvasController {
                     : 0;
 
                 // Determine first content line (skipping frontmatter properties)
-                let firstContentLine = 0;
-                try {
-                    const cache = this.options.app.metadataCache.getFileCache(this.file);
-                    if (cache?.frontmatterPosition) {
-                        firstContentLine = cache.frontmatterPosition.end.line + 1;
-                    }
-                } catch { /* ignore */ }
+                const firstContentLine = this.getFirstContentLine();
 
                 const firstLineNum = Math.min(cm.state.doc.lines, Math.max(1, firstContentLine + 1));
                 const firstBlock = cm.lineBlockAt(cm.state.doc.line(firstLineNum).from);
@@ -2876,18 +3102,13 @@ export class CanvasController {
                 contentBottom = baseTop + lastBlock.bottom;
             }
         } else {
-            // Reading Mode: use rendered content blocks
+            // Reading Mode: use rendered content blocks + preview header floor
+            const previewFloor = this.getPreviewContentTop();
             const rendered = Array.from(
                 this.scroller.querySelectorAll<HTMLElement>('[data-apolo-line-start]')
             );
             if (rendered.length > 0) {
-                let firstContentLine = 0;
-                try {
-                    const cache = this.options.app.metadataCache.getFileCache(this.file);
-                    if (cache?.frontmatterPosition) {
-                        firstContentLine = cache.frontmatterPosition.end.line + 1;
-                    }
-                } catch { /* ignore */ }
+                const firstContentLine = this.getFirstContentLine();
 
                 let minTop = Number.POSITIVE_INFINITY;
                 let maxBottom = Number.NEGATIVE_INFINITY;
@@ -2901,9 +3122,14 @@ export class CanvasController {
                         if (b > maxBottom) maxBottom = b;
                     }
                 }
-                contentTop = Number.isFinite(minTop) ? minTop : 0;
+                if (Number.isFinite(minTop)) {
+                    contentTop = previewFloor > 0 ? Math.min(minTop, previewFloor) : minTop;
+                } else {
+                    contentTop = previewFloor;
+                }
                 contentBottom = Number.isFinite(maxBottom) ? maxBottom : this.scroller.scrollHeight / this.zoom;
             } else {
+                contentTop = previewFloor;
                 contentBottom = this.scroller.scrollHeight / this.zoom;
             }
         }
@@ -2913,10 +3139,6 @@ export class CanvasController {
 
     private shouldAcceptDrawingPointer(event: PointerEvent): boolean {
         if (!this.penEnabled) return false;
-
-        if (event.pointerType === 'pen' && this.isPenBarrelEvent(event)) {
-            return false;
-        }
 
         if (this.findBoxOptionsButtonAt(event.clientX, event.clientY) || this.findBoxHandleAt(event.clientX, event.clientY)) {
             return false;
@@ -2938,29 +3160,84 @@ export class CanvasController {
         return true;
     }
 
-    private updateCursor(event: PointerEvent, isDrawing = false): void {
+    private updateCursor(event: PointerEvent): void {
         if (!this.penEnabled) {
             this.canvas.style.cursor = '';
+            if (this.hoverSnapPort) {
+                this.hoverSnapPort = null;
+                this.schedulePaint();
+            }
             return;
         }
 
         const isForbidden = !this.shouldAcceptDrawingPointer(event);
         if (isForbidden) {
             this.canvas.style.cursor = 'not-allowed';
-        } else {
-            this.canvas.style.cursor = 'crosshair';
+            if (this.hoverSnapPort) {
+                this.hoverSnapPort = null;
+                this.schedulePaint();
+            }
+            return;
         }
+
+        const rect = this.canvas.getBoundingClientRect();
+        const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+        const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+
+        const nextHoverSnap = !this.activeStart && !this.handleDrag && this.tool === 'shape' && !getShapePlugin(this.shapeType).isClosed
+            ? this.findSnapPort({ x: docX, y: docY })
+            : null;
+        if (
+            nextHoverSnap?.elementId !== this.hoverSnapPort?.elementId ||
+            nextHoverSnap?.portId !== this.hoverSnapPort?.portId
+        ) {
+            this.hoverSnapPort = nextHoverSnap;
+            this.schedulePaint();
+        }
+
+        const barrelModifierActive = event.pointerType === 'pen' && (this.penBarrelPressed || this.isPenBarrelEvent(event));
+        if (event.ctrlKey || event.metaKey || this.isCtrlDown || barrelModifierActive) {
+            let shape = this.getSelectedShape();
+            if (!shape || (shape.shapeType !== 'line' && shape.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    shape = hit;
+                }
+            }
+            if (shape && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
+                const geom = this.getShapeDocGeometry(shape);
+                const hitRadius = (SHAPE_HANDLE_HIT_RADIUS_PX + 4) / this.zoom;
+                if (linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
+                    const nodes = getLinearPathNodes(geom);
+                    if (nodes.length >= 2) {
+                        const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                        const pA = nodes[segIdx];
+                        const pB = nodes[Math.min(segIdx + 1, nodes.length - 1)];
+                        const isHorizontal = Math.abs(pA.y - pB.y) <= Math.abs(pA.x - pB.x);
+                        this.canvas.style.cursor = isHorizontal ? 'row-resize' : 'col-resize';
+                        return;
+                    }
+                }
+            }
+        }
+
+        this.canvas.style.cursor = 'crosshair';
     }
 
     private resetCursor(): void {
         this.canvas.style.cursor = this.penEnabled ? 'crosshair' : '';
+        if (this.hoverSnapPort) {
+            this.hoverSnapPort = null;
+            this.schedulePaint();
+        }
     }
 
     // Drawing input lifecycle (normalized to content column width & anchor block)
     private begin(rawPoint: Point, barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.penEnabled) return;
-        if (rawEvent && rawEvent.pointerType === 'pen' && this.isPenBarrelEvent(rawEvent)) {
-            return;
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey);
         }
         const screenX = rawEvent ? rawEvent.clientX : rawPoint.x;
         const screenY = rawEvent ? rawEvent.clientY : rawPoint.y;
@@ -2979,8 +3256,87 @@ export class CanvasController {
         const docX = (rawPoint.x + this.currentScrollLeft) / this.zoom;
         const docY = (rawPoint.y + this.currentScrollTop) / this.zoom;
 
-        // 2. For ink drawing tools, forbid drawing above content top (properties / title)
-        const isDrawingTool = this.tool === 'pen' || this.tool === 'highlighter' || this.tool === 'shape';
+        // With a line / arrow armed, pressing on a port of a closed shape starts a magnetic connector,
+        // even over a selected closed shape (whose edge handles / body would otherwise win)
+        const selectedForConnector = this.getSelectedShape();
+        const startsConnector = this.tool === 'shape' && !barrel &&
+            !getShapePlugin(this.shapeType).isClosed &&
+            (!selectedForConnector || getShapePlugin(selectedForConnector.shapeType).isClosed) &&
+            this.findSnapPort({ x: docX, y: docY }) !== null;
+
+        // S-Pen Barrel button on a linear shape segment OR Ctrl key: activates segment sliding!
+        let activateSegmentSlide = this.isCtrlDown;
+        if (barrel && !activateSegmentSlide) {
+            let target = this.getSelectedShape();
+            if (!target || (target.shapeType !== 'line' && target.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 20 / this.zoom);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    target = hit;
+                }
+            }
+            if (target && (target.shapeType === 'line' || target.shapeType === 'arrow')) {
+                const geom = this.getShapeDocGeometry(target);
+                if (linearPathHit(geom, { x: docX, y: docY }, Math.max(16, 24 / this.zoom))) {
+                    activateSegmentSlide = true;
+                    barrel = false;
+                    this.barrelActive = false;
+                    this.barrelEraseSession = false;
+                    this.barrelSegmentSlideLatched = true;
+                    this.isCtrlDown = true;
+                }
+            }
+        }
+
+        // Ctrl key active / S-Pen barrel on segment: blocks drawing new shapes, directly selects and slides linear/circuit segments
+        if (activateSegmentSlide && !barrel) {
+            let targetShape = this.getSelectedShape();
+            if (!targetShape || (targetShape.shapeType !== 'line' && targetShape.shapeType !== 'arrow')) {
+                const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 18);
+                if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                    this.selection = [hit];
+                    this.emitSelection();
+                    targetShape = hit;
+                }
+            }
+            if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                if (this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+                    this.schedulePaint();
+                    return;
+                }
+            }
+            // Ctrl strictly blocks drawing new shapes
+            return;
+        }
+
+        // Parametric control handles of the selected shape take priority over drawing / moving
+        if (!startsConnector && (this.tool === 'lasso' || this.tool === 'shape') && !barrel && this.tryBeginHandleDrag(docX, docY, rawPoint)) {
+            // S-Pen Long-press (Dwell ~200ms): holding on a linear segment converts drag to orthogonal slide
+            if (rawEvent?.pointerType === 'pen' && !this.isCtrlDown && !barrel) {
+                const targetShape = this.getSelectedShape();
+                if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                    const geom = this.getShapeDocGeometry(targetShape);
+                    if (linearPathHit(geom, { x: docX, y: docY }, Math.max(16, 24 / this.zoom))) {
+                        const startX = docX;
+                        const startY = docY;
+                        this.penDwellTimer = window.setTimeout(() => {
+                            this.penDwellTimer = null;
+                            if (this.handleDrag && this.handleDrag.elementId === targetShape.id) {
+                                const segIdx = findClosestLinearSegment(geom, { x: startX, y: startY });
+                                this.handleDrag.handleId = `seg-slide-${segIdx}`;
+                                try { navigator.vibrate?.(25); } catch {}
+                                this.renderDirty = true;
+                                this.schedulePaint();
+                            }
+                        }, 220);
+                    }
+                }
+            }
+            this.schedulePaint();
+            return;
+        }
+
+        // 2. For ink drawing tools (not barrel-erasing), forbid drawing above content top (properties / title)
+        const isDrawingTool = !barrel && (this.tool === 'pen' || this.tool === 'highlighter' || this.tool === 'shape');
         if (isDrawingTool) {
             const bounds = this.getDocumentContentBounds();
             const check = isInkAllowedAt(docX, docY, bounds);
@@ -2997,23 +3353,42 @@ export class CanvasController {
             this.lastPointerDownTime = this.strokeStartTime;
         }
 
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        this.activeContentLeft = contentLeft;
-        this.activeContentWidth = contentWidth;
-
         this.activeAnchor = this.anchorAt(docX, docY);
         this.activeBlockTop = this.activeAnchor.y;
 
         this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
 
-        // Moving existing selection if tapped inside bounds
+        // Moving existing selection if tapped inside bounds (lasso, or a shape selected with the shape tool)
         const selectionBounds = this.getSelectionDocBounds();
-        this.movingSelection = this.tool === 'lasso' && Boolean(
+        const canMoveSelection = this.tool === 'lasso' || (this.tool === 'shape' && this.getSelectedShape() !== null);
+        this.movingSelection = canMoveSelection && !barrel && !startsConnector && Boolean(
             selectionBounds && contains(selectionBounds, docX, docY, 12)
         );
+        this.moveSelectionSnapshot = this.movingSelection ? this.createHistorySnapshot() : null;
+        if (this.movingSelection) {
+            this.moveSelectionStartPt = { x: docX, y: docY };
+            this.moveSelectionInitialBounds = selectionBounds ? { ...selectionBounds } : null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+        } else {
+            this.moveSelectionStartPt = null;
+            this.moveSelectionInitialBounds = null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+        }
+        if (this.tool === 'shape' && !this.movingSelection && this.selection.length > 0) {
+            // Starting a new shape (or tapping elsewhere) drops the current shape selection
+            this.selection = [];
+            this.emitSelection();
+        }
         this.barrelActive = barrel;
+        this.barrelEraseSession = barrel;
 
         this.pushWorldPoint(rawPoint);
+        this.clearHoldToSnap();
+        if (this.isHoldToSnapActive()) {
+            this.trackHoldToSnap();
+        }
 
         if (this.tool === 'eraser' || barrel) {
             this.recordHistory();
@@ -3028,8 +3403,39 @@ export class CanvasController {
 
     private move(rawPoints: Point[], barrel: boolean, rawEvent?: PointerEvent): void {
         if (!this.activeStart) return;
-        this.barrelActive = barrel;
-        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey) || this.barrelSegmentSlideLatched;
+        }
+        if (this.penDwellTimer && this.activeStart) {
+            const lastRaw = rawPoints[rawPoints.length - 1];
+            if (lastRaw && Math.hypot(lastRaw.x - this.activeStart.x, lastRaw.y - this.activeStart.y) > 6) {
+                window.clearTimeout(this.penDwellTimer);
+                this.penDwellTimer = null;
+            }
+        }
+
+        if (this.handleDrag) {
+            const last = rawPoints[rawPoints.length - 1];
+            if (last) {
+                this.updateHandleDrag({
+                    x: (last.x + this.currentScrollLeft) / this.zoom,
+                    y: (last.y + this.currentScrollTop) / this.zoom,
+                });
+            }
+            return;
+        }
+        if (barrel && !this.barrelEraseSession && this.tool !== 'eraser') {
+            this.recordHistory();
+            this.barrelEraseSession = true;
+            this.points.clear();
+            this.clearHoldToSnap();
+            this.resetLiveBake();
+            this.movingSelection = false;
+            this.moveSelectionSnapshot = null;
+        }
+        this.barrelActive = barrel || this.barrelEraseSession;
+        if (this.straightenLines && !this.barrelActive && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const lastRaw = rawPoints[rawPoints.length - 1];
             const currentDocPt: Point = {
                 x: (lastRaw.x + this.currentScrollLeft) / this.zoom,
@@ -3048,7 +3454,11 @@ export class CanvasController {
             for (let i = 0; i < rawPoints.length; i++) this.pushWorldPoint(rawPoints[i]);
         }
 
-        if (this.tool === 'eraser' || barrel) {
+        if (this.isHoldToSnapActive()) {
+            this.trackHoldToSnap();
+        }
+
+        if (this.tool === 'eraser' || this.barrelActive) {
             const worldPoints = rawPoints.map(p => ({
                 x: (p.x + this.currentScrollLeft) / this.zoom,
                 y: (p.y + this.currentScrollTop) / this.zoom,
@@ -3060,29 +3470,82 @@ export class CanvasController {
         }
 
         if (rawEvent) {
-            this.updateCursor(rawEvent, true);
+            this.updateCursor(rawEvent);
             this.checkAutoScroll(rawEvent);
         }
 
-        if (this.activeAnchor?.blockId.startsWith('space:')) {
+        if (!this.barrelActive && this.tool !== 'eraser' && this.activeAnchor?.blockId.startsWith('space:')) {
             this.checkAutoGrowth(rawPoints);
         }
 
-        if (this.movingSelection && this.tool === 'lasso' && this.points.size > 1) {
-            const last = this.points.get(this.points.size - 1);
-            const prev = this.points.get(this.points.size - 2);
-            const dx = last.x - prev.x;
-            const dy = last.y - prev.y;
-            this.translateSelection(dx, dy, false);
+        if (this.movingSelection && this.moveSelectionStartPt && this.moveSelectionInitialBounds) {
+            const rawDocX = (rawPoints[rawPoints.length - 1].x + this.currentScrollLeft) / this.zoom;
+            const rawDocY = (rawPoints[rawPoints.length - 1].y + this.currentScrollTop) / this.zoom;
+            const totalDx = rawDocX - this.moveSelectionStartPt.x;
+            const totalDy = rawDocY - this.moveSelectionStartPt.y;
+
+            let effectiveTotalDx = totalDx;
+            let effectiveTotalDy = totalDy;
+
+            const isSnapBypassed = Boolean(rawEvent?.altKey || rawEvent?.ctrlKey);
+            if (!isSnapBypassed) {
+                const tol = 6 / this.zoom;
+                const otherBounds: SnapTargetBounds[] = [];
+                const selSet = new Set(this.selection.map(el => el.id));
+                for (const el of this.document.elements) {
+                    if (selSet.has(el.id)) continue;
+                    if (el.type === 'shape') {
+                        otherBounds.push(this.getElementDocBounds(el));
+                    }
+                }
+                const activePredicted = {
+                    minX: this.moveSelectionInitialBounds.minX + totalDx,
+                    maxX: this.moveSelectionInitialBounds.maxX + totalDx,
+                    minY: this.moveSelectionInitialBounds.minY + totalDy,
+                    maxY: this.moveSelectionInitialBounds.maxY + totalDy,
+                };
+                const smart = computeSmartAlignmentGuides(activePredicted, otherBounds, tol);
+                effectiveTotalDx += smart.deltaX;
+                effectiveTotalDy += smart.deltaY;
+                this.activeAlignmentGuides = smart.guides;
+            } else {
+                this.activeAlignmentGuides = [];
+            }
+
+            const stepDx = effectiveTotalDx - this.moveSelectionCurrentDx;
+            const stepDy = effectiveTotalDy - this.moveSelectionCurrentDy;
+            if (stepDx !== 0 || stepDy !== 0) {
+                this.translateSelection(stepDx, stepDy, false);
+                this.moveSelectionCurrentDx = effectiveTotalDx;
+                this.moveSelectionCurrentDy = effectiveTotalDy;
+            }
         }
 
         this.schedulePaint();
     }
 
-    private end(rawPoint: Point, barrel: boolean, releasedAt: number): void {
+    private end(rawPoint: Point, barrel: boolean, releasedAt: number, rawEvent?: PointerEvent): void {
+        if (this.penDwellTimer) {
+            window.clearTimeout(this.penDwellTimer);
+            this.penDwellTimer = null;
+        }
         if (!this.activeStart) return;
+        if (rawEvent) {
+            this.isShiftDown = Boolean(rawEvent.shiftKey);
+            this.isCtrlDown = Boolean(rawEvent.ctrlKey || rawEvent.metaKey) || this.barrelSegmentSlideLatched;
+        }
+        if (this.handleDrag) {
+            this.updateHandleDrag({
+                x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
+                y: (rawPoint.y + this.currentScrollTop) / this.zoom,
+            });
+            this.finishHandleDrag();
+            this.cancel();
+            return;
+        }
+        const isBarrelErasing = barrel || this.barrelActive || this.barrelEraseSession;
         const lastMotionAt = this.points.size > 0 ? this.points.getTime(this.points.size - 1) : releasedAt;
-        if (this.straightenLines && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
+        if (this.straightenLines && !isBarrelErasing && (this.tool === 'pen' || this.tool === 'highlighter') && !this.movingSelection) {
             const currentDocPt: Point = {
                 x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
                 y: (rawPoint.y + this.currentScrollTop) / this.zoom,
@@ -3101,18 +3564,32 @@ export class CanvasController {
         }
         const raw = this.readActivePoints();
 
-        if (this.movingSelection && this.tool === 'lasso') {
-            this.recordHistory();
+        if (this.movingSelection) {
             this.movingSelection = false;
-            this.reanchorSelection();
-            this.rebuildIndex();
-            this.emitSelection();
-            this.renderDirty = true;
-            this.persistSoon();
-            this.toast?.show('Selección reubicada');
+            this.activeAlignmentGuides = [];
+            this.moveSelectionStartPt = null;
+            this.moveSelectionInitialBounds = null;
+            this.moveSelectionCurrentDx = 0;
+            this.moveSelectionCurrentDy = 0;
+            const snapshot = this.moveSelectionSnapshot;
+            this.moveSelectionSnapshot = null;
+            if (this.isTapGesture(this.activeStart, raw[raw.length - 1])) {
+                // No real displacement: keep the selection and leave the undo stack untouched
+                if (this.tool === 'shape') this.selectShapeAt(this.activeStart);
+            } else {
+                // The snapshot was taken at pointerdown, so undo restores the pre-move position
+                this.commitHistorySnapshot(snapshot ?? this.createHistorySnapshot());
+                this.reanchorSelection();
+                this.followConnectors(new Set(this.selection.map(el => el.id)));
+                this.rebuildIndex();
+                this.emitSelection();
+                this.renderDirty = true;
+                this.persistSoon();
+                this.toast?.show('Selección reubicada');
+            }
         } else if (this.tool === 'lasso') {
             this.selectLasso(raw);
-        } else if (this.tool === 'eraser' || barrel) {
+        } else if (this.tool === 'eraser' || isBarrelErasing) {
             const endDocPt = {
                 x: (rawPoint.x + this.currentScrollLeft) / this.zoom,
                 y: (rawPoint.y + this.currentScrollTop) / this.zoom,
@@ -3121,22 +3598,52 @@ export class CanvasController {
             this.rebuildIndex();
             this.renderDirty = true;
             this.persistSoon();
+        } else if (this.tool === 'shape') {
+            const isBlob = getShapePlugin(this.shapeType).id === 'blob';
+            const isTap = isBlob
+                ? raw.every(pt => Math.hypot(pt.x - this.activeStart!.x, pt.y - this.activeStart!.y) < SHAPE_TAP_SLOP_PX)
+                : this.isTapGesture(this.activeStart, raw[raw.length - 1]);
+            if (isTap) {
+                // Tapping with the shape tool selects an existing shape (exposing its handles) instead of
+                // creating a zero-size shape
+                this.selectShapeAt(this.activeStart);
+            } else {
+                this.recordHistory();
+                const rawEndPoint = raw[raw.length - 1];
+                let endPt = { x: rawEndPoint.x, y: rawEndPoint.y };
+                const snaps: { start: SnapPortHit | null; end: SnapPortHit | null } = isBlob
+                    ? { start: null, end: null }
+                    : this.resolveConnectorSnaps(this.shapeType, this.activeStart, endPt);
+                if (!isBlob && !snaps.end && !this.isShiftDown) {
+                    const tol = 6 / this.zoom;
+                    const refPoints = this.getAllReferencePoints();
+                    refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
+                    const ptGuide = computePointAlignmentGuides(endPt, refPoints, tol);
+                    if (ptGuide.deltaY !== 0) endPt.y = ptGuide.snappedPoint.y;
+                    if (ptGuide.deltaX !== 0) endPt.x = ptGuide.snappedPoint.x;
+                }
+                this.addShape(this.activeStart, endPt, this.shapeType, {
+                    startSnap: snaps.start,
+                    endSnap: snaps.end,
+                    ...(isBlob ? { points: raw } : {}),
+                });
+            }
         } else {
             this.recordHistory();
-            if (this.tool === 'shape') {
-                this.addShape(this.activeStart, raw[raw.length - 1], this.shapeType);
+            // Hold-to-snap: the live dwell preview wins; otherwise a stationary hold right
+            // before release still converts the stroke
+            const recognized = this.snapPreview ?? (this.isHoldToSnapActive()
+                ? this.recognizer.recognize(raw, releasedAt, lastMotionAt)
+                : null);
+            if (recognized) {
+                this.addRecognizedShape(recognized);
+                this.toast?.show(`Forma reconocida: ${getShapePlugin(recognized.type).name}`);
             } else {
-                const recognized = (this.shapeRecognition && !this.straightenLines) ? this.recognizer.recognize(raw, releasedAt, lastMotionAt) : null;
-                if (recognized) {
-                    this.addShape(recognized.start, recognized.end, recognized.type);
-                    this.toast?.show(`Forma reconocida: ${recognized.type}`);
-                } else {
-                    this.addStroke(raw);
-                }
+                this.addStroke(raw);
             }
         }
 
-        if (this.activeAnchor?.blockId.startsWith('space:')) {
+        if (!isBarrelErasing && this.tool !== 'eraser' && this.activeAnchor?.blockId.startsWith('space:')) {
             this.checkAutoGrowth([rawPoint]);
             const spaceId = this.activeAnchor.blockId.slice(6);
             const finalHeight = BoxRegistry.getHeight(spaceId);
@@ -3145,13 +3652,22 @@ export class CanvasController {
             }
         }
 
+        this.clearHoldToSnap();
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
+        this.hoverSnapPort = null;
         this.barrelActive = false;
+        this.barrelEraseSession = false;
+        if (this.barrelSegmentSlideLatched) {
+            this.isCtrlDown = false;
+            this.barrelSegmentSlideLatched = false;
+        }
+        this.activeAlignmentGuides = [];
+        this.isShiftDown = false;
         this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
         this.renderDirty = true;
@@ -3162,24 +3678,41 @@ export class CanvasController {
     }
 
     private cancel(): void {
+        this.activeAlignmentGuides = [];
+        if (this.handleDrag) {
+            this.revertHandleDrag();
+        }
+        this.clearHoldToSnap();
         this.points.clear();
         this.predictor.reset();
         this.resetLiveBake();
         this.hasPrediction = false;
         this.activeStart = null;
         this.activeAnchor = null;
+        this.hoverSnapPort = null;
         this.movingSelection = false;
+        this.moveSelectionSnapshot = null;
+        this.moveSelectionStartPt = null;
+        this.moveSelectionInitialBounds = null;
+        this.moveSelectionCurrentDx = 0;
+        this.moveSelectionCurrentDy = 0;
         this.barrelActive = false;
+        this.barrelEraseSession = false;
+        if (this.barrelSegmentSlideLatched) {
+            this.isCtrlDown = false;
+            this.barrelSegmentSlideLatched = false;
+        }
+        this.isShiftDown = false;
         this.lastPointerDownTime = 0;
         this.pointerDownStartPos = null;
         this.schedulePaint();
     }
 
     private resetLiveBake(): void {
-        this.liveBakedIndex = 0;
-        this.liveBakeSegState = {};
-        if (this.liveBakeCtx && this.liveBakeCanvas) {
-            this.liveBakeCtx.clearRect(0, 0, this.liveBakeCanvas.width, this.liveBakeCanvas.height);
+        this.liveBakeState.liveBakedIndex = 0;
+        this.liveBakeState.liveBakeSegState = {};
+        if (this.liveBakeState.liveBakeCtx && this.liveBakeState.liveBakeCanvas) {
+            this.liveBakeState.liveBakeCtx.clearRect(0, 0, this.liveBakeState.liveBakeCanvas.width, this.liveBakeState.liveBakeCanvas.height);
         }
     }
 
@@ -3305,7 +3838,120 @@ export class CanvasController {
         return false;
     }
 
-    private addShape(start: Point, end: Point, shapeType: ShapeElement['shapeType']): void {
+    /** Commits a hold-to-snap recognition as a parametric ShapeElement styled like the active pen. */
+    private addRecognizedShape(recognized: RecognizedShape): void {
+        this.addShape(recognized.start, recognized.end, recognized.type, {
+            style: { ...this.style, profile: undefined, isHighlighter: undefined },
+            regularize: recognized.regularize,
+            vertices: recognized.vertices,
+            fill: false,
+        });
+    }
+
+    private isHoldToSnapActive(): boolean {
+        return this.shapeRecognition &&
+            !this.straightenLines &&
+            !this.barrelActive &&
+            !this.movingSelection &&
+            (this.tool === 'pen' || this.tool === 'highlighter');
+    }
+
+    /**
+     * Restarts the dwell timer whenever the stylus travels more than HOLD_TO_SNAP_MOVE_TOLERANCE_PX
+     * (screen px). If it then stays put for HOLD_TO_SNAP_DWELL_MS the stroke is classified and, when
+     * confident, previewed as a perfect shape until pointerup commits it.
+     */
+    private trackHoldToSnap(): void {
+        if (this.points.size === 0) return;
+        const last = { x: this.points.getX(this.points.size - 1), y: this.points.getY(this.points.size - 1) };
+        const tolerance = HOLD_TO_SNAP_MOVE_TOLERANCE_PX / this.zoom;
+        const anchor = this.dwellAnchor;
+        if (anchor && Math.hypot(last.x - anchor.x, last.y - anchor.y) <= tolerance) return;
+
+        this.dwellAnchor = last;
+        if (this.snapPreview) {
+            // Drawing resumed: drop the preview and keep inking freehand
+            this.snapPreview = null;
+            this.schedulePaint();
+        }
+        if (this.dwellTimer !== null) clearTimeout(this.dwellTimer);
+        this.dwellTimer = setTimeout(() => this.onHoldToSnapDwell(), HOLD_TO_SNAP_DWELL_MS);
+    }
+
+    private onHoldToSnapDwell(): void {
+        this.dwellTimer = null;
+        if (this.destroyed || !this.activeStart || !this.isHoldToSnapActive()) return;
+        const recognized = this.recognizer.classify(this.readActivePoints());
+        if (!recognized) return;
+        this.snapPreview = recognized;
+        try {
+            (navigator as Navigator | undefined)?.vibrate?.(12);
+        } catch { /* haptics are best effort */ }
+        this.schedulePaint();
+    }
+
+    private clearHoldToSnap(): void {
+        if (this.dwellTimer !== null) {
+            clearTimeout(this.dwellTimer);
+            this.dwellTimer = null;
+        }
+        this.dwellAnchor = null;
+        this.snapPreview = null;
+    }
+
+    /** Wet-canvas preview of the recognized shape (with a faint accent halo) while the stylus is held. */
+    private paintSnapPreview(preview: RecognizedShape): void {
+        const plugin = getShapePlugin(preview.type);
+        const geom: ShapeRenderGeometry = {
+            x0: preview.start.x,
+            y0: preview.start.y,
+            x1: preview.end.x,
+            y1: preview.end.y,
+            regularize: preview.regularize,
+            ...(preview.vertices ? { vertices: preview.vertices.map(v => ({ x: v.x, y: v.y })) } : {}),
+        };
+        plugin.renderCanvas(this.context, geom, {
+            strokeColor: '#2F6BFF',
+            strokeWidth: this.style.width + 8 / this.zoom,
+            strokeOpacity: 0.18,
+            fillEnabled: false,
+        });
+        plugin.renderCanvas(this.context, geom, {
+            strokeColor: this.style.color,
+            strokeWidth: this.style.width,
+            strokePattern: this.style.pattern,
+            strokeOpacity: this.style.opacity,
+            fillEnabled: false,
+        });
+    }
+
+    private addShape(
+        start: Point,
+        end: Point,
+        shapeType: ShapeElement['shapeType'],
+        options: {
+            style?: StrokeStyle;
+            regularize?: boolean;
+            vertices?: Point[];
+            points?: Point[];
+            fill?: boolean;
+            /** Magnetic ports the connector endpoints were snapped to (line / arrow only). */
+            startSnap?: SnapPortHit | null;
+            endSnap?: SnapPortHit | null;
+        } = {},
+    ): void {
+        const isMagnetized = Boolean(options.startSnap || options.endSnap);
+        if (options.startSnap) start = { ...start, x: options.startSnap.x, y: options.startSnap.y };
+        if (options.endSnap) end = { ...end, x: options.endSnap.x, y: options.endSnap.y };
+        const plugin = getShapePlugin(shapeType);
+        const blobGeom = plugin.id === 'blob' && options.points && options.points.length >= 2
+            ? buildBlobGeometryFromPoints(options.points)
+            : null;
+        const anchorStart = start;
+        if (blobGeom) {
+            start = { x: blobGeom.x0, y: blobGeom.y0 };
+            end = { x: blobGeom.x1, y: blobGeom.y1 };
+        }
         const bounds = this.getDocumentContentBounds();
         const forbiddenY = bounds.contentTop > 0 ? bounds.contentTop - DEFAULT_INK_LIMITS.topMarginPx : -Infinity;
         if (bounds.contentTop > 0 && start.y < forbiddenY && end.y < forbiddenY) {
@@ -3313,22 +3959,33 @@ export class CanvasController {
             return;
         }
 
-        const anchor = this.activeAnchor ?? this.anchorAt(start.x, start.y);
+        const anchor = this.activeAnchor ?? this.anchorAt(anchorStart.x, anchorStart.y);
         const geom = this.getElementAnchorGeometry(anchor.blockId, anchor.text);
         const isBoxStroke = geom.isBox;
         const spaceId = anchor.blockId.startsWith('space:') ? anchor.blockId.slice(6) : '';
         const isBoxSnap = spaceId ? (BoxRegistry.isSnapActive(spaceId) || !!this.document.boxes?.[spaceId]?.snapToGrid) : false;
         const boxGridDensity = (spaceId && this.document.boxes?.[spaceId]?.gridDensity) || this.gridDensity || 32;
 
-        const rawStartU = (start.x - geom.originX) / geom.scaleWidth;
-        const rawStartV = (start.y - geom.originY) / geom.scaleWidth;
-        const rawEndU = (end.x - geom.originX) / geom.scaleWidth;
-        const rawEndV = (end.y - geom.originY) / geom.scaleWidth;
+        // Port positions win over 45° snapping and grid snapping
+        const regularize = (isMagnetized || blobGeom) ? false : (options.regularize ?? Boolean(this.toolState.shape.regularize || this.isShiftDown));
+        const normalizedGeom = blobGeom ?? plugin.normalizeGeometry({
+            x0: start.x,
+            y0: start.y,
+            x1: end.x,
+            y1: end.y,
+            regularize,
+            ...(options.vertices ? { vertices: options.vertices.map(v => ({ x: v.x, y: v.y })) } : {}),
+        });
+
+        const rawStartU = (normalizedGeom.x0 - geom.originX) / geom.scaleWidth;
+        const rawStartV = (normalizedGeom.y0 - geom.originY) / geom.scaleWidth;
+        const rawEndU = (normalizedGeom.x1 - geom.originX) / geom.scaleWidth;
+        const rawEndV = (normalizedGeom.y1 - geom.originY) / geom.scaleWidth;
 
         let { u: startU, v: startV } = sanitizeNormalizedPoint(rawStartU, rawStartV, { isBoxStroke });
         let { u: endU, v: endV } = sanitizeNormalizedPoint(rawEndU, rawEndV, { isBoxStroke });
 
-        if (isBoxStroke && (this.snapGrid || isBoxSnap)) {
+        if (isBoxStroke && (this.snapGrid || isBoxSnap) && !isMagnetized && !blobGeom) {
             const snStart = snapNormalizedPoint(startU, startV, boxGridDensity);
             const snEnd = snapNormalizedPoint(endU, endV, boxGridDensity);
             startU = snStart.u; startV = snStart.v;
@@ -3352,9 +4009,47 @@ export class CanvasController {
             startY: startV,
             endX: endU,
             endY: endV,
-            style: { ...this.style },
+            style: options.style ? { ...options.style } : {
+                ...this.style,
+                color: this.toolState.shape.color || this.style.color,
+                width: this.toolState.shape.width || this.style.width,
+                pattern: this.toolState.shape.pattern || this.style.pattern,
+                opacity: this.toolState.shape.opacity !== undefined ? this.toolState.shape.opacity : this.style.opacity,
+            },
+            regularize,
+            fillEnabled: options.fill === false ? false : this.toolState.shape.fillEnabled,
+            fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
+            fillOpacity: this.toolState.shape.fillOpacity,
+            fillPattern: this.toolState.shape.fillPattern,
+            fillDensity: this.toolState.shape.fillDensity,
             bounds: { minX: minU, maxX: maxU, minY: minV, maxY: maxV },
         };
+        if (normalizedGeom.vertices) {
+            element.vertices = normalizedGeom.vertices.map(v => {
+                const { u, v: vv } = sanitizeNormalizedPoint((v.x - geom.originX) / geom.scaleWidth, (v.y - geom.originY) / geom.scaleWidth, { isBoxStroke });
+                return { x: u, y: vv };
+            });
+            element.regularize = false;
+            refreshShapeElementBounds(element);
+        }
+        if (normalizedGeom.pathNodes && normalizedGeom.pathNodes.length >= 2) {
+            const normPt = (pt: { x: number; y: number }) => {
+                const { u, v } = sanitizeNormalizedPoint((pt.x - geom.originX) / geom.scaleWidth, (pt.y - geom.originY) / geom.scaleWidth, { isBoxStroke });
+                return { x: u, y: v };
+            };
+            element.pathNodes = normalizedGeom.pathNodes.map(n => ({
+                ...normPt(n),
+                ...(n.handleIn ? { handleIn: normPt(n.handleIn) } : {}),
+                ...(n.handleOut ? { handleOut: normPt(n.handleOut) } : {}),
+                ...(n.nodeKind ? { nodeKind: n.nodeKind } : {}),
+            }));
+            element.regularize = false;
+            refreshShapeElementBounds(element);
+        }
+        if (!plugin.isClosed) {
+            if (options.startSnap) element.startBinding = { elementId: options.startSnap.elementId, portId: options.startSnap.portId };
+            if (options.endSnap) element.endBinding = { elementId: options.endSnap.elementId, portId: options.endSnap.portId };
+        }
         this.document.elements.push(element);
         this.options.eventBus?.emit('snap:detected', shapeType, end.x, end.y);
     }
@@ -3486,12 +4181,14 @@ export class CanvasController {
                         }
                     }
 
+                    const previewLh = this.getPreviewLineHeight();
+                    const previewFloor = this.getPreviewContentTop();
                     if (prevBlock) {
                         const rect = prevBlock.getBoundingClientRect();
                         const prevBottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
                         const prevEnd = parseInt(prevBlock.dataset.apoloLineEnd || '0', 10);
                         const deltaLines = targetLine - prevEnd;
-                        const estimatedTop = prevBottom + (deltaLines - 1) * 24;
+                        const estimatedTop = prevBottom + Math.max(0, deltaLines - 1) * previewLh;
                         this.blockPositionCache.set(cacheKey, estimatedTop);
                         return estimatedTop;
                     } else if (nextBlock) {
@@ -3499,7 +4196,7 @@ export class CanvasController {
                         const nextTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
                         const nextStart = parseInt(nextBlock.dataset.apoloLineStart || '0', 10);
                         const deltaLines = nextStart - targetLine;
-                        const estimatedTop = Math.max(0, nextTop - deltaLines * 24);
+                        const estimatedTop = Math.max(previewFloor, nextTop - deltaLines * previewLh);
                         this.blockPositionCache.set(cacheKey, estimatedTop);
                         return estimatedTop;
                     }
@@ -3542,6 +4239,11 @@ export class CanvasController {
         const lineMatch = blockId.match(/^line:(\d+)$/);
         if (lineMatch) {
             const lineNum = parseInt(lineMatch[1], 10);
+            if (this.options.readonly) {
+                const firstContentLine = this.getFirstContentLine();
+                const previewTop = this.getPreviewContentTop();
+                return previewTop + Math.max(0, lineNum - firstContentLine) * this.getPreviewLineHeight();
+            }
             const lineCount = Math.max(1, this.editor ? this.editor.lineCount() : 1);
             const avgLineHeight = this.editor ? (this.scroller.scrollHeight / lineCount) : 26;
             return lineNum * avgLineHeight;
@@ -3576,6 +4278,13 @@ export class CanvasController {
     private getElementDocBounds(element: CanvasElement): BoundingBox {
         const geom = this.getElementAnchorGeometry(element.blockId, element.anchorText);
         const halfWidth = (element.style.width || 2) / 2;
+        if (element.type === 'shape') {
+            const plugin = getShapePlugin(element.shapeType);
+            return plugin.computeBounds(
+                shapeElementToGeometry(element, geom.originX, geom.originY, geom.scaleWidth),
+                element.style.width || 2,
+            );
+        }
         return {
             minX: geom.originX + element.bounds.minX * geom.scaleWidth - halfWidth,
             maxX: geom.originX + element.bounds.maxX * geom.scaleWidth + halfWidth,
@@ -3586,7 +4295,6 @@ export class CanvasController {
 
     private anchorAt(docX: number, docY: number): Anchor {
         const scrollerRect = this.scroller.getBoundingClientRect();
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
 
         // 1. Check if (docX, docY) falls inside any apolo-space box (both Live Preview & Reading mode).
         // Strokes starting within the box bounds belong to that box.
@@ -3673,6 +4381,10 @@ export class CanvasController {
         let modified = false;
 
         for (const element of this.document.elements) {
+            if (this.toolState.eraser.onlyHighlighter && !this.isHighlighter(element)) {
+                kept.push(element);
+                continue;
+            }
             const blockTop = this.getBlockTop(element.blockId, element.anchorText);
             if (element.type === 'stroke') {
                 if (this.eraserMode === 'reticle') {
@@ -3692,10 +4404,20 @@ export class CanvasController {
                     }
                 }
             } else {
-                if (shapeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
-                    modified = true;
+                if (this.eraserMode === 'reticle') {
+                    const fragments = splitShapeDoc(element, points, radius, contentLeft, contentWidth, blockTop, uuid);
+                    if (fragments) {
+                        kept.push(...fragments);
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
                 } else {
-                    kept.push(element);
+                    if (shapeHitDoc(element, points, radius, contentLeft, contentWidth, blockTop)) {
+                        modified = true;
+                    } else {
+                        kept.push(element);
+                    }
                 }
             }
         }
@@ -3708,6 +4430,8 @@ export class CanvasController {
                 }
             }
             this.document.elements = kept;
+            // Erasing a connected shape leaves its connectors in place but unbound
+            clearDanglingBindings(this.document.elements);
             this.selection = [];
             this.lassoMenu?.hide();
             this.emitSelection();
@@ -3746,9 +4470,12 @@ export class CanvasController {
     }
 
     private selectAt(point: Point): void {
-        const hit = [...this.document.elements].reverse().find(element =>
-            contains(this.getElementDocBounds(element), point.x, point.y, 14),
-        );
+        const hit = [...this.document.elements].reverse().find(element => {
+            if (element.type === 'shape') {
+                return this.hitTestShapeElement(element, point, 14);
+            }
+            return contains(this.getElementDocBounds(element), point.x, point.y, 14);
+        });
         if (hit) {
             // Select all strokes sharing the same link if linked
             if (hit.url) {
@@ -3775,6 +4502,398 @@ export class CanvasController {
             };
         }
         return bounds;
+    }
+
+    // ---------------------------------------------------------------------
+    // Parametric shape editing (control handles + reactive style edits)
+    // ---------------------------------------------------------------------
+
+    /** The selected ShapeElement (live document reference) when the selection is exactly one shape. */
+    private getSelectedShape(): ShapeElement | null {
+        if (this.selection.length !== 1) return null;
+        const selected = this.selection[0];
+        if (selected.type !== 'shape') return null;
+        return this.document.elements.includes(selected) ? selected : null;
+    }
+
+
+    private getAllReferencePoints(excludeElementId?: string): ReferencePoint[] {
+        const points: ReferencePoint[] = [];
+        const selSet = new Set(this.selection.map(el => el.id));
+        for (const el of this.document.elements) {
+            if (el.id === excludeElementId || selSet.has(el.id)) continue;
+            if (el.type === 'shape') {
+                const geom = this.getShapeDocGeometry(el);
+                const ports = getShapePlugin(el.shapeType).getSnapPorts(geom);
+                points.push(...getShapeKeyPoints(geom, ports));
+            }
+        }
+        return points;
+    }
+
+    private getShapeDocGeometry(shape: ShapeElement): ShapeRenderGeometry {
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        return shapeElementToGeometry(shape, anchor.originX, anchor.originY, anchor.scaleWidth);
+    }
+
+    private hitTestShapeElement(shape: ShapeElement, point: Point, tolerance: number): boolean {
+        const geom = this.getShapeDocGeometry(shape);
+        const rot = geom.rotation ?? shape.rotation ?? 0;
+        if (rot !== 0) {
+            const plugin = getShapePlugin(shape.shapeType);
+            const norm = plugin.normalizeGeometry(geom);
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            const inv = rotatePoint(point.x, point.y, cx, cy, -rot);
+            return plugin.hitTest(geom, inv, tolerance);
+        }
+        return getShapePlugin(shape.shapeType).hitTest(geom, point, tolerance);
+    }
+
+    private isTapGesture(start: Point, end: Point | undefined): boolean {
+        if (!end) return true;
+        return Math.hypot(end.x - start.x, end.y - start.y) < SHAPE_TAP_SLOP_PX;
+    }
+
+    /** Finds the topmost ShapeElement under `point` (or null). */
+    private findShapeAtDocPoint(point: Point, tolerance = 14): ShapeElement | null {
+        return [...this.document.elements].reverse().find(
+            (el): el is ShapeElement => el.type === 'shape' && this.hitTestShapeElement(el, point, tolerance),
+        ) ?? null;
+    }
+
+    /** Selects the topmost ShapeElement under `point` (or clears the selection). */
+    private selectShapeAt(point: Point): void {
+        const hit = this.findShapeAtDocPoint(point, 14);
+        this.selection = hit ? [hit] : [];
+        this.emitSelection();
+    }
+
+    /** Nearest magnetic port of a closed shape within MAGNETIC_SNAP_RADIUS_PX (screen) of `point`. */
+    private findSnapPort(point: { x: number; y: number }, excludeId?: string): SnapPortHit | null {
+        return findNearestSnapPort(
+            this.document.elements,
+            point,
+            MAGNETIC_SNAP_RADIUS_PX / this.zoom,
+            this.connectorAdapter,
+            excludeId,
+        );
+    }
+
+    /** Ports that a line / arrow being drawn from `start` to `end` snaps to (none for closed shapes). */
+    private resolveConnectorSnaps(
+        shapeType: ShapeType,
+        start: { x: number; y: number },
+        end: { x: number; y: number },
+    ): { start: SnapPortHit | null; end: SnapPortHit | null } {
+        if (getShapePlugin(shapeType).isClosed) return { start: null, end: null };
+        const startSnap = this.findSnapPort(start);
+        let endSnap = this.findSnapPort(end);
+        if (endSnap && startSnap && endSnap.elementId === startSnap.elementId && endSnap.portId === startSnap.portId) {
+            endSnap = null;
+        }
+        return { start: startSnap, end: endSnap };
+    }
+
+    /**
+     * Re-glues connectors bound to any of `changedIds` and releases bindings whose target vanished.
+     * Returns true when at least one connector moved.
+     */
+    private followConnectors(changedIds: ReadonlySet<string>): boolean {
+        if (changedIds.size === 0) return false;
+        const updated = followBoundConnectors(this.document.elements, changedIds, this.connectorAdapter);
+        if (updated.length > 0) this.renderDirty = true;
+        return updated.length > 0;
+    }
+
+    /** Magnetic feedback: the target shape's ports as dots plus a halo ring on the matched port. */
+    private paintSnapTargets(hits: Array<SnapPortHit | null | undefined>): void {
+        const ctx = this.context;
+        const accent = '#2F6BFF';
+        const painted = new Set<string>();
+        ctx.save();
+        ctx.setLineDash([]);
+        for (const hit of hits) {
+            if (!hit) continue;
+            if (!painted.has(hit.elementId)) {
+                painted.add(hit.elementId);
+                const target = this.document.elements.find(el => el.id === hit.elementId);
+                if (target && target.type === 'shape') {
+                    ctx.fillStyle = accent;
+                    ctx.globalAlpha = 0.45;
+                    for (const port of getShapePlugin(target.shapeType).getSnapPorts(this.getShapeDocGeometry(target))) {
+                        ctx.beginPath();
+                        ctx.arc(port.x, port.y, 2.5 / this.zoom, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = accent;
+            ctx.lineWidth = 2 / this.zoom;
+            ctx.beginPath();
+            ctx.arc(hit.x, hit.y, 6 / this.zoom, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    /** Starts dragging a control handle of the selected shape when (docX, docY) is within the pick radius. */
+    private tryBeginHandleDrag(docX: number, docY: number, rawPoint: Point): boolean {
+        const shape = this.getSelectedShape();
+        if (!shape) return false;
+        const geom = this.getShapeDocGeometry(shape);
+        const hitRadius = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+
+        // When Ctrl is held on a linear shape: ALWAYS prioritize segment sliding over handles!
+        if (this.isCtrlDown && (shape.shapeType === 'line' || shape.shapeType === 'arrow')) {
+            if (linearPathHit(geom, { x: docX, y: docY }, Math.max(hitRadius * 2.5, 24 / this.zoom, 16))) {
+                const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                this.startHandleDragSession(shape.id, `seg-slide-${segIdx}`, 'segment-mid', geom, 0, 0, docX, docY, rawPoint);
+                return true;
+            }
+        }
+
+        let best: { id: string; kind: ShapeHandleKind; x: number; y: number } | null = null;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (const handle of getShapePlugin(shape.shapeType).getControlHandles(geom)) {
+            const distance = Math.hypot(handle.x - docX, handle.y - docY);
+            if (distance <= hitRadius && distance < bestDistance) {
+                best = handle;
+                bestDistance = distance;
+            }
+        }
+        if (!best) {
+            if ((shape.shapeType === 'line' || shape.shapeType === 'arrow') && linearPathHit(geom, { x: docX, y: docY }, hitRadius)) {
+                const inserted = insertLinearNodeAtPoint(geom, { x: docX, y: docY });
+                if (inserted) {
+                    this.applyHandleGeometryMutation(shape, inserted.geom);
+                    this.startHandleDragSession(shape.id, inserted.handleId, 'vertex', inserted.geom, 0, 0, docX, docY, rawPoint);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        const now = performance.now();
+        const hitRadiusPx = SHAPE_HANDLE_HIT_RADIUS_PX / this.zoom;
+        const isDoubleTap = Boolean(
+            this.lastHandleTap &&
+            this.lastHandleTap.shapeId === shape.id &&
+            this.lastHandleTap.handleId === best.id &&
+            (now - this.lastHandleTap.time < 350) &&
+            Math.hypot(best.x - this.lastHandleTap.x, best.y - this.lastHandleTap.y) < hitRadiusPx * 2
+        );
+        this.lastHandleTap = { shapeId: shape.id, handleId: best.id, time: now, x: best.x, y: best.y };
+
+        if (isDoubleTap) {
+            let nextGeom: ShapeRenderGeometry | null = null;
+            if (best.id.startsWith('seg-mid-') || best.id === 'curve') {
+                const segIdx = best.id.startsWith('seg-mid-') ? parseInt(best.id.slice('seg-mid-'.length), 10) : 0;
+                const nodes = getLinearPathNodes(geom);
+                const n0 = nodes[segIdx];
+                const n1 = nodes[segIdx + 1];
+                const isCurved = Boolean(n0?.handleOut || n1?.handleIn);
+                nextGeom = isCurved
+                    ? straightenLinearSegment(geom, segIdx)
+                    : splitLinearSegment(geom, segIdx);
+            } else if (best.id === 'start' || best.id === 'end' || best.id.startsWith('node-')) {
+                const nodes = getLinearPathNodes(geom);
+                const nodeIdx = best.id === 'start' ? 0 : best.id === 'end' ? nodes.length - 1 : parseInt(best.id.slice('node-'.length), 10);
+                nextGeom = toggleLinearNodeKind(geom, nodeIdx);
+            }
+            if (nextGeom) {
+                this.applyHandleGeometryMutation(shape, nextGeom, true);
+                return true;
+            }
+        }
+
+        this.startHandleDragSession(shape.id, best.id, best.kind, geom, best.x - docX, best.y - docY, docX, docY, rawPoint);
+        return true;
+    }
+
+    private startHandleDragSession(
+        elementId: string,
+        handleId: string,
+        kind: ShapeHandleKind,
+        startGeom: ShapeRenderGeometry,
+        grabOffsetX: number,
+        grabOffsetY: number,
+        docX: number,
+        docY: number,
+        rawPoint: Point,
+    ): void {
+        this.points.clear();
+        this.predictor.reset();
+        this.resetLiveBake();
+        this.movingSelection = false;
+        this.activeStart = { x: docX, y: docY, pressure: rawPoint.pressure, time: rawPoint.time };
+        this.handleDrag = {
+            elementId,
+            handleId,
+            kind,
+            startGeom,
+            grabOffsetX,
+            grabOffsetY,
+            snapshot: this.createHistorySnapshot(),
+            changed: false,
+            snap: null,
+        };
+    }
+
+    private applyHandleGeometryMutation(shape: ShapeElement, nextGeom: ShapeRenderGeometry, emitDirty = false): void {
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        this.recordHistory();
+        applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
+        this.strokeCache.delete(shape.id);
+        this.rebuildIndex();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        if (emitDirty) {
+            this.options.eventBus?.emit('canvas:dirty', this.pageId);
+        }
+    }
+
+    private updateHandleDrag(docPoint: { x: number; y: number }): void {
+        const drag = this.handleDrag;
+        if (!drag) return;
+        const shape = this.document.elements.find(el => el.id === drag.elementId);
+        if (!shape || shape.type !== 'shape') return;
+
+        const plugin = getShapePlugin(shape.shapeType);
+        const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+        let target = { x: docPoint.x + drag.grabOffsetX, y: docPoint.y + drag.grabOffsetY };
+        let regularize = Boolean(this.toolState.shape.regularize || this.isShiftDown);
+
+        // Inverse rotate target point for local slider handles (radius / parametric 3D)
+        if (drag.handleId === 'radius' || drag.handleId.startsWith('param-')) {
+            if (drag.startGeom.rotation) {
+                const norm = plugin.normalizeGeometry(drag.startGeom);
+                const cx = (norm.x0 + norm.x1) / 2;
+                const cy = (norm.y0 + norm.y1) / 2;
+                target = rotatePoint(target.x, target.y, cx, cy, -drag.startGeom.rotation);
+            }
+        }
+
+        // Connector endpoints magnetize to nearby ports; leaving the 14px radius releases them
+        if (isConnectorShape(shape) && (drag.handleId === 'start' || drag.handleId === 'end')) {
+            drag.snap = this.findSnapPort(target, shape.id);
+            if (drag.snap) {
+                target = { x: drag.snap.x, y: drag.snap.y };
+                regularize = false;
+            }
+        }
+
+        // Fusion 360 style CAD point alignment guides ("a la altura" & vertical columns)
+        const isGuideBypassed = Boolean(this.isShiftDown);
+        if (!isGuideBypassed && !drag.snap && drag.handleId !== 'rotate') {
+            const tol = 6 / this.zoom;
+            const refPoints = this.getAllReferencePoints(shape.id);
+            if (!plugin.isClosed && shape.pathNodes && shape.pathNodes.length > 1) {
+                const geom = this.getShapeDocGeometry(shape);
+                const nodes = getLinearPathNodes(geom);
+                for (let i = 0; i < nodes.length; i++) {
+                    const nodeHandleId = i === 0 ? 'start' : i === nodes.length - 1 ? 'end' : `node-${i}`;
+                    if (drag.handleId !== nodeHandleId) {
+                        refPoints.push({ x: nodes[i].x, y: nodes[i].y });
+                    }
+                }
+            }
+            const pointGuide = computePointAlignmentGuides(target, refPoints, tol);
+            if (pointGuide.deltaY !== 0) {
+                target.y = pointGuide.snappedPoint.y;
+            }
+            if (pointGuide.deltaX !== 0) {
+                target.x = pointGuide.snappedPoint.x;
+            }
+            this.activeAlignmentGuides = pointGuide.guides;
+        } else if (drag.handleId === 'rotate') {
+            this.activeAlignmentGuides = [];
+        }
+
+        const next = plugin.applyHandleDrag(drag.startGeom, drag.handleId, target, regularize);
+        applyGeometryToShapeElement(shape, next, anchor.originX, anchor.originY, anchor.scaleWidth);
+        shape.regularize = regularize && !drag.snap;
+
+        drag.changed = true;
+        this.strokeCache.delete(shape.id);
+        // Connectors glued to this shape follow the resize / reshape live
+        this.followConnectors(new Set([shape.id]));
+        this.renderDirty = true;
+        this.schedulePaint();
+    }
+
+    private finishHandleDrag(): void {
+        this.activeAlignmentGuides = [];
+        const drag = this.handleDrag;
+        this.handleDrag = null;
+        if (!drag || !drag.changed) return;
+        const shape = this.document.elements.find(el => el.id === drag.elementId);
+        if (shape && isConnectorShape(shape) && (drag.handleId === 'start' || drag.handleId === 'end')) {
+            setBinding(shape, drag.handleId, drag.snap ? { elementId: drag.snap.elementId, portId: drag.snap.portId } : null);
+        }
+        this.commitHistorySnapshot(drag.snapshot);
+        this.rebuildIndex();
+        this.emitSelection();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        this.options.eventBus?.emit('canvas:dirty', this.pageId);
+    }
+
+    /** Pointer cancelled mid-drag: restore the pre-drag document and keep the shape selected. */
+    private revertHandleDrag(): void {
+        this.activeAlignmentGuides = [];
+        const drag = this.handleDrag;
+        this.handleDrag = null;
+        if (!drag || !drag.changed) return;
+        this.document.elements = cloneElements(drag.snapshot.elements);
+        const restored = this.document.elements.find(el => el.id === drag.elementId);
+        this.selection = restored ? [restored] : [];
+        this.strokeCache.delete(drag.elementId);
+        this.rebuildIndex();
+        this.emitSelection();
+    }
+
+    /**
+     * Reactive editing: style changes made in ToolEstuche / Toolbar while shapes are selected
+     * (shape or lasso tool) are applied to those shapes in place, with one undo step per burst.
+     */
+    private applyStyleToSelectedShapes(patch: ShapeStylePatch): boolean {
+        if (this.suppressSelectionStyleSync) return false;
+        if (this.tool !== 'shape' && this.tool !== 'lasso') return false;
+        const shapes = this.selection.filter((el): el is ShapeElement => el.type === 'shape');
+        if (shapes.length === 0) return false;
+
+        const now = Date.now();
+        const key = `${shapes.map(s => s.id).join(',')}|${Object.keys(patch).sort().join(',')}`;
+        if (now - this.lastShapeStyleEdit.at > SHAPE_STYLE_HISTORY_COALESCE_MS || this.lastShapeStyleEdit.key !== key) {
+            this.recordHistory();
+        }
+        this.lastShapeStyleEdit = { at: now, key };
+
+        for (const shape of shapes) {
+            if (patch.color !== undefined) shape.style.color = patch.color;
+            if (patch.width !== undefined) shape.style.width = patch.width;
+            if (patch.opacity !== undefined) shape.style.opacity = patch.opacity;
+            if (patch.pattern !== undefined) shape.style.pattern = patch.pattern;
+            if (getShapePlugin(shape.shapeType).isClosed) {
+                if (patch.fillEnabled !== undefined) shape.fillEnabled = patch.fillEnabled;
+                if (patch.fillColor !== undefined) shape.fillColor = patch.fillColor;
+                if (patch.fillPattern !== undefined) shape.fillPattern = patch.fillPattern;
+                if (patch.fillOpacity !== undefined) shape.fillOpacity = patch.fillOpacity;
+                if (patch.fillDensity !== undefined) shape.fillDensity = patch.fillDensity;
+            }
+            this.strokeCache.delete(shape.id);
+        }
+
+        this.rebuildIndex();
+        this.renderDirty = true;
+        this.schedulePaint();
+        this.persistSoon();
+        this.options.eventBus?.emit('canvas:dirty', this.pageId);
+        return true;
     }
 
     private emitSelection(): void {
@@ -3828,10 +4947,7 @@ export class CanvasController {
         element.bounds.minY += dv;
         element.bounds.maxY += dv;
         if (element.type === 'shape') {
-            element.startX += du;
-            element.endX += du;
-            element.startY += dv;
-            element.endY += dv;
+            mapShapeElementPoints(element, (u, v) => ({ x: u + du, y: v + dv }));
         } else {
             for (let i = 0; i < element.points.length; i += 4) {
                 element.points[i] += du;
@@ -3849,11 +4965,24 @@ export class CanvasController {
         const { width: contentWidth } = this.getContentGeometry();
         const du = 20 / contentWidth;
         const dv = 20 / contentWidth;
+        const idMap = new Map<string, string>();
         for (let i = 0; i < copies.length; i++) {
-            copies[i].id = uuid();
+            const newId = uuid();
+            idMap.set(copies[i].id, newId);
+            copies[i].id = newId;
             copies[i].zIndex = offset + i;
             this.shiftElementNormalized(copies[i], du, dv);
             this.document.elements.push(copies[i]);
+        }
+        // Pasted connectors stay glued only to shapes pasted with them
+        for (const copy of copies) {
+            if (copy.type !== 'shape') continue;
+            for (const end of ['start', 'end'] as const) {
+                const binding = end === 'start' ? copy.startBinding : copy.endBinding;
+                if (!binding) continue;
+                const mapped = idMap.get(binding.elementId);
+                setBinding(copy, end, mapped ? { elementId: mapped, portId: binding.portId } : null);
+            }
         }
         this.selection = copies;
         this.rebuildIndex();
@@ -3871,6 +5000,7 @@ export class CanvasController {
             this.strokeCache.delete(id);
         }
         this.document.elements = this.document.elements.filter(element => !ids.has(element.id));
+        clearDanglingBindings(this.document.elements);
         this.selection = [];
         this.lassoMenu?.hide();
         this.rebuildIndex();
@@ -3918,6 +5048,9 @@ export class CanvasController {
             this.shiftElementNormalized(element, du, dv);
             this.strokeCache.delete(element.id);
         }
+        // Connectors dragged without their target let go; connectors glued to moved shapes follow
+        releaseDetachedBindings(this.selection);
+        this.followConnectors(new Set(this.selection.map(element => element.id)));
         this.rebuildIndex();
         this.emitSelection();
         this.renderDirty = true;
@@ -3961,32 +5094,17 @@ export class CanvasController {
                     }
                     element.bounds = { minX: minU, maxX: maxU, minY: minV, maxY: maxV };
                 } else {
-                    const docStartX = oldGeom.originX + element.startX * oldGeom.scaleWidth;
-                    const docStartY = oldGeom.originY + element.startY * oldGeom.scaleWidth;
-                    const docEndX = oldGeom.originX + element.endX * oldGeom.scaleWidth;
-                    const docEndY = oldGeom.originY + element.endY * oldGeom.scaleWidth;
-
-                    let newStartX = (docStartX - newGeom.originX) / newGeom.scaleWidth;
-                    let newStartY = (docStartY - newGeom.originY) / newGeom.scaleWidth;
-                    let newEndX = (docEndX - newGeom.originX) / newGeom.scaleWidth;
-                    let newEndY = (docEndY - newGeom.originY) / newGeom.scaleWidth;
-
-                    if (newGeom.isBox) {
-                        newStartX = Math.max(0, Math.min(1, newStartX));
-                        newStartY = Math.max(0, newStartY);
-                        newEndX = Math.max(0, Math.min(1, newEndX));
-                        newEndY = Math.max(0, newEndY);
-                    }
-                    element.startX = newStartX;
-                    element.startY = newStartY;
-                    element.endX = newEndX;
-                    element.endY = newEndY;
-                    element.bounds = {
-                        minX: Math.min(newStartX, newEndX),
-                        maxX: Math.max(newStartX, newEndX),
-                        minY: Math.min(newStartY, newEndY),
-                        maxY: Math.max(newStartY, newEndY),
-                    };
+                    mapShapeElementPoints(element, (u, v) => {
+                        const docX = oldGeom.originX + u * oldGeom.scaleWidth;
+                        const docY = oldGeom.originY + v * oldGeom.scaleWidth;
+                        let newU = (docX - newGeom.originX) / newGeom.scaleWidth;
+                        let newV = (docY - newGeom.originY) / newGeom.scaleWidth;
+                        if (newGeom.isBox) {
+                            newU = Math.max(0, Math.min(1, newU));
+                            newV = Math.max(0, newV);
+                        }
+                        return { x: newU, y: newV };
+                    }, oldGeom.scaleWidth / newGeom.scaleWidth);
                 }
 
                 element.blockId = newAnchor.blockId;
@@ -4037,15 +5155,18 @@ export class CanvasController {
         BoxRegistry.setGridDensity(boxId, defGridDensity);
         BoxRegistry.setBorderOutline(boxId, defBorder);
 
-        // 2. Insert into Markdown
+        // 2. Insert into Markdown (clearing any existing freehand ink above/at end of note)
         if (this.editor) {
             const cursor = this.editor.getCursor?.();
             const content = this.editor.getValue();
+            const cursorLine = cursor ? cursor.line : undefined;
+            const minLine = this.computeMinLineBelowFreehandInk(content, cursorLine);
             const { updatedContent, insertedLine } = insertCanvasIntoMarkdown(
                 content,
                 boxId,
                 defHeight,
-                cursor ? cursor.line : undefined,
+                cursorLine,
+                minLine > 0 ? { minLine } : undefined,
             );
 
             if (updatedContent !== content) {
@@ -4057,8 +5178,16 @@ export class CanvasController {
                 this.requestCmMeasure();
             }
         } else {
+            const currentContent = await this.options.app.vault.cachedRead(this.file);
+            const minLine = this.computeMinLineBelowFreehandInk(currentContent, undefined);
             await this.options.app.vault.process(this.file, (content) => {
-                const res = insertCanvasIntoMarkdown(content, boxId, defHeight, undefined);
+                const res = insertCanvasIntoMarkdown(
+                    content,
+                    boxId,
+                    defHeight,
+                    undefined,
+                    minLine > 0 ? { minLine } : undefined,
+                );
                 return res.updatedContent;
             });
         }
@@ -4083,83 +5212,6 @@ export class CanvasController {
 
         this.toast?.show('Canvas insertado');
         return boxId;
-    }
-
-    private insertSpace(points: Point[]): void {
-        if (points.length < 2) return;
-        const dy = points[points.length - 1].y - points[0].y;
-        if (Math.abs(dy) < 6) return;
-        const pivot = points[0].y;
-
-        this.recordHistory();
-
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-
-        // 1. Check if the pivot touch is inside an existing apolo-space block
-        const spaceBlocks = Array.from(this.scroller.querySelectorAll<HTMLElement>('.apolo-space-block, [data-apolo-space], [data-apolo-space-id]'));
-        const scrollerRect = this.scroller.getBoundingClientRect();
-        let targetSpace: { id: string; height: number; el: HTMLElement; top: number; bottom: number } | null = null;
-
-        for (const blockEl of spaceBlocks) {
-            const spaceId = blockEl.dataset.apoloSpaceId || blockEl.dataset.apoloSpace;
-            if (!spaceId) continue;
-            const rect = blockEl.getBoundingClientRect();
-            const top = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
-            const bottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom;
-            const height = Math.max(1, bottom - top);
-            const hitMargin = Math.max(16, (44 - height) / 2);
-            if (pivot >= top - hitMargin && pivot <= bottom + hitMargin) {
-                const currentHeight = parseInt(blockEl.dataset.apoloHeight || String(Math.round(rect.height / this.zoom)), 10);
-                targetSpace = { id: spaceId, height: currentHeight, el: blockEl, top, bottom };
-                break;
-            }
-        }
-
-        let effectiveShift = 0;
-        let mutation: SpaceMutation | null = null;
-
-        if (targetSpace) {
-            // Modifying existing space block
-            const newHeight = Math.max(0, targetSpace.height + Math.round(dy));
-            effectiveShift = newHeight - targetSpace.height;
-
-            if (newHeight <= 10 && dy < 0) {
-                // Remove space block
-                mutation = { id: targetSpace.id, height: 0, isNew: false, remove: true, targetLine: 0 };
-                targetSpace.el.remove();
-            } else {
-                const clampedH = Math.max(20, Math.min(3000, newHeight));
-                mutation = { id: targetSpace.id, height: clampedH, isNew: false, remove: false, targetLine: 0 };
-                targetSpace.el.style.height = `${clampedH}px`;
-                targetSpace.el.dataset.apoloHeight = String(clampedH);
-            }
-        } else if (dy >= 20) {
-            // Creating a new space block
-            const newId = `space-${Date.now()}`;
-            const newHeight = Math.round(dy);
-            effectiveShift = newHeight;
-
-            let targetLine = 0;
-            if (this.editor) {
-                const anchor = this.anchorAt(contentLeft + contentWidth / 2, pivot);
-                if (anchor.blockId.startsWith('line:')) {
-                    targetLine = parseInt(anchor.blockId.slice(5), 10);
-                } else {
-                    targetLine = this.editor.lastLine();
-                }
-            }
-            mutation = { id: newId, height: newHeight, isNew: true, remove: false, targetLine };
-        }
-
-        if (mutation) {
-            this.blockPositionCache.clear();
-            this.rebuildIndex();
-            // 2. Debounced write to markdown file via vault.process
-            this.queueSpaceMutation(mutation);
-            this.persistSoon();
-            this.schedulePaint();
-            this.toast?.show(`Espacio: ${effectiveShift > 0 ? '+' : ''}${Math.round(effectiveShift)} px`);
-        }
     }
 
     private queueSpaceMutation(mutation: SpaceMutation): void {
@@ -4273,23 +5325,6 @@ export class CanvasController {
         }
     }
 
-    private testAnchorDisplacement(): void {
-        if (this.document.elements.length === 0) {
-            this.toast?.show('Dibuja algún trazo primero para probar el anclaje');
-            return;
-        }
-        const { width: contentWidth } = this.getContentGeometry();
-        this.recordHistory();
-        const dv = 56 / contentWidth;
-        for (const element of this.document.elements) {
-            this.shiftElementNormalized(element, 0, dv);
-        }
-        this.rebuildIndex();
-        this.persistSoon();
-        this.schedulePaint();
-        this.toast?.show('Tinta desplazada +56 px simulando nuevo párrafo arriba');
-    }
-
     private getBoxHeightsSnapshot(): Record<string, number> {
         const heights: Record<string, number> = {};
         if (this.document.boxes) {
@@ -4359,10 +5394,19 @@ export class CanvasController {
     }
 
     private recordHistory(): void {
-        this.history.push({
+        this.commitHistorySnapshot(this.createHistorySnapshot());
+    }
+
+    private createHistorySnapshot(): HistorySnapshot {
+        return {
             elements: cloneElements(this.document.elements),
             boxHeights: this.getBoxHeightsSnapshot(),
-        });
+        };
+    }
+
+    /** Pushes a snapshot captured earlier (e.g. at pointerdown) onto the undo stack. */
+    private commitHistorySnapshot(snapshot: HistorySnapshot): void {
+        this.history.push(snapshot);
         if (this.history.length > 30) this.history.shift();
         this.future.length = 0;
         this.toolbar?.setHistory(this.history.length > 0, false);
@@ -4500,8 +5544,7 @@ export class CanvasController {
                                 element.points[i] += deltaV;
                             }
                         } else {
-                            element.startY += deltaV;
-                            element.endY += deltaV;
+                            mapShapeElementPoints(element, (u, v) => ({ x: u, y: v + deltaV }));
                         }
                         changed = true;
                     }
@@ -4543,6 +5586,153 @@ export class CanvasController {
         this.schedulePaint();
     }
 
+    private getFirstContentLine(lines?: string[]): number {
+        try {
+            const cache = this.options.app.metadataCache.getFileCache(this.file);
+            if (cache?.frontmatterPosition) {
+                return cache.frontmatterPosition.end.line + 1;
+            }
+        } catch {
+            // ignore
+        }
+        if (lines && lines.length > 1 && lines[0].trim() === '---') {
+            for (let i = 1; i < lines.length; i++) {
+                if (lines[i].trim() === '---') {
+                    return i + 1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private getElementComputedStyle(el: HTMLElement): CSSStyleDeclaration | null {
+        const fn = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+            ? window.getComputedStyle.bind(window)
+            : (typeof getComputedStyle === 'function' ? getComputedStyle : null);
+        return fn ? fn(el) : null;
+    }
+
+    private getPreviewContentTop(): number {
+        const scrollerRect = this.scroller.getBoundingClientRect();
+        let floorTop = 0;
+        const headerEls = Array.from(
+            this.scroller.querySelectorAll<HTMLElement>('.mod-header, .inline-title, .metadata-container')
+        );
+        for (const el of headerEls) {
+            const rect = el.getBoundingClientRect();
+            if (rect.height <= 0 && rect.width <= 0) continue;
+            const style = this.getElementComputedStyle(el);
+            const marginBottom = parseFloat(style?.marginBottom || '0') || 0;
+            const bottom = (rect.bottom - scrollerRect.top + this.currentScrollTop) / this.zoom + marginBottom / this.zoom;
+            if (bottom > floorTop) floorTop = bottom;
+        }
+        const sectionEl = this.scroller.querySelector<HTMLElement>('.markdown-preview-section')
+            ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
+        if (sectionEl) {
+            const rect = sectionEl.getBoundingClientRect();
+            const sectionTop = (rect.top - scrollerRect.top + this.currentScrollTop) / this.zoom;
+            if (sectionTop > floorTop) floorTop = sectionTop;
+        }
+        return floorTop;
+    }
+
+    private computeMinLineBelowFreehandInk(content: string, cursorLine?: number): number {
+        const nonBoxElements = this.document.elements.filter(el => !el.blockId.startsWith('space:'));
+        if (nonBoxElements.length === 0) return 0;
+
+        const targetLine = findCanvasInsertionLine(content, cursorLine);
+        const lines = content.split('\n');
+        const hasNonBlankAfterTarget = lines.slice(targetLine + 1).some(l => l.trim() !== '');
+        if (hasNonBlankAfterTarget) return 0;
+
+        let maxInkBottomDocY = Number.NEGATIVE_INFINITY;
+        for (const el of nonBoxElements) {
+            const b = this.getElementDocBounds(el);
+            if (b.maxY > maxInkBottomDocY) maxInkBottomDocY = b.maxY;
+        }
+        if (!Number.isFinite(maxInkBottomDocY)) return 0;
+
+        const firstContentLine = this.getFirstContentLine(lines);
+        let lastNonBlankLine = -1;
+        for (let i = Math.min(targetLine, lines.length - 1); i >= firstContentLine; i--) {
+            if (lines[i].trim() !== '') {
+                lastNonBlankLine = i;
+                break;
+            }
+        }
+
+        let lineHeight = 24;
+        let anchorDocY = 0;
+
+        if (!this.options.readonly && this.editor) {
+            const cm = (this.editor as any)?.cm as EditorView | undefined;
+            const scrollerRect = this.scroller.getBoundingClientRect();
+            const contentEl = this.scroller.querySelector<HTMLElement>('.cm-content');
+            const contentTop = contentEl
+                ? (contentEl.getBoundingClientRect().top - scrollerRect.top + this.currentScrollTop) / this.zoom
+                : this.getDocumentContentBounds().contentTop;
+            if (cm && cm.state && cm.state.doc) {
+                const cmLh = (cm as any).defaultLineHeight;
+                if (typeof cmLh === 'number' && cmLh > 0) {
+                    lineHeight = cmLh;
+                } else {
+                    const lineEl = this.scroller.querySelector<HTMLElement>('.cm-line');
+                    if (lineEl) {
+                        const lh = parseFloat(this.getElementComputedStyle(lineEl)?.lineHeight || '');
+                        if (!Number.isNaN(lh) && lh > 0) lineHeight = lh;
+                    }
+                }
+                if (lastNonBlankLine >= firstContentLine) {
+                    const lineNum = Math.min(cm.state.doc.lines, lastNonBlankLine + 1);
+                    const lb = cm.lineBlockAt(cm.state.doc.line(lineNum).from);
+                    anchorDocY = contentTop + lb.bottom;
+                } else {
+                    const lineNum = Math.min(cm.state.doc.lines, firstContentLine + 1);
+                    const lb = cm.lineBlockAt(cm.state.doc.line(lineNum).from);
+                    anchorDocY = contentTop + lb.top;
+                }
+            } else {
+                const bounds = this.getDocumentContentBounds();
+                anchorDocY = bounds.contentTop + (lastNonBlankLine >= firstContentLine
+                    ? (lastNonBlankLine - firstContentLine + 1) * lineHeight
+                    : 0);
+            }
+        } else {
+            lineHeight = this.getPreviewLineHeight();
+            const previewTop = this.getPreviewContentTop();
+            anchorDocY = previewTop + (lastNonBlankLine >= firstContentLine
+                ? (lastNonBlankLine - firstContentLine + 1) * lineHeight
+                : 0);
+        }
+
+        const clearancePx = 16;
+        if (maxInkBottomDocY + clearancePx <= anchorDocY) return 0;
+
+        const blankLinesNeeded = Math.max(
+            1,
+            Math.ceil((maxInkBottomDocY + clearancePx - anchorDocY) / Math.max(8, lineHeight)),
+        );
+        const baseBlankStartLine = lastNonBlankLine >= firstContentLine ? lastNonBlankLine + 1 : firstContentLine;
+        return baseBlankStartLine + blankLinesNeeded;
+    }
+
+    private getPreviewLineHeight(): number {
+        const pEl = this.scroller.querySelector<HTMLElement>(
+            '.markdown-preview-section p, .markdown-preview-sizer p, .markdown-preview-section li'
+        );
+        const targetEl = pEl
+            ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-section')
+            ?? this.scroller.querySelector<HTMLElement>('.markdown-preview-sizer');
+        if (targetEl) {
+            const style = this.getElementComputedStyle(targetEl);
+            const lh = parseFloat(style?.lineHeight || '');
+            if (!Number.isNaN(lh) && lh > 0) return lh;
+            const fs = parseFloat(style?.fontSize || '');
+            if (!Number.isNaN(fs) && fs > 0) return fs * 1.5;
+        }
+        return 24;
+    }
+
     syncPreviewSpacing(): void {
         if (!this.options.readonly) return;
         const rendered = Array.from(
@@ -4561,68 +5751,127 @@ export class CanvasController {
             return startA - startB;
         });
 
-        let lineHeight = 24;
-        if (topLevelBlocks.length > 0) {
-            const computedLh = parseFloat(window.getComputedStyle(topLevelBlocks[0]).lineHeight);
-            if (!Number.isNaN(computedLh) && computedLh > 0) {
-                lineHeight = computedLh;
-            }
-        }
+        const lineHeight = this.getPreviewLineHeight();
 
-        let firstContentLine = 0;
+        let cache: ReturnType<typeof this.options.app.metadataCache.getFileCache> | null = null;
         try {
-            const cache = this.options.app.metadataCache.getFileCache(this.file);
-            if (cache?.frontmatterPosition) {
-                firstContentLine = cache.frontmatterPosition.end.line + 1;
-            }
+            cache = this.options.app.metadataCache.getFileCache(this.file);
         } catch {
             // ignore
         }
+        const firstContentLine = cache?.frontmatterPosition
+            ? cache.frontmatterPosition.end.line + 1
+            : 0;
+        const hasSectionBetween = (startInclusive: number, endExclusive: number): boolean => {
+            const sections = cache?.sections;
+            if (!sections || endExclusive <= startInclusive) return false;
+            return sections.some(
+                sec =>
+                    sec.type !== 'yaml'
+                    && sec.position.start.line >= startInclusive
+                    && sec.position.start.line < endExclusive,
+            );
+        };
+        const isElementVirtualizedPusher = (el: Element | null): boolean => {
+            if (!el || typeof el !== 'object') return false;
+            const htmlEl = el as HTMLElement;
+            if (!htmlEl.classList?.contains('markdown-preview-pusher')) return false;
+            const h = htmlEl.getBoundingClientRect().height || parseFloat(htmlEl.style?.height || '0') || 0;
+            return h > 0;
+        };
+        const hasUnannotatedSiblingBetween = (a: HTMLElement, b: HTMLElement): boolean => {
+            if (a.parentElement !== b.parentElement) return false;
+            let cursor = a.nextElementSibling;
+            while (cursor && cursor !== b) {
+                if (isElementVirtualizedPusher(cursor)) return true;
+                if ((cursor.textContent || '').trim().length > 0) {
+                    return true;
+                }
+                cursor = cursor.nextElementSibling;
+            }
+            return false;
+        };
 
         for (let i = 0; i < topLevelBlocks.length; i++) {
             const current = topLevelBlocks[i];
             const currentStart = parseInt(current.dataset.apoloLineStart || '0', 10);
 
             if (i === 0) {
-                // Only apply leadingBlankLines if current is actually at the beginning of content!
-                // If currentStart > firstContentLine + 1, preceding blocks are virtualized, NOT blank.
-                if (currentStart <= firstContentLine + 1) {
+                // Apply leading blank lines whenever no real markdown section (nor virtualized pusher) precedes current.
+                const hasPrecedingSection = hasSectionBetween(firstContentLine, currentStart)
+                    || isElementVirtualizedPusher(current.previousElementSibling);
+                if (!hasPrecedingSection) {
                     const leadingBlankLines = currentStart - firstContentLine;
-                    if (leadingBlankLines > 0) {
-                        current.style.marginTop = `${leadingBlankLines * lineHeight}px`;
-                    } else {
-                        current.style.marginTop = '';
-                    }
+                    current.style.marginTop = leadingBlankLines > 0
+                        ? `${leadingBlankLines * lineHeight}px`
+                        : '';
                 }
             } else {
                 const prev = topLevelBlocks[i - 1];
-                // Only apply inter-block spacing if prev and current are immediate DOM siblings
-                if (current.previousElementSibling === prev) {
-                    const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                // Apply inter-block blank lines for direct siblings OR when no virtualized section/content sits in between
+                const isDirectSibling = current.previousElementSibling === prev;
+                const noInterveningSection = !hasSectionBetween(prevEnd + 1, currentStart)
+                    && !hasUnannotatedSiblingBetween(prev, current);
+                if (isDirectSibling || noInterveningSection) {
                     const blankLines = currentStart - prevEnd - 1;
-
-                    if (blankLines > 0) {
-                        current.style.marginTop = `${blankLines * lineHeight}px`;
-                    } else {
-                        current.style.marginTop = '';
-                    }
+                    current.style.marginTop = blankLines > 0
+                        ? `${blankLines * lineHeight}px`
+                        : '';
                 }
             }
         }
 
-        if (topLevelBlocks.length > 0) {
+        if (topLevelBlocks.length > 0 && typeof this.options.app?.vault?.cachedRead === 'function') {
+            const firstBlock = topLevelBlocks[0];
+            const firstStart = parseInt(firstBlock.dataset.apoloLineStart || '0', 10);
             const lastBlock = topLevelBlocks[topLevelBlocks.length - 1];
             const lastBlockEnd = parseInt(lastBlock.dataset.apoloLineEnd || lastBlock.dataset.apoloLineStart || '0', 10);
             void this.options.app.vault.cachedRead(this.file).then(content => {
                 if (this.destroyed) return;
                 const lines = content.split('\n');
+                const effectiveFirstContentLine = this.getFirstContentLine(lines);
+                let layoutChanged = false;
+
+                if (firstStart > effectiveFirstContentLine) {
+                    const leadingSlice = lines.slice(effectiveFirstContentLine, firstStart);
+                    if (leadingSlice.length > 0 && leadingSlice.every(l => l.trim() === '')) {
+                        const expectedTop = `${leadingSlice.length * lineHeight}px`;
+                        if (firstBlock.style.marginTop !== expectedTop) {
+                            firstBlock.style.marginTop = expectedTop;
+                            layoutChanged = true;
+                        }
+                    }
+                }
+
+                for (let i = 1; i < topLevelBlocks.length; i++) {
+                    const prev = topLevelBlocks[i - 1];
+                    const current = topLevelBlocks[i];
+                    const prevEnd = parseInt(prev.dataset.apoloLineEnd || prev.dataset.apoloLineStart || '0', 10);
+                    const currentStart = parseInt(current.dataset.apoloLineStart || '0', 10);
+                    const betweenSlice = lines.slice(prevEnd + 1, currentStart);
+                    if (betweenSlice.length > 0 && betweenSlice.every(l => l.trim() === '')) {
+                        const expectedTop = `${betweenSlice.length * lineHeight}px`;
+                        if (current.style.marginTop !== expectedTop) {
+                            current.style.marginTop = expectedTop;
+                            layoutChanged = true;
+                        }
+                    }
+                }
+
                 const trailingSlice = lines.slice(lastBlockEnd + 1);
                 const areAllTrailingBlank = trailingSlice.length > 0 && trailingSlice.every(l => l.trim() === '');
-                if (areAllTrailingBlank) {
-                    const trailingBlankLines = trailingSlice.length;
-                    lastBlock.style.marginBottom = `${trailingBlankLines * lineHeight}px`;
-                } else {
-                    lastBlock.style.marginBottom = '';
+                const nextMarginBottom = areAllTrailingBlank ? `${trailingSlice.length * lineHeight}px` : '';
+                if (lastBlock.style.marginBottom !== nextMarginBottom) {
+                    lastBlock.style.marginBottom = nextMarginBottom;
+                    layoutChanged = true;
+                }
+
+                if (layoutChanged) {
+                    this.blockPositionCache.clear();
+                    this.rebuildIndex();
+                    this.renderDirty = true;
+                    this.schedulePaint();
                 }
             }).catch(() => { /* ignore */ });
         }
@@ -4755,17 +6004,20 @@ export class CanvasController {
             -ratio * sTop,
         );
 
-        if (this.points.size > 0 && this.activeStart) {
+        if (this.points.size > 0 && this.activeStart && !this.movingSelection && !this.handleDrag) {
             if (this.tool === 'lasso') {
-                if (!this.movingSelection) {
-                    this.paintLasso();
-                }
+                this.paintLasso();
             } else {
                 this.paintActive();
             }
         }
 
+        if (this.hoverSnapPort && !this.activeStart && !this.handleDrag && this.tool === 'shape' && !getShapePlugin(this.shapeType).isClosed) {
+            this.paintSnapTargets([this.hoverSnapPort]);
+        }
+
         if (this.selection.length) this.paintSelection();
+        this.paintAlignmentGuides();
         this.context.setTransform(1, 0, 0, 1, 0, 0);
     }
 
@@ -4801,7 +6053,12 @@ export class CanvasController {
                     context.stroke();
                 }
             } else {
-                this.paintShape(element, context, contentLeft, contentWidth, blockTop);
+                this.paintShape(element, context, contentLeft, contentWidth, blockTop, {
+                    strokeColor: '#6C3FD1',
+                    strokeWidth: element.style.width + 8,
+                    strokeOpacity: 0.25,
+                    fillEnabled: false,
+                });
             }
             context.restore();
         }
@@ -4859,10 +6116,6 @@ export class CanvasController {
         const geom = this.getElementAnchorGeometry(el.blockId, el.anchorText);
         const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
         return getOrCreateStrokeSprite(el, this.strokeCache, geom, this.zoom, ratio);
-    }
-
-    private getOrCreatePencilCache(el: StrokeElement): HTMLCanvasElement | null {
-        return this.getOrCreateStrokeCache(el);
     }
 
     private isHighlighter(element: CanvasElement): boolean {
@@ -4960,56 +6213,34 @@ export class CanvasController {
         contentLeft: number,
         contentWidth: number,
         blockTop: number,
+        styleOverride?: Partial<ShapeStyleConfig>,
     ): void {
-        const startX = contentLeft + shape.startX * contentWidth;
-        const startY = blockTop + shape.startY * contentWidth;
-        const endX = contentLeft + shape.endX * contentWidth;
-        const endY = blockTop + shape.endY * contentWidth;
-
-        const x = Math.min(startX, endX);
-        const y = Math.min(startY, endY);
-        const width = Math.abs(endX - startX);
-        const height = Math.abs(endY - startY);
-
-        context.beginPath();
-        switch (shape.shapeType) {
-            case 'line':
-                context.moveTo(startX, startY);
-                context.lineTo(endX, endY);
-                break;
-            case 'arrow':
-                context.moveTo(startX, startY);
-                context.lineTo(endX, endY);
-                context.lineTo(endX - 10, endY - 5);
-                context.moveTo(endX, endY);
-                context.lineTo(endX - 5, endY - 10);
-                break;
-            case 'ellipse':
-                context.ellipse(x + width / 2, y + height / 2, Math.max(1, width / 2), Math.max(1, height / 2), 0, 0, Math.PI * 2);
-                break;
-            case 'triangle':
-                context.moveTo(x + width / 2, y);
-                context.lineTo(x + width, y + height);
-                context.lineTo(x, y + height);
-                context.closePath();
-                break;
-            case 'rounded-rect':
-                context.roundRect(x, y, width, height, 8);
-                break;
-            default:
-                context.rect(x, y, width, height);
-                break;
+        const plugin = getShapePlugin(shape.shapeType);
+        const geom = shapeElementToGeometry(shape, contentLeft, blockTop, contentWidth);
+        const rot = geom.rotation ?? shape.rotation ?? 0;
+        if (rot !== 0) {
+            const norm = plugin.normalizeGeometry(geom);
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            context.save();
+            context.translate(cx, cy);
+            context.rotate(rot);
+            context.translate(-cx, -cy);
+            plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
+            context.restore();
+        } else {
+            plugin.renderCanvas(context, geom, shapeElementStyle(shape, styleOverride));
         }
-        if (shape.fillColor) {
-            context.fillStyle = shape.fillColor;
-            context.fill();
-        }
-        context.stroke();
     }
 
     private paintActive(): void {
         if (this.tool === 'eraser' || this.barrelActive) {
             this.paintEraserReticle();
+            return;
+        }
+
+        if (this.snapPreview && (this.tool === 'pen' || this.tool === 'highlighter')) {
+            this.paintSnapPreview(this.snapPreview);
             return;
         }
 
@@ -5025,6 +6256,73 @@ export class CanvasController {
             context.beginPath();
             context.rect(geom.originX, geom.originY, geom.scaleWidth, geom.boxHeight);
             context.clip();
+        }
+
+        if (this.tool === 'shape') {
+            if (this.activeStart && this.points.size > 0) {
+                const shapeType = this.toolState.shape.shapeType || this.shapeType || 'rectangle';
+                const shapePlugin = getShapePlugin(shapeType);
+
+                const lastDocPt = {
+                    x: this.points.getX(this.points.size - 1),
+                    y: this.points.getY(this.points.size - 1),
+                };
+
+                let geom: ShapeRenderGeometry;
+                if (shapePlugin.id === 'blob') {
+                    this.activeAlignmentGuides = [];
+                    const rawPts = this.readActivePoints();
+                    geom = rawPts.length >= 2
+                        ? buildBlobGeometryFromPoints(rawPts)
+                        : shapePlugin.normalizeGeometry({
+                            x0: this.activeStart.x,
+                            y0: this.activeStart.y,
+                            x1: lastDocPt.x,
+                            y1: lastDocPt.y,
+                        });
+                } else {
+                    const snaps = this.resolveConnectorSnaps(shapeType, this.activeStart, lastDocPt);
+                    let endPtX = snaps.end?.x ?? lastDocPt.x;
+                    let endPtY = snaps.end?.y ?? lastDocPt.y;
+                    if (!snaps.end && !this.isShiftDown) {
+                        const tol = 6 / this.zoom;
+                        const refPoints = this.getAllReferencePoints();
+                        refPoints.push({ x: this.activeStart.x, y: this.activeStart.y });
+                        const ptGuide = computePointAlignmentGuides({ x: endPtX, y: endPtY }, refPoints, tol);
+                        if (ptGuide.deltaY !== 0) endPtY = ptGuide.snappedPoint.y;
+                        if (ptGuide.deltaX !== 0) endPtX = ptGuide.snappedPoint.x;
+                        this.activeAlignmentGuides = ptGuide.guides;
+                    } else if (snaps.end) {
+                        this.activeAlignmentGuides = [];
+                    }
+
+                    const regularize = !snaps.start && !snaps.end && Boolean(this.toolState.shape.regularize || this.isShiftDown);
+                    geom = shapePlugin.normalizeGeometry({
+                        x0: snaps.start?.x ?? this.activeStart.x,
+                        y0: snaps.start?.y ?? this.activeStart.y,
+                        x1: endPtX,
+                        y1: endPtY,
+                        regularize,
+                    });
+                    this.paintSnapTargets([snaps.start, snaps.end]);
+                }
+
+                const styleConfig: ShapeStyleConfig = {
+                    strokeColor: this.toolState.shape.color || this.style.color,
+                    strokeWidth: this.toolState.shape.width || this.style.width,
+                    strokePattern: this.toolState.shape.pattern || this.style.pattern,
+                    strokeOpacity: this.toolState.shape.opacity !== undefined ? this.toolState.shape.opacity : this.style.opacity,
+                    fillEnabled: this.toolState.shape.fillEnabled,
+                    fillColor: this.toolState.shape.fillColor || this.toolState.shape.color || this.style.color,
+                    fillOpacity: this.toolState.shape.fillOpacity,
+                    fillPattern: this.toolState.shape.fillPattern,
+                    fillDensity: this.toolState.shape.fillDensity,
+                };
+
+                shapePlugin.renderCanvas(context, geom, styleConfig);
+            }
+            context.restore();
+            return;
         }
 
         if (this.tool === 'highlighter') {
@@ -5081,7 +6379,6 @@ export class CanvasController {
                 DEFAULT_INK_LIMITS.topMarginPx,
             );
             const activeStyle: StrokeStyle = { ...this.style, profile: this.penProfileId };
-            const penPlugin = getPenPlugin(this.penProfileId);
 
             if (!this.straightenLines && validRuns.length === 1 && validRuns[0].length === rawPoints.length) {
                 const ratio = Math.max(1, (typeof window !== 'undefined' ? window.devicePixelRatio : 1) || 1);
@@ -5089,7 +6386,7 @@ export class CanvasController {
                     ? this.getElementAnchorGeometry(this.activeAnchor.blockId)
                     : null;
                 const baked = bakeLiveStrokeSegment(
-                    this as unknown as LiveBakeState,
+                    this.liveBakeState,
                     context,
                     validRuns[0],
                     activeStyle,
@@ -5186,57 +6483,48 @@ export class CanvasController {
         this.context.restore();
     }
 
-    private paintSpacer(): void {
-        if (!this.activeStart || this.points.size === 0) return;
-        const currentY = this.points.getY(this.points.size - 1);
-        const startY = this.activeStart.y;
-        const dy = currentY - startY;
+    private paintAlignmentGuides(): void {
+        if (!this.activeAlignmentGuides || this.activeAlignmentGuides.length === 0) return;
+        const ctx = this.context;
+        ctx.save();
+        ctx.strokeStyle = '#00C8FF';
+        ctx.lineWidth = 1.25 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        ctx.beginPath();
+        for (const g of this.activeAlignmentGuides) {
+            if (g.axis === 'x') {
+                ctx.moveTo(g.position, g.from);
+                ctx.lineTo(g.position, g.to);
+            } else {
+                ctx.moveTo(g.from, g.position);
+                ctx.lineTo(g.to, g.position);
+            }
+        }
+        ctx.stroke();
 
-        const { left: contentLeft, width: contentWidth } = this.getContentGeometry();
-        const scrollerW = this.scroller.clientWidth / this.zoom;
-        const x1 = Math.max(0, contentLeft - 20);
-        const x2 = Math.min(scrollerW, contentLeft + contentWidth + 20);
-
-        this.context.save();
-
-        // Start pivot line (gray dashed)
-        this.context.strokeStyle = '#8B949E';
-        this.context.lineWidth = 1.5 / this.zoom;
-        this.context.setLineDash([4 / this.zoom, 4 / this.zoom]);
-        this.context.beginPath();
-        this.context.moveTo(x1, startY);
-        this.context.lineTo(x2, startY);
-        this.context.stroke();
-
-        // End line (blue solid)
-        this.context.strokeStyle = '#2F6BFF';
-        this.context.lineWidth = 2 / this.zoom;
-        this.context.setLineDash([]);
-        this.context.beginPath();
-        this.context.moveTo(x1, currentY);
-        this.context.lineTo(x2, currentY);
-        this.context.stroke();
-
-        // Tinted region between pivot and currentY
-        const minY = Math.min(startY, currentY);
-        const h = Math.abs(dy);
-        this.context.fillStyle = dy >= 0 ? 'rgba(47, 107, 255, 0.08)' : 'rgba(239, 68, 68, 0.08)';
-        this.context.fillRect(x1, minY, x2 - x1, h);
-
-        // Height badge at center
-        const midX = (x1 + x2) / 2;
-        const midY = (startY + currentY) / 2;
-        const text = `${dy >= 0 ? '+' : ''}${Math.round(dy)} px`;
-        this.context.font = `600 ${Math.round(13 / this.zoom)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-        this.context.fillStyle = '#2F6BFF';
-        this.context.textAlign = 'center';
-        this.context.textBaseline = 'middle';
-        this.context.fillText(text, midX, midY);
-
-        this.context.restore();
+        // Render reference point indicator dots (Fusion 360 style)
+        for (const g of this.activeAlignmentGuides) {
+            if (g.refPoint) {
+                const r = 3 / this.zoom;
+                ctx.beginPath();
+                ctx.arc(g.refPoint.x, g.refPoint.y, r, 0, Math.PI * 2);
+                ctx.fillStyle = '#00C8FF';
+                ctx.fill();
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 1 / this.zoom;
+                ctx.setLineDash([]);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
     }
 
     private paintSelection(): void {
+        const selectedShape = this.getSelectedShape();
+        if (selectedShape) {
+            this.paintShapeSelection(selectedShape);
+            return;
+        }
         const bounds = this.getSelectionDocBounds();
         if (!bounds) return;
         const padding = 6;
@@ -5281,6 +6569,168 @@ export class CanvasController {
         this.context.restore();
     }
 
+    /** Selection chrome of a single shape: light outline plus its parametric control handles. */
+    private paintShapeSelection(shape: ShapeElement): void {
+        const plugin = getShapePlugin(shape.shapeType);
+        const geom = this.getShapeDocGeometry(shape);
+        const norm = plugin.normalizeGeometry(geom);
+        const ctx = this.context;
+        const accent = '#2F6BFF';
+        const padding = 6;
+
+        ctx.save();
+        const rot = norm.rotation || shape.rotation || 0;
+        if (rot !== 0) {
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate(rot);
+            ctx.translate(-cx, -cy);
+        }
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 1 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        const rMinX = Math.min(norm.x0, norm.x1);
+        const rMaxX = Math.max(norm.x0, norm.x1);
+        const rMinY = Math.min(norm.y0, norm.y1);
+        const rMaxY = Math.max(norm.y0, norm.y1);
+        if (shape.shapeType !== 'line' && shape.shapeType !== 'arrow') {
+            ctx.strokeRect(
+                rMinX - padding,
+                rMinY - padding,
+                rMaxX - rMinX + padding * 2,
+                rMaxY - rMinY + padding * 2,
+            );
+        }
+        ctx.restore();
+        ctx.save();
+
+        // Bezier guides: endpoints / nodes → control points
+        if (shape.shapeType === 'line' || shape.shapeType === 'arrow') {
+            const nodes = getLinearPathNodes(geom);
+            ctx.save();
+            ctx.strokeStyle = '#00A3FF';
+            ctx.globalAlpha = 0.65;
+            ctx.lineWidth = 1 / this.zoom;
+            ctx.setLineDash([3 / this.zoom, 3 / this.zoom]);
+            for (const node of nodes) {
+                if (node.handleIn) {
+                    ctx.beginPath();
+                    ctx.moveTo(node.x, node.y);
+                    ctx.lineTo(node.handleIn.x, node.handleIn.y);
+                    ctx.stroke();
+                }
+                if (node.handleOut) {
+                    ctx.beginPath();
+                    ctx.moveTo(node.x, node.y);
+                    ctx.lineTo(node.handleOut.x, node.handleOut.y);
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        } else if (norm.controlPoint) {
+            ctx.beginPath();
+            ctx.moveTo(norm.x0, norm.y0);
+            ctx.lineTo(norm.controlPoint.x, norm.controlPoint.y);
+            ctx.lineTo(norm.x1, norm.y1);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+
+        const activeHandleId = this.handleDrag?.elementId === shape.id ? this.handleDrag.handleId : '';
+        const radius = 6 / this.zoom;
+        const diamond = 7 / this.zoom;
+        const handles = plugin.getControlHandles(geom);
+
+        // Rotation stem line if 'rotate' handle exists
+        const rotHandle = handles.find(h => h.kind === 'rotate');
+        if (rotHandle) {
+            const minX = Math.min(norm.x0, norm.x1);
+            const maxX = Math.max(norm.x0, norm.x1);
+            const minY = Math.min(norm.y0, norm.y1);
+            const midX = (minX + maxX) / 2;
+            const cx = (norm.x0 + norm.x1) / 2;
+            const cy = (norm.y0 + norm.y1) / 2;
+            const stemStart = rot !== 0
+                ? rotatePoint(midX, minY, cx, cy, rot)
+                : { x: midX, y: minY };
+
+            ctx.save();
+            ctx.strokeStyle = accent;
+            ctx.lineWidth = 1.5 / this.zoom;
+            ctx.setLineDash([2 / this.zoom, 2 / this.zoom]);
+            ctx.beginPath();
+            ctx.moveTo(stemStart.x, stemStart.y);
+            ctx.lineTo(rotHandle.x, rotHandle.y);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        for (const handle of handles) {
+            const isActive = handle.id === activeHandleId;
+            ctx.beginPath();
+            if (handle.kind === 'curve' || handle.kind === 'radius' || handle.kind === 'param') {
+                // Diamond accent handle for curvature / corner radius / 3D params
+                ctx.moveTo(handle.x, handle.y - diamond);
+                ctx.lineTo(handle.x + diamond, handle.y);
+                ctx.lineTo(handle.x, handle.y + diamond);
+                ctx.lineTo(handle.x - diamond, handle.y);
+                ctx.closePath();
+                ctx.fillStyle = isActive ? '#FFFFFF' : accent;
+                ctx.fill();
+                ctx.strokeStyle = isActive ? accent : '#FFFFFF';
+            } else if (handle.kind === 'bezier-in' || handle.kind === 'bezier-out') {
+                const rBez = 4.5 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rBez * 1.3 : rBez, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? '#00A3FF' : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = '#00A3FF';
+            } else if (handle.kind === 'segment-mid') {
+                const rMid = 4 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rMid * 1.3 : rMid, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            } else if (handle.kind === 'rotate') {
+                const rRot = 6.5 / this.zoom;
+                ctx.arc(handle.x, handle.y, isActive ? rRot * 1.3 : rRot, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            } else {
+                ctx.arc(handle.x, handle.y, isActive ? radius * 1.3 : radius, 0, Math.PI * 2);
+                ctx.fillStyle = isActive ? accent : '#FFFFFF';
+                ctx.fill();
+                ctx.strokeStyle = accent;
+            }
+            ctx.lineWidth = 2 / this.zoom;
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        if (this.handleDrag?.elementId === shape.id && this.handleDrag.snap) {
+            this.paintSnapTargets([this.handleDrag.snap]);
+        }
+
+        // Highlight exact electrical terminal snap ports when an electrical component is selected
+        if (plugin.category?.startsWith('electrical')) {
+            ctx.save();
+            const pinR = 3.2 / this.zoom;
+            ctx.fillStyle = '#00A3FF';
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 1.5 / this.zoom;
+            for (const port of plugin.getSnapPorts(geom)) {
+                ctx.beginPath();
+                ctx.arc(port.x, port.y, pinR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    }
+
     // Touch gesture handling (Pinch-to-zoom & 2-finger navigation scroll with 1-finger palm rejection)
     private readonly onTouchDown = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch') return;
@@ -5308,6 +6758,41 @@ export class CanvasController {
                 this.lastSingleTouch = null;
                 this.singleTouchPanned = false;
             } else {
+                // Finger input for orthogonal segment sliding: touching a segment directly slides it
+                const rect = this.canvas.getBoundingClientRect();
+                const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+                const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+                let targetShape = this.getSelectedShape();
+                if (!targetShape || (targetShape.shapeType !== 'line' && targetShape.shapeType !== 'arrow')) {
+                    const hit = this.findShapeAtDocPoint({ x: docX, y: docY }, 24 / this.zoom);
+                    if (hit && (hit.shapeType === 'line' || hit.shapeType === 'arrow')) {
+                        this.selection = [hit];
+                        this.emitSelection();
+                        targetShape = hit;
+                    }
+                }
+
+                if (targetShape && (targetShape.shapeType === 'line' || targetShape.shapeType === 'arrow')) {
+                    const geom = this.getShapeDocGeometry(targetShape);
+                    if (linearPathHit(geom, { x: docX, y: docY }, Math.max(18, 28 / this.zoom))) {
+                        const segIdx = findClosestLinearSegment(geom, { x: docX, y: docY });
+                        this.touchSlideState = {
+                            pointerId: event.pointerId,
+                            elementId: targetShape.id,
+                            segIdx,
+                            startGeom: geom,
+                            snapshot: this.createHistorySnapshot(),
+                            changed: false,
+                        };
+                        try { navigator.vibrate?.(20); } catch {}
+                        event.preventDefault();
+                        event.stopPropagation();
+                        try { this.canvas.setPointerCapture(event.pointerId); } catch {}
+                        this.schedulePaint();
+                        return;
+                    }
+                }
+
                 this.palmRejectedSingleTouch = false;
                 this.singleTouchStartCoords = { x: event.clientX, y: event.clientY, time: Date.now() };
                 this.lastSingleTouch = { x: event.clientX, y: event.clientY };
@@ -5328,6 +6813,25 @@ export class CanvasController {
     private readonly onTouchMove = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch' || !this.touches.has(event.pointerId)) return;
         this.touches.set(event.pointerId, this.localTouch(event));
+
+        if (this.touchSlideState && event.pointerId === this.touchSlideState.pointerId) {
+            const rect = this.canvas.getBoundingClientRect();
+            const docX = (event.clientX - rect.left + this.currentScrollLeft) / this.zoom;
+            const docY = (event.clientY - rect.top + this.currentScrollTop) / this.zoom;
+            const shape = this.document.elements.find(el => el.id === this.touchSlideState!.elementId) as ShapeElement | undefined;
+            if (shape) {
+                const nextGeom = slideLinearSegment(this.touchSlideState.startGeom, this.touchSlideState.segIdx, { x: docX, y: docY });
+                const anchor = this.getElementAnchorGeometry(shape.blockId, shape.anchorText);
+                applyGeometryToShapeElement(shape, nextGeom, anchor.originX, anchor.originY, anchor.scaleWidth);
+                this.touchSlideState.changed = true;
+                this.strokeCache.delete(shape.id);
+                this.rebuildIndex();
+                this.renderDirty = true;
+                this.schedulePaint();
+            }
+            event.preventDefault();
+            return;
+        }
 
         if (this.touches.size === 1) {
             if (this.palmRejectedSingleTouch) {
@@ -5371,6 +6875,17 @@ export class CanvasController {
 
     private readonly onTouchEnd = (event: PointerEvent): void => {
         if (event.pointerType !== 'touch') return;
+        if (this.touchSlideState && event.pointerId === this.touchSlideState.pointerId) {
+            if (this.touchSlideState.changed) {
+                this.recordHistory();
+                this.persistSoon();
+                this.options.eventBus?.emit('canvas:dirty', this.pageId);
+            }
+            this.touchSlideState = null;
+            this.touches.delete(event.pointerId);
+            event.preventDefault();
+            return;
+        }
         this.lastTouchEndTime = Date.now();
         this.lastTouchEndPos = { x: event.clientX, y: event.clientY };
 
@@ -5526,32 +7041,4 @@ function contains(bounds: BoundingBox, x: number, y: number, padding: number): b
     return x >= bounds.minX - padding && x <= bounds.maxX + padding && y >= bounds.minY - padding && y <= bounds.maxY + padding;
 }
 
-function pointInPolygon(x: number, y: number, polygon: Point[]): boolean {
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const a = polygon[i];
-        const b = polygon[j];
-        const crosses = (a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y || Number.EPSILON) + a.x;
-        if (crosses) inside = !inside;
-    }
-    return inside;
-}
-
-export function cloneElements(elements: readonly CanvasElement[]): CanvasElement[] {
-    return elements.map(el => {
-        if (el.type === 'stroke') {
-            return {
-                ...el,
-                points: el.points.slice(),
-                style: { ...el.style },
-                bounds: { ...el.bounds },
-            };
-        } else {
-            return {
-                ...el,
-                style: { ...el.style },
-                bounds: { ...el.bounds },
-            };
-        }
-    });
-}
+export { cloneElements };

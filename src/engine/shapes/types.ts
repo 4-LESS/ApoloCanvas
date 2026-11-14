@@ -1,0 +1,158 @@
+/**
+ * src/engine/shapes/types.ts
+ *
+ * Core type definitions for the modular shape engine of Apolo Canvas 2.0.
+ */
+
+import type {
+    BoundingBox,
+    ShapeCustomParams,
+    ShapeFillPattern,
+    ShapePathNode,
+    ShapeType,
+    StrokePattern,
+} from '../../core/types.ts';
+
+export interface ShapeSvgOutput {
+    defs?: Record<string, string>;
+    body: string;
+}
+
+export interface ShapePoint {
+    x: number;
+    y: number;
+}
+
+export interface ShapeRenderGeometry {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    regularize?: boolean;
+    rotation?: number;
+    /** Rectangle corner radius in the same space as x0..y1. */
+    cornerRadius?: number;
+    /** Quadratic Bezier control point for curved lines / arrows. */
+    controlPoint?: ShapePoint;
+    /** Independent vertex overrides (e.g. a free triangle). */
+    vertices?: ShapePoint[];
+    /** Multi-segment straight/curved Bezier path nodes (world/doc space). */
+    pathNodes?: ShapePathNode[];
+    /** Custom shape parametric modifiers (capRatio, bevelRatio). */
+    shapeParams?: ShapeCustomParams;
+}
+
+export type ShapeHandleKind =
+    | 'endpoint'
+    | 'corner'
+    | 'curve'
+    | 'radius'
+    | 'vertex'
+    | 'rotate'
+    | 'bezier-in'
+    | 'bezier-out'
+    | 'segment-mid'
+    | 'param';
+
+export interface ShapeHandle {
+    readonly id: string;
+    readonly kind: ShapeHandleKind;
+    readonly x: number;
+    readonly y: number;
+}
+
+/** Magnetic connection port (see ShapePortId in core/types.ts). */
+export interface ShapeSnapPort {
+    readonly id: string;
+    readonly x: number;
+    readonly y: number;
+    /** Optional outward unit normal in document space (used for smooth curved connectors). */
+    readonly nx?: number;
+    readonly ny?: number;
+}
+
+export type ShapeCategory = 'geometric' | 'electrical-basic' | 'electrical-transistor' | 'electrical-logic';
+
+export interface CustomShapePortSpec {
+    readonly id: string;
+    /** Normalized [0..1] X coordinate within the shape bounding box. */
+    readonly u: number;
+    /** Normalized [0..1] Y coordinate within the shape bounding box. */
+    readonly v: number;
+    /** Optional unrotated outward unit normal X component. */
+    readonly nx?: number;
+    readonly ny?: number;
+}
+
+export interface ShapeStyleConfig {
+    strokeColor?: string;
+    strokeWidth?: number;
+    strokePattern?: StrokePattern;
+    strokeOpacity?: number;
+    fillEnabled?: boolean;
+    fillColor?: string;
+    fillOpacity?: number;
+    fillPattern?: ShapeFillPattern;
+    fillDensity?: number;
+}
+
+export interface ShapePlugin {
+    readonly id: ShapeType;
+    readonly name: string;
+    readonly isClosed: boolean; // true for rectangle, ellipse, triangle, diamond, etc.; false for line, arrow
+    readonly category?: ShapeCategory;
+    readonly iconSvgPaths: readonly string[]; // Normalized 24x24 icon paths for UI buttons
+    normalizeGeometry(geom: ShapeRenderGeometry): ShapeRenderGeometry;
+    renderCanvas(ctx: CanvasRenderingContext2D, geom: ShapeRenderGeometry, style: ShapeStyleConfig): void;
+    renderSvg(geom: ShapeRenderGeometry, style: ShapeStyleConfig): ShapeSvgOutput;
+    computeBounds(geom: ShapeRenderGeometry, strokeWidth: number): BoundingBox;
+    hitTest(geom: ShapeRenderGeometry, point: { x: number; y: number }, tolerance: number): boolean;
+    /** Editable control handles of the rendered (normalized) geometry. */
+    getControlHandles(geom: ShapeRenderGeometry): ShapeHandle[];
+    /** Returns the geometry produced by dragging `handleId` to `newPoint`; `geom` itself is not mutated. */
+    applyHandleDrag(geom: ShapeRenderGeometry, handleId: string, newPoint: ShapePoint, regularize?: boolean): ShapeRenderGeometry;
+    /** Ports where connector endpoints can magnetically attach. */
+    getSnapPorts(geom: ShapeRenderGeometry): ShapeSnapPort[];
+    /** Optional subpath contour decomposition used by geometric erasers on custom shapes. */
+    getBoundarySubpaths?(geom: ShapeRenderGeometry): CustomShapeSubpath[];
+}
+
+export type NormalizedPoint = [number, number];
+
+export interface ShapeFaceFillOptions {
+    /** Rotation offset in degrees for pattern fills ('hachure', 'cross-hatch', 'dots'), e.g. 0 for body, 90 for top cap */
+    readonly patternAngleOffsetDeg?: number;
+    /** Multiplier applied to base fillOpacity (e.g. 0.72 on top cap for natural 3D shading contrast in 'solid' mode) */
+    readonly opacityMultiplier?: number;
+    /** Counter-rotation angle in degrees to preserve global pattern orientation */
+    readonly shapeRotationDeg?: number;
+}
+
+export interface CustomPathSegment {
+    type: 'M' | 'L' | 'C' | 'Q' | 'Z';
+    args: number[]; // normalized [0..1] coordinates
+}
+
+export interface CustomShapeSubpath {
+    commands: CustomPathSegment[];
+    isClosed?: boolean;
+    isFilled?: boolean;
+    isStroked?: boolean;
+    /** When true, always fills the subpath with the active stroke color (e.g. solid transistor arrowheads). */
+    fillWithStroke?: boolean;
+    fillOptions?: ShapeFaceFillOptions;
+}
+
+export interface CustomShapeDefinition {
+    id: ShapeType;
+    name: string;
+    isClosed?: boolean;
+    category?: ShapeCategory;
+    iconSvgPaths?: readonly string[];
+    polygon?: NormalizedPoint[] | ((geom: ShapeRenderGeometry) => NormalizedPoint[]);
+    commands?: CustomPathSegment[];
+    subpaths?: CustomShapeSubpath[] | ((geom: ShapeRenderGeometry) => CustomShapeSubpath[]);
+    snapPorts?: readonly CustomShapePortSpec[] | ((geom: ShapeRenderGeometry) => readonly CustomShapePortSpec[]);
+    extraControlHandles?: (geom: ShapeRenderGeometry) => ShapeHandle[];
+    applyParamDrag?: (geom: ShapeRenderGeometry, handleId: string, point: ShapePoint) => ShapeRenderGeometry | null;
+}

@@ -19,78 +19,20 @@ import {
     DEFAULT_SHAPE_FAVORITE_PROFILES,
     type WorkspaceToolState,
 } from '../src/core/types.ts';
-import { ToolEstuche } from '../src/ui/ToolEstuche.ts';
-import { Toolbar } from '../src/ui/Toolbar.ts';
 import { CanvasController } from '../src/engine/CanvasController.ts';
 import { EngineEventBus } from '../src/core/events.ts';
-import { createMockEnvironment } from './helpers/mockDom.ts';
-
-function createMockCycleEnv() {
-    const mockDocument = createMockEnvironment();
-    const listeners = new Map<string, Array<{ listener: Function; options?: any }>>();
-    const mockWindow: any = {
-        innerWidth: 1024,
-        innerHeight: 768,
-        visualViewport: null,
-        devicePixelRatio: 1,
-        addEventListener: (event: string, listener: Function, options?: any) => {
-            if (!listeners.has(event)) listeners.set(event, []);
-            listeners.get(event)!.push({ listener, options });
-        },
-        removeEventListener: (event: string, listener: Function) => {
-            const list = listeners.get(event);
-            if (list) {
-                const idx = list.findIndex(item => item.listener === listener);
-                if (idx !== -1) list.splice(idx, 1);
-            }
-        },
-        dispatch: (event: string, evObj: any) => {
-            const list = listeners.get(event) || [];
-            for (const item of [...list]) {
-                item.listener(evObj);
-            }
-        },
-        setTimeout: (fn: Function, ms: number) => setTimeout(fn, ms),
-        clearTimeout: (id: any) => clearTimeout(id),
-        requestAnimationFrame: (cb: Function) => setTimeout(cb, 16),
-        cancelAnimationFrame: (id: any) => clearTimeout(id),
-    };
-    return { mockWindow, mockDocument };
-}
+import { createTestEstuche, createTestToolbar, setupMockDom } from './helpers/mockDom.ts';
 
 describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profile', () => {
-    let mockEnv: ReturnType<typeof createMockCycleEnv>;
-    let origWindow: any;
-    let origDocument: any;
-    let origComputedStyle: any;
-    let origResizeObserver: any;
-    let origRAF: any;
-    let origCAF: any;
+    let mockEnv: ReturnType<typeof setupMockDom>['env'] & { teardown: () => void };
 
     beforeEach(() => {
-        mockEnv = createMockCycleEnv();
-        origWindow = (globalThis as any).window;
-        origDocument = (globalThis as any).document;
-        origComputedStyle = (globalThis as any).getComputedStyle;
-        origResizeObserver = (globalThis as any).ResizeObserver;
-        origRAF = (globalThis as any).requestAnimationFrame;
-        origCAF = (globalThis as any).cancelAnimationFrame;
-
-        (globalThis as any).window = mockEnv.mockWindow;
-        (globalThis as any).document = mockEnv.mockDocument;
-        (globalThis as any).getComputedStyle = () => ({ position: 'relative', overflow: 'auto', userSelect: 'none' });
-        (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-        (globalThis as any).requestAnimationFrame = (cb: Function) => setTimeout(cb, 0);
-        (globalThis as any).cancelAnimationFrame = (id: any) => clearTimeout(id);
+        const dom = setupMockDom();
+        mockEnv = { ...dom.env, teardown: dom.teardown };
     });
 
     afterEach(() => {
-        (globalThis as any).window = origWindow;
-        (globalThis as any).document = origDocument;
-        (globalThis as any).getComputedStyle = origComputedStyle;
-        (globalThis as any).ResizeObserver = origResizeObserver;
-        (globalThis as any).requestAnimationFrame = origRAF;
-        (globalThis as any).cancelAnimationFrame = origCAF;
+        mockEnv.teardown();
     });
 
     describe('1. getNextFavoritePreset logic', () => {
@@ -820,23 +762,9 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             let appliedPreset: ToolFavoritePreset | null = null;
             const root = mockEnv.mockDocument.createElement('div');
 
-            const estuche = new ToolEstuche(
-                {
-                    tool: 'pen',
-                    slot: 'tc',
-                    color: '#000',
-                    width: 2,
-                    profileId: 'ball',
-                    smoothing: 0.5,
-                    pressureSensitivity: 0.7,
-                    favorites: [penFav],
-                    showingFavorites: true,
-                },
-                {
-                    onApplyFavorite: (preset) => {
-                        appliedPreset = preset;
-                    },
-                },
+            const { estuche } = createTestEstuche(
+                { width: 2, profileId: 'ball', smoothing: 0.5, pressureSensitivity: 0.7, favorites: [penFav], showingFavorites: true },
+                { onApplyFavorite: (preset) => { appliedPreset = preset; } },
                 root,
             );
 
@@ -861,30 +789,11 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             let cycledTool: string | null = null;
             let estucheOpened: string | null = null;
 
-            const toolbar = new Toolbar({
-                slot: 'tc',
-                penEnabled: true,
-                activeTool: 'pen',
-                activeShape: 'rectangle',
-                activeColor: '#000',
-                activeWidth: 2,
+            const { toolbar } = createTestToolbar({
                 activeProfileId: 'ball',
-                activeFavoriteIndex: 0,
-                favorites: [],
-                snapGrid: false,
-                canUndo: false,
-                canRedo: false,
                 eraserRadius: 20,
-                onSlotChange: () => {},
-                onToggleKeyboardMode: () => {},
-                onSelectTool: () => {},
                 onToggleEstuche: (tool) => { estucheOpened = tool; },
                 onCycleFavorite: (tool) => { cycledTool = tool; },
-                onUndo: () => {},
-                onRedo: () => {},
-                onSelectFavorite: () => {},
-                onSelectThickness: () => {},
-                onToggleSnapGrid: () => {},
             });
 
             const penBtn = toolbar.getToolButton('pen');
@@ -911,30 +820,11 @@ describe('Phase 6: 1-Action S-Pen & Toolbar Quick-Cycle Within Active Tool Profi
             let cycledTool: string | null = null;
             let estucheOpened: string | null = null;
 
-            const toolbar = new Toolbar({
-                slot: 'tc',
-                penEnabled: true,
-                activeTool: 'pen',
-                activeShape: 'rectangle',
-                activeColor: '#000',
-                activeWidth: 2,
+            const { toolbar } = createTestToolbar({
                 activeProfileId: 'ball',
-                activeFavoriteIndex: 0,
-                favorites: [],
-                snapGrid: false,
-                canUndo: false,
-                canRedo: false,
                 eraserRadius: 20,
-                onSlotChange: () => {},
-                onToggleKeyboardMode: () => {},
-                onSelectTool: () => {},
                 onToggleEstuche: (tool) => { estucheOpened = tool; },
                 onCycleFavorite: (tool) => { cycledTool = tool; },
-                onUndo: () => {},
-                onRedo: () => {},
-                onSelectFavorite: () => {},
-                onSelectThickness: () => {},
-                onToggleSnapGrid: () => {},
             });
 
             const penBtn = toolbar.getToolButton('pen');

@@ -1,20 +1,33 @@
 import type { App, TFile } from 'obsidian';
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, Point, ShapeElement, StrokeElement } from '../core/types.ts';
+import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, Point, StrokeElement } from '../core/types.ts';
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
 import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
+import {
+    clearDanglingBindings,
+    getShapePlugin,
+    sanitizeLoadedShapeElement,
+    shapeElementStyle,
+    shapeElementToGeometry,
+} from '../engine/shapes/index.ts';
+import { createSvgFromMarkup, isDarkTheme } from '../ui/theme.ts';
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
+/** Feeds a string into a running 32-bit FNV-1a accumulator. */
+function fnv1aUpdate(hash: number, input: string): number {
+    let h = hash;
+    for (let i = 0; i < input.length; i++) {
+        h ^= input.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+}
+
 /** Computes a deterministic 8-hex-character 32-bit FNV-1a hash for collision-free ID disambiguation. */
 function fnv1aHex(input: string): string {
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < input.length; i++) {
-        hash ^= input.charCodeAt(i);
-        hash = Math.imul(hash, 0x01000193);
-    }
-    return (hash >>> 0).toString(16).padStart(8, '0');
+    return fnv1aUpdate(0x811c9dc5, input).toString(16).padStart(8, '0');
 }
 
 /**
@@ -292,13 +305,20 @@ export class PersistenceQueue {
             }
         }
 
+        const elements = [...freehandElements, ...boxElements];
+        for (const el of elements) {
+            if (el.type === 'shape') sanitizeLoadedShapeElement(el);
+        }
+        // Connectors whose target shape was not loaded (e.g. an orphaned box) must not dangle
+        clearDanglingBindings(elements);
+
         const now = Date.now();
         const doc: PageDocument = {
             schemaVersion: 1,
             version: 1,
             id: file.path,
             notePath: file.path,
-            elements: [...freehandElements, ...boxElements],
+            elements,
             boxes: boxesMeta,
             layoutHint,
             createdAt: now,
@@ -514,12 +534,33 @@ export function boxCompanionPath(notePath: string, boxId: string): string {
     return `${folder ? `${folder}/` : ''}assets/ink/${basename}.${safeBoxId}.ink.svg`;
 }
 
+export interface BoxSvgRenderMeta {
+    height?: number;
+    gridStyle?: string;
+    gridDensity?: number;
+    bgTheme?: string;
+    customBgColor?: string;
+    /** When true, `'default'` background stays transparent so the host CSS box theme renders natively. */
+    omitDefaultBg?: boolean;
+    /** Explicit theme polarity override for standalone SVG export when no DOM theme class is present. */
+    isDarkTheme?: boolean;
+}
+
+function resolveRenderBoxDarkTheme(meta?: BoxSvgRenderMeta): boolean {
+    if (meta?.isDarkTheme !== undefined) return meta.isDarkTheme;
+    if (typeof document !== 'undefined' && document?.body?.classList) {
+        if (document.body.classList.contains('theme-light')) return false;
+        if (isDarkTheme()) return true;
+    }
+    return true;
+}
+
 export function renderBoxSvg(
     boxId: string,
     elements: CanvasElement[],
     width = 800,
     height = 280,
-    meta?: { height?: number; gridStyle?: string; gridDensity?: number; bgTheme?: string; customBgColor?: string },
+    meta?: BoxSvgRenderMeta,
 ): string {
     const scale = width;
     let gridDef = '';
@@ -530,6 +571,7 @@ export function renderBoxSvg(
 
     const bgTheme = meta?.bgTheme ?? BoxRegistry.getBgTheme(boxId);
     const customBg = meta?.customBgColor ?? BoxRegistry.getCustomBgColor(boxId);
+    const isDark = resolveRenderBoxDarkTheme(meta);
     let bgFill = 'transparent';
     if (customBg) {
         bgFill = customBg;
@@ -537,8 +579,8 @@ export function renderBoxSvg(
         bgFill = '#000000';
     } else if (bgTheme === 'graphite') {
         bgFill = '#27272a';
-    } else if (bgTheme === 'default') {
-        bgFill = '#1f1f21';
+    } else if (bgTheme === 'default' && !meta?.omitDefaultBg) {
+        bgFill = isDark ? '#1f1f21' : '#f4f5f8';
     }
     const bgRect = bgFill !== 'transparent' ? `<rect width="100%" height="100%" fill="${escapeXml(bgFill)}"/>` : '';
 
@@ -555,10 +597,90 @@ export function renderBoxSvg(
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${defsTag}${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${contentMarkup}</g></svg>`;
 }
 
-function vaultRelativeLink(notePath: string, assetPath: string): string {
-    const noteFolder = notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/')) : '';
-    const prefix = noteFolder ? `${noteFolder}/` : '';
-    return assetPath.startsWith(prefix) ? assetPath.slice(prefix.length) : assetPath;
+/**
+ * Computes a deterministic cache key covering container geometry, box styling, theme polarity,
+ * and every element's style, geometry, and stroke/shape payload.
+ */
+export function computeBoxPreviewSvgHash(
+    boxId: string,
+    elements: readonly CanvasElement[],
+    width: number,
+    height: number,
+    meta?: BoxSvgRenderMeta,
+): string {
+    const gridStyle = meta?.gridStyle ?? BoxRegistry.getGridStyle(boxId);
+    const density = meta?.gridDensity ?? BoxRegistry.getGridDensity(boxId) ?? 32;
+    const bgTheme = meta?.bgTheme ?? BoxRegistry.getBgTheme(boxId);
+    const customBg = meta?.customBgColor ?? BoxRegistry.getCustomBgColor(boxId);
+    const isDark = resolveRenderBoxDarkTheme(meta);
+
+    let hash = 0x811c9dc5;
+    hash = fnv1aUpdate(
+        hash,
+        `${boxId}|${width}x${height}|${gridStyle}|${density}|${bgTheme}|${customBg ?? ''}|${meta?.omitDefaultBg ? 1 : 0}|${isDark ? 'd' : 'l'}|${elements.length}`,
+    );
+
+    for (const el of elements) {
+        const s = el.style;
+        hash = fnv1aUpdate(
+            hash,
+            `|${el.id}:${el.type}:${el.zIndex}:${s.color}:${s.width}:${s.opacity}:${s.pattern}:${s.profile ?? ''}:${s.isHighlighter ? 1 : 0}`,
+        );
+        hash = fnv1aUpdate(hash, `:${el.bounds.minX},${el.bounds.minY},${el.bounds.maxX},${el.bounds.maxY}`);
+        if (el.type === 'stroke') {
+            const pts = el.points;
+            const len = pts.length;
+            const mid = Math.floor(len / 4) * 4;
+            hash = fnv1aUpdate(
+                hash,
+                `:${len}:${pts[0] ?? ''},${pts[1] ?? ''},${pts[mid] ?? ''},${pts[mid + 1] ?? ''},${pts[len - 4] ?? ''},${pts[len - 3] ?? ''}`,
+            );
+        } else {
+            hash = fnv1aUpdate(
+                hash,
+                `:${el.shapeType}:${el.startX},${el.startY},${el.endX},${el.endY}:${el.rotation ?? 0}:${el.cornerRadius ?? 0}:${el.regularize ? 1 : 0}:${el.fillEnabled ? 1 : 0}:${el.fillColor ?? ''}:${el.fillOpacity ?? ''}:${el.fillPattern ?? ''}:${el.fillDensity ?? ''}:${JSON.stringify(el.shapeParams ?? null)}:${JSON.stringify(el.controlPoint ?? null)}:${JSON.stringify(el.vertices ?? null)}:${el.startBinding?.elementId ?? ''}:${el.endBinding?.elementId ?? ''}:${el.pathNodes?.length ?? 0}`,
+            );
+            if (el.pathNodes && el.pathNodes.length > 0) {
+                for (const n of el.pathNodes) {
+                    hash = fnv1aUpdate(hash, `;${n.x},${n.y},${n.handleIn?.x ?? ''},${n.handleIn?.y ?? ''},${n.handleOut?.x ?? ''},${n.handleOut?.y ?? ''}`);
+                }
+            }
+        }
+    }
+
+    return `${elements.length}:${width}:${height}:${hash.toString(16).padStart(8, '0')}`;
+}
+
+/**
+ * Renders or updates the inline `.apolo-box-preview-svg` wrapper inside a Reading View space box.
+ */
+export function syncBoxPreviewSvg(
+    boxEl: HTMLElement,
+    boxId: string,
+    boxElements: CanvasElement[],
+    width: number,
+    height: number,
+    meta?: BoxSvgRenderMeta,
+): void {
+    let previewSvgWrap = boxEl.querySelector<HTMLElement>('.apolo-box-preview-svg');
+    if (boxElements.length === 0) {
+        if (previewSvgWrap) previewSvgWrap.remove();
+        return;
+    }
+    if (!previewSvgWrap) {
+        previewSvgWrap = document.createElement('div');
+        previewSvgWrap.className = 'apolo-box-preview-svg';
+        boxEl.appendChild(previewSvgWrap);
+    }
+    const targetW = Math.max(1, Math.round(width || 800));
+    const effectiveMeta: BoxSvgRenderMeta = { ...meta, omitDefaultBg: true };
+    const svgHash = computeBoxPreviewSvgHash(boxId, boxElements, targetW, height, effectiveMeta);
+    if (previewSvgWrap.dataset.apoloSvgHash !== svgHash || previewSvgWrap.children.length === 0) {
+        const svgMarkup = renderBoxSvg(boxId, boxElements, targetW, height, effectiveMeta);
+        const parsedSvg = createSvgFromMarkup(svgMarkup);
+        previewSvgWrap.replaceChildren(parsedSvg);
+        previewSvgWrap.dataset.apoloSvgHash = svgHash;
+    }
 }
 
 export function renderSvg(document: PageDocument): string {
@@ -752,22 +874,24 @@ function renderElementWithDefs(element: CanvasElement, scale = 800, anchorOffset
         };
     }
 
-    const startX = element.startX * scale;
-    const startY = element.startY * scale + anchorOffsetY;
-    const endX = element.endX * scale;
-    const endY = element.endY * scale + anchorOffsetY;
-    const x = Math.min(startX, endX); const y = Math.min(startY, endY);
-    const width = Math.abs(endX - startX); const height = Math.abs(endY - startY);
-    const fill = element.fillColor ? ` fill="${escapeXml(element.fillColor)}"` : '';
-    const shape: ShapeElement = element;
-    switch (shape.shapeType) {
-        case 'line': return { defs: {}, body: `<path d="M ${startX} ${startY} L ${endX} ${endY}" ${style}/>` };
-        case 'arrow': return { defs: {}, body: `<path d="M ${startX} ${startY} L ${endX} ${endY} M ${endX - 10} ${endY - 5} L ${endX} ${endY} L ${endX - 5} ${endY - 10}" ${style}/>` };
-        case 'ellipse': return { defs: {}, body: `<ellipse cx="${x + width / 2}" cy="${y + height / 2}" rx="${width / 2}" ry="${height / 2}" ${style}${fill}/>` };
-        case 'triangle': return { defs: {}, body: `<path d="M ${x + width / 2} ${y} L ${x + width} ${y + height} L ${x} ${y + height} Z" ${style}${fill}/>` };
-        case 'rounded-rect': return { defs: {}, body: `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="8" ${style}${fill}/>` };
-        default: return { defs: {}, body: `<rect x="${x}" y="${y}" width="${width}" height="${height}" ${style}${fill}/>` };
+    const plugin = getShapePlugin(element.shapeType);
+    const geom = shapeElementToGeometry(element, 0, anchorOffsetY, scale);
+    const rotDeg = geom.rotation ? (geom.rotation * 180 / Math.PI) : 0;
+    const svgOut = plugin.renderSvg(geom, {
+        ...shapeElementStyle(element),
+        ...(rotDeg !== 0 ? { shapeRotationDeg: rotDeg } as any : {}),
+    });
+    if (geom.rotation) {
+        const norm = plugin.normalizeGeometry(geom);
+        const cx = (norm.x0 + norm.x1) / 2;
+        const cy = (norm.y0 + norm.y1) / 2;
+        const deg = (geom.rotation * 180 / Math.PI).toFixed(2);
+        return {
+            defs: svgOut.defs,
+            body: `<g transform="rotate(${deg} ${cx.toFixed(1)} ${cy.toFixed(1)})">\n  ${svgOut.body}\n</g>`,
+        };
     }
+    return svgOut;
 }
 
 export function renderElement(element: CanvasElement, scale = 800): string {

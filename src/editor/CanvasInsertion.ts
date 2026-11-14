@@ -139,6 +139,11 @@ export function findCanvasInsertionLine(content: string, cursorLine?: number): n
     return lastParaLine;
 }
 
+export interface InsertCanvasOptions {
+    /** Minimum 0-based line index where the canvas div should be placed (pads blank lines above if needed). */
+    minLine?: number;
+}
+
 /**
  * Inserts a canvas div with blank lines before and after.
  */
@@ -147,44 +152,41 @@ export function insertCanvasIntoMarkdown(
     boxId: string,
     height = 280,
     cursorLine?: number,
+    options?: InsertCanvasOptions,
 ): { updatedContent: string; insertedLine: number } {
     const lines = content.split('\n');
+    const minLine = Math.max(0, Math.floor(options?.minLine ?? 0));
     const targetLine = findCanvasInsertionLine(content, cursorLine);
     const divTag = formatCanvasDivTag(boxId, height);
 
     if (lines.length === 0 || (lines.length === 1 && lines[0].trim() === '')) {
-        return { updatedContent: `${divTag}\n`, insertedLine: 0 };
+        if (minLine <= 0) {
+            return { updatedContent: `${divTag}\n`, insertedLine: 0 };
+        }
+        const prefix = Array.from({ length: minLine }, () => '');
+        return {
+            updatedContent: [...prefix, divTag, ''].join('\n'),
+            insertedLine: minLine,
+        };
     }
 
-    // If target line is an empty line, replace or format around it
-    if (lines[targetLine]?.trim() === '') {
-        const before = lines.slice(0, targetLine);
-        const after = lines.slice(targetLine + 1);
-
-        const newLines = [...before];
-        if (newLines.length > 0 && newLines[newLines.length - 1].trim() !== '') {
-            newLines.push('');
-        }
-        const divIndex = newLines.length;
-        newLines.push(divTag);
-        if (after.length > 0 && after[0].trim() !== '') {
-            newLines.push('');
-        }
-        newLines.push(...after);
-        return { updatedContent: newLines.join('\n'), insertedLine: divIndex };
-    }
-
-    // Insert after targetLine
-    const before = lines.slice(0, targetLine + 1);
+    const before = lines[targetLine]?.trim() === ''
+        ? lines.slice(0, targetLine)
+        : lines.slice(0, targetLine + 1);
     const after = lines.slice(targetLine + 1);
 
     const newLines = [...before];
-    if (newLines[newLines.length - 1].trim() !== '') {
+    if (newLines.length > 0 && newLines[newLines.length - 1].trim() !== '') {
+        newLines.push('');
+    }
+    while (newLines.length < minLine) {
         newLines.push('');
     }
     const divIndex = newLines.length;
     newLines.push(divTag);
     if (after.length > 0 && after[0].trim() !== '') {
+        newLines.push('');
+    } else if (after.length === 0 && minLine > targetLine) {
         newLines.push('');
     }
     newLines.push(...after);

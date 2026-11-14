@@ -1,27 +1,12 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { CanvasController, type CanvasControllerOptions } from '../src/engine/CanvasController.ts';
+import { CanvasController } from '../src/engine/CanvasController.ts';
 import {
     DEFAULT_WORKSPACE_TOOL_STATE,
     cloneWorkspaceToolState,
 } from '../src/core/types.ts';
 
-import { setupMockDom, type MockEnvironment } from './helpers/mockDom.ts';
-
-function createControllerOptions(overrides: Partial<CanvasControllerOptions> = {}): CanvasControllerOptions {
-    return {
-        palmRejectionCooldownMs: 400,
-        autoSaveDebounceMs: 500,
-        defaultPenColor: '#1F4FD8',
-        defaultPenWidth: 3,
-        enabled: true,
-        enableMouseDrawing: false,
-        shapeRecognition: false,
-        straightenLines: false,
-        app: {} as any,
-        ...overrides,
-    };
-}
+import { createControllerOptions, setupMockDom, type MockEnvironment } from './helpers/mockDom.ts';
 
 describe('Editor Focus & Virtual Keyboard Guards in Drawing Mode', () => {
     let mockEnv: MockEnvironment;
