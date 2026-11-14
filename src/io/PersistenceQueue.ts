@@ -317,21 +317,26 @@ export class PersistenceQueue {
     }
 
     /** Loads global ink from `.<BaseName>.global.json` and per-box elements from `.<BaseName>.<boxId>.svg`. */
-    async loadDocumentForNote(file: TFile): Promise<PageDocument> {
-        return this.loadNoteInk(file);
+    async loadDocumentForNote(fileOrPath: TFile | string): Promise<PageDocument> {
+        return this.loadNoteInk(fileOrPath);
     }
 
     /** Loads global ink from `.<BaseName>.global.json` and per-box elements from `.<BaseName>.<boxId>.svg`. */
-    async loadNoteInk(file: TFile): Promise<PageDocument> {
+    async loadNoteInk(fileOrPath: TFile | string): Promise<PageDocument> {
+        const filePath = typeof fileOrPath === 'string' ? fileOrPath : fileOrPath.path;
+        const file = typeof fileOrPath === 'string'
+            ? ((this.app.vault.getAbstractFileByPath?.(filePath) as TFile | null) ?? ({ path: filePath } as TFile))
+            : fileOrPath;
+
         // 1. Check in-memory cache first to guarantee zero data loss on rapid tab switching
-        const inMemory = this.getDocument(file.path);
+        const inMemory = this.getDocument(filePath);
         if (inMemory) {
-            inMemory.notePath = file.path;
+            inMemory.notePath = filePath;
             return inMemory;
         }
 
         const adapter = this.app.vault.adapter;
-        const split = splitNotePath(file.path);
+        const split = splitNotePath(filePath);
 
         let content = '';
         try {
@@ -350,7 +355,7 @@ export class PersistenceQueue {
         const boxIds = scanMarkdownBoxIds(content);
 
         // 3. Load global freehand ink from <dir>/.<BaseName>.global.json
-        const globalFile = getGlobalInkPath(file.path);
+        const globalFile = getGlobalInkPath(filePath);
         let freehandElements: CanvasElement[] = [];
         let layoutHint: LayoutHint | undefined = undefined;
 
@@ -376,7 +381,7 @@ export class PersistenceQueue {
                     return true;
                 });
             } catch (err) {
-                console.error(`[ApoloCanvas] Could not read global ink for ${file.path}:`, err);
+                console.error(`[ApoloCanvas] Could not read global ink for ${filePath}:`, err);
             }
         }
 
@@ -385,7 +390,7 @@ export class PersistenceQueue {
         const boxesMeta: Record<string, BoxMetadata> = {};
 
         for (const boxId of boxIds) {
-            const boxSvgFile = getBoxSvgPath(file.path, boxId);
+            const boxSvgFile = getBoxSvgPath(filePath, boxId);
             if (await adapter.exists(boxSvgFile)) {
                 try {
                     const rawSvg = await adapter.read(boxSvgFile);
@@ -437,15 +442,15 @@ export class PersistenceQueue {
         const doc: PageDocument = {
             schemaVersion: 1,
             version: 1,
-            id: file.path,
-            notePath: file.path,
+            id: filePath,
+            notePath: filePath,
             elements,
             boxes: boxesMeta,
             layoutHint,
             createdAt: now,
             updatedAt: now,
         };
-        this.cacheByPageId.set(file.path, doc);
+        this.cacheByPageId.set(filePath, doc);
         return doc;
     }
 
