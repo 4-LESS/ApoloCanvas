@@ -25,6 +25,7 @@ import { CanvasController } from './engine/CanvasController.ts';
 import { PersistenceQueue, syncBoxPreviewSvg } from './io/PersistenceQueue.ts';
 import {
     applyFileExplorerCloaking,
+    attachMakeMdBridge,
     clearKnownApnotes,
     ensureDirectory,
     ensureNoteInBundleFolder,
@@ -43,6 +44,7 @@ import {
     resolveBundleFolderPaths,
     resolveMdFromTrigger,
     splitNotePath,
+    syncMakeMdBundleState,
 } from './io/ApnoteBundle.ts';
 import { createDotsIcon, DEFAULT_FAVORITES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
@@ -163,6 +165,8 @@ export default class ApoloCanvasPlugin extends Plugin {
     private explorerObserver: MutationObserver | null = null;
     private explorerObservedContainers = new WeakSet<Node>();
     private cloakingRafId: number | null = null;
+    private cleanupMakeMdBridge: (() => void) | null = null;
+    private redirectingMakeMdLeaves = new WeakSet<WorkspaceLeaf>();
     private syncingRenames = new Set<string>();
     private syncingDeletes = new Set<string>();
 
@@ -455,10 +459,12 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.registerCommands();
 
         this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
+            this.redirectMakeMdBundleLeaves();
             void this.mountActiveEditor();
             this.scheduleFileExplorerCloaking();
         }));
         this.registerEvent(this.app.workspace.on('layout-change', () => {
+            this.redirectMakeMdBundleLeaves();
             void this.mountActiveEditor();
             this.scheduleFileExplorerCloaking();
         }));
@@ -691,6 +697,8 @@ export default class ApoloCanvasPlugin extends Plugin {
                     registerKnownApnote(f.path);
                 }
             }
+            this.ensureMakeMdIntegration();
+            this.redirectMakeMdBundleLeaves();
             this.refreshFileExplorerCloaking();
             void this.mountActiveEditor();
             this.showFirstTimeNoticeIfNeeded();
@@ -714,6 +722,8 @@ export default class ApoloCanvasPlugin extends Plugin {
                         }
                     }
                 }
+                this.ensureMakeMdIntegration();
+                this.redirectMakeMdBundleLeaves();
                 this.scheduleFileExplorerCloaking();
 
                 // Redirect any .apnote tabs restored from Obsidian's workspace.json directly to their .md note
@@ -735,13 +745,16 @@ export default class ApoloCanvasPlugin extends Plugin {
             })();
         });
 
-        // Direct click interception on File Explorer bundle folders and .apnote items so notes open seamlessly in MarkdownView
+        // Direct click interception on File Explorer & Make.md bundle folders / .apnote items so notes open seamlessly in MarkdownView
         if (typeof document !== 'undefined') {
             this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
                 if (evt.button !== 0 || evt.defaultPrevented) return;
                 const target = evt.target instanceof Element ? evt.target : null;
-                if (!target) return;
-                const titleEl = target.closest<HTMLElement>('.nav-file-title[data-path], .nav-folder-title[data-path], .tree-item-self[data-path]');
+                if (!target || target.closest('input')) return;
+                const inExplorer = Boolean(target.closest('.nav-files-container, .mk-path-tree'));
+                const titleEl = inExplorer
+                    ? target.closest<HTMLElement>('[data-path]')
+                    : target.closest<HTMLElement>('.nav-file-title[data-path], .nav-folder-title[data-path], .tree-item-self[data-path], .mk-tree-item[data-path]');
                 if (!titleEl || titleEl.classList.contains('is-being-renamed')) return;
                 const rawPath = titleEl.dataset.path || titleEl.getAttribute('data-path') || '';
                 if (!rawPath) return;
@@ -795,6 +808,10 @@ export default class ApoloCanvasPlugin extends Plugin {
     }
 
     onunload(): void {
+        if (this.cleanupMakeMdBridge) {
+            this.cleanupMakeMdBridge();
+            this.cleanupMakeMdBridge = null;
+        }
         if (this.cloakingRafId !== null && typeof cancelAnimationFrame === 'function') {
             cancelAnimationFrame(this.cloakingRafId);
             this.cloakingRafId = null;
@@ -815,6 +832,40 @@ export default class ApoloCanvasPlugin extends Plugin {
         console.log('[ApoloCanvas] Unloaded.');
     }
 
+    private ensureMakeMdIntegration(): void {
+        if (this.isShuttingDown) return;
+        const makeMd = (this.app as unknown as {
+            plugins?: { plugins?: Record<string, { superstate?: { dispatchEvent?: (event: string, payload?: unknown) => void } }> };
+        })?.plugins?.plugins?.['make-md'];
+        if (!makeMd?.superstate) return;
+
+        if (!this.cleanupMakeMdBridge) {
+            this.cleanupMakeMdBridge = attachMakeMdBridge(this.app, this.app.vault);
+        } else if (syncMakeMdBundleState(this.app, this.app.vault)) {
+            makeMd.superstate.dispatchEvent?.('superstateUpdated', null);
+        }
+    }
+
+    private redirectMakeMdBundleLeaves(): void {
+        if (this.isShuttingDown) return;
+        for (const viewType of ['mk-space', 'mk-flow']) {
+            const leaves = this.app.workspace.getLeavesOfType(viewType);
+            for (const leaf of leaves) {
+                if (this.redirectingMakeMdLeaves.has(leaf)) continue;
+                const statePath = (leaf.getViewState()?.state as { path?: unknown } | undefined)?.path;
+                if (typeof statePath !== 'string' || !statePath) continue;
+                const bundle = resolveBundleFolderPaths(statePath, this.app.vault);
+                if (!bundle) continue;
+                const mdFile = this.app.vault.getAbstractFileByPath(bundle.mdPath);
+                if (!(mdFile instanceof TFile)) continue;
+                this.redirectingMakeMdLeaves.add(leaf);
+                void Promise.resolve(leaf.openFile(mdFile)).finally(() => {
+                    this.redirectingMakeMdLeaves.delete(leaf);
+                });
+            }
+        }
+    }
+
     private scheduleFileExplorerCloaking(): void {
         if (this.isShuttingDown || typeof document === 'undefined') return;
         if (typeof requestAnimationFrame !== 'function') {
@@ -830,6 +881,7 @@ export default class ApoloCanvasPlugin extends Plugin {
 
     private refreshFileExplorerCloaking(): void {
         if (this.isShuttingDown || typeof document === 'undefined') return;
+        this.ensureMakeMdIntegration();
         applyFileExplorerCloaking(document, this.app.vault, this.app.workspace.getActiveFile()?.path);
 
         if (typeof MutationObserver === 'undefined') return;
@@ -838,7 +890,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                 this.scheduleFileExplorerCloaking();
             });
         }
-        const containers = document.querySelectorAll('.nav-files-container');
+        const containers = document.querySelectorAll('.nav-files-container, .mk-path-tree');
         for (let i = 0; i < containers.length; i++) {
             const container = containers[i];
             if (!this.explorerObservedContainers.has(container)) {

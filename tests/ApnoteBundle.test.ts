@@ -7,6 +7,7 @@ import {
     APOLO_BUNDLE_FOLDER_CLASS,
     APOLO_SATELLITE_HIDDEN_CLASS,
     applyFileExplorerCloaking,
+    attachMakeMdBridge,
     clearKnownApnotes,
     createApnoteManifest,
     detectApnoteFormat,
@@ -30,6 +31,7 @@ import {
     resolveMdFromTrigger,
     serializeApnoteManifest,
     syncAtomicRename,
+    syncMakeMdBundleState,
     type VaultLike,
 } from '../src/io/ApnoteBundle.ts';
 import { PersistenceQueue, syncMarkdownFallbackEmbeds } from '../src/io/PersistenceQueue.ts';
@@ -260,12 +262,9 @@ class MockExplorerNode {
     matchesSelector(sel: string): boolean {
         const parts = sel.split(',').map(s => s.trim()).filter(Boolean);
         for (const p of parts) {
-            if (p === '.nav-file-title[data-path]') {
-                if (this.classList.contains('nav-file-title') && this.attributes.has('data-path')) return true;
-            } else if (p === '.nav-folder-title[data-path]') {
-                if (this.classList.contains('nav-folder-title') && this.attributes.has('data-path')) return true;
-            } else if (p === '.tree-item-self[data-path]') {
-                if (this.classList.contains('tree-item-self') && this.attributes.has('data-path')) return true;
+            if (p.startsWith('.') && p.endsWith('[data-path]')) {
+                const cls = p.slice(1, -'[data-path]'.length);
+                if (this.classList.contains(cls) && this.attributes.has('data-path')) return true;
             } else if (p.startsWith('.')) {
                 const cls = p.slice(1);
                 if (this.classList.contains(cls)) return true;
@@ -850,5 +849,237 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.strictEqual(files.has('Inbox/Standalone/Standalone.md'), true);
         assert.strictEqual(files.get('Inbox/Standalone/.nomedia'), '');
         clearKnownApnotes();
+    });
+
+    test('applyFileExplorerCloaking handles Make.md .mk-path-tree virtual nodes and hides bundle satellites', () => {
+        clearKnownApnotes();
+        const mkTree = new MockExplorerNode('div');
+        mkTree.classList.add('mk-path-tree');
+
+        const createMkRow = (path: string, isFolder: boolean) => {
+            const node = new MockExplorerNode('div');
+            node.classList.add('mk-tree-node');
+            const wrapper = new MockExplorerNode('div');
+            wrapper.classList.add('mk-tree-wrapper');
+            const row = new MockExplorerNode('div');
+            row.classList.add(isFolder ? 'nav-folder' : 'nav-file');
+            const title = new MockExplorerNode('div');
+            title.classList.add('mk-tree-item');
+            title.classList.add('tree-item-self');
+            title.classList.add(isFolder ? 'nav-folder-title' : 'nav-file-title');
+            title.setAttribute('data-path', path);
+            row.appendChild(title);
+            wrapper.appendChild(row);
+            node.appendChild(wrapper);
+            mkTree.appendChild(node);
+            return { node, wrapper, row, title };
+        };
+
+        const { vault } = createMockVault({
+            'Test/Test.md': '# Test',
+            'Test/Test.apnote': serializeApnoteManifest(createApnoteManifest('Test/Test.md', ['c1'])),
+            'Test/Test.c1.svg': '<svg/>',
+            'RegularFolder/Note.md': '# Regular',
+        });
+
+        const bundleRow = createMkRow('Test', true);
+        const regularFolderRow = createMkRow('RegularFolder', true);
+        const apnoteChildRow = createMkRow('Test/Test.apnote', false);
+        const mdChildRow = createMkRow('Test/Test.md', false);
+        const svgChildRow = createMkRow('Test/Test.c1.svg', false);
+        const regularNoteRow = createMkRow('RegularFolder/Note.md', false);
+
+        try {
+            applyFileExplorerCloaking(mkTree as any, vault, 'Test/Test.md');
+
+            assert.strictEqual(bundleRow.node.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), true);
+            assert.strictEqual(bundleRow.wrapper.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), true);
+            assert.strictEqual(bundleRow.row.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), true);
+            assert.strictEqual(bundleRow.title.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), true);
+            assert.strictEqual(bundleRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), true);
+            assert.strictEqual(bundleRow.title.classList.contains('is-active'), true);
+            assert.strictEqual(bundleRow.wrapper.classList.contains('is-active'), true);
+
+            assert.strictEqual(regularFolderRow.node.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), false);
+            assert.strictEqual(regularFolderRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), false);
+
+            assert.strictEqual(apnoteChildRow.node.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
+            assert.strictEqual(mdChildRow.node.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
+            assert.strictEqual(svgChildRow.node.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
+            assert.strictEqual(regularNoteRow.node.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
+
+            removeFileExplorerCloaking(mkTree as any);
+            assert.strictEqual(bundleRow.node.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), false);
+            assert.strictEqual(bundleRow.wrapper.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), false);
+            assert.strictEqual(bundleRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), false);
+            assert.strictEqual(apnoteChildRow.node.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
+            assert.strictEqual(mdChildRow.node.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
+            assert.strictEqual(svgChildRow.node.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
+        } finally {
+            clearKnownApnotes();
+        }
+    });
+
+    test('syncMakeMdBundleState and attachMakeMdBridge convert bundle folders to file nodes and redirect openPath', () => {
+        clearKnownApnotes();
+        const { vault } = createMockVault({
+            'Test/Test.md': '# Test',
+            'Test/Test.apnote': serializeApnoteManifest(createApnoteManifest('Test/Test.md', ['c1'])),
+            'Test/Test.c1.svg': '<svg/>',
+            'Test/.Test.global.json': '{}',
+            'Test/.nomedia': '',
+            'RegularFolder/Other.md': '# Other',
+        });
+
+        const pathsIndex = new Map<string, any>([
+            [
+                'Test',
+                {
+                    path: 'Test',
+                    name: 'Test',
+                    type: 'space',
+                    subtype: 'folder',
+                    file: { isFolder: true },
+                    metadata: { isFolder: true },
+                    label: { name: 'Test', sticker: 'ui//mk-ui-folder', thumbnail: 'folder.png' },
+                },
+            ],
+            ['Test/Test.apnote', { path: 'Test/Test.apnote', type: 'file', hidden: false }],
+            ['Test/Test.md', { path: 'Test/Test.md', type: 'file', subtype: 'md', hidden: false }],
+            ['Test/Test.c1.svg', { path: 'Test/Test.c1.svg', type: 'file', hidden: false }],
+            [
+                'RegularFolder',
+                {
+                    path: 'RegularFolder',
+                    name: 'RegularFolder',
+                    type: 'space',
+                    subtype: 'folder',
+                    file: { isFolder: true },
+                    metadata: { isFolder: true },
+                    label: { name: 'RegularFolder', sticker: 'ui//mk-ui-folder' },
+                },
+            ],
+        ]);
+
+        const spacesIndex = new Map<string, any>([
+            ['Test', { name: 'Test' }],
+            ['RegularFolder', { name: 'RegularFolder' }],
+        ]);
+        const expandedSpaces = ['//Test', 'Test', 'RegularFolder'];
+
+        const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+        const dispatchedEvents: string[] = [];
+        const pluginOpenCalls: Array<{ leaf: unknown; path: string; flow: unknown }> = [];
+        const uiOpenCalls: Array<{ path: string; flow: unknown }> = [];
+
+        const origOpenPath = async (leaf: unknown, path: string, flow?: unknown) => {
+            pluginOpenCalls.push({ leaf, path, flow });
+        };
+        const origUiOpenPath = async (path: string, flow?: unknown) => {
+            uiOpenCalls.push({ path, flow });
+        };
+
+        const eventsDispatcher = {
+            addListener(ev: string, fn: (...args: unknown[]) => void) {
+                let set = listeners.get(ev);
+                if (!set) {
+                    set = new Set();
+                    listeners.set(ev, set);
+                }
+                set.add(fn);
+            },
+            removeListener(ev: string, fn: (...args: unknown[]) => void) {
+                listeners.get(ev)?.delete(fn);
+            },
+        };
+
+        const superstate = {
+            pathsIndex,
+            spacesIndex,
+            settings: { expandedSpaces },
+            eventsDispatcher,
+            dispatchEvent(ev: string, payload?: unknown) {
+                dispatchedEvents.push(ev);
+                for (const fn of listeners.get(ev) ?? []) {
+                    fn(payload);
+                }
+            },
+            ui: {
+                openPath: origUiOpenPath,
+            },
+        };
+
+        const makeMd = {
+            superstate,
+            openPath: origOpenPath,
+        };
+
+        const mockApp = {
+            plugins: {
+                plugins: {
+                    'make-md': makeMd,
+                },
+            },
+        };
+
+        const detach = attachMakeMdBridge(mockApp, vault);
+        try {
+            const testEntry = pathsIndex.get('Test');
+            assert.strictEqual(testEntry.type, 'file');
+            assert.strictEqual(testEntry.subtype, 'md');
+            assert.strictEqual(testEntry.file.isFolder, false);
+            assert.strictEqual(testEntry.metadata.isFolder, false);
+            assert.strictEqual(testEntry.label.sticker, '');
+            assert.strictEqual(testEntry.label.thumbnail, '');
+
+            const regularEntry = pathsIndex.get('RegularFolder');
+            assert.strictEqual(regularEntry.type, 'space');
+            assert.strictEqual(regularEntry.metadata.isFolder, true);
+            assert.strictEqual(regularEntry.label.sticker, 'ui//mk-ui-folder');
+
+            assert.strictEqual(spacesIndex.has('Test'), false);
+            assert.strictEqual(spacesIndex.has('RegularFolder'), true);
+            assert.deepStrictEqual(expandedSpaces, ['RegularFolder']);
+
+            assert.strictEqual(pathsIndex.get('Test/Test.apnote').hidden, true);
+            assert.strictEqual(pathsIndex.get('Test/Test.md').hidden, true);
+            assert.strictEqual(pathsIndex.get('Test/Test.c1.svg').hidden, true);
+            assert.ok(dispatchedEvents.includes('superstateUpdated'));
+
+            // Second sync without changes is idempotent and returns false
+            assert.strictEqual(syncMakeMdBundleState(mockApp, vault), false);
+
+            // openPath redirection on both makeMd and superstate.ui
+            const mockLeaf = { id: 'leaf-1' };
+            void makeMd.openPath(mockLeaf, 'Test', false);
+            void superstate.ui.openPath('Test', true);
+            void makeMd.openPath(mockLeaf, 'RegularFolder', false);
+            assert.deepStrictEqual(pluginOpenCalls, [
+                { leaf: mockLeaf, path: 'Test/Test.md', flow: false },
+                { leaf: mockLeaf, path: 'RegularFolder', flow: false },
+            ]);
+            assert.deepStrictEqual(uiOpenCalls, [
+                { path: 'Test/Test.md', flow: true },
+            ]);
+
+            // Simulate Make.md reloading cache back into folder state and firing pathStateUpdated
+            testEntry.type = 'space';
+            testEntry.metadata.isFolder = true;
+            spacesIndex.set('Test', { name: 'Test' });
+            for (const fn of listeners.get('pathStateUpdated') ?? []) {
+                fn({ path: 'Test' });
+            }
+            assert.strictEqual(testEntry.type, 'file');
+            assert.strictEqual(testEntry.metadata.isFolder, false);
+            assert.strictEqual(spacesIndex.has('Test'), false);
+        } finally {
+            detach();
+            clearKnownApnotes();
+        }
+
+        assert.strictEqual(makeMd.openPath, origOpenPath);
+        assert.strictEqual(superstate.ui.openPath, origUiOpenPath);
+        void makeMd.openPath({ id: 'leaf-2' }, 'Test', false);
+        assert.strictEqual(pluginOpenCalls[pluginOpenCalls.length - 1].path, 'Test');
     });
 });

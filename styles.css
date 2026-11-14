@@ -6294,10 +6294,12 @@ button.apolo-profile-cancel-btn,
 }
 
 /* ============================================================================
- * .apnote Satellite File Explorer Cloaking & Bundle Folders
+ * .apnote Satellite File Explorer Cloaking & Bundle Folders (Native + Make.md)
  * ============================================================================ */
 .apolo-satellite-hidden,
-.apolo-fallback-embed-hidden {
+.apolo-fallback-embed-hidden,
+.mk-path-tree .mk-tree-node.apolo-satellite-hidden,
+.mk-path-tree .mk-tree-wrapper.apolo-satellite-hidden {
   display: none;
 }
 
@@ -6312,11 +6314,24 @@ button.apolo-profile-cancel-btn,
 .nav-files-container .nav-folder.apolo-bundle-folder > .nav-folder-title > .nav-folder-collapse-indicator,
 .apolo-bundle-folder > .nav-folder-title > .collapse-icon,
 .apolo-bundle-folder > .tree-item-self > .collapse-icon,
-.apolo-apnote-item .apolo-apnote-icon {
+.apolo-apnote-item .apolo-apnote-icon,
+.apolo-apnote-item > .tree-item-icon,
+.apolo-apnote-item > .nav-folder-collapse-indicator,
+.apolo-apnote-item > .mk-collapse,
+.apolo-apnote-item > .mk-path-icon,
+.apolo-bundle-folder .mk-collapse,
+.apolo-bundle-folder .mk-path-icon,
+.mk-path-tree .apolo-bundle-folder .mk-collapse,
+.mk-path-tree .apolo-bundle-folder .mk-path-icon,
+.apolo-bundle-folder .mk-folder-buttons > button[aria-label="New Note"] {
   display: none;
 }
 
 .nav-files-container .tree-item.nav-folder.apolo-bundle-folder > .tree-item-self.apolo-apnote-item,
 .nav-files-container .nav-folder.apolo-bundle-folder > .nav-folder-title.apolo-apnote-item {
   padding-inline-start: var(--size-4-2, 8px);
+}
+
+.mk-path-tree .mk-tree-item.nav-folder-title.apolo-apnote-item {
+  padding-inline-start: 20px;
 }

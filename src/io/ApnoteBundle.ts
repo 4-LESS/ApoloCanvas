@@ -1307,30 +1307,54 @@ export const APOLO_APNOTE_ITEM_CLASS = 'apolo-apnote-item';
 export const APOLO_APNOTE_ICON_CLASS = 'apolo-apnote-icon';
 export const APOLO_BUNDLE_FOLDER_CLASS = 'apolo-bundle-folder';
 
-/**
- * Cloaks internal bundle files inside Obsidian's File Explorer whenever `<BaseName>.apnote` exists,
- * turning single-note bundle folders (`<BaseName>/`) into icon-free note entries and hiding loose satellites.
- */
-export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, activeFilePath?: string): void {
-    const items = root.querySelectorAll<HTMLElement>(
-        '.nav-file-title[data-path], .nav-folder-title[data-path], .tree-item-self[data-path]',
-    );
+/** Collects all known and vault-resident `.apnote` trigger paths. */
+function collectKnownAndVaultApnotes(
+    vault?: VaultLike,
+    pathsIndex?: Map<string, unknown>,
+): Set<string> {
     const apnoteSet = new Set<string>(knownApnotePaths);
-    const activeApnotePaths = new Set<string>();
-
     if (vault?.getFiles) {
         for (const f of vault.getFiles()) {
             const norm = normalizeVaultNotePath(f.path);
             if (norm.toLowerCase().endsWith('.apnote')) {
                 apnoteSet.add(norm);
+                registerKnownApnote(norm);
             }
         }
     }
+    if (pathsIndex instanceof Map) {
+        for (const rawPath of pathsIndex.keys()) {
+            const norm = normalizeVaultNotePath(rawPath);
+            if (norm.toLowerCase().endsWith('.apnote')) {
+                apnoteSet.add(norm);
+                registerKnownApnote(norm);
+            }
+        }
+    }
+    return apnoteSet;
+}
+
+/**
+ * Cloaks internal bundle files inside Obsidian's File Explorer and Make.md's Spaces Navigator
+ * whenever `<BaseName>.apnote` exists, turning single-note bundle folders (`<BaseName>/`) into
+ * icon-free note entries and hiding loose or virtual satellites.
+ */
+export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, activeFilePath?: string | null): void {
+    const items = root.querySelectorAll<HTMLElement>(
+        '.nav-file-title[data-path], .nav-folder-title[data-path], .tree-item-self[data-path], .mk-tree-item[data-path]',
+    );
+    const apnoteSet = collectKnownAndVaultApnotes(vault);
+    const activeApnotePaths = new Set<string>();
 
     if (activeFilePath) {
         const parsedActive = parseSatelliteFilename(activeFilePath);
         if (parsedActive && (parsedActive.kind === 'md' || parsedActive.kind === 'apnote')) {
             activeApnotePaths.add(parsedActive.apnotePath);
+        } else {
+            const activeBundle = resolveBundleFolderPaths(activeFilePath, vault);
+            if (activeBundle) {
+                activeApnotePaths.add(activeBundle.apnotePath);
+            }
         }
     }
 
@@ -1378,17 +1402,32 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, a
         const normPath = normalizeVaultNotePath(rawPath);
         if (!normPath) continue;
 
+        const mkWrapper = titleEl.closest?.('.mk-tree-wrapper') as HTMLElement | null;
+        const mkNode = titleEl.closest?.('.mk-tree-node') as HTMLElement | null;
+
         const bundleInfo = bundleFolderMap.get(normPath);
         if (bundleInfo) {
-            const folderRow = titleEl.closest?.('.nav-folder, .tree-item') as HTMLElement | null ?? titleEl;
+            const folderRow = titleEl.closest?.('.nav-folder, .nav-file, .tree-item') as HTMLElement | null ?? titleEl;
             folderRow.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkWrapper?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkNode?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+
             folderRow.classList.add(APOLO_BUNDLE_FOLDER_CLASS);
+            mkWrapper?.classList.add(APOLO_BUNDLE_FOLDER_CLASS);
+            mkNode?.classList.add(APOLO_BUNDLE_FOLDER_CLASS);
+            if (titleEl.classList.contains('mk-tree-item')) {
+                titleEl.classList.add(APOLO_BUNDLE_FOLDER_CLASS);
+            }
             titleEl.classList.add(APOLO_APNOTE_ITEM_CLASS);
-            if (activeApnotePaths.has(bundleInfo.apnotePath)) {
+
+            const isActive = activeApnotePaths.has(bundleInfo.apnotePath);
+            if (isActive) {
                 titleEl.classList.add('is-active');
+                mkWrapper?.classList.add('is-active');
             } else {
                 titleEl.classList.remove('is-active');
+                mkWrapper?.classList.remove('is-active');
             }
             continue;
         }
@@ -1396,25 +1435,48 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, a
         if (titleEl.classList.contains('nav-folder-title')) {
             const folderRow = titleEl.closest?.('.nav-folder, .tree-item') as HTMLElement | null ?? titleEl;
             folderRow.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+            folderRow.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkWrapper?.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+            mkWrapper?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkNode?.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+            mkNode?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            titleEl.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
             titleEl.classList.remove(APOLO_APNOTE_ITEM_CLASS);
+            titleEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             continue;
         }
 
         const rowEl = titleEl.closest?.('.nav-file, .tree-item') as HTMLElement | null ?? titleEl;
+        rowEl.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+        mkWrapper?.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+        mkNode?.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+        titleEl.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+
         const parsed = parseSatelliteFilename(normPath);
 
         if (parsed?.kind === 'apnote') {
-            if (isInsideNoteBundleFolder(normPath) && bundleFolderMap.has(parsed.dir) && folderDomSet.has(parsed.dir)) {
+            if (
+                isInsideNoteBundleFolder(normPath) &&
+                bundleFolderMap.has(parsed.dir) &&
+                (folderDomSet.has(parsed.dir) || mkNode !== null || mkWrapper !== null)
+            ) {
                 rowEl.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
+                titleEl.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
+                mkWrapper?.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
+                mkNode?.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
                 continue;
             }
             rowEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkWrapper?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkNode?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.add(APOLO_APNOTE_ITEM_CLASS);
             if (activeApnotePaths.has(normPath)) {
                 titleEl.classList.add('is-active');
+                mkWrapper?.classList.add('is-active');
             } else {
                 titleEl.classList.remove('is-active');
+                mkWrapper?.classList.remove('is-active');
             }
             continue;
         }
@@ -1427,14 +1489,20 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, a
 
         if (shouldHide) {
             rowEl.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
+            titleEl.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkWrapper?.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkNode?.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
         } else {
             rowEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkWrapper?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            mkNode?.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            titleEl.classList.remove(APOLO_APNOTE_ITEM_CLASS);
         }
     }
 }
 
-/** Removes all File Explorer cloaking classes, bundle folder markers, and any stale Apolo icons on unload. */
+/** Removes all File Explorer & Make.md cloaking classes, bundle folder markers, and any stale Apolo icons on unload. */
 export function removeFileExplorerCloaking(root: ParentNode): void {
     const hiddenEls = root.querySelectorAll<HTMLElement>(`.${APOLO_SATELLITE_HIDDEN_CLASS}`);
     for (let i = 0; i < hiddenEls.length; i++) {
@@ -1452,4 +1520,271 @@ export function removeFileExplorerCloaking(root: ParentNode): void {
     for (let i = 0; i < iconEls.length; i++) {
         iconEls[i].remove();
     }
+}
+
+// =============================================================================
+// Make.md (`make-md`) Superstate & Navigator Compatibility Bridge
+// =============================================================================
+
+interface MakeMdPathLabel {
+    sticker?: string;
+    thumbnail?: string;
+    name?: string;
+    color?: string;
+}
+
+interface MakeMdPathMetadata {
+    isFolder?: boolean;
+    [key: string]: unknown;
+}
+
+interface MakeMdPathState {
+    path?: string;
+    name?: string;
+    type?: string;
+    subtype?: string;
+    hidden?: boolean;
+    file?: { isFolder?: boolean; [key: string]: unknown };
+    metadata?: MakeMdPathMetadata;
+    label?: MakeMdPathLabel;
+    [key: string]: unknown;
+}
+
+interface MakeMdEventsDispatcher {
+    addListener?(event: string, listener: (...args: unknown[]) => void): void;
+    removeListener?(event: string, listener: (...args: unknown[]) => void): void;
+}
+
+interface MakeMdSuperstate {
+    pathsIndex?: Map<string, MakeMdPathState>;
+    spacesIndex?: Map<string, unknown>;
+    settings?: {
+        expandedSpaces?: string[];
+        [key: string]: unknown;
+    };
+    eventsDispatcher?: MakeMdEventsDispatcher;
+    dispatchEvent?(event: string, payload?: unknown): void;
+    ui?: {
+        openPath?: (path: string, ...args: unknown[]) => unknown;
+        [key: string]: unknown;
+    };
+    [key: string]: unknown;
+}
+
+interface MakeMdPluginLike {
+    superstate?: MakeMdSuperstate;
+    openPath?: (leaf: unknown, path: string, ...args: unknown[]) => unknown;
+    [key: string]: unknown;
+}
+
+function getMakeMdPlugin(app: unknown): MakeMdPluginLike | null {
+    const plugins = (app as { plugins?: { plugins?: Record<string, unknown> } } | null | undefined)?.plugins?.plugins;
+    const candidate = plugins?.['make-md'];
+    return candidate && typeof candidate === 'object' ? (candidate as MakeMdPluginLike) : null;
+}
+
+function rewriteMakeMdTargetPath(targetPath: string, vault?: VaultLike): string {
+    if (typeof targetPath !== 'string' || !targetPath) return targetPath;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(targetPath)) return targetPath;
+    const bundle = resolveBundleFolderPaths(targetPath, vault);
+    if (bundle) {
+        return bundle.mdPath;
+    }
+    const norm = normalizeVaultNotePath(targetPath);
+    if (norm.toLowerCase().endsWith('.apnote')) {
+        return resolveMdFromTrigger(norm);
+    }
+    return targetPath;
+}
+
+/**
+ * Synchronizes Apolo single-folder note bundles into Make.md's `superstate` so bundle folders
+ * are represented as flat Markdown notes rather than collapsible folder spaces, and internal
+ * satellites stay hidden in Make.md's Navigator index.
+ *
+ * Returns `true` if any `superstate` entry was modified.
+ */
+export function syncMakeMdBundleState(app: unknown, vault?: VaultLike): boolean {
+    const makeMd = getMakeMdPlugin(app);
+    const superstate = makeMd?.superstate;
+    if (!superstate || typeof superstate !== 'object') return false;
+
+    const pathsIndex = superstate.pathsIndex instanceof Map ? superstate.pathsIndex : undefined;
+    const apnoteSet = collectKnownAndVaultApnotes(vault, pathsIndex);
+    const bundleByDir = new Map<string, SplitNotePath>();
+    for (const apnotePath of apnoteSet) {
+        if (isInsideNoteBundleFolder(apnotePath)) {
+            const split = splitNotePath(apnotePath);
+            bundleByDir.set(split.dir, split);
+        }
+    }
+    if (bundleByDir.size === 0) return false;
+
+    let changed = false;
+
+    if (superstate.spacesIndex instanceof Map) {
+        for (const bundleDir of bundleByDir.keys()) {
+            if (superstate.spacesIndex.delete(bundleDir)) {
+                changed = true;
+            }
+        }
+    }
+
+    const expandedSpaces = superstate.settings?.expandedSpaces;
+    if (Array.isArray(expandedSpaces) && expandedSpaces.length > 0) {
+        const nextExpanded = expandedSpaces.filter((sp) => {
+            if (typeof sp !== 'string') return true;
+            const norm = normalizeVaultNotePath(sp);
+            return !bundleByDir.has(norm);
+        });
+        if (nextExpanded.length !== expandedSpaces.length) {
+            expandedSpaces.splice(0, expandedSpaces.length, ...nextExpanded);
+            changed = true;
+        }
+    }
+
+    if (pathsIndex) {
+        for (const bundleDir of bundleByDir.keys()) {
+            const folderState = pathsIndex.get(bundleDir);
+            if (!folderState || typeof folderState !== 'object') continue;
+
+            if (folderState.type !== 'file') {
+                folderState.type = 'file';
+                changed = true;
+            }
+            if (folderState.subtype !== 'md') {
+                folderState.subtype = 'md';
+                changed = true;
+            }
+            if (folderState.file && typeof folderState.file === 'object' && folderState.file.isFolder !== false) {
+                folderState.file.isFolder = false;
+                changed = true;
+            }
+            if (!folderState.metadata || typeof folderState.metadata !== 'object') {
+                folderState.metadata = { isFolder: false };
+                changed = true;
+            } else if (folderState.metadata.isFolder !== false) {
+                folderState.metadata.isFolder = false;
+                changed = true;
+            }
+            if (folderState.label && typeof folderState.label === 'object') {
+                if (folderState.label.sticker) {
+                    folderState.label.sticker = '';
+                    changed = true;
+                }
+                if (folderState.label.thumbnail) {
+                    folderState.label.thumbnail = '';
+                    changed = true;
+                }
+            }
+        }
+
+        for (const [rawEntryPath, entryState] of pathsIndex.entries()) {
+            if (!entryState || typeof entryState !== 'object') continue;
+            const normEntry = normalizeVaultNotePath(rawEntryPath);
+            if (!normEntry || bundleByDir.has(normEntry)) continue;
+            const slashIdx = normEntry.lastIndexOf('/');
+            if (slashIdx <= 0) continue;
+            const parentDir = normEntry.slice(0, slashIdx);
+            const split = bundleByDir.get(parentDir);
+            if (!split) continue;
+
+            const fileName = normEntry.slice(slashIdx + 1);
+            const lowerFile = fileName.toLowerCase();
+            const lowerBase = split.baseName.toLowerCase();
+            const isBundleInternal =
+                normEntry === split.apnotePath ||
+                normEntry === split.mdPath ||
+                fileName === '.nomedia' ||
+                (lowerFile.startsWith(`.${lowerBase}.`) && lowerFile.endsWith('.global.json')) ||
+                ((lowerFile.startsWith(`${lowerBase}.`) || lowerFile.startsWith(`.${lowerBase}.`)) && lowerFile.endsWith('.svg'));
+
+            if (isBundleInternal && entryState.hidden !== true) {
+                entryState.hidden = true;
+                changed = true;
+            }
+        }
+    }
+
+    return changed;
+}
+
+/**
+ * Attaches reactive listeners and path-open redirection onto Make.md's plugin instance and
+ * `superstate` so Apolo bundle folders always look and open like notes in Make.md.
+ *
+ * Returns a cleanup callback that restores patched Make.md methods and removes listeners.
+ */
+export function attachMakeMdBridge(app: unknown, vault?: VaultLike): () => void {
+    const makeMd = getMakeMdPlugin(app);
+    const superstate = makeMd?.superstate;
+    if (!makeMd || !superstate || typeof superstate !== 'object') {
+        return () => {};
+    }
+
+    let disposed = false;
+    let inSync = false;
+
+    const runSync = (emitUpdate: boolean) => {
+        if (disposed || inSync) return;
+        inSync = true;
+        try {
+            if (syncMakeMdBundleState(app, vault) && emitUpdate) {
+                superstate.dispatchEvent?.('superstateUpdated', null);
+            }
+        } finally {
+            inSync = false;
+        }
+    };
+
+    runSync(true);
+
+    const origMakeMdOpenPath = typeof makeMd.openPath === 'function' ? makeMd.openPath : null;
+    const wrappedMakeMdOpenPath = origMakeMdOpenPath
+        ? function (this: unknown, leaf: unknown, path: string, ...rest: unknown[]) {
+              const resolved = rewriteMakeMdTargetPath(path, vault);
+              return origMakeMdOpenPath.call(this, leaf, resolved, ...rest);
+          }
+        : null;
+    if (wrappedMakeMdOpenPath) {
+        makeMd.openPath = wrappedMakeMdOpenPath;
+    }
+
+    const uiObj = superstate.ui;
+    const origUiOpenPath = uiObj && typeof uiObj.openPath === 'function' ? uiObj.openPath : null;
+    const wrappedUiOpenPath = origUiOpenPath
+        ? function (this: unknown, path: string, ...rest: unknown[]) {
+              const resolved = rewriteMakeMdTargetPath(path, vault);
+              return origUiOpenPath.call(this, resolved, ...rest);
+          }
+        : null;
+    if (uiObj && wrappedUiOpenPath) {
+        uiObj.openPath = wrappedUiOpenPath;
+    }
+
+    const onSuperstateChange = () => {
+        runSync(true);
+    };
+    const listenedEvents = ['superstateUpdated', 'spaceStateUpdated', 'pathStateUpdated', 'superstateReindex'] as const;
+    const dispatcher = superstate.eventsDispatcher;
+    if (dispatcher?.addListener) {
+        for (const ev of listenedEvents) {
+            dispatcher.addListener(ev, onSuperstateChange);
+        }
+    }
+
+    return () => {
+        disposed = true;
+        if (dispatcher?.removeListener) {
+            for (const ev of listenedEvents) {
+                dispatcher.removeListener(ev, onSuperstateChange);
+            }
+        }
+        if (wrappedMakeMdOpenPath && makeMd.openPath === wrappedMakeMdOpenPath && origMakeMdOpenPath) {
+            makeMd.openPath = origMakeMdOpenPath;
+        }
+        if (uiObj && wrappedUiOpenPath && uiObj.openPath === wrappedUiOpenPath && origUiOpenPath) {
+            uiObj.openPath = origUiOpenPath;
+        }
+    };
 }
