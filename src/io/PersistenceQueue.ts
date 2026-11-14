@@ -143,6 +143,30 @@ export function syncMarkdownFallbackEmbeds(
     let inOtherCodeBlock = false;
     let otherFence = '';
 
+    const emitFallbackEmbedAfterBlock = (blockEndIndex: number, rawId: string): number => {
+        if (!rawId) return blockEndIndex;
+        const safeId = sanitizeBoxId(rawId);
+        const expectedEmbed = `![[${baseName}.${safeId}.svg]]`;
+        let lookahead = blockEndIndex + 1;
+        while (lookahead < lines.length && lines[lookahead].trim() === '') {
+            lookahead++;
+        }
+        let consumedEnd = blockEndIndex;
+        if (lookahead < lines.length) {
+            const nextMatch = lines[lookahead].match(anyBoxEmbedRegex);
+            if (nextMatch && nextMatch[1] === safeId) {
+                consumedEnd = lookahead;
+            }
+        }
+        // Blank line terminates any preceding HTML block (CommonMark Type 6) so the embed parses cleanly
+        out.push('', expectedEmbed);
+        emittedEmbeds.add(safeId);
+        if (consumedEnd + 1 < lines.length && lines[consumedEnd + 1].trim() !== '') {
+            out.push('');
+        }
+        return consumedEnd;
+    };
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
 
@@ -168,19 +192,7 @@ export function syncMarkdownFallbackEmbeds(
                 out.push(lines[j]);
             }
             const parsed = parseApoloSpaceBlock(body.join('\n'));
-            if (parsed.id) {
-                const safeId = sanitizeBoxId(parsed.id);
-                const expectedEmbed = `![[${baseName}.${safeId}.svg]]`;
-                out.push(expectedEmbed);
-                emittedEmbeds.add(safeId);
-                if (j + 1 < lines.length) {
-                    const nextMatch = lines[j + 1].match(anyBoxEmbedRegex);
-                    if (nextMatch && nextMatch[1] === safeId) {
-                        j++;
-                    }
-                }
-            }
-            i = j;
+            i = parsed.id ? emitFallbackEmbedAfterBlock(j, parsed.id) : j;
             continue;
         }
 
@@ -196,16 +208,7 @@ export function syncMarkdownFallbackEmbeds(
             const parsed = parseApoloSpaceHtml(line);
             out.push(line);
             if (parsed?.id) {
-                const safeId = sanitizeBoxId(parsed.id);
-                const expectedEmbed = `![[${baseName}.${safeId}.svg]]`;
-                out.push(expectedEmbed);
-                emittedEmbeds.add(safeId);
-                if (i + 1 < lines.length) {
-                    const nextMatch = lines[i + 1].match(anyBoxEmbedRegex);
-                    if (nextMatch && nextMatch[1] === safeId) {
-                        i++;
-                    }
-                }
+                i = emitFallbackEmbedAfterBlock(i, parsed.id);
             }
             continue;
         }

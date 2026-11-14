@@ -5267,14 +5267,18 @@ export class CanvasController {
                             if (line.text.includes('data-apolo-space') && idRegex.test(line.text)) {
                                 if (isDelete) {
                                     let endLineNum = l;
-                                    if (l < doc.lines) {
-                                        const nextLine = doc.line(l + 1);
+                                    let probeLineNum = l + 1;
+                                    while (probeLineNum <= doc.lines && doc.line(probeLineNum).text.trim() === '') {
+                                        probeLineNum++;
+                                    }
+                                    if (probeLineNum <= doc.lines) {
+                                        const candidateLine = doc.line(probeLineNum);
                                         const safeSvgId = escapeRegExp(sanitizeBoxId(normalizedMutId));
                                         const rawSvgId = escapeRegExp(normalizedMutId);
                                         const fallbackPattern = safeSvgId === rawSvgId ? safeSvgId : `(?:${safeSvgId}|${rawSvgId})`;
-                                        const fallbackRegex = new RegExp(`^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.${fallbackPattern}\\.svg\\]\\]\\s*$`, 'i');
-                                        if (fallbackRegex.test(nextLine.text)) {
-                                            endLineNum = l + 1;
+                                        const fallbackRegex = new RegExp(`^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.${fallbackPattern}\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`, 'i');
+                                        if (fallbackRegex.test(candidateLine.text)) {
+                                            endLineNum = probeLineNum;
                                         }
                                     }
                                     const from = line.from;

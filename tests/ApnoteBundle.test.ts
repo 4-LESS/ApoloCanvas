@@ -4,6 +4,7 @@ import { EditorState, StateField } from '@codemirror/state';
 import {
     APOLO_APNOTE_ICON_CLASS,
     APOLO_APNOTE_ITEM_CLASS,
+    APOLO_BREADCRUMB_HIDDEN_CLASS,
     APOLO_BUNDLE_FOLDER_CLASS,
     APOLO_SATELLITE_HIDDEN_CLASS,
     applyFileExplorerCloaking,
@@ -211,6 +212,7 @@ class MockExplorerNode {
     attributes = new Map<string, string>();
     dataset: Record<string, string> = {};
     classList = new MockClassList();
+    textContent = '';
     children: MockExplorerNode[] = [];
     parentElement: MockExplorerNode | null = null;
 
@@ -1081,5 +1083,132 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.strictEqual(superstate.ui.openPath, origUiOpenPath);
         void makeMd.openPath({ id: 'leaf-2' }, 'Test', false);
         assert.strictEqual(pluginOpenCalls[pluginOpenCalls.length - 1].path, 'Test');
+    });
+
+    test('syncMarkdownFallbackEmbeds separates fallback embed with blank line idempotently and Live Preview covers it', () => {
+        const legacyAdjacent = [
+            '<div data-apolo-space="c_jq6635" data-h="530"></div>',
+            '![[Test.c_jq6635.svg]]',
+            'Following paragraph text',
+        ].join('\n');
+
+        const normalized = syncMarkdownFallbackEmbeds(legacyAdjacent, 'Test', new Set(['c_jq6635']));
+        assert.strictEqual(
+            normalized,
+            [
+                '<div data-apolo-space="c_jq6635" data-h="530"></div>',
+                '',
+                '![[Test.c_jq6635.svg]]',
+                '',
+                'Following paragraph text',
+            ].join('\n'),
+        );
+
+        // Second pass must be strictly idempotent
+        assert.strictEqual(syncMarkdownFallbackEmbeds(normalized, 'Test', new Set(['c_jq6635'])), normalized);
+
+        const mockLiveField = StateField.define<boolean>({
+            create: () => true,
+            update: (v) => v,
+        });
+        try {
+            const extensions = createApoloSpaceExtension(mockLiveField);
+            const state = EditorState.create({
+                doc: normalized,
+                extensions: [mockLiveField, ...extensions],
+            });
+            const decos = state.field(apoloSpaceField);
+            const iter = decos.iter();
+            assert.ok(iter.value, 'apoloSpaceField must emit replacement decoration');
+            const replacedText = normalized.slice(iter.from, iter.to);
+            assert.strictEqual(
+                replacedText,
+                '<div data-apolo-space="c_jq6635" data-h="530"></div>\n\n![[Test.c_jq6635.svg]]',
+            );
+            iter.next();
+            assert.strictEqual(iter.value, null);
+        } finally {
+            configureLivePreviewField(null);
+        }
+    });
+
+    test('applyFileExplorerCloaking hides redundant bundle folder breadcrumb in view headers and removeFileExplorerCloaking restores it', () => {
+        clearKnownApnotes();
+        const root = new MockExplorerNode('div');
+
+        const buildHeader = (crumbs: string[], noteTitle: string) => {
+            const container = new MockExplorerNode('div');
+            container.classList.add('view-header-title-container');
+
+            const parent = new MockExplorerNode('div');
+            parent.classList.add('view-header-title-parent');
+
+            const crumbEls: MockExplorerNode[] = [];
+            const sepEls: MockExplorerNode[] = [];
+            for (const c of crumbs) {
+                const crumb = new MockExplorerNode('span');
+                crumb.classList.add('view-header-breadcrumb');
+                crumb.textContent = c;
+                parent.appendChild(crumb);
+                crumbEls.push(crumb);
+
+                const sep = new MockExplorerNode('span');
+                sep.classList.add('view-header-breadcrumb-separator');
+                sep.textContent = '/';
+                parent.appendChild(sep);
+                sepEls.push(sep);
+            }
+
+            const title = new MockExplorerNode('div');
+            title.classList.add('view-header-title');
+            title.textContent = noteTitle;
+
+            container.appendChild(parent);
+            container.appendChild(title);
+            root.appendChild(container);
+            return { container, parent, crumbEls, sepEls, title };
+        };
+
+        const { vault } = createMockVault({
+            'Test/Test.md': '# Test',
+            'Test/Test.apnote': serializeApnoteManifest(createApnoteManifest('Test/Test.md', [])),
+            'Parent/Test/Test.md': '# Nested Test',
+            'Parent/Test/Test.apnote': serializeApnoteManifest(createApnoteManifest('Parent/Test/Test.md', [])),
+            'Parent/Notes.md': '# Regular Note',
+        });
+
+        const topBundleHeader = buildHeader(['Test'], 'Test');
+        const nestedBundleHeader = buildHeader(['Parent', 'Test'], 'Test');
+        const regularHeader = buildHeader(['Parent'], 'Notes');
+
+        try {
+            applyFileExplorerCloaking(root as any, vault, 'Test/Test.md');
+
+            // Top-level bundle: hide breadcrumb, trailing separator, and parent wrapper
+            assert.strictEqual(topBundleHeader.crumbEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), true);
+            assert.strictEqual(topBundleHeader.sepEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), true);
+            assert.strictEqual(topBundleHeader.parent.classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), true);
+
+            // Nested bundle: hide only trailing Test + trailing separator, keep Parent /
+            assert.strictEqual(nestedBundleHeader.crumbEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(nestedBundleHeader.sepEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(nestedBundleHeader.crumbEls[1].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), true);
+            assert.strictEqual(nestedBundleHeader.sepEls[1].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), true);
+            assert.strictEqual(nestedBundleHeader.parent.classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+
+            // Non-bundle header untouched
+            assert.strictEqual(regularHeader.crumbEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(regularHeader.sepEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(regularHeader.parent.classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+
+            removeFileExplorerCloaking(root as any);
+            assert.strictEqual(topBundleHeader.crumbEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(topBundleHeader.sepEls[0].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(topBundleHeader.parent.classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(nestedBundleHeader.crumbEls[1].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+            assert.strictEqual(nestedBundleHeader.sepEls[1].classList.contains(APOLO_BREADCRUMB_HIDDEN_CLASS), false);
+        } finally {
+            clearKnownApnotes();
+        }
     });
 });

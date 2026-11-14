@@ -1306,6 +1306,7 @@ export const APOLO_SATELLITE_HIDDEN_CLASS = 'apolo-satellite-hidden';
 export const APOLO_APNOTE_ITEM_CLASS = 'apolo-apnote-item';
 export const APOLO_APNOTE_ICON_CLASS = 'apolo-apnote-icon';
 export const APOLO_BUNDLE_FOLDER_CLASS = 'apolo-bundle-folder';
+export const APOLO_BREADCRUMB_HIDDEN_CLASS = 'apolo-breadcrumb-bundle-hidden';
 
 /** Collects all known and vault-resident `.apnote` trigger paths. */
 function collectKnownAndVaultApnotes(
@@ -1377,6 +1378,17 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, a
         if (isInsideNoteBundleFolder(apnotePath)) {
             const split = splitNotePath(apnotePath);
             bundleFolderMap.set(split.dir, { mdPath: split.mdPath, apnotePath });
+        }
+    }
+    if (vault?.getFiles) {
+        for (const f of vault.getFiles()) {
+            const norm = normalizeVaultNotePath(f.path);
+            if (norm.toLowerCase().endsWith('.md') && isInsideNoteBundleFolder(norm)) {
+                const split = splitNotePath(norm);
+                if (!bundleFolderMap.has(split.dir)) {
+                    bundleFolderMap.set(split.dir, { mdPath: split.mdPath, apnotePath: split.apnotePath });
+                }
+            }
         }
     }
 
@@ -1500,13 +1512,65 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, a
             titleEl.classList.remove(APOLO_APNOTE_ITEM_CLASS);
         }
     }
+
+    // Hide redundant bundle folder breadcrumb in Obsidian's native view header (e.g. `Test / Test` -> `Test`)
+    const headerContainers = root.querySelectorAll<HTMLElement>('.view-header-title-container');
+    for (let i = 0; i < headerContainers.length; i++) {
+        const container = headerContainers[i];
+        const parentEl = container.querySelector<HTMLElement>('.view-header-title-parent');
+        const titleEl = container.querySelector<HTMLElement>('.view-header-title');
+        if (!parentEl) continue;
+
+        parentEl.classList.remove(APOLO_BREADCRUMB_HIDDEN_CLASS);
+        const crumbs = parentEl.querySelectorAll<HTMLElement>('.view-header-breadcrumb');
+        const seps = parentEl.querySelectorAll<HTMLElement>('.view-header-breadcrumb-separator');
+        for (let c = 0; c < crumbs.length; c++) {
+            crumbs[c].classList.remove(APOLO_BREADCRUMB_HIDDEN_CLASS);
+        }
+        for (let s = 0; s < seps.length; s++) {
+            seps[s].classList.remove(APOLO_BREADCRUMB_HIDDEN_CLASS);
+        }
+
+        if (crumbs.length === 0 || !titleEl) continue;
+
+        const crumbNames: string[] = [];
+        for (let c = 0; c < crumbs.length; c++) {
+            const text = (crumbs[c].textContent ?? '').trim();
+            if (text) crumbNames.push(text);
+        }
+        if (crumbNames.length === 0) continue;
+
+        const lastCrumb = crumbs[crumbs.length - 1];
+        const lastCrumbText = (lastCrumb.textContent ?? '').trim();
+        const titleText = (titleEl.textContent ?? '').trim();
+        const folderPath = normalizeVaultNotePath(crumbNames.join('/'));
+
+        if (
+            lastCrumbText &&
+            titleText &&
+            lastCrumbText.toLowerCase() === titleText.toLowerCase() &&
+            (bundleFolderMap.has(folderPath) || isInsideNoteBundleFolder(`${folderPath}/${titleText}.md`))
+        ) {
+            lastCrumb.classList.add(APOLO_BREADCRUMB_HIDDEN_CLASS);
+            if (seps.length > 0) {
+                seps[seps.length - 1].classList.add(APOLO_BREADCRUMB_HIDDEN_CLASS);
+            }
+            if (crumbs.length === 1) {
+                parentEl.classList.add(APOLO_BREADCRUMB_HIDDEN_CLASS);
+            }
+        }
+    }
 }
 
-/** Removes all File Explorer & Make.md cloaking classes, bundle folder markers, and any stale Apolo icons on unload. */
+/** Removes all File Explorer & Make.md cloaking classes, breadcrumb markers, bundle folder markers, and any stale Apolo icons on unload. */
 export function removeFileExplorerCloaking(root: ParentNode): void {
     const hiddenEls = root.querySelectorAll<HTMLElement>(`.${APOLO_SATELLITE_HIDDEN_CLASS}`);
     for (let i = 0; i < hiddenEls.length; i++) {
         hiddenEls[i].classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+    }
+    const breadcrumbHiddenEls = root.querySelectorAll<HTMLElement>(`.${APOLO_BREADCRUMB_HIDDEN_CLASS}`);
+    for (let i = 0; i < breadcrumbHiddenEls.length; i++) {
+        breadcrumbHiddenEls[i].classList.remove(APOLO_BREADCRUMB_HIDDEN_CLASS);
     }
     const bundleFolderEls = root.querySelectorAll<HTMLElement>(`.${APOLO_BUNDLE_FOLDER_CLASS}`);
     for (let i = 0; i < bundleFolderEls.length; i++) {

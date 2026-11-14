@@ -1,4 +1,4 @@
-import { type Extension, RangeSetBuilder, StateEffect, StateField, type EditorState } from '@codemirror/state';
+import { type Extension, Prec, RangeSetBuilder, StateEffect, StateField, type EditorState } from '@codemirror/state';
 import {
     Decoration,
     type DecorationSet,
@@ -417,6 +417,7 @@ interface SpaceDecorationItem {
     to: number;
     height: number;
     id: string;
+    hidden?: boolean;
 }
 
 export function isLivePreviewState(
@@ -432,18 +433,38 @@ export function isLivePreviewState(
     }
 }
 
+function buildBoxIdPattern(boxIds: Iterable<string>): string {
+    const variants: string[] = [];
+    const seen = new Set<string>();
+    for (const rawId of boxIds) {
+        if (!rawId) continue;
+        const safeId = sanitizeBoxId(rawId);
+        for (const candidate of [safeId, rawId]) {
+            if (candidate && !seen.has(candidate)) {
+                seen.add(candidate);
+                variants.push(escapeRegExp(candidate));
+            }
+        }
+    }
+    return variants.join('|');
+}
+
 function extendToAdjacentFallbackEmbed(doc: EditorState['doc'], endLineNumber: number, boxId: string): number {
     const baseEndLine = doc.line(endLineNumber);
-    if (endLineNumber >= doc.lines) return baseEndLine.to;
-    const nextLine = doc.line(endLineNumber + 1);
-    const safeId = sanitizeBoxId(boxId);
-    const idCandidates = safeId === boxId ? [escapeRegExp(boxId)] : [escapeRegExp(safeId), escapeRegExp(boxId)];
+    let lineNum = endLineNumber + 1;
+    while (lineNum <= doc.lines && doc.line(lineNum).text.trim() === '') {
+        lineNum++;
+    }
+    if (lineNum > doc.lines) return baseEndLine.to;
+    const candidateLine = doc.line(lineNum);
+    const idPattern = buildBoxIdPattern([boxId]);
+    if (!idPattern) return baseEndLine.to;
     const embedLineRegex = new RegExp(
-        `^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${idCandidates.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+        `^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${idPattern})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
         'i',
     );
-    if (embedLineRegex.test(nextLine.text)) {
-        return nextLine.to;
+    if (embedLineRegex.test(candidateLine.text)) {
+        return candidateLine.to;
     }
     return baseEndLine.to;
 }
@@ -517,19 +538,53 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
         }
     }
 
+    // 3. Also hide any standalone/non-adjacent fallback SVG embed lines for active boxes
+    if (seenIds.size > 0) {
+        const allIdsPattern = buildBoxIdPattern(seenIds);
+        if (allIdsPattern) {
+            const standaloneEmbedRegex = new RegExp(
+                `^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${allIdsPattern})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+                'i',
+            );
+            for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+                const line = doc.line(lineNum);
+                const covered = items.some((it) => line.from >= it.from && line.to <= it.to);
+                if (!covered && standaloneEmbedRegex.test(line.text)) {
+                    items.push({
+                        from: line.from,
+                        to: line.to,
+                        height: 0,
+                        id: '',
+                        hidden: true,
+                    });
+                }
+            }
+        }
+    }
+
     // Sort items monotonically by start position as required by RangeSetBuilder
     items.sort((a, b) => a.from - b.from);
 
     for (const item of items) {
         if (item.from <= item.to) {
-            builder.add(
-                item.from,
-                item.to,
-                Decoration.replace({
-                    widget: new ApoloSpaceWidget(item.height, item.id),
-                    block: true,
-                }),
-            );
+            if (item.hidden) {
+                builder.add(
+                    item.from,
+                    item.to,
+                    Decoration.replace({
+                        block: true,
+                    }),
+                );
+            } else {
+                builder.add(
+                    item.from,
+                    item.to,
+                    Decoration.replace({
+                        widget: new ApoloSpaceWidget(item.height, item.id),
+                        block: true,
+                    }),
+                );
+            }
         } else {
             console.warn('[ApoloCanvas] Skipping malformed space block range:', item);
         }
@@ -565,6 +620,7 @@ export class ApoloSpaceSyncController {
         this.unsubscribe = BoxRegistry.onChange(() => {
             this.requestSync();
         });
+        this.hideFallbackEmbedDomNodes();
     }
 
     update(update: ViewUpdate): void {
@@ -574,6 +630,51 @@ export class ApoloSpaceSyncController {
                 this.lastViewportFrom = vp.from;
                 this.lastViewportTo = vp.to;
                 this.requestSync();
+            }
+        }
+        this.hideFallbackEmbedDomNodes();
+    }
+
+    private hideFallbackEmbedDomNodes(): void {
+        const root = this.view?.dom;
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+
+        const docText = this.view.state?.doc?.toString() ?? '';
+        const boxSafeIds = new Set<string>();
+        const attrRegex = /data-apolo-space(?:-id)?=["']([^"']+)["']/gi;
+        let m: RegExpExecArray | null;
+        while ((m = attrRegex.exec(docText)) !== null) {
+            const boxId = normalizeBoxId(m[1]);
+            if (boxId) boxSafeIds.add(sanitizeBoxId(boxId).toLowerCase());
+        }
+        const codeIdRegex = /id:\s*(?:"([^"]+)"|'([^']+)'|([^\s\r\n#"']+))/gi;
+        while ((m = codeIdRegex.exec(docText)) !== null) {
+            const boxId = normalizeBoxId(m[1] ?? m[2] ?? m[3] ?? '');
+            if (boxId) boxSafeIds.add(sanitizeBoxId(boxId).toLowerCase());
+        }
+
+        const embeds = root.querySelectorAll<HTMLElement>('.internal-embed[src$=".svg"], .internal-embed[src$=".SVG"]');
+        for (let i = 0; i < embeds.length; i++) {
+            const embedEl = embeds[i];
+            const src = embedEl.getAttribute('src') || '';
+            const filename = (src.split(/[\\/]/).pop() || '').toLowerCase();
+            if (!filename) continue;
+            let matchesBoxSvg = false;
+            for (const safeId of boxSafeIds) {
+                if (filename.endsWith(`.${safeId}.svg`)) {
+                    matchesBoxSvg = true;
+                    break;
+                }
+            }
+            if (!matchesBoxSvg && /^\.?[^/\\]+\.c_[a-z0-9]{4,}\.svg$/i.test(filename)) {
+                matchesBoxSvg = true;
+            }
+            if (!matchesBoxSvg) continue;
+
+            embedEl.classList.add('apolo-fallback-embed-hidden');
+            const cmEmbedBlock = embedEl.closest?.('.cm-embed-block') as HTMLElement | null;
+            if (cmEmbedBlock && !cmEmbedBlock.querySelector('.apolo-space-block')) {
+                cmEmbedBlock.classList.add('apolo-fallback-embed-hidden');
             }
         }
     }
@@ -621,7 +722,7 @@ export class ApoloSpaceSyncController {
 
 export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(ApoloSpaceSyncController);
 
-export const apoloSpaceExtension: Extension = [apoloSpaceField, apoloSpaceSyncPlugin];
+export const apoloSpaceExtension: Extension = [Prec.highest(apoloSpaceField), apoloSpaceSyncPlugin];
 
 export function createApoloSpaceExtension(livePreviewField?: StateField<boolean> | null): Extension {
     if (livePreviewField !== undefined) {

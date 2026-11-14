@@ -239,6 +239,14 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.registerMarkdownPostProcessor((el, ctx) => {
             // Suppress native fallback satellite embeds (`![[<BaseName>.<boxId>.svg]]`) while plugin is active
             const sourceBaseName = ctx?.sourcePath ? splitNotePath(ctx.sourcePath).baseName : '';
+            const isFallbackSvgFilename = (filename: string): boolean => {
+                const lowerFile = filename.toLowerCase();
+                const lowerBase = sourceBaseName.toLowerCase();
+                return sourceBaseName
+                    ? (lowerFile.startsWith(`${lowerBase}.`) || lowerFile.startsWith(`.${lowerBase}.`)) && lowerFile.endsWith('.svg')
+                    : /^\.?[^/\\]+\.[a-z0-9_-]+\.svg$/i.test(filename);
+            };
+
             const embedCandidates: HTMLElement[] = [];
             if (el.matches?.('.internal-embed')) {
                 embedCandidates.push(el);
@@ -250,15 +258,52 @@ export default class ApoloCanvasPlugin extends Plugin {
             for (const embedEl of embedCandidates) {
                 const src = embedEl.getAttribute('src') || '';
                 const filename = src.split(/[\\/]/).pop() || '';
-                const lowerFile = filename.toLowerCase();
-                const lowerBase = sourceBaseName.toLowerCase();
-                const isFallbackSvg = sourceBaseName
-                    ? (lowerFile.startsWith(`${lowerBase}.`) || lowerFile.startsWith(`.${lowerBase}.`)) && lowerFile.endsWith('.svg')
-                    : /^\.?[^/\\]+\.[a-z0-9_-]+\.svg$/i.test(filename);
-                if (isFallbackSvg) {
-                    embedEl.addClass('apolo-fallback-embed-hidden');
+                if (!isFallbackSvgFilename(filename)) continue;
+
+                embedEl.addClass('apolo-fallback-embed-hidden');
+                const parentEl = embedEl.parentElement;
+                if (parentEl && (parentEl.tagName === 'P' || parentEl.tagName === 'DIV')) {
+                    let hasOtherContent = false;
+                    for (let c = 0; c < parentEl.childNodes.length; c++) {
+                        const child = parentEl.childNodes[c];
+                        if (child === embedEl) continue;
+                        if (child.nodeType === 3 && !(child.nodeValue ?? '').trim()) continue;
+                        if (child instanceof HTMLElement && child.classList.contains('apolo-fallback-embed-hidden')) continue;
+                        hasOtherContent = true;
+                        break;
+                    }
+                    if (!hasOtherContent) {
+                        parentEl.addClass('apolo-fallback-embed-hidden');
+                    }
+                }
+                const cmEmbedBlock = embedEl.closest<HTMLElement>('.cm-embed-block');
+                if (cmEmbedBlock && !cmEmbedBlock.querySelector('.apolo-space-block')) {
+                    cmEmbedBlock.addClass('apolo-fallback-embed-hidden');
                 }
             }
+
+            // Strip raw fallback embed text when adjacent to an HTML block without a separating blank line
+            const rawFallbackLineRe = /^[ \t]*!\[\[\.?[^\]\r\n]+\.[a-z0-9_-]+\.svg(?:\|[^\]]*)?\]\][ \t]*\r?\n?/gim;
+            const stripFallbackTextNodes = (node: Node): void => {
+                if (node.nodeType === 3) {
+                    const val = node.nodeValue;
+                    if (val && val.includes('![[') && val.toLowerCase().includes('.svg')) {
+                        const cleaned = val.replace(rawFallbackLineRe, (lineText) => {
+                            const innerMatch = lineText.match(/!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/i);
+                            const fname = (innerMatch?.[1] || '').split(/[\\/]/).pop() || '';
+                            return isFallbackSvgFilename(fname) ? '' : lineText;
+                        });
+                        if (cleaned !== val) {
+                            node.nodeValue = cleaned;
+                        }
+                    }
+                    return;
+                }
+                for (let i = 0; i < node.childNodes.length; i++) {
+                    stripFallbackTextNodes(node.childNodes[i]);
+                }
+            };
+            stripFallbackTextNodes(el);
 
             const spaceCandidates: HTMLElement[] = [];
             if (el.matches?.('.apolo-space, [data-apolo-space], [data-apolo-space-id]')) {
@@ -890,7 +935,7 @@ export default class ApoloCanvasPlugin extends Plugin {
                 this.scheduleFileExplorerCloaking();
             });
         }
-        const containers = document.querySelectorAll('.nav-files-container, .mk-path-tree');
+        const containers = document.querySelectorAll('.nav-files-container, .mk-path-tree, .view-header-title-container');
         for (let i = 0; i < containers.length; i++) {
             const container = containers[i];
             if (!this.explorerObservedContainers.has(container)) {
@@ -1649,6 +1694,7 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.mountedScroller = scroller;
         this.mountedFilePath = file.path;
         this.mountedMode = mode;
+        this.scheduleFileExplorerCloaking();
 
         if (mode === 'source') {
             this.applyWorkspaceToolStateToController(this.controller);
