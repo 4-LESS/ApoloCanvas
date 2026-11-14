@@ -2845,7 +2845,7 @@ button.apolo-box-menu-swatch,
 /* 5. Popovers de estuche (.apolo-estuche-popover) y Panel Base (.panel) */
 .apolo-ui .panel,
 .apolo-ui .apolo-estuche-popover,
-.panel,
+.apolo-estuche-popover.panel, .apolo-color-picker-popover.panel,
 .apolo-estuche-popover {
   --bg: var(--apolo-bg);
   --bg-alt: var(--apolo-bg-alt);
@@ -2880,13 +2880,13 @@ button.apolo-box-menu-swatch,
 }
 
 .apolo-estuche-popover::-webkit-scrollbar,
-.panel::-webkit-scrollbar {
+.apolo-color-picker-popover.panel::-webkit-scrollbar {
   display: none;
 }
 
 .apolo-ui .apolo-estuche-popover .apolo-popover-body,
 .apolo-estuche-popover .apolo-popover-body,
-.estuche-body {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .estuche-body {
   padding: 0;
   overflow-y: visible;
   display: flex;
@@ -2895,7 +2895,7 @@ button.apolo-box-menu-swatch,
 }
 
 /* Botón de ícono estándar */
-.ibtn {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .ibtn {
   all: unset;
   display: inline-flex;
   align-items: center;
@@ -2907,21 +2907,21 @@ button.apolo-box-menu-swatch,
   cursor: pointer;
   transition: background .12s, color .12s;
 }
-.ibtn:hover {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .ibtn:hover {
   background: var(--card-hover);
   color: var(--text);
 }
-.ibtn:focus-visible {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .ibtn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.ibtn.is-active {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .ibtn.is-active {
   background: var(--accent-subtle);
   color: var(--accent);
 }
 
 /* Botón contador de favoritos (izquierda de cabecera) */
-.hd-bookmark-btn,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hd-bookmark-btn,
 .popover-favs-btn {
   all: unset;
   display: inline-flex;
@@ -2938,12 +2938,12 @@ button.apolo-box-menu-swatch,
   transition: background .12s, color .12s;
   box-sizing: border-box;
 }
-.hd-bookmark-btn:hover,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hd-bookmark-btn:hover,
 .popover-favs-btn:hover {
   background: var(--card-hover);
   color: var(--text);
 }
-.hd-bookmark-btn.is-active,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hd-bookmark-btn.is-active,
 .popover-favs-btn.is-active {
   background: var(--accent-subtle);
   color: var(--accent);
@@ -3141,20 +3141,20 @@ button.apolo-box-menu-swatch,
 }
 
 /* Cabecera Unificada (3 columnas: 1fr auto 1fr) */
-.hd,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hd,
 .popover-header {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: start;
   margin-bottom: 12px;
 }
-.hd-left {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hd-left {
   display: flex;
   align-items: center;
   height: 28px;
   min-width: 28px;
 }
-.hd-right,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hd-right,
 .popover-header-right {
   display: flex;
   align-items: center;
@@ -3163,7 +3163,7 @@ button.apolo-box-menu-swatch,
   height: 28px;
   min-width: 58px;
 }
-.hd-center,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hd-center,
 .popover-title-container,
 .popover-title-wrap {
   display: flex;
@@ -3173,7 +3173,7 @@ button.apolo-box-menu-swatch,
   min-width: 0;
   text-align: center;
 }
-.title,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .title,
 .popover-title {
   margin: 0;
   font-size: 15px;
@@ -3211,7 +3211,7 @@ button.apolo-box-menu-swatch,
 }
 
 /* Paginador (Perfiles y Paleta) */
-.pager,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .pager,
 .popover-header-profile-dots,
 .apolo-kit-dots-indicator {
   display: flex;
@@ -3223,7 +3223,7 @@ button.apolo-box-menu-swatch,
   margin: 0;
   user-select: none;
 }
-.pager .arrow,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .pager .arrow,
 .apolo-kit-nav-btn {
   all: unset;
   width: 18px;
@@ -3236,12 +3236,12 @@ button.apolo-box-menu-swatch,
   transition: background .12s, color .12s;
   box-sizing: border-box;
 }
-.pager .arrow:hover,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .pager .arrow:hover,
 .apolo-kit-nav-btn:hover {
   background: var(--card-hover);
   color: var(--text);
 }
-.pager .arrow[disabled],
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .pager .arrow[disabled],
 .apolo-kit-nav-btn[disabled],
 .apolo-kit-nav-btn.is-disabled {
   opacity: .35;
@@ -3254,7 +3254,7 @@ button.apolo-box-menu-swatch,
   gap: 6px;
 }
 
-.dot,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .dot,
 .popover-header-dot,
 .apolo-kit-dot,
 .popover-pag-dot:not(.is-clock-dot):not(.popover-pag-clock):not(:first-child) {
@@ -3274,14 +3274,14 @@ button.apolo-box-menu-swatch,
   flex-shrink: 0 !important;
   transition: width .15s ease, opacity .15s ease, background .15s ease, border-radius .15s ease !important;
 }
-.dot:hover,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .dot:hover,
 .popover-header-dot:hover,
 .apolo-kit-dot:hover,
 .popover-pag-dot:not(.is-clock-dot):not(.popover-pag-clock):not(:first-child):hover {
   background: var(--text) !important;
   opacity: 0.85 !important;
 }
-.dot.is-active,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .dot.is-active,
 .popover-header-dot.is-active,
 .apolo-kit-dot.is-active,
 .popover-pag-dot:not(.is-clock-dot):not(.popover-pag-clock):not(:first-child).is-active {
@@ -3293,7 +3293,7 @@ button.apolo-box-menu-swatch,
   background: var(--text) !important;
   opacity: 1 !important;
 }
-.dot-add,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .dot-add,
 .popover-header-dot.is-add-dot,
 .apolo-kit-dot.is-add-dot {
   all: unset !important;
@@ -3313,8 +3313,8 @@ button.apolo-box-menu-swatch,
   outline: none !important;
   transition: background .12s ease, color .12s ease !important;
 }
-.dot-add:hover,
-.dot-add.is-active,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .dot-add:hover,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .dot-add.is-active,
 .popover-header-dot.is-add-dot:hover,
 .popover-header-dot.is-add-dot.is-active,
 .apolo-kit-dot.is-add-dot:hover,
@@ -3325,7 +3325,7 @@ button.apolo-box-menu-swatch,
 }
 
 /* 1. Selector de Puntas (4 columnas) */
-.tool-grid,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .tool-grid,
 .popover-tools-selector {
   display: grid !important;
   grid-template-columns: repeat(4, 1fr) !important;
@@ -3336,7 +3336,7 @@ button.apolo-box-menu-swatch,
   align-items: center;
   box-sizing: border-box;
 }
-.tool-btn,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .tool-btn,
 .popover-tool-opt {
   all: unset;
   width: 100% !important;
@@ -3366,7 +3366,7 @@ button.apolo-box-menu-swatch,
   background: rgba(255, 255, 255, 0.05) !important;
   color: var(--muted) !important;
 }
-.tool-btn:hover:not(.is-active),
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .tool-btn:hover:not(.is-active),
 .popover-tool-opt:hover:not(.is-active) {
   background: var(--card-hover) !important;
   color: var(--text) !important;
@@ -3383,12 +3383,12 @@ button.apolo-box-menu-swatch,
   background: rgba(255, 255, 255, 0.10) !important;
   color: var(--text) !important;
 }
-.tool-btn:focus-visible,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .tool-btn:focus-visible,
 .popover-tool-opt:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.tool-btn.is-active,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .tool-btn.is-active,
 .popover-tool-opt.is-active {
   background: var(--accent-subtle) !important;
   border-color: var(--accent) !important;
@@ -3411,7 +3411,7 @@ button.apolo-box-menu-swatch,
   color: #5b8cff !important;
 }
 .popover-tool-opt .icon-wrap,
-.tool-btn .icon-wrap {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .tool-btn .icon-wrap {
   width: 100%;
   height: 100%;
   display: flex;
@@ -3423,14 +3423,14 @@ button.apolo-box-menu-swatch,
   pointer-events: none;
 }
 .popover-tool-opt.is-active .icon-wrap,
-.tool-btn.is-active .icon-wrap {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .tool-btn.is-active .icon-wrap {
   color: inherit;
   background: transparent !important;
 }
 
 /* 1B. Selector Simétrico de 2 Puntas de Marcador (.hl-tip-grid) */
 .apolo-estuche-popover .hl-tip-grid,
-.hl-tip-grid {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hl-tip-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
@@ -3441,7 +3441,7 @@ button.apolo-box-menu-swatch,
 
 .apolo-estuche-popover button.hl-tip-btn,
 .apolo-estuche-popover .hl-tip-btn,
-.hl-tip-btn {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hl-tip-btn {
   all: unset;
   height: 46px;
   padding: 0 12px;
@@ -3468,21 +3468,21 @@ button.apolo-box-menu-swatch,
 
 .apolo-estuche-popover button.hl-tip-btn:hover,
 .apolo-estuche-popover .hl-tip-btn:hover,
-.hl-tip-btn:hover {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hl-tip-btn:hover {
   background: var(--card-hover);
   color: var(--text);
 }
 
 .apolo-estuche-popover button.hl-tip-btn:focus-visible,
 .apolo-estuche-popover .hl-tip-btn:focus-visible,
-.hl-tip-btn:focus-visible {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hl-tip-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 .apolo-estuche-popover button.hl-tip-btn.is-active,
 .apolo-estuche-popover .hl-tip-btn.is-active,
-.hl-tip-btn.is-active {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hl-tip-btn.is-active {
   background: var(--accent-subtle);
   border-color: var(--accent-light);
   color: var(--accent);
@@ -3504,7 +3504,7 @@ button.apolo-box-menu-swatch,
   color: #5b8cff;
 }
 
-.hl-tip-left {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hl-tip-left {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -3512,7 +3512,7 @@ button.apolo-box-menu-swatch,
   font-weight: 600;
 }
 
-.hl-stroke-sample {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .hl-stroke-sample {
   width: 34px;
   height: 14px;
   flex-shrink: 0;
@@ -3520,13 +3520,13 @@ button.apolo-box-menu-swatch,
 }
 
 /* 2. Grupos de Control (Sliders) */
-.control-group,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .control-group,
 .popover-slider-section {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.section-label,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .section-label,
 .popover-slider-label {
   font-size: 11px;
   font-weight: 700;
@@ -3536,7 +3536,7 @@ button.apolo-box-menu-swatch,
   user-select: none;
   margin-left: 2px;
 }
-.slider-row,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-row,
 .popover-slider-row {
   display: grid;
   grid-template-columns: 24px 1fr 24px;
@@ -3544,7 +3544,7 @@ button.apolo-box-menu-swatch,
   gap: 8px;
   height: 28px;
 }
-.slider-step,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-step,
 .popover-step-btn {
   all: unset;
   width: 24px;
@@ -3557,13 +3557,13 @@ button.apolo-box-menu-swatch,
   box-sizing: border-box;
   transition: background .12s, color .12s;
 }
-.slider-step:hover,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-step:hover,
 .popover-step-btn:hover {
   background: var(--card-hover);
   color: var(--text);
 }
 
-.slider-track,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-track,
 .popover-track-wrap {
   position: relative;
   height: 28px;
@@ -3573,7 +3573,7 @@ button.apolo-box-menu-swatch,
   width: 100%;
   min-width: 0;
 }
-.slider-track::before,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-track::before,
 .popover-track-wrap::before {
   content: "";
   position: absolute;
@@ -3588,12 +3588,12 @@ button.apolo-box-menu-swatch,
   background-repeat: repeat-x;
   pointer-events: none;
 }
-.slider-fill {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-fill {
   display: none;
 }
 
 /* Pista de Opacidad con damero + gradiente del color activo (¡La burbuja NUNCA se vuelve transparente!) */
-.slider-track.opacity-track::before,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-track.opacity-track::before,
 .popover-track-wrap.opacity-track::before {
   height: 8px;
   border-radius: 999px;
@@ -3608,7 +3608,7 @@ button.apolo-box-menu-swatch,
   background-position: 0 0, 0 4px, 4px -4px, -4px 0;
 }
 
-.opacity-track .opacity-gradient-layer {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .opacity-track .opacity-gradient-layer {
   position: absolute;
   left: 0;
   right: 0;
@@ -3620,7 +3620,7 @@ button.apolo-box-menu-swatch,
   pointer-events: none;
 }
 
-.opacity-track .slider-fill {
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .opacity-track .slider-fill {
   display: none;
 }
 .popover-track-wrap input[type="range"].popover-range-native {
@@ -3654,7 +3654,7 @@ button.apolo-box-menu-swatch,
   cursor: pointer;
   border: none;
 }
-.slider-thumb,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-thumb,
 .popover-bubble-val {
   position: absolute;
   top: 50%;
@@ -3684,7 +3684,7 @@ button.apolo-box-menu-swatch,
   z-index: 1;
   transition: transform .1s, background .12s;
 }
-.slider-track:hover .slider-thumb,
+:is(.apolo-estuche-popover, .apolo-color-picker-popover) .slider-track:hover .slider-thumb,
 .popover-track-wrap:hover .slider-thumb,
 .popover-track-wrap:hover .popover-bubble-val {
   transform: translateY(-50%) scale(1.06);
@@ -3833,7 +3833,7 @@ button.apolo-box-menu-swatch,
 }
 
 /* 4. Interruptor (Toggle) */
-.toggle-row,
+.apolo-estuche-popover .toggle-row,
 .popover-toggle-row {
   display: flex !important;
   align-items: center !important;
@@ -3844,14 +3844,14 @@ button.apolo-box-menu-swatch,
   user-select: none;
   box-sizing: border-box;
 }
-.toggle-label,
+.apolo-estuche-popover .toggle-label,
 .popover-toggle-title {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text);
   flex: 1 1 auto;
 }
-.switch,
+.apolo-estuche-popover .switch,
 .popover-switch {
   all: unset;
   display: inline-block !important;
@@ -3885,7 +3885,7 @@ button.apolo-box-menu-swatch,
   background: #3e424b !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
 }
-.switch.is-on,
+.apolo-estuche-popover .switch.is-on,
 .popover-switch.is-checked {
   background: var(--accent, #2f6bff) !important;
   border-color: var(--accent, #2f6bff) !important;
@@ -3895,7 +3895,7 @@ button.apolo-box-menu-swatch,
   background: #5b8cff !important;
   border-color: #5b8cff !important;
 }
-.switch:empty::after,
+.apolo-estuche-popover .switch:empty::after,
 .popover-switch-thumb {
   content: "";
   position: absolute !important;
@@ -3917,14 +3917,14 @@ button.apolo-box-menu-swatch,
   transition: transform .16s cubic-bezier(.2, .8, .2, 1) !important;
   pointer-events: none !important;
 }
-.switch.is-on:empty::after,
+.apolo-estuche-popover .switch.is-on:empty::after,
 .popover-switch.is-checked .popover-switch-thumb,
 .popover-switch.is-checked:empty::after {
   transform: translateX(18px) !important;
 }
 
 /* 5. Paleta de Colores y Paginador Inferior */
-.palette-block,
+.apolo-estuche-popover .palette-block,
 .popover-palette-section {
   display: flex;
   flex-direction: column;
@@ -3933,7 +3933,7 @@ button.apolo-box-menu-swatch,
 }
 .apolo-estuche-popover .swatch-row,
 .apolo-estuche-popover .popover-swatches-row,
-.swatch-row,
+.apolo-estuche-popover .swatch-row,
 .popover-swatches-row {
   display: flex;
   align-items: center;
@@ -3946,7 +3946,7 @@ button.apolo-box-menu-swatch,
 
 .apolo-estuche-popover .swatch-row.is-centered,
 .apolo-estuche-popover .popover-swatches-row.is-centered,
-.swatch-row.is-centered,
+.apolo-estuche-popover .swatch-row.is-centered,
 .popover-swatches-row.is-centered {
   justify-content: center !important;
   gap: 12px !important;
@@ -3958,7 +3958,7 @@ button.apolo-box-menu-swatch,
 .apolo-color-picker-popover button.color-picker-recent-swatch,
 .apolo-estuche-popover .swatch,
 .apolo-estuche-popover .popover-swatch-circle,
-.swatch,
+.apolo-estuche-popover .swatch,
 .popover-swatch-circle {
   all: unset;
   appearance: none;
@@ -4004,14 +4004,14 @@ button.apolo-box-menu-swatch,
 
 .apolo-estuche-popover button.swatch:hover,
 .apolo-estuche-popover button.popover-swatch-circle:hover,
-.swatch:hover,
+.apolo-estuche-popover .swatch:hover,
 .popover-swatch-circle:hover {
   transform: scale(1.08);
 }
 
 .apolo-estuche-popover button.swatch.is-active,
 .apolo-estuche-popover button.popover-swatch-circle.is-active,
-.swatch.is-active,
+.apolo-estuche-popover .swatch.is-active,
 .popover-swatch-circle.is-active {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--muted);
   transform: none;
@@ -4060,7 +4060,7 @@ button.apolo-box-menu-swatch,
 .apolo-estuche-popover button.popover-color-add,
 .apolo-estuche-popover .swatch-add,
 .apolo-estuche-popover .popover-color-add,
-.swatch-add,
+.apolo-estuche-popover .swatch-add,
 .popover-color-add {
   all: unset;
   appearance: none;
@@ -4107,7 +4107,7 @@ button.apolo-box-menu-swatch,
 
 .apolo-estuche-popover button.swatch-add:hover,
 .apolo-estuche-popover button.popover-color-add:hover,
-.swatch-add:hover,
+.apolo-estuche-popover .swatch-add:hover,
 .popover-color-add:hover {
   color: var(--text);
   border-color: var(--text);
@@ -4149,7 +4149,7 @@ button.apolo-box-menu-swatch,
   max-height: 18px;
   aspect-ratio: 1 / 1;
 }
-.palette-footer,
+.apolo-estuche-popover .palette-footer,
 .popover-pagination {
   display: flex;
   justify-content: center;
@@ -4866,7 +4866,7 @@ button.apolo-box-menu-swatch,
   box-sizing: border-box;
 }
 
-.list,
+.apolo-favorites-drawer .list,
 .apolo-favorites-list {
   display: flex;
   flex-direction: column;
@@ -4878,18 +4878,18 @@ button.apolo-box-menu-swatch,
   touch-action: pan-y;
   padding-right: 2px;
 }
-.list.is-dragging-active,
+.apolo-favorites-drawer .list.is-dragging-active,
 .apolo-favorites-list.is-dragging-active {
   touch-action: none;
   overflow: hidden;
 }
-.list::-webkit-scrollbar,
+.apolo-favorites-drawer .list::-webkit-scrollbar,
 .apolo-favorites-list::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
 }
-.list::-webkit-scrollbar-thumb,
+.apolo-favorites-drawer .list::-webkit-scrollbar-thumb,
 .apolo-favorites-list::-webkit-scrollbar-thumb {
   display: none;
 }
@@ -4916,7 +4916,7 @@ button.apolo-box-menu-swatch,
   height: 0;
 }
 
-.card,
+.apolo-favorites-drawer .card,
 .apolo-favorite-card {
   position: relative;
   display: grid;
@@ -4936,24 +4936,24 @@ button.apolo-box-menu-swatch,
   box-sizing: border-box;
   transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), opacity 0.2s ease, background .12s, border-color .12s, max-height 0.22s ease, margin 0.22s ease, padding 0.22s ease;
 }
-.card:hover,
-.card.is-hover,
+.apolo-favorites-drawer .card:hover,
+.apolo-favorites-drawer .card.is-hover,
 .apolo-favorite-card:hover {
   background: var(--card-hover);
 }
-.card:focus-visible,
+.apolo-favorites-drawer .card:focus-visible,
 .apolo-favorite-card:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.card.is-active,
+.apolo-favorites-drawer .card.is-active,
 .apolo-favorite-card.is-active {
   background: var(--accent-subtle);
   border-color: var(--accent-light);
 }
-.theme-light .card.is-active,
+.theme-light .apolo-favorites-drawer .card.is-active,
 .theme-light .apolo-favorite-card.is-active,
-:root .card.is-active,
+:root .apolo-favorites-drawer .card.is-active,
 :root .apolo-favorite-card.is-active {
   background: #eef3ff;
   border-color: rgba(47, 107, 255, 0.24);
@@ -5038,18 +5038,18 @@ button.apolo-box-menu-swatch,
 
 
 
-.glyph,
+.apolo-favorites-drawer .glyph,
 .apolo-favorite-glyph {
   display: grid;
   place-items: center;
   color: var(--muted);
 }
-.card.is-active .glyph,
+.apolo-favorites-drawer .card.is-active .glyph,
 .apolo-favorite-card.is-active .apolo-favorite-glyph {
   color: var(--accent);
 }
 
-.preview,
+.apolo-favorites-drawer .preview,
 .apolo-favorite-preview {
   height: 32px;
   min-width: 0;
@@ -5057,16 +5057,16 @@ button.apolo-box-menu-swatch,
   align-items: center;
   overflow: hidden;
 }
-.preview svg,
+.apolo-favorites-drawer .preview svg,
 .apolo-favorite-preview svg {
   display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
 }
-.preview path,
-.preview rect,
-.preview line,
+.apolo-favorites-drawer .preview path,
+.apolo-favorites-drawer .preview rect,
+.apolo-favorites-drawer .preview line,
 .apolo-favorite-preview path,
 .apolo-favorite-preview rect,
 .apolo-favorite-preview line {
@@ -5074,7 +5074,7 @@ button.apolo-box-menu-swatch,
 }
 
 /* Minimalist Unified Drag Handle (base rules for all favorite cards) */
-.grip,
+.apolo-favorites-drawer .grip,
 .apolo-favorite-handle-wrap,
 .apolo-favorite-drag-handle,
 .apolo-estuche-popover button.apolo-favorite-drag-handle,
@@ -5113,13 +5113,13 @@ button.apolo-box-menu-swatch,
 
 .apolo-favorite-drag-handle svg,
 .apolo-favorite-drag-handle svg *,
-.grip svg,
-.grip svg * {
+.apolo-favorites-drawer .grip svg,
+.apolo-favorites-drawer .grip svg * {
   touch-action: none;
   pointer-events: none;
 }
 
-.grip:hover,
+.apolo-favorites-drawer .grip:hover,
 .apolo-favorite-drag-handle:hover,
 .apolo-estuche-popover button.apolo-favorite-drag-handle:hover,
 .apolo-estuche-popover button.grip:hover,
@@ -5136,9 +5136,9 @@ button.apolo-box-menu-swatch,
   color: var(--apolo-text);
 }
 
-.grip:active,
+.apolo-favorites-drawer .grip:active,
 .apolo-favorite-drag-handle:active,
-.card.is-dragging .grip {
+.apolo-favorites-drawer .card.is-dragging .grip {
   cursor: grabbing;
   color: var(--text);
 }
@@ -5220,13 +5220,13 @@ button.apolo-box-menu-swatch,
   stroke: none;
 }
 
-.card.is-dragging,
+.apolo-favorites-drawer .card.is-dragging,
 .apolo-favorite-card.is-dragging {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   cursor: grabbing;
   z-index: 30;
 }
-.card.is-drag-out,
+.apolo-favorites-drawer .card.is-drag-out,
 .apolo-favorite-card.is-drag-out {
   background: rgba(239, 68, 68, 0.14);
   border-color: rgba(239, 68, 68, 0.5);
@@ -5235,7 +5235,7 @@ button.apolo-box-menu-swatch,
 }
 
 /* Estado Vacío */
-.empty,
+.apolo-favorites-drawer .empty,
 .apolo-favorites-empty {
   display: flex;
   flex-direction: column;
@@ -5245,19 +5245,19 @@ button.apolo-box-menu-swatch,
   color: var(--faint);
   text-align: center;
 }
-.empty .icon,
+.apolo-favorites-drawer .empty .icon,
 .apolo-favorites-empty svg {
   width: 26px;
   height: 26px;
 }
-.empty p,
+.apolo-favorites-drawer .empty p,
 .apolo-favorites-empty p,
 .apolo-favorites-empty-text {
   margin: 0;
   font-size: 12px;
   color: var(--muted);
 }
-.empty p .icon,
+.apolo-favorites-drawer .empty p .icon,
 .apolo-favorites-empty p svg,
 .apolo-favorites-empty-text svg {
   width: 13px;
@@ -5593,7 +5593,7 @@ button.apolo-profile-cancel-btn,
 }
 
 .apolo-estuche-popover .pager,
-.pager {
+.apolo-favorites-drawer .pager {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -5603,7 +5603,7 @@ button.apolo-profile-cancel-btn,
 }
 
 .apolo-estuche-popover .dot,
-.dot {
+.apolo-favorites-drawer .dot {
   all: unset;
   box-sizing: border-box;
   touch-action: manipulation;
@@ -5617,7 +5617,7 @@ button.apolo-profile-cancel-btn,
   transition: width 0.15s ease, border-radius 0.15s ease, opacity 0.15s ease;
 }
 .apolo-estuche-popover .dot::before,
-.dot::before {
+.apolo-favorites-drawer .dot::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -5627,7 +5627,7 @@ button.apolo-profile-cancel-btn,
   height: 28px;
 }
 .apolo-estuche-popover .dot.on,
-.dot.on {
+.apolo-favorites-drawer .dot.on {
   width: 13px;
   border-radius: 3px;
   background: var(--tx);
