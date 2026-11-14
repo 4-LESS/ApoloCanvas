@@ -4,23 +4,29 @@ import { EditorState, StateField } from '@codemirror/state';
 import {
     APOLO_APNOTE_ICON_CLASS,
     APOLO_APNOTE_ITEM_CLASS,
+    APOLO_BUNDLE_FOLDER_CLASS,
     APOLO_SATELLITE_HIDDEN_CLASS,
     applyFileExplorerCloaking,
     clearKnownApnotes,
     createApnoteManifest,
     detectApnoteFormat,
     ensureNoMediaFile,
+    ensureNoteInBundleFolder,
     exportAsPortableApnote,
     getApnoteTriggerPath,
     getBoxSvgPath,
+    getBundledMdPath,
     getGlobalInkPath,
+    getNoteBundleFolderPath,
     importPortableApnote,
+    isInsideNoteBundleFolder,
     isJsonApnote,
     isSatelliteFile,
     isZipApnote,
     parseApnoteManifest,
     registerKnownApnote,
     removeFileExplorerCloaking,
+    resolveBundleFolderPaths,
     resolveMdFromTrigger,
     serializeApnoteManifest,
     syncAtomicRename,
@@ -131,6 +137,9 @@ function createMockVault(initialFiles: Record<string, string | Uint8Array> = {})
             },
             async mkdir(p: string) {
                 directories.add(p);
+            },
+            async rmdir(p: string) {
+                directories.delete(p);
             },
             async read(p: string) {
                 const val = files.get(p);
@@ -253,6 +262,8 @@ class MockExplorerNode {
         for (const p of parts) {
             if (p === '.nav-file-title[data-path]') {
                 if (this.classList.contains('nav-file-title') && this.attributes.has('data-path')) return true;
+            } else if (p === '.nav-folder-title[data-path]') {
+                if (this.classList.contains('nav-folder-title') && this.attributes.has('data-path')) return true;
             } else if (p === '.tree-item-self[data-path]') {
                 if (this.classList.contains('tree-item-self') && this.attributes.has('data-path')) return true;
             } else if (p.startsWith('.')) {
@@ -681,7 +692,7 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.strictEqual(reloaded.elements[0].id, 'g-draft');
     });
 
-    test('applyFileExplorerCloaking hides sibling satellites only when .apnote exists, syncs active highlight, and restores cleanly on unload', () => {
+    test('applyFileExplorerCloaking hides sibling satellites and bundle children without injecting any icons', () => {
         clearKnownApnotes();
         const prevDoc = globalThis.document;
         const container = new MockExplorerNode('div');
@@ -702,22 +713,55 @@ describe('.apnote Satellite Bundle Architecture', () => {
             return { row, title };
         };
 
+        const addFolderRow = (path: string) => {
+            const row = new MockExplorerNode('div');
+            row.classList.add('nav-folder');
+            const title = new MockExplorerNode('div');
+            title.classList.add('nav-folder-title');
+            title.setAttribute('data-path', path);
+            row.appendChild(title);
+            container.appendChild(row);
+            return { row, title };
+        };
+
         const apnoteRow = addRow('Notes/Quantum.apnote');
+        // Pre-seed a stale icon to verify cloaking actively strips all icons
+        const staleIcon = new MockExplorerNode('svg');
+        staleIcon.classList.add(APOLO_APNOTE_ICON_CLASS);
+        apnoteRow.title.appendChild(staleIcon);
+
         const mdRow = addRow('Notes/Quantum.md');
         mdRow.title.classList.add('is-active');
         const globalRow = addRow('Notes/.Quantum.global.json');
         const svgRow = addRow('Notes/Quantum.box1.svg');
         const plainMdRow = addRow('Notes/Standalone.md');
 
+        const regularFolderRow = addFolderRow('Notes/RegularFolder');
+        const bundledFolderRow = addFolderRow('Notes/Bundled');
+        const bundledApnoteRow = addRow('Notes/Bundled/Bundled.apnote');
+        const bundledMdRow = addRow('Notes/Bundled/Bundled.md');
+        const bundledSvgRow = addRow('Notes/Bundled/Bundled.b1.svg');
+
         try {
-            applyFileExplorerCloaking(container as any);
+            registerKnownApnote('Notes/Bundled/Bundled.apnote');
+            applyFileExplorerCloaking(container as any, undefined, 'Notes/Bundled/Bundled.md');
 
             assert.strictEqual(apnoteRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(apnoteRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), true);
             assert.strictEqual(apnoteRow.title.classList.contains('is-active'), true, 'Must highlight .apnote row when hidden .md sibling is active');
-            const iconEl = apnoteRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`);
-            assert.ok(iconEl, 'Must attach minimalist Apolo icon to .apnote entry');
-            assert.strictEqual(iconEl.getAttribute('width'), '12');
+            assert.strictEqual(apnoteRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`), null, 'Must never inject or retain explorer icons');
+
+            assert.strictEqual(regularFolderRow.row.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), false);
+            assert.strictEqual(regularFolderRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), false);
+
+            assert.strictEqual(bundledFolderRow.row.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), true);
+            assert.strictEqual(bundledFolderRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), true);
+            assert.strictEqual(bundledFolderRow.title.classList.contains('is-active'), true, 'Must highlight bundle folder when bundled note is active');
+            assert.strictEqual(bundledFolderRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`), null);
+
+            assert.strictEqual(bundledApnoteRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
+            assert.strictEqual(bundledMdRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
+            assert.strictEqual(bundledSvgRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
 
             assert.strictEqual(mdRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
             assert.strictEqual(globalRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
@@ -728,11 +772,83 @@ describe('.apnote Satellite Bundle Architecture', () => {
             assert.strictEqual(mdRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(globalRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(svgRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
+            assert.strictEqual(bundledFolderRow.row.classList.contains(APOLO_BUNDLE_FOLDER_CLASS), false);
+            assert.strictEqual(bundledFolderRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), false);
+            assert.strictEqual(bundledApnoteRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
+            assert.strictEqual(bundledMdRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
+            assert.strictEqual(bundledSvgRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(apnoteRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), false);
             assert.strictEqual(apnoteRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`), null);
         } finally {
             globalThis.document = prevDoc;
             clearKnownApnotes();
         }
+    });
+
+    test('ensureNoteInBundleFolder and PersistenceQueue autoBundleNoteFolder pack a note into its own folder', async () => {
+        clearKnownApnotes();
+        assert.strictEqual(isInsideNoteBundleFolder('Notes/Physics.md'), false);
+        assert.strictEqual(isInsideNoteBundleFolder('Notes/Physics/Physics.md'), true);
+        assert.strictEqual(getNoteBundleFolderPath('Notes/Physics.md'), 'Notes/Physics');
+        assert.strictEqual(getNoteBundleFolderPath('RootNote.md'), 'RootNote');
+        assert.strictEqual(getBundledMdPath('Notes/Physics.md'), 'Notes/Physics/Physics.md');
+
+        const initialMd = [
+            '# Physics',
+            '<div class="apolo-space" data-apolo-space="box-1" data-h="200" style="height:200px;"></div>',
+        ].join('\n');
+        const { vault, files } = createMockVault({ 'Notes/Physics.md': initialMd });
+        const queue = new PersistenceQueue({ vault } as any);
+        queue.setAutoBundleNoteFolder(true);
+
+        const doc: PageDocument = {
+            schemaVersion: 1,
+            version: 1,
+            id: 'Notes/Physics.md',
+            notePath: 'Notes/Physics.md',
+            elements: [
+                {
+                    id: 's-1',
+                    type: 'stroke',
+                    blockId: 'space:box-1',
+                    points: [0.1, 0.1, 0.5, 10, 0.3, 0.2, 0.5, 20],
+                    style: { color: '#1F4FD8', width: 2, opacity: 1, blendMode: 'source-over' },
+                    bounds: { minX: 0.1, minY: 0.1, maxX: 0.3, maxY: 0.2 },
+                    timestamp: 100,
+                },
+            ],
+            boxes: { 'box-1': { height: 200 } },
+            createdAt: 100,
+            updatedAt: 100,
+        };
+
+        const fileHandle = { path: 'Notes/Physics.md' } as any;
+        queue.enqueue(doc, fileHandle, 'Notes/Physics.md');
+        await queue.flushSave();
+
+        assert.strictEqual(files.has('Notes/Physics.md'), false, 'Loose .md must move into its bundle folder');
+        assert.strictEqual(files.has('Notes/Physics/Physics.md'), true);
+        assert.strictEqual(files.has('Notes/Physics/Physics.apnote'), true);
+        assert.strictEqual(files.has('Notes/Physics/.Physics.global.json'), true);
+        assert.strictEqual(files.has('Notes/Physics/Physics.box-1.svg'), true);
+        assert.strictEqual(files.get('Notes/Physics/.nomedia'), '');
+        assert.strictEqual(fileHandle.path, 'Notes/Physics/Physics.md');
+
+        const resolved = resolveBundleFolderPaths('Notes/Physics', vault);
+        assert.deepStrictEqual(resolved, {
+            folderPath: 'Notes/Physics',
+            baseName: 'Physics',
+            mdPath: 'Notes/Physics/Physics.md',
+            apnotePath: 'Notes/Physics/Physics.apnote',
+        });
+
+        const looseMdPath = 'Inbox/Standalone.md';
+        files.set(looseMdPath, '# Loose');
+        const bundledPath = await ensureNoteInBundleFolder(vault, looseMdPath);
+        assert.strictEqual(bundledPath, 'Inbox/Standalone/Standalone.md');
+        assert.strictEqual(files.has(looseMdPath), false);
+        assert.strictEqual(files.has('Inbox/Standalone/Standalone.md'), true);
+        assert.strictEqual(files.get('Inbox/Standalone/.nomedia'), '');
+        clearKnownApnotes();
     });
 });

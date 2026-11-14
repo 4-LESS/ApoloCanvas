@@ -6293,22 +6293,30 @@ button.apolo-profile-cancel-btn,
   pointer-events: auto;
 }
 
-/* .apnote Satellite Cloaking & Native Fallback Embed Suppression */
-.apolo-satellite-hidden {
-  display: none;
-}
-
+/* ============================================================================
+ * .apnote Satellite File Explorer Cloaking & Bundle Folders
+ * ============================================================================ */
+.apolo-satellite-hidden,
 .apolo-fallback-embed-hidden {
   display: none;
 }
 
+.nav-files-container .tree-item.nav-folder.apolo-bundle-folder > .tree-item-children,
+.nav-files-container .nav-folder.apolo-bundle-folder > .nav-folder-children,
+.apolo-bundle-folder > .nav-folder-children,
+.apolo-bundle-folder > .tree-item-children {
+  display: none;
+}
+
+.nav-files-container .tree-item.nav-folder.apolo-bundle-folder > .tree-item-self > .tree-item-icon,
+.nav-files-container .nav-folder.apolo-bundle-folder > .nav-folder-title > .nav-folder-collapse-indicator,
+.apolo-bundle-folder > .nav-folder-title > .collapse-icon,
+.apolo-bundle-folder > .tree-item-self > .collapse-icon,
 .apolo-apnote-item .apolo-apnote-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-right: 5px;
-  color: var(--text-muted);
-  opacity: 0.8;
-  vertical-align: middle;
+  display: none;
+}
+
+.nav-files-container .tree-item.nav-folder.apolo-bundle-folder > .tree-item-self.apolo-apnote-item,
+.nav-files-container .nav-folder.apolo-bundle-folder > .nav-folder-title.apolo-apnote-item {
+  padding-inline-start: var(--size-4-2, 8px);
 }

@@ -27,6 +27,7 @@ export interface VaultAdapterLike {
     rename(normalizedPath: string, newPath: string): Promise<void>;
     remove(normalizedPath: string): Promise<void>;
     mkdir(normalizedPath: string): Promise<void>;
+    rmdir?(normalizedPath: string, recursive: boolean): Promise<void>;
     list?(normalizedPath: string): Promise<{ files: string[]; folders: string[] }>;
     readBinary?(normalizedPath: string): Promise<ArrayBuffer>;
     writeBinary?(normalizedPath: string, data: ArrayBuffer): Promise<void>;
@@ -228,6 +229,68 @@ export function getLegacyDotBoxSvgPath(mdPath: string, boxId: string): string {
 /** Resolves `<dir>/<BaseName>.md` from a trigger path `<dir>/<BaseName>.apnote`. */
 export function resolveMdFromTrigger(apnotePath: string): string {
     return splitNotePath(apnotePath).mdPath;
+}
+
+/**
+ * Returns `true` when `<dir>/<BaseName>.md` (or `.apnote`) already resides inside
+ * its dedicated single-note bundle folder (`.../<BaseName>/<BaseName>.md`).
+ */
+export function isInsideNoteBundleFolder(noteOrTriggerPath: string): boolean {
+    const split = splitNotePath(noteOrTriggerPath);
+    if (!split.dir || !split.baseName) return false;
+    const folderName = split.dir.slice(split.dir.lastIndexOf('/') + 1);
+    return folderName.toLowerCase() === split.baseName.toLowerCase();
+}
+
+/** Resolves the dedicated folder path `<parentDir>/<BaseName>` for a note or trigger path. */
+export function getNoteBundleFolderPath(noteOrTriggerPath: string): string {
+    const split = splitNotePath(noteOrTriggerPath);
+    if (isInsideNoteBundleFolder(noteOrTriggerPath)) {
+        return split.dir;
+    }
+    return split.dir ? `${split.dir}/${split.baseName}` : split.baseName;
+}
+
+/** Resolves `<parentDir>/<BaseName>/<BaseName>.md` for any note or trigger path. */
+export function getBundledMdPath(noteOrTriggerPath: string): string {
+    const split = splitNotePath(noteOrTriggerPath);
+    const bundleDir = getNoteBundleFolderPath(noteOrTriggerPath);
+    return `${bundleDir}/${split.baseName}.md`;
+}
+
+/**
+ * Resolves `{ folderPath, baseName, mdPath, apnotePath }` if `folderPath` is a single-note
+ * Apolo bundle folder (i.e. contains `<BaseName>.apnote`), or `null` otherwise.
+ */
+export function resolveBundleFolderPaths(
+    folderPath: string,
+    siblingCheck?: SatelliteSiblingSource,
+): { folderPath: string; baseName: string; mdPath: string; apnotePath: string } | null {
+    const cleanFolder = normalizeVaultNotePath(folderPath);
+    if (!cleanFolder) return null;
+    const rawFolderName = cleanFolder.slice(cleanFolder.lastIndexOf('/') + 1);
+    const baseName = sanitizePathSegment(rawFolderName, '');
+    if (!baseName) return null;
+    const apnotePath = `${cleanFolder}/${baseName}.apnote`;
+    const mdPath = `${cleanFolder}/${baseName}.md`;
+    const exists = siblingCheck !== undefined
+        ? hasSiblingApnote(apnotePath, siblingCheck) || knownApnotePaths.has(apnotePath)
+        : knownApnotePaths.has(apnotePath);
+    if (!exists) return null;
+    return { folderPath: cleanFolder, baseName, mdPath, apnotePath };
+}
+
+/**
+ * Ensures an Apolo note and all of its satellites live inside its single dedicated folder
+ * (`<parentDir>/<BaseName>/`). Returns the resulting bundled `<BaseName>.md` path.
+ */
+export async function ensureNoteInBundleFolder(vault: VaultLike, noteOrTriggerPath: string): Promise<string> {
+    if (isInsideNoteBundleFolder(noteOrTriggerPath)) {
+        return splitNotePath(noteOrTriggerPath).mdPath;
+    }
+    const targetMdPath = getBundledMdPath(noteOrTriggerPath);
+    await syncAtomicRename(vault, noteOrTriggerPath, targetMdPath);
+    return targetMdPath;
 }
 
 /** Parses any vault path into its satellite classification, baseName, and sibling `.apnote` / `.md` paths. */
@@ -1178,6 +1241,10 @@ export async function syncAtomicRename(
     unregisterKnownApnote(oldSplit.apnotePath);
     registerKnownApnote(newSplit.apnotePath);
 
+    if (oldSplit.dir && oldSplit.dir !== newSplit.dir && isInsideNoteBundleFolder(oldSplit.mdPath)) {
+        await cleanupEmptyBundleDir(vault, oldSplit.dir);
+    }
+
     return {
         oldMdPath: oldSplit.mdPath,
         newMdPath: newSplit.mdPath,
@@ -1187,7 +1254,28 @@ export async function syncAtomicRename(
     };
 }
 
-/** Removes `.apnote`, `.global.json`, and `.<BaseName>.*.svg` satellites when a note is deleted. */
+/** Removes an empty note bundle folder (along with an orphaned `.nomedia` file inside it). */
+async function cleanupEmptyBundleDir(vault: VaultLike, dirPath: string): Promise<void> {
+    if (!dirPath || typeof vault.adapter.list !== 'function') return;
+    try {
+        const listed = await vault.adapter.list(dirPath);
+        if (listed.folders.length > 0) return;
+        const nonNoMediaFiles = listed.files.filter((f) => {
+            const name = f.slice(f.lastIndexOf('/') + 1);
+            return name !== '.nomedia';
+        });
+        if (nonNoMediaFiles.length > 0) return;
+        const noMediaPath = `${dirPath}/.nomedia`;
+        if (await vault.adapter.exists(noMediaPath)) {
+            await vault.adapter.remove(noMediaPath);
+        }
+        await vault.adapter.rmdir?.(dirPath, false);
+    } catch {
+        // Ignore cleanup failure when folder is missing or non-empty
+    }
+}
+
+/** Removes `.apnote`, `.global.json`, and `<BaseName>.*.svg` satellites when a note is deleted. */
 export async function deleteNoteSatellites(vault: VaultLike, noteOrTriggerPath: string): Promise<void> {
     const split = splitNotePath(noteOrTriggerPath);
     const svgPaths = await discoverBoxSvgPaths(vault, split.mdPath);
@@ -1204,6 +1292,10 @@ export async function deleteNoteSatellites(vault: VaultLike, noteOrTriggerPath: 
     }
 
     unregisterKnownApnote(split.apnotePath);
+
+    if (split.dir && isInsideNoteBundleFolder(split.mdPath)) {
+        await cleanupEmptyBundleDir(vault, split.dir);
+    }
 }
 
 // =============================================================================
@@ -1213,43 +1305,16 @@ export async function deleteNoteSatellites(vault: VaultLike, noteOrTriggerPath: 
 export const APOLO_SATELLITE_HIDDEN_CLASS = 'apolo-satellite-hidden';
 export const APOLO_APNOTE_ITEM_CLASS = 'apolo-apnote-item';
 export const APOLO_APNOTE_ICON_CLASS = 'apolo-apnote-icon';
-
-/** Creates a subtle, minimalist vector icon for `.apnote` items in the Obsidian File Explorer. */
-export function createApnoteExplorerIcon(): SVGSVGElement {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', APOLO_APNOTE_ICON_CLASS);
-    svg.setAttribute('viewBox', '0 0 16 16');
-    svg.setAttribute('width', '12');
-    svg.setAttribute('height', '12');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.5');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-
-    const frame = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    frame.setAttribute('x', '2');
-    frame.setAttribute('y', '2');
-    frame.setAttribute('width', '12');
-    frame.setAttribute('height', '12');
-    frame.setAttribute('rx', '3');
-
-    const wave = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    wave.setAttribute('d', 'M4.75 9.5c1.5-2.5 2.75-2.5 4.25 0s1.5 0 2.25-1.25');
-
-    svg.appendChild(frame);
-    svg.appendChild(wave);
-    return svg;
-}
+export const APOLO_BUNDLE_FOLDER_CLASS = 'apolo-bundle-folder';
 
 /**
- * Cloaks `<BaseName>.md`, `.<BaseName>.global.json`, and `<BaseName>.<boxId>.svg` satellite items
- * inside Obsidian's File Explorer whenever a sibling `<BaseName>.apnote` exists in the same folder,
- * leaving only `<BaseName>.apnote` visible with a minimalist Apolo icon.
+ * Cloaks internal bundle files inside Obsidian's File Explorer whenever `<BaseName>.apnote` exists,
+ * turning single-note bundle folders (`<BaseName>/`) into icon-free note entries and hiding loose satellites.
  */
-export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): void {
-    const items = root.querySelectorAll<HTMLElement>('.nav-file-title[data-path], .tree-item-self[data-path]');
+export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike, activeFilePath?: string): void {
+    const items = root.querySelectorAll<HTMLElement>(
+        '.nav-file-title[data-path], .nav-folder-title[data-path], .tree-item-self[data-path]',
+    );
     const apnoteSet = new Set<string>(knownApnotePaths);
     const activeApnotePaths = new Set<string>();
 
@@ -1259,6 +1324,13 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): 
             if (norm.toLowerCase().endsWith('.apnote')) {
                 apnoteSet.add(norm);
             }
+        }
+    }
+
+    if (activeFilePath) {
+        const parsedActive = parseSatelliteFilename(activeFilePath);
+        if (parsedActive && (parsedActive.kind === 'md' || parsedActive.kind === 'apnote')) {
+            activeApnotePaths.add(parsedActive.apnotePath);
         }
     }
 
@@ -1276,16 +1348,66 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): 
         }
     }
 
+    const bundleFolderMap = new Map<string, { mdPath: string; apnotePath: string }>();
+    for (const apnotePath of apnoteSet) {
+        if (isInsideNoteBundleFolder(apnotePath)) {
+            const split = splitNotePath(apnotePath);
+            bundleFolderMap.set(split.dir, { mdPath: split.mdPath, apnotePath });
+        }
+    }
+
+    const folderDomSet = new Set<string>();
     for (let i = 0; i < items.length; i++) {
         const titleEl = items[i];
         const rawPath = titleEl.dataset?.path || titleEl.getAttribute('data-path') || '';
+        const norm = normalizeVaultNotePath(rawPath);
+        if (!norm) continue;
+        if (titleEl.classList.contains('nav-folder-title') || bundleFolderMap.has(norm)) {
+            folderDomSet.add(norm);
+        }
+    }
+
+    for (let i = 0; i < items.length; i++) {
+        const titleEl = items[i];
+        const oldIcon = titleEl.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`);
+        if (oldIcon) {
+            oldIcon.remove();
+        }
+
+        const rawPath = titleEl.dataset?.path || titleEl.getAttribute('data-path') || '';
         const normPath = normalizeVaultNotePath(rawPath);
         if (!normPath) continue;
+
+        const bundleInfo = bundleFolderMap.get(normPath);
+        if (bundleInfo) {
+            const folderRow = titleEl.closest?.('.nav-folder, .tree-item') as HTMLElement | null ?? titleEl;
+            folderRow.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            titleEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+            folderRow.classList.add(APOLO_BUNDLE_FOLDER_CLASS);
+            titleEl.classList.add(APOLO_APNOTE_ITEM_CLASS);
+            if (activeApnotePaths.has(bundleInfo.apnotePath)) {
+                titleEl.classList.add('is-active');
+            } else {
+                titleEl.classList.remove('is-active');
+            }
+            continue;
+        }
+
+        if (titleEl.classList.contains('nav-folder-title')) {
+            const folderRow = titleEl.closest?.('.nav-folder, .tree-item') as HTMLElement | null ?? titleEl;
+            folderRow.classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
+            titleEl.classList.remove(APOLO_APNOTE_ITEM_CLASS);
+            continue;
+        }
 
         const rowEl = titleEl.closest?.('.nav-file, .tree-item') as HTMLElement | null ?? titleEl;
         const parsed = parseSatelliteFilename(normPath);
 
         if (parsed?.kind === 'apnote') {
+            if (isInsideNoteBundleFolder(normPath) && bundleFolderMap.has(parsed.dir) && folderDomSet.has(parsed.dir)) {
+                rowEl.classList.add(APOLO_SATELLITE_HIDDEN_CLASS);
+                continue;
+            }
             rowEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.add(APOLO_APNOTE_ITEM_CLASS);
@@ -1293,14 +1415,6 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): 
                 titleEl.classList.add('is-active');
             } else {
                 titleEl.classList.remove('is-active');
-            }
-            if (!titleEl.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`)) {
-                const icon = createApnoteExplorerIcon();
-                if (typeof titleEl.insertBefore === 'function' && titleEl.firstChild) {
-                    titleEl.insertBefore(icon, titleEl.firstChild);
-                } else {
-                    titleEl.appendChild(icon);
-                }
             }
             continue;
         }
@@ -1320,11 +1434,15 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): 
     }
 }
 
-/** Removes all File Explorer cloaking classes and injected Apolo `.apnote` icons on unload. */
+/** Removes all File Explorer cloaking classes, bundle folder markers, and any stale Apolo icons on unload. */
 export function removeFileExplorerCloaking(root: ParentNode): void {
     const hiddenEls = root.querySelectorAll<HTMLElement>(`.${APOLO_SATELLITE_HIDDEN_CLASS}`);
     for (let i = 0; i < hiddenEls.length; i++) {
         hiddenEls[i].classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
+    }
+    const bundleFolderEls = root.querySelectorAll<HTMLElement>(`.${APOLO_BUNDLE_FOLDER_CLASS}`);
+    for (let i = 0; i < bundleFolderEls.length; i++) {
+        bundleFolderEls[i].classList.remove(APOLO_BUNDLE_FOLDER_CLASS);
     }
     const apnoteEls = root.querySelectorAll<HTMLElement>(`.${APOLO_APNOTE_ITEM_CLASS}`);
     for (let i = 0; i < apnoteEls.length; i++) {

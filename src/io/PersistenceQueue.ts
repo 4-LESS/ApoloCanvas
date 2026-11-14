@@ -26,10 +26,13 @@ import {
     deleteNoteSatellites,
     discoverBoxSvgPaths,
     ensureNoMediaFile,
+    ensureNoteInBundleFolder,
     getApnoteTriggerPath,
     getBoxSvgPath,
+    getBundledMdPath,
     getGlobalInkPath,
     getLegacyDotBoxSvgPath,
+    isInsideNoteBundleFolder,
     isSatelliteFile,
     normalizeVaultNotePath,
     parseApnoteManifest,
@@ -257,6 +260,9 @@ export class PersistenceQueue {
     private chain: Promise<void> = Promise.resolve();
     private debounceMs: number;
     private companionSvgEnabled = true;
+    private autoBundleNoteFolder = false;
+    private readonly internalRenamePaths = new Set<string>();
+    private onPersistComplete?: (mdPath: string, apnotePath: string) => void;
     private readonly app: App;
     private readonly onError?: (error: unknown) => void;
     private readonly cacheByPageId = new Map<string, PageDocument>();
@@ -270,6 +276,11 @@ export class PersistenceQueue {
     setDebounceMs(value: number): void { this.debounceMs = Math.max(50, value); }
     setCompanionSvgEnabled(value: boolean): void { this.companionSvgEnabled = value; }
     isCompanionSvgEnabled(): boolean { return this.companionSvgEnabled; }
+    setAutoBundleNoteFolder(enabled: boolean): void { this.autoBundleNoteFolder = enabled; }
+    setOnPersistComplete(cb?: (mdPath: string, apnotePath: string) => void): void { this.onPersistComplete = cb; }
+    isInternalRename(oldPath: string, newPath?: string): boolean {
+        return this.internalRenamePaths.has(oldPath) || (newPath ? this.internalRenamePaths.has(newPath) : false);
+    }
 
     /** Returns the latest in-memory document state for a page, eliminating race conditions on tab switch. */
     getDocument(pageId: string): PageDocument | null {
@@ -520,7 +531,36 @@ export class PersistenceQueue {
 
     private async persist(document: PageDocument, file: TFile, _pageId: string): Promise<void> {
         const adapter = this.app.vault.adapter;
-        const split = splitNotePath(file.path);
+        let effectiveFilePath = file.path;
+        if (this.autoBundleNoteFolder && !isInsideNoteBundleFolder(effectiveFilePath)) {
+            const oldPath = effectiveFilePath;
+            const targetMdPath = getBundledMdPath(oldPath);
+            this.internalRenamePaths.add(oldPath);
+            this.internalRenamePaths.add(targetMdPath);
+            try {
+                effectiveFilePath = await ensureNoteInBundleFolder(this.app.vault, oldPath);
+                if ((file as { path?: string }).path !== effectiveFilePath) {
+                    try {
+                        (file as { path: string }).path = effectiveFilePath;
+                    } catch {
+                        // Ignore if path is a getter already updated by vault.rename
+                    }
+                }
+                const cached = this.cacheByPageId.get(oldPath);
+                if (cached) {
+                    cached.notePath = effectiveFilePath;
+                    cached.id = effectiveFilePath;
+                    this.cacheByPageId.delete(oldPath);
+                    this.cacheByPageId.set(effectiveFilePath, cached);
+                }
+                document.notePath = effectiveFilePath;
+                document.id = effectiveFilePath;
+            } finally {
+                this.internalRenamePaths.delete(oldPath);
+                this.internalRenamePaths.delete(targetMdPath);
+            }
+        }
+        const split = splitNotePath(effectiveFilePath);
 
         // 1. Ensure <dir>/.nomedia exists
         await ensureNoMediaFile(this.app.vault, split.dir);
@@ -695,6 +735,8 @@ export class PersistenceQueue {
                 }
             }
         }
+
+        this.onPersistComplete?.(split.mdPath, split.apnotePath);
     }
 
     /** Writes a non-dot satellite/trigger file through Vault APIs so Obsidian indexes it immediately. */
