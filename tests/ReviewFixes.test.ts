@@ -26,13 +26,10 @@ import { InputManager } from '../src/engine/input/InputManager.ts';
 import {
     PersistenceQueue,
     sanitizeBoxId,
-    boxStoragePath,
-    noteStoragePath,
     normalizeVaultNotePath,
-    notePathToKey,
-    keyToNotePath,
-    companionPath,
-    boxCompanionPath,
+    getApnoteTriggerPath,
+    getGlobalInkPath,
+    getBoxSvgPath,
     renderBoxSvg,
 } from '../src/io/PersistenceQueue.ts';
 import { BoxMenu } from '../src/ui/BoxMenu.ts';
@@ -1601,8 +1598,9 @@ describe('Code Review Fixes Verification', () => {
         test('sanitizeBoxId and filepath helpers prevent path traversal, Windows reserved names, and collisions', () => {
             // 1. Clean alphanumeric IDs are preserved verbatim
             assert.strictEqual(sanitizeBoxId('box-abc_123'), 'box-abc_123');
-            assert.strictEqual(boxStoragePath('box-abc_123'), '.apolocanvas/boxes/box-abc_123.json');
-            assert.strictEqual(boxCompanionPath('Notes/Daily Note.md', 'box-abc'), 'Notes/assets/ink/Daily Note.box-abc.ink.svg');
+            assert.strictEqual(getApnoteTriggerPath('Notes/Daily Note.md'), 'Notes/Daily Note.apnote');
+            assert.strictEqual(getGlobalInkPath('Notes/Daily Note.md'), 'Notes/.Daily Note.global.json');
+            assert.strictEqual(getBoxSvgPath('Notes/Daily Note.md', 'box-abc'), 'Notes/.Daily Note.box-abc.svg');
 
             // 2. Path traversal attempts are sanitized and hashed
             const traversalIds = [
@@ -1619,13 +1617,10 @@ describe('Code Review Fixes Verification', () => {
                 assert.ok(/^[A-Za-z0-9_-]+$/.test(safeId), `Sanitized ID "${safeId}" for "${rawId}" must only contain [A-Za-z0-9_-]`);
                 assert.ok(!safeId.includes('..'), 'Sanitized ID must not contain ..');
 
-                const storagePath = boxStoragePath(rawId);
-                assert.ok(storagePath.startsWith('.apolocanvas/boxes/'), `Storage path "${storagePath}" must stay inside .apolocanvas/boxes/`);
-                assert.strictEqual(storagePath.split('/').length, 3, 'Storage path must not contain extra directory segments');
-
-                const svgPath = boxCompanionPath('Notes/Daily.md', rawId);
-                assert.ok(svgPath.startsWith('Notes/assets/ink/Daily.'), `Companion path "${svgPath}" must stay inside Notes/assets/ink/`);
-                assert.strictEqual(svgPath.split('/').length, 4, 'Companion path must not traverse directories');
+                const svgPath = getBoxSvgPath('Notes/Daily.md', rawId);
+                assert.ok(svgPath.startsWith('Notes/.Daily.'), `Satellite SVG path "${svgPath}" must stay inside Notes/ as a dotfile`);
+                assert.ok(svgPath.endsWith('.svg'), `Satellite SVG path "${svgPath}" must end with .svg`);
+                assert.strictEqual(svgPath.split('/').length, 2, 'Satellite SVG path must not traverse directories');
             }
 
             // 3. Windows reserved device names are never emitted bare
@@ -1650,15 +1645,15 @@ describe('Code Review Fixes Verification', () => {
             const mapped = new Set(distinctUnsafe.map((id) => sanitizeBoxId(id)));
             assert.strictEqual(mapped.size, distinctUnsafe.length, 'Distinct raw box IDs must never collide after sanitization');
 
-            // 5. Note path normalization prevents traversal in noteStoragePath and companionPath
+            // 5. Note path normalization prevents traversal in global/box satellite paths
             assert.strictEqual(normalizeVaultNotePath('../../outside/secret.md'), 'outside/secret.md');
-            const safeNoteStorage = noteStoragePath('../../outside/secret.md');
-            assert.ok(safeNoteStorage.startsWith('.apolocanvas/notes/'));
-            assert.ok(!safeNoteStorage.includes('..'));
+            const safeGlobal = getGlobalInkPath('../../outside/secret.md');
+            assert.strictEqual(safeGlobal, 'outside/.secret.global.json');
+            assert.ok(!safeGlobal.includes('..'));
 
-            const safeCompanion = companionPath('../../outside/CON.md');
-            assert.ok(!safeCompanion.includes('..'));
-            assert.strictEqual(safeCompanion, 'outside/assets/ink/_CON.ink.svg');
+            const safeBoxSvg = getBoxSvgPath('../../outside/CON.md', 'box1');
+            assert.ok(!safeBoxSvg.includes('..'));
+            assert.strictEqual(safeBoxSvg, 'outside/._CON.box1.svg');
 
             // 6. renderBoxSvg uses sanitized pattern ID
             const svg = renderBoxSvg('box"onload="alert(1)', [], 400, 200, { gridStyle: 'dots' });
@@ -1666,18 +1661,21 @@ describe('Code Review Fixes Verification', () => {
         });
 
         test('PersistenceQueue persists and reloads strokes with adversarial box IDs without path traversal or collisions', async () => {
-            const files = new Map<string, string>();
             const noteMarkdown = [
                 '<div class="apolo-space" data-apolo-space="../../etc/passwd" style="height:200px;"></div>',
                 '<div class="apolo-space" data-apolo-space="CON" style="height:200px;"></div>',
                 '<div class="apolo-space" data-apolo-space="box:alpha" style="height:200px;"></div>',
                 '<div class="apolo-space" data-apolo-space="box*alpha" style="height:200px;"></div>',
             ].join('\n');
+            const files = new Map<string, string>([['Notes/Test.md', noteMarkdown]]);
 
             const mockFile = { path: 'Notes/Test.md' } as any;
             const mockApp = {
                 vault: {
-                    read: async () => noteMarkdown,
+                    read: async () => files.get('Notes/Test.md') ?? noteMarkdown,
+                    modify: async (f: any, data: string) => {
+                        files.set(f.path, data);
+                    },
                     adapter: {
                         exists: async (p: string) => files.has(p),
                         mkdir: async () => {},
@@ -1746,16 +1744,14 @@ describe('Code Review Fixes Verification', () => {
             queue.enqueue(doc, mockFile, 'Notes/Test.md');
             await queue.flush();
 
-            assert.ok(files.size >= 5, 'Must write 1 note file and 4 distinct box files');
+            assert.ok(files.has('Notes/.nomedia'), 'Must write .nomedia guard');
+            assert.ok(files.has('Notes/Test.apnote'), 'Must write .apnote trigger manifest');
+            assert.ok(files.has('Notes/.Test.global.json'), 'Must write note-local global ink file');
 
-            // Verify every written file path is strictly inside .apolocanvas/boxes/, .apolocanvas/notes/, or Notes/assets/ink/
+            // Verify every written file path stays inside Notes/ without traversal
             for (const filePath of files.keys()) {
                 assert.ok(!filePath.includes('..'), `Written path "${filePath}" must never contain '..'`);
-                const validPrefix =
-                    filePath.startsWith('.apolocanvas/boxes/') ||
-                    filePath.startsWith('.apolocanvas/notes/') ||
-                    filePath.startsWith('Notes/assets/ink/');
-                assert.ok(validPrefix, `Written path "${filePath}" must stay within expected vault subdirectories`);
+                assert.ok(filePath.startsWith('Notes/'), `Written path "${filePath}" must stay inside Notes/`);
             }
 
             // Cold disk reload via a fresh PersistenceQueue instance must recover all 4 strokes without collision

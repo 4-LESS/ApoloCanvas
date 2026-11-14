@@ -1,4 +1,20 @@
-import { normalizeBoxId } from '../editor/ApoloSpaceExtension.ts';
+function cleanBoxId(id: string): string {
+    if (!id) return '';
+    let clean = id.trim();
+    if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+        clean = clean.slice(1, -1).trim();
+    }
+    clean = clean
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+    if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+        clean = clean.slice(1, -1).trim();
+    }
+    return clean;
+}
 
 const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -125,7 +141,7 @@ export function normalizeVaultNotePath(notePath: string): string {
  */
 export function sanitizeBoxId(rawId: string): string {
     const trimmed = (rawId ?? '').trim();
-    const normalized = normalizeBoxId(trimmed);
+    const normalized = cleanBoxId(trimmed);
     if (
         normalized.length > 0 &&
         normalized === trimmed &&
@@ -321,7 +337,7 @@ export function createApnoteManifest(mdPath: string, canvases: Iterable<string>)
     const seen = new Set<string>();
     const safeCanvases: string[] = [];
     for (const rawId of canvases) {
-        const clean = normalizeBoxId(rawId) || rawId;
+        const clean = cleanBoxId(rawId) || rawId;
         if (clean && !seen.has(clean)) {
             seen.add(clean);
             safeCanvases.push(clean);
@@ -450,7 +466,7 @@ export function extractReferencedBoxIds(markdown: string, baseName?: string): st
     const ids: string[] = [];
     const seen = new Set<string>();
     const addId = (raw: string) => {
-        const norm = normalizeBoxId(raw) || raw.trim();
+        const norm = cleanBoxId(raw) || raw.trim();
         if (norm && !seen.has(norm)) {
             seen.add(norm);
             ids.push(norm);
@@ -1169,7 +1185,7 @@ export async function deleteNoteSatellites(vault: VaultLike, noteOrTriggerPath: 
 }
 
 // =============================================================================
-// File Explorer Cloaking Helpers (Pure DOM, Zero innerHTML)
+// File Explorer Cloaking Helpers (Pure DOM)
 // =============================================================================
 
 export const APOLO_SATELLITE_HIDDEN_CLASS = 'apolo-satellite-hidden';

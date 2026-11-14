@@ -10,6 +10,7 @@ import {
 
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from '../core/types.ts';
+import { sanitizeBoxId } from '../io/ApnoteBundle.ts';
 import { createDotsIcon } from '../ui/theme.ts';
 export { BoxRegistry };
 
@@ -362,6 +363,16 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
         // Also remove codeblock if present (supporting quoted, escaped, or unquoted ID)
         const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*(?:${codeIdPattern})[\\s\\S]*?\`\`\``, 'gi');
         res = res.replace(codeBlockRegex, '');
+        // Also remove adjacent fallback SVG embed ![[.<BaseName>.<boxId>.svg]]
+        const safeBoxId = sanitizeBoxId(normalizedId);
+        const embedIdVariants = safeBoxId === normalizedId
+            ? [safeId]
+            : [escapeRegExp(safeBoxId), safeId];
+        const embedRegex = new RegExp(
+            `[\\r\\n]*!\\[\\[\\.[^\\]\\r\\n]+\\.(?:${embedIdVariants.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]`,
+            'gi',
+        );
+        res = res.replace(embedRegex, '');
         return res;
     }
 
@@ -421,6 +432,22 @@ export function isLivePreviewState(
     }
 }
 
+function extendToAdjacentFallbackEmbed(doc: EditorState['doc'], endLineNumber: number, boxId: string): number {
+    const baseEndLine = doc.line(endLineNumber);
+    if (endLineNumber >= doc.lines) return baseEndLine.to;
+    const nextLine = doc.line(endLineNumber + 1);
+    const safeId = sanitizeBoxId(boxId);
+    const idCandidates = safeId === boxId ? [escapeRegExp(boxId)] : [escapeRegExp(safeId), escapeRegExp(boxId)];
+    const embedLineRegex = new RegExp(
+        `^\\s*!\\[\\[\\.[^\\]\\r\\n]+\\.(?:${idCandidates.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+        'i',
+    );
+    if (embedLineRegex.test(nextLine.text)) {
+        return nextLine.to;
+    }
+    return baseEndLine.to;
+}
+
 function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
     if (!isLivePreviewState(state)) {
         return Decoration.none;
@@ -454,14 +481,14 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
             const line = doc.lineAt(match.index);
             items.push({
                 from: line.from,
-                to: line.to,
+                to: extendToAdjacentFallbackEmbed(doc, line.number, parsed.id),
                 height: parsed.height,
                 id: parsed.id,
             });
         }
     }
 
-    // 2. Match ```apolo-space ... ``` codeblocks (backward compatibility)
+    // 2. Match ```apolo-space ... ``` codeblocks
     const codeRegex = /```apolo-space\b([\s\S]*?)```/gi;
     while ((match = codeRegex.exec(text)) !== null) {
         const parsed = parseApoloSpaceBlock(match[1]);
@@ -483,7 +510,7 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
             const endLine = doc.lineAt(match.index + match[0].length);
             items.push({
                 from: startLine.from,
-                to: endLine.to,
+                to: extendToAdjacentFallbackEmbed(doc, endLine.number, parsed.id),
                 height: parsed.height,
                 id: parsed.id,
             });

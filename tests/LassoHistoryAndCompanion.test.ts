@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { boxCompanionPath, companionPath, computeBoxPreviewSvgHash, renderBoxSvg } from '../src/io/PersistenceQueue.ts';
+import { computeBoxPreviewSvgHash, getApnoteTriggerPath, getBoxSvgPath, getGlobalInkPath, renderBoxSvg } from '../src/io/PersistenceQueue.ts';
 import { BoxRegistry } from '../src/core/BoxRegistry.ts';
 import type { CanvasElement, PageDocument, ShapeElement, StrokeElement } from '../src/core/types.ts';
 
@@ -269,14 +269,15 @@ describe('(c5) Duplicados de ID y Huérfanos', () => {
 });
 
 describe('(d) Exportador SVG companion por caja y (e) Modo lectura integral', () => {
-    test('boxCompanionPath resolves clean asset path for individual boxes', () => {
+    test('getBoxSvgPath resolves note-local satellite SVG paths for individual boxes', () => {
         const path1 = 'Notes/Daily Note.md';
         const boxId = 'box-abc';
-        const expected = 'Notes/assets/ink/Daily Note.box-abc.ink.svg';
-        assert.strictEqual(boxCompanionPath(path1, boxId), expected);
+        assert.strictEqual(getBoxSvgPath(path1, boxId), 'Notes/.Daily Note.box-abc.svg');
+        assert.strictEqual(getGlobalInkPath(path1), 'Notes/.Daily Note.global.json');
+        assert.strictEqual(getApnoteTriggerPath(path1), 'Notes/Daily Note.apnote');
 
         const pathRoot = 'RootNote.md';
-        assert.strictEqual(boxCompanionPath(pathRoot, 'b1'), 'assets/ink/RootNote.b1.ink.svg');
+        assert.strictEqual(getBoxSvgPath(pathRoot, 'b1'), '.RootNote.b1.svg');
     });
 
     test('renderBoxSvg generates responsive SVG with grid pattern and strokes', () => {

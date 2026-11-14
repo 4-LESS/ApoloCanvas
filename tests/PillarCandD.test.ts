@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { cloneElements, type CanvasElement, type PageDocument, type StrokeElement } from '../src/core/types.ts';
-import { companionPath } from '../src/io/PersistenceQueue.ts';
+import { getApnoteTriggerPath, getBoxSvgPath, getGlobalInkPath } from '../src/io/PersistenceQueue.ts';
 
 describe('Pilar C: Rechazo de Palma y Alternancia Lápiz / Teclado', () => {
     test('palm rejection gating: 1-finger touches ignored during pen contact or hover', () => {
@@ -120,18 +120,20 @@ describe('Pilar C: Rechazo de Palma y Alternancia Lápiz / Teclado', () => {
 });
 
 describe('Pilar D: Ciclo de vida, Zero Data Loss y Undo/Redo', () => {
-    test('companionPath resolves matching SVG paths and sanitizes note basenames', () => {
+    test('satellite path helpers resolve note-local paths and sanitize note basenames', () => {
         const path1 = 'My Folder/Daily Note.md';
-        const expected1 = 'My Folder/assets/ink/Daily Note.ink.svg';
-        assert.strictEqual(companionPath(path1), expected1);
+        assert.strictEqual(getApnoteTriggerPath(path1), 'My Folder/Daily Note.apnote');
+        assert.strictEqual(getGlobalInkPath(path1), 'My Folder/.Daily Note.global.json');
+        assert.strictEqual(getBoxSvgPath(path1, 'box1'), 'My Folder/.Daily Note.box1.svg');
 
         const path2 = 'RootNote.md';
-        const expected2 = 'assets/ink/RootNote.ink.svg';
-        assert.strictEqual(companionPath(path2), expected2);
+        assert.strictEqual(getApnoteTriggerPath(path2), 'RootNote.apnote');
+        assert.strictEqual(getGlobalInkPath(path2), '.RootNote.global.json');
+        assert.strictEqual(getBoxSvgPath(path2, 'box1'), '.RootNote.box1.svg');
 
         const pathSpecial = 'Folder/Note:With*Invalid?Chars.md';
-        const expectedSpecial = 'Folder/assets/ink/Note-With-Invalid-Chars.ink.svg';
-        assert.strictEqual(companionPath(pathSpecial), expectedSpecial);
+        assert.strictEqual(getGlobalInkPath(pathSpecial), 'Folder/.Note-With-Invalid-Chars.global.json');
+        assert.strictEqual(getBoxSvgPath(pathSpecial, 'box1'), 'Folder/.Note-With-Invalid-Chars.box1.svg');
     });
 
     test('in-memory document caching guarantees zero data loss on rapid tab switching', () => {

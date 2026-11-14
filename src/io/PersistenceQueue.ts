@@ -1,5 +1,15 @@
 import type { App, TFile } from 'obsidian';
-import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, BoxMetadata, CanvasElement, LayoutHint, PageDocument, Point, StrokeElement } from '../core/types.ts';
+import type {
+    BoxAccentColor,
+    BoxBgTheme,
+    BoxGridStyle,
+    BoxMetadata,
+    CanvasElement,
+    LayoutHint,
+    PageDocument,
+    Point,
+    StrokeElement,
+} from '../core/types.ts';
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import { normalizeBoxId, parseApoloSpaceBlock, parseApoloSpaceHtml } from '../editor/ApoloSpaceExtension.ts';
 import { getPenPlugin, type PenSvgOutput } from '../engine/pens/index.ts';
@@ -11,9 +21,35 @@ import {
     shapeElementToGeometry,
 } from '../engine/shapes/index.ts';
 import { createSvgFromMarkup, isDarkTheme } from '../ui/theme.ts';
+import {
+    createApnoteManifest,
+    deleteNoteSatellites,
+    discoverBoxSvgPaths,
+    ensureNoMediaFile,
+    getApnoteTriggerPath,
+    getBoxSvgPath,
+    getGlobalInkPath,
+    isSatelliteFile,
+    normalizeVaultNotePath,
+    parseApnoteManifest,
+    parseSatelliteFilename,
+    registerKnownApnote,
+    resolveMdFromTrigger,
+    sanitizeBoxId,
+    serializeApnoteManifest,
+    splitNotePath,
+    syncAtomicRename,
+} from './ApnoteBundle.ts';
 
-const WINDOWS_RESERVED_NAME_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
-const STRICT_SAFE_BOX_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+export {
+    getApnoteTriggerPath,
+    getBoxSvgPath,
+    getGlobalInkPath,
+    isSatelliteFile,
+    normalizeVaultNotePath,
+    resolveMdFromTrigger,
+    sanitizeBoxId,
+};
 
 /** Feeds a string into a running 32-bit FNV-1a accumulator. */
 function fnv1aUpdate(hash: number, input: string): number {
@@ -23,95 +59,6 @@ function fnv1aUpdate(hash: number, input: string): number {
         h = Math.imul(h, 0x01000193);
     }
     return h >>> 0;
-}
-
-/** Computes a deterministic 8-hex-character 32-bit FNV-1a hash for collision-free ID disambiguation. */
-function fnv1aHex(input: string): string {
-    return fnv1aUpdate(0x811c9dc5, input).toString(16).padStart(8, '0');
-}
-
-/**
- * Normalizes a vault-relative note path by converting backslashes to forward slashes,
- * stripping control characters, and removing empty, `.` or `..` traversal segments.
- */
-export function normalizeVaultNotePath(notePath: string): string {
-    const cleaned = (notePath ?? '').replace(/[\x00-\x1f\x7f]/g, '').replace(/\\/g, '/');
-    const segments: string[] = [];
-    for (const rawSeg of cleaned.split('/')) {
-        const seg = rawSeg.trim();
-        if (!seg || seg === '.' || seg === '..') continue;
-        segments.push(seg);
-    }
-    return segments.join('/');
-}
-
-/**
- * Converts a user-supplied box ID into a strict, cross-platform filesystem-safe identifier
- * matching `/^[a-zA-Z0-9_-]{1,64}$/` and guaranteed not to be a Windows reserved device name
- * or contain path separators / traversal sequences.
- * Clean alphanumeric IDs (`box-abc`, `b1`, `c_123456`) are preserved as-is; any ID containing
- * special characters, dots, slashes, spaces, reserved names, or excessive length is converted
- * into `<safe-slug>_<8char-fnv1a-hash>`.
- */
-export function sanitizeBoxId(rawId: string): string {
-    const trimmed = (rawId ?? '').trim();
-    const normalized = normalizeBoxId(trimmed);
-    if (
-        normalized.length > 0 &&
-        normalized === trimmed &&
-        STRICT_SAFE_BOX_ID_RE.test(normalized) &&
-        !WINDOWS_RESERVED_NAME_RE.test(normalized)
-    ) {
-        return normalized;
-    }
-
-    const source = normalized || trimmed;
-    let slug = source
-        .replace(/[^a-zA-Z0-9_-]+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^[-_]+|[-_]+$/g, '')
-        .slice(0, 32)
-        .replace(/[-_]+$/g, '');
-
-    if (!slug || WINDOWS_RESERVED_NAME_RE.test(slug)) {
-        slug = 'box';
-    }
-
-    const hash = fnv1aHex(source || 'empty');
-    return `${slug}_${hash}`;
-}
-
-/** Resolves the sanitized vault storage path `.apolocanvas/boxes/<safeId>.json` for a box ID. */
-export function boxStoragePath(boxId: string): string {
-    return `.apolocanvas/boxes/${sanitizeBoxId(boxId)}.json`;
-}
-
-export function notePathToKey(notePath: string): string {
-    const normalized = normalizeVaultNotePath(notePath);
-    let hex = '';
-    for (let i = 0; i < normalized.length; i++) {
-        hex += normalized.charCodeAt(i).toString(16).padStart(4, '0');
-    }
-    if (!hex) return '0000';
-    // Cap filename length well below the 255-byte filesystem limit on all platforms
-    if (hex.length > 160) {
-        return `${hex.slice(0, 144)}_${fnv1aHex(normalized)}`;
-    }
-    return hex;
-}
-
-export function keyToNotePath(key: string): string {
-    const hexPart = key.includes('_') ? key.slice(0, key.indexOf('_')) : key;
-    let result = '';
-    for (let i = 0; i + 4 <= hexPart.length; i += 4) {
-        result += String.fromCharCode(parseInt(hexPart.slice(i, i + 4), 16));
-    }
-    return result;
-}
-
-/** Resolves the sanitized vault storage path `.apolocanvas/notes/<noteKey>.json` for a note path. */
-export function noteStoragePath(notePath: string): string {
-    return `.apolocanvas/notes/${notePathToKey(notePath)}.json`;
 }
 
 export interface BoxRecord {
@@ -137,7 +84,172 @@ export interface NoteRecord {
     layoutHint?: LayoutHint;
 }
 
-/** Debounced, serialized vault writes with box-by-box and note-level persistence without frontmatter pollution. */
+function escapeRegExpLiteral(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Ensures every `apolo-space` block in `markdown` has an adjacent standard Obsidian embed
+ * `![[.<BaseName>.<safeBoxId>.svg]]` for native rendering when the plugin is disabled,
+ * and removes stale or duplicate fallback embeds for deleted boxes.
+ */
+export function syncMarkdownFallbackEmbeds(
+    markdown: string,
+    baseName: string,
+    activeBoxIds?: ReadonlySet<string>,
+): string {
+    if (!markdown || !baseName) return markdown;
+    const eol = markdown.includes('\r\n') ? '\r\n' : '\n';
+    const lines = markdown.split(/\r?\n/);
+    const escapedBase = escapeRegExpLiteral(baseName);
+    const anyBoxEmbedRegex = new RegExp(
+        `^\\s*!\\[\\[\\.${escapedBase}\\.([A-Za-z0-9_-]+)\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+    );
+
+    const activeSafeIds = new Set<string>();
+    if (activeBoxIds) {
+        for (const id of activeBoxIds) {
+            activeSafeIds.add(sanitizeBoxId(id));
+        }
+    }
+
+    // Pre-scan all box IDs present in markdown blocks
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^\s*```apolo-space\b/i.test(line)) {
+            let end = i + 1;
+            const body: string[] = [];
+            while (end < lines.length && !/^\s*```\s*$/.test(lines[end])) {
+                body.push(lines[end]);
+                end++;
+            }
+            const parsed = parseApoloSpaceBlock(body.join('\n'));
+            if (parsed.id) activeSafeIds.add(sanitizeBoxId(parsed.id));
+            i = end;
+            continue;
+        }
+        if (line.includes('data-apolo-space')) {
+            const parsed = parseApoloSpaceHtml(line);
+            if (parsed?.id) activeSafeIds.add(sanitizeBoxId(parsed.id));
+        }
+    }
+
+    const out: string[] = [];
+    const emittedEmbeds = new Set<string>();
+    let inOtherCodeBlock = false;
+    let otherFence = '';
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (inOtherCodeBlock) {
+            out.push(line);
+            if (new RegExp(`^\\s*${escapeRegExpLiteral(otherFence)}\\s*$`).test(line)) {
+                inOtherCodeBlock = false;
+                otherFence = '';
+            }
+            continue;
+        }
+
+        if (/^\s*```apolo-space\b/i.test(line)) {
+            const body: string[] = [];
+            out.push(line);
+            let j = i + 1;
+            while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) {
+                body.push(lines[j]);
+                out.push(lines[j]);
+                j++;
+            }
+            if (j < lines.length) {
+                out.push(lines[j]);
+            }
+            const parsed = parseApoloSpaceBlock(body.join('\n'));
+            if (parsed.id) {
+                const safeId = sanitizeBoxId(parsed.id);
+                const expectedEmbed = `![[.${baseName}.${safeId}.svg]]`;
+                out.push(expectedEmbed);
+                emittedEmbeds.add(safeId);
+                if (j + 1 < lines.length) {
+                    const nextMatch = lines[j + 1].match(anyBoxEmbedRegex);
+                    if (nextMatch && nextMatch[1] === safeId) {
+                        j++;
+                    }
+                }
+            }
+            i = j;
+            continue;
+        }
+
+        const otherFenceMatch = line.match(/^\s*(```|~~~)/);
+        if (otherFenceMatch) {
+            inOtherCodeBlock = true;
+            otherFence = otherFenceMatch[1];
+            out.push(line);
+            continue;
+        }
+
+        if (line.includes('data-apolo-space')) {
+            const parsed = parseApoloSpaceHtml(line);
+            out.push(line);
+            if (parsed?.id) {
+                const safeId = sanitizeBoxId(parsed.id);
+                const expectedEmbed = `![[.${baseName}.${safeId}.svg]]`;
+                out.push(expectedEmbed);
+                emittedEmbeds.add(safeId);
+                if (i + 1 < lines.length) {
+                    const nextMatch = lines[i + 1].match(anyBoxEmbedRegex);
+                    if (nextMatch && nextMatch[1] === safeId) {
+                        i++;
+                    }
+                }
+            }
+            continue;
+        }
+
+        const embedMatch = line.match(anyBoxEmbedRegex);
+        if (embedMatch) {
+            const embedSafeId = embedMatch[1];
+            if (!activeSafeIds.has(embedSafeId) || emittedEmbeds.has(embedSafeId)) {
+                // Drop stale or duplicate fallback embed line
+                continue;
+            }
+        }
+
+        out.push(line);
+    }
+
+    return out.join(eol);
+}
+
+/** Extracts box IDs referenced in markdown `apolo-space` HTML divs and codeblocks. */
+function scanMarkdownBoxIds(content: string): Set<string> {
+    const boxIds = new Set<string>();
+    const htmlDivRegex = /<div\s+[^>]*data-apolo-space(?:-id)?=(?:"[^"]+"|'[^']+'|[^\s>]+)[^>]*>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = htmlDivRegex.exec(content)) !== null) {
+        const parsed = parseApoloSpaceHtml(`${match[0]}</div>`);
+        if (parsed?.id) {
+            boxIds.add(parsed.id);
+        }
+    }
+    const attrFallbackRegex = /data-apolo-space(?:-id)?=["']([^"']+)["']/gi;
+    while ((match = attrFallbackRegex.exec(content)) !== null) {
+        const norm = normalizeBoxId(match[1]);
+        if (norm) {
+            boxIds.add(norm);
+        }
+    }
+    const codeRegex = /```apolo-space\b([\s\S]*?)```/gi;
+    while ((match = codeRegex.exec(content)) !== null) {
+        const parsed = parseApoloSpaceBlock(match[1]);
+        if (parsed?.id) {
+            boxIds.add(parsed.id);
+        }
+    }
+    return boxIds;
+}
+
+/** Debounced, serialized vault writes using note-local `.apnote` manifests and colocated satellites. */
 export class PersistenceQueue {
     private timer: ReturnType<typeof setTimeout> | null = null;
     private pending: { document: PageDocument; file: TFile; pageId: string } | null = null;
@@ -156,6 +268,7 @@ export class PersistenceQueue {
 
     setDebounceMs(value: number): void { this.debounceMs = Math.max(50, value); }
     setCompanionSvgEnabled(value: boolean): void { this.companionSvgEnabled = value; }
+    isCompanionSvgEnabled(): boolean { return this.companionSvgEnabled; }
 
     /** Returns the latest in-memory document state for a page, eliminating race conditions on tab switch. */
     getDocument(pageId: string): PageDocument | null {
@@ -177,7 +290,7 @@ export class PersistenceQueue {
         if (this.timer !== null) globalThis.clearTimeout(this.timer);
         this.timer = globalThis.setTimeout(() => {
             this.timer = null;
-            this.flush().catch((error: unknown) => {
+            this.flushSave().catch((error: unknown) => {
                 console.error('[ApoloCanvas] Save failed:', error);
                 this.onError?.(error);
             });
@@ -185,16 +298,31 @@ export class PersistenceQueue {
     }
 
     async flush(): Promise<void> {
-        if (this.timer !== null) { globalThis.clearTimeout(this.timer); this.timer = null; }
+        return this.flushSave();
+    }
+
+    /** Immediately writes pending note-local satellites (`.global.json`, `.<boxId>.svg`, `.apnote`) and fallback embeds. */
+    async flushSave(): Promise<void> {
+        if (this.timer !== null) {
+            globalThis.clearTimeout(this.timer);
+            this.timer = null;
+        }
         const batch = this.pending;
         this.pending = null;
         if (!batch) return this.chain;
-        this.chain = this.chain.catch(() => undefined).then(() => this.persist(batch.document, batch.file, batch.pageId));
+        this.chain = this.chain
+            .catch(() => undefined)
+            .then(() => this.persist(batch.document, batch.file, batch.pageId));
         return this.chain;
     }
 
-    /** Loads document without modifying frontmatter: freehand ink by note path and boxes by boxId. */
+    /** Loads global ink from `.<BaseName>.global.json` and per-box elements from `.<BaseName>.<boxId>.svg`. */
     async loadDocumentForNote(file: TFile): Promise<PageDocument> {
+        return this.loadNoteInk(file);
+    }
+
+    /** Loads global ink from `.<BaseName>.global.json` and per-box elements from `.<BaseName>.<boxId>.svg`. */
+    async loadNoteInk(file: TFile): Promise<PageDocument> {
         // 1. Check in-memory cache first to guarantee zero data loss on rapid tab switching
         const inMemory = this.getDocument(file.path);
         if (inMemory) {
@@ -203,50 +331,36 @@ export class PersistenceQueue {
         }
 
         const adapter = this.app.vault.adapter;
+        const split = splitNotePath(file.path);
+
         let content = '';
         try {
             content = await this.app.vault.read(file);
         } catch {
-            content = '';
-        }
-
-        // 2. Scan box IDs present in the note (HTML blocks and codeblocks), normalizing each ID
-        const boxIds = new Set<string>();
-        const htmlDivRegex = /<div\s+[^>]*data-apolo-space(?:-id)?=(?:"[^"]+"|'[^']+'|[^\s>]+)[^>]*>/gi;
-        let match: RegExpExecArray | null;
-        while ((match = htmlDivRegex.exec(content)) !== null) {
-            const parsed = parseApoloSpaceHtml(`${match[0]}</div>`);
-            if (parsed?.id) {
-                boxIds.add(parsed.id);
-            }
-        }
-        const attrFallbackRegex = /data-apolo-space(?:-id)?=["']([^"']+)["']/gi;
-        while ((match = attrFallbackRegex.exec(content)) !== null) {
-            const norm = normalizeBoxId(match[1]);
-            if (norm) {
-                boxIds.add(norm);
-            }
-        }
-        const codeRegex = /```apolo-space\b([\s\S]*?)```/gi;
-        while ((match = codeRegex.exec(content)) !== null) {
-            const parsed = parseApoloSpaceBlock(match[1]);
-            if (parsed?.id) {
-                boxIds.add(parsed.id);
+            try {
+                if (await adapter.exists(split.mdPath)) {
+                    content = await adapter.read(split.mdPath);
+                }
+            } catch {
+                content = '';
             }
         }
 
-        // 3. Load freehand ink
-        const noteFile = noteStoragePath(file.path);
+        // 2. Scan box IDs present in the note (HTML blocks and codeblocks)
+        const boxIds = scanMarkdownBoxIds(content);
+
+        // 3. Load global freehand ink from <dir>/.<BaseName>.global.json
+        const globalFile = getGlobalInkPath(file.path);
         let freehandElements: CanvasElement[] = [];
         let layoutHint: LayoutHint | undefined = undefined;
 
-        if (await adapter.exists(noteFile)) {
+        if (await adapter.exists(globalFile)) {
             try {
-                const noteData = JSON.parse(await adapter.read(noteFile)) as NoteRecord;
+                const noteData = JSON.parse(await adapter.read(globalFile)) as NoteRecord;
                 freehandElements = noteData.elements || [];
                 layoutHint = noteData.layoutHint;
 
-                // Silently clean up orphaned strokes older than 30 days without intrusive notifications
+                // Silently clean up orphaned strokes older than 30 days
                 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
                 const checkTime = Date.now();
                 freehandElements = freehandElements.filter(el => {
@@ -262,19 +376,22 @@ export class PersistenceQueue {
                     return true;
                 });
             } catch (err) {
-                console.error(`[ApoloCanvas] Could not read freehand ink for ${file.path}:`, err);
+                console.error(`[ApoloCanvas] Could not read global ink for ${file.path}:`, err);
             }
         }
 
-        // 4. Load boxes using sanitized filesystem paths
+        // 4. Load boxes from <dir>/.<BaseName>.<boxId>.svg
         const boxElements: CanvasElement[] = [];
         const boxesMeta: Record<string, BoxMetadata> = {};
 
         for (const boxId of boxIds) {
-            const boxFile = boxStoragePath(boxId);
-            if (await adapter.exists(boxFile)) {
+            const boxSvgFile = getBoxSvgPath(file.path, boxId);
+            if (await adapter.exists(boxSvgFile)) {
                 try {
-                    const boxData = JSON.parse(await adapter.read(boxFile)) as BoxRecord;
+                    const rawSvg = await adapter.read(boxSvgFile);
+                    const boxData = parseBoxSvg(rawSvg, boxId);
+                    if (!boxData) continue;
+
                     boxesMeta[boxId] = {
                         height: boxData.height,
                         lastTop: boxData.lastTop,
@@ -300,7 +417,7 @@ export class PersistenceQueue {
                         boxElements.push(...boxData.elements);
                     }
                 } catch (err) {
-                    console.error(`[ApoloCanvas] Could not read box ${boxId}:`, err);
+                    console.error(`[ApoloCanvas] Could not read box SVG ${boxSvgFile}:`, err);
                 }
             }
         }
@@ -309,8 +426,12 @@ export class PersistenceQueue {
         for (const el of elements) {
             if (el.type === 'shape') sanitizeLoadedShapeElement(el);
         }
-        // Connectors whose target shape was not loaded (e.g. an orphaned box) must not dangle
+        // Connectors whose target shape was not loaded must not dangle
         clearDanglingBindings(elements);
+
+        if (await adapter.exists(split.apnotePath)) {
+            registerKnownApnote(split.apnotePath);
+        }
 
         const now = Date.now();
         const doc: PageDocument = {
@@ -328,78 +449,111 @@ export class PersistenceQueue {
         return doc;
     }
 
-    /** Discharges pending writes immediately and updates file paths when a note is renamed. */
+    /** Discharges pending writes immediately and synchronizes all note-local satellites on rename/move. */
     async onFileRenamed(oldPath: string, newFile: TFile): Promise<void> {
-        for (const doc of this.cacheByPageId.values()) {
-            if (doc.notePath === oldPath) {
-                doc.notePath = newFile.path;
-                doc.id = newFile.path;
+        const oldSplit = splitNotePath(oldPath);
+        const newSplit = splitNotePath(newFile.path);
+
+        const cachedKeys = Array.from(this.cacheByPageId.keys());
+        for (const key of cachedKeys) {
+            const doc = this.cacheByPageId.get(key);
+            if (!doc) continue;
+            if (doc.notePath === oldSplit.mdPath || doc.notePath === oldPath) {
+                doc.notePath = newSplit.mdPath;
+                doc.id = newSplit.mdPath;
+                this.cacheByPageId.delete(key);
+                this.cacheByPageId.set(newSplit.mdPath, doc);
             }
         }
-        if (this.pending && this.pending.file.path === oldPath) {
-            this.pending.file = newFile;
-            this.pending.document.notePath = newFile.path;
-            this.pending.document.id = newFile.path;
+
+        if (this.pending && (this.pending.file.path === oldPath || this.pending.file.path === oldSplit.mdPath)) {
+            const targetMdFile = (this.app.vault.getAbstractFileByPath?.(newSplit.mdPath) as TFile | null) ?? newFile;
+            this.pending.file = targetMdFile;
+            this.pending.pageId = newSplit.mdPath;
+            this.pending.document.notePath = newSplit.mdPath;
+            this.pending.document.id = newSplit.mdPath;
         }
 
-        const adapter = this.app.vault.adapter;
-        const oldNoteFile = noteStoragePath(oldPath);
-        const newNoteFile = noteStoragePath(newFile.path);
         try {
-            if (await adapter.exists(oldNoteFile)) {
-                await ensureDirectory(adapter, '.apolocanvas/notes');
-                await adapter.rename(oldNoteFile, newNoteFile);
-            }
-        } catch (e) {
-            console.warn('[ApoloCanvas] Could not rename note storage:', e);
+            await syncAtomicRename(this.app.vault, oldPath, newFile.path);
+        } catch (err) {
+            console.warn('[ApoloCanvas] Could not synchronize satellite rename:', err);
         }
 
-        if (this.companionSvgEnabled) {
-            const oldSvg = companionPath(oldPath);
-            const newSvg = companionPath(newFile.path);
-            try {
-                if (await adapter.exists(oldSvg)) {
-                    await ensureDirectory(adapter, newSvg.slice(0, newSvg.lastIndexOf('/')));
-                    await adapter.rename(oldSvg, newSvg);
-                }
-            } catch (err) {
-                console.warn('[ApoloCanvas] Could not rename companion SVG:', err);
-            }
-        }
-
-        await this.flush();
+        await this.flushSave();
     }
 
-    /** Cleans up note storage when a file is deleted. Boxes are kept for 30 days as orphans. */
+    /** Cleans up all note-local satellites when a note or `.apnote` file is deleted. */
     async onFileDeleted(deletedPath: string): Promise<void> {
+        const split = splitNotePath(deletedPath);
         this.cacheByPageId.delete(deletedPath);
-        const adapter = this.app.vault.adapter;
-        const noteFile = noteStoragePath(deletedPath);
+        this.cacheByPageId.delete(split.mdPath);
         try {
-            if (await adapter.exists(noteFile)) {
-                await adapter.remove(noteFile);
-            }
+            await deleteNoteSatellites(this.app.vault, deletedPath);
         } catch (e) {
-            console.warn('[ApoloCanvas] Could not remove deleted note storage:', e);
+            console.warn('[ApoloCanvas] Could not remove deleted note satellites:', e);
         }
     }
 
-    private async persist(document: PageDocument, file: TFile, pageId: string): Promise<void> {
+    private async persist(document: PageDocument, file: TFile, _pageId: string): Promise<void> {
         const adapter = this.app.vault.adapter;
-        await ensureDirectory(adapter, '.apolocanvas');
-        await ensureDirectory(adapter, '.apolocanvas/boxes');
-        await ensureDirectory(adapter, '.apolocanvas/notes');
+        const split = splitNotePath(file.path);
 
-        // Split elements into boxes and freehand
+        // 1. Ensure <dir>/.nomedia exists
+        await ensureNoMediaFile(this.app.vault, split.dir);
+
+        // 2. Read current markdown & inspect existing satellites on disk
+        let currentMd: string | null = null;
+        try {
+            currentMd = await this.app.vault.read(file);
+        } catch {
+            try {
+                if (await adapter.exists(split.mdPath)) {
+                    currentMd = await adapter.read(split.mdPath);
+                }
+            } catch {
+                currentMd = null;
+            }
+        }
+        const markdownBoxIds = currentMd !== null ? scanMarkdownBoxIds(currentMd) : new Set<string>();
+
+        const existingSvgPaths = await discoverBoxSvgPaths(this.app.vault, split.mdPath);
+        const existingSvgSafeIds = new Set<string>();
+        for (const svgPath of existingSvgPaths) {
+            const parsed = parseSatelliteFilename(svgPath);
+            if (parsed?.boxId) existingSvgSafeIds.add(parsed.boxId);
+        }
+
+        const prevManifestCanvases = new Set<string>();
+        if (await adapter.exists(split.apnotePath)) {
+            try {
+                const manifest = parseApnoteManifest(await adapter.read(split.apnotePath));
+                if (manifest) {
+                    for (const id of manifest.canvases) prevManifestCanvases.add(id);
+                }
+            } catch {
+                // Ignore unreadable manifest
+            }
+        }
+
+        // 3. Partition elements into global freehand annotations vs per-box elements
         const freehandElements: CanvasElement[] = [];
         const boxElementsMap = new Map<string, CanvasElement[]>();
+        const docBoxIds = new Set<string>();
 
         if (document.boxes) {
             for (const rawBoxId of Object.keys(document.boxes)) {
                 const boxId = normalizeBoxId(rawBoxId) || rawBoxId;
                 if (boxId) {
+                    docBoxIds.add(boxId);
                     boxElementsMap.set(boxId, []);
                 }
+            }
+        }
+
+        for (const mdBoxId of markdownBoxIds) {
+            if (!boxElementsMap.has(mdBoxId)) {
+                boxElementsMap.set(mdBoxId, []);
             }
         }
 
@@ -420,21 +574,41 @@ export class PersistenceQueue {
             }
         }
 
-        // 1. Save freehand ink for this note by note path
+        // Determine active boxes (drop boxes that existed on disk and were removed from the note)
+        const activeBoxes = new Map<string, CanvasElement[]>();
+        const activeSafeIds = new Set<string>();
+
+        for (const [boxId, els] of boxElementsMap.entries()) {
+            const safeId = sanitizeBoxId(boxId);
+            const wasPersistedBefore = existingSvgSafeIds.has(safeId) || prevManifestCanvases.has(boxId);
+            const presentInMarkdown = markdownBoxIds.has(boxId);
+            const presentInDocBoxes = docBoxIds.has(boxId);
+
+            if (currentMd !== null && wasPersistedBefore && !presentInMarkdown) {
+                continue;
+            }
+            if (!presentInMarkdown && !presentInDocBoxes) {
+                continue;
+            }
+            activeBoxes.set(boxId, els);
+            activeSafeIds.add(safeId);
+        }
+
+        // 4. Write global ink to <dir>/.<BaseName>.global.json
         const noteRecord: NoteRecord = {
-            notePath: file.path,
+            notePath: split.mdPath,
             updatedAt: Date.now(),
             elements: freehandElements,
             layoutHint: document.layoutHint,
         };
-        await adapter.write(noteStoragePath(file.path), JSON.stringify(noteRecord));
+        await adapter.write(getGlobalInkPath(split.mdPath), JSON.stringify(noteRecord));
 
-        // 2. Save each box by sanitized boxId path
-        for (const [boxId, elements] of boxElementsMap.entries()) {
+        // 5. Render and write each active box as standalone <dir>/.<BaseName>.<boxId>.svg
+        for (const [boxId, elements] of activeBoxes.entries()) {
             const meta = document.boxes?.[boxId];
-            const boxRecord: BoxRecord = {
-                boxId,
-                height: meta?.height ?? 280,
+            const boxH = meta?.height ?? BoxRegistry.getHeight(boxId) ?? 280;
+            const renderMeta: BoxSvgRenderMeta = {
+                height: boxH,
                 lastTop: meta?.lastTop,
                 gridVisible: meta?.gridVisible ?? BoxRegistry.isGridVisible(boxId),
                 gridStyle: meta?.gridStyle ?? BoxRegistry.getGridStyle(boxId),
@@ -444,102 +618,64 @@ export class PersistenceQueue {
                 customBgColor: meta?.customBgColor ?? BoxRegistry.getCustomBgColor(boxId),
                 accentColor: meta?.accentColor ?? BoxRegistry.getAccentColor(boxId),
                 borderOutline: meta?.borderOutline ?? BoxRegistry.isBorderOutline(boxId),
-                updatedAt: Date.now(),
-                elements,
             };
-            await adapter.write(boxStoragePath(boxId), JSON.stringify(boxRecord));
+            const boxSvgPath = getBoxSvgPath(split.mdPath, boxId);
+            const boxSvgContent = renderBoxSvg(boxId, elements, 800, boxH, renderMeta);
+            await adapter.write(boxSvgPath, boxSvgContent);
         }
 
-        // 3. Companion SVG if enabled
-        if (this.companionSvgEnabled) {
-            const svgPath = companionPath(file.path);
-            const folder = svgPath.slice(0, svgPath.lastIndexOf('/'));
-            await ensureDirectory(adapter, folder);
-            await adapter.write(svgPath, renderSvg(document));
-
-            // Export standalone companion SVG for each box
-            for (const [boxId, elements] of boxElementsMap.entries()) {
-                const boxMeta = document.boxes?.[boxId];
-                const boxH = boxMeta?.height ?? 280;
-                const boxSvgPath = boxCompanionPath(file.path, boxId);
-                const boxSvgContent = renderBoxSvg(boxId, elements, 800, boxH, boxMeta);
-                await adapter.write(boxSvgPath, boxSvgContent);
+        // 6. Delete stale .<BaseName>.<oldBoxId>.svg files for removed boxes
+        for (const oldSvgPath of existingSvgPaths) {
+            const parsed = parseSatelliteFilename(oldSvgPath);
+            if (parsed?.boxId && !activeSafeIds.has(parsed.boxId)) {
+                try {
+                    if (await adapter.exists(oldSvgPath)) {
+                        await adapter.remove(oldSvgPath);
+                    }
+                } catch (err) {
+                    console.warn(`[ApoloCanvas] Could not delete stale box SVG "${oldSvgPath}":`, err);
+                }
             }
+        }
 
-            await this.cleanLegacyMarker(file, pageId);
+        // 7. Write/update <dir>/<BaseName>.apnote trigger manifest
+        const manifest = createApnoteManifest(split.mdPath, activeBoxes.keys());
+        await adapter.write(split.apnotePath, serializeApnoteManifest(manifest));
+        registerKnownApnote(split.apnotePath);
+
+        // 8. Sync native plugin-disabled fallback embeds ![[.<BaseName>.<boxId>.svg]] inside <BaseName>.md
+        if (currentMd !== null && markdownBoxIds.size > 0 || (currentMd !== null && existingSvgPaths.length > 0)) {
+            const updatedMd = syncMarkdownFallbackEmbeds(
+                currentMd,
+                split.baseName,
+                new Set(activeBoxes.keys()),
+            );
+            if (updatedMd !== currentMd) {
+                try {
+                    if (typeof this.app.vault.modify === 'function') {
+                        await this.app.vault.modify(file, updatedMd);
+                    } else {
+                        await adapter.write(split.mdPath, updatedMd);
+                    }
+                } catch {
+                    await adapter.write(split.mdPath, updatedMd);
+                }
+            }
         }
     }
-
-    private async cleanLegacyMarker(file: TFile, _pageId: string): Promise<void> {
-        try {
-            const content = await this.app.vault.read(file);
-            let cleaned = content;
-            if (/<!--\s*apolo-canvas:start/i.test(cleaned)) {
-                cleaned = cleaned.replace(/<!--\s*apolo-canvas:start:[^>]*-->[\s\S]*?<!--\s*apolo-canvas:end:[^>]*-->\n?/gi, '').trimEnd() + '\n';
-            }
-            if (/^---\n[\s\S]*?apolo-page-id:[\s\S]*?---\n/m.test(cleaned)) {
-                cleaned = cleaned.replace(/^(\s*apolo-page-id:\s*[^\n\r]*\n)/m, '');
-            }
-            if (cleaned !== content) {
-                await this.app.vault.modify(file, cleaned);
-            }
-        } catch {
-            // Non-critical cleanup
-        }
-    }
-}
-
-async function ensureDirectory(adapter: App['vault']['adapter'], path: string): Promise<void> {
-    const parts = path.split('/').filter(Boolean);
-    let current = '';
-    for (const part of parts) {
-        current = current ? `${current}/${part}` : part;
-        if (!(await adapter.exists(current))) await adapter.mkdir(current);
-    }
-}
-
-function sanitizePathSegment(segment: string, fallback = 'note'): string {
-    let clean = segment
-        .replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, '-')
-        .replace(/^\.+|\.+$/g, '')
-        .trim();
-    if (!clean || clean === '.' || clean === '..' || WINDOWS_RESERVED_NAME_RE.test(clean)) {
-        clean = clean ? `_${clean}` : fallback;
-    }
-    if (clean.length > 120) {
-        clean = `${clean.slice(0, 100)}_${fnv1aHex(segment)}`;
-    }
-    return clean;
-}
-
-function resolveSafeNoteCompanionParts(notePath: string): { folder: string; basename: string } {
-    const normalized = normalizeVaultNotePath(notePath);
-    const segments = normalized ? normalized.split('/') : [];
-    const rawFile = segments.pop() ?? 'note';
-    const safeFolders = segments.map(seg => sanitizePathSegment(seg, 'folder'));
-    const folder = safeFolders.join('/');
-    const rawBasename = rawFile.replace(/\.md$/i, '');
-    const basename = sanitizePathSegment(rawBasename, 'note');
-    return { folder, basename };
-}
-
-export function companionPath(notePath: string): string {
-    const { folder, basename } = resolveSafeNoteCompanionParts(notePath);
-    return `${folder ? `${folder}/` : ''}assets/ink/${basename}.ink.svg`;
-}
-
-export function boxCompanionPath(notePath: string, boxId: string): string {
-    const { folder, basename } = resolveSafeNoteCompanionParts(notePath);
-    const safeBoxId = sanitizeBoxId(boxId);
-    return `${folder ? `${folder}/` : ''}assets/ink/${basename}.${safeBoxId}.ink.svg`;
 }
 
 export interface BoxSvgRenderMeta {
     height?: number;
+    lastTop?: number;
+    gridVisible?: boolean;
     gridStyle?: string;
     gridDensity?: number;
+    snapToGrid?: boolean;
     bgTheme?: string;
     customBgColor?: string;
+    accentColor?: BoxAccentColor;
+    borderOutline?: boolean;
     /** When true, `'default'` background stays transparent so the host CSS box theme renders natively. */
     omitDefaultBg?: boolean;
     /** Explicit theme polarity override for standalone SVG export when no DOM theme class is present. */
@@ -553,6 +689,16 @@ function resolveRenderBoxDarkTheme(meta?: BoxSvgRenderMeta): boolean {
         if (isDarkTheme()) return true;
     }
     return true;
+}
+
+function stripTransientElementProps(elements: readonly CanvasElement[]): CanvasElement[] {
+    return elements.map((el) => {
+        if (el.type === 'stroke' && 'cacheCanvas' in el && el.cacheCanvas !== undefined) {
+            const { cacheCanvas: _dropped, ...rest } = el;
+            return rest as StrokeElement;
+        }
+        return el;
+    });
 }
 
 export function renderBoxSvg(
@@ -594,7 +740,73 @@ export function renderBoxSvg(
 
     const { defsMarkup, contentMarkup } = collectDefsAndRenderElements(elements, scale);
     const defsTag = defsMarkup ? `<defs>${defsMarkup}</defs>` : '<defs/>';
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${defsTag}${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${contentMarkup}</g></svg>`;
+
+    let recordAttr = '';
+    if (!meta?.omitDefaultBg) {
+        const recordPayload = {
+            boxId,
+            height,
+            ...(meta?.lastTop !== undefined ? { lastTop: meta.lastTop } : {}),
+            gridVisible: meta?.gridVisible ?? BoxRegistry.isGridVisible(boxId),
+            gridStyle,
+            gridDensity: density,
+            snapToGrid: meta?.snapToGrid ?? BoxRegistry.isSnapActive(boxId),
+            bgTheme,
+            ...(customBg ? { customBgColor: customBg } : {}),
+            accentColor: meta?.accentColor ?? BoxRegistry.getAccentColor(boxId),
+            borderOutline: meta?.borderOutline ?? BoxRegistry.isBorderOutline(boxId),
+            elements: stripTransientElementProps(elements),
+        };
+        recordAttr = ` data-apolo-box-record="${escapeXml(JSON.stringify(recordPayload))}"`;
+    }
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"${recordAttr}>${defsTag}${bgRect}${gridDef}<g fill="none" stroke-linecap="round" stroke-linejoin="round">${contentMarkup}</g></svg>`;
+}
+
+/** Parses embedded box metadata and parametric element payloads from a standalone `.<BaseName>.<boxId>.svg` file. */
+export function parseBoxSvg(svgContent: string, fallbackBoxId?: string): BoxRecord | null {
+    if (!svgContent) return null;
+    const attrMatch = svgContent.match(/\bdata-apolo-box-record=(?:"([^"]*)"|'([^']*)')/i);
+    if (!attrMatch) return null;
+
+    const encoded = attrMatch[1] ?? attrMatch[2] ?? '';
+    if (!encoded) return null;
+
+    try {
+        const jsonStr = unescapeXml(encoded);
+        const parsed = JSON.parse(jsonStr) as Partial<BoxRecord>;
+        if (!parsed || typeof parsed !== 'object') return null;
+
+        const rawElements = Array.isArray(parsed.elements) ? parsed.elements : [];
+        const elements: CanvasElement[] = [];
+        for (const el of rawElements) {
+            if (!el || typeof el !== 'object') continue;
+            if (el.type === 'shape') {
+                sanitizeLoadedShapeElement(el);
+            }
+            elements.push(el);
+        }
+
+        const height = typeof parsed.height === 'number' && Number.isFinite(parsed.height) ? parsed.height : 280;
+        return {
+            boxId: typeof parsed.boxId === 'string' && parsed.boxId ? parsed.boxId : (fallbackBoxId ?? ''),
+            height,
+            lastTop: typeof parsed.lastTop === 'number' ? parsed.lastTop : undefined,
+            gridVisible: typeof parsed.gridVisible === 'boolean' ? parsed.gridVisible : undefined,
+            gridStyle: parsed.gridStyle,
+            gridDensity: typeof parsed.gridDensity === 'number' ? parsed.gridDensity : undefined,
+            snapToGrid: typeof parsed.snapToGrid === 'boolean' ? parsed.snapToGrid : undefined,
+            bgTheme: parsed.bgTheme,
+            customBgColor: typeof parsed.customBgColor === 'string' ? parsed.customBgColor : undefined,
+            accentColor: parsed.accentColor,
+            borderOutline: typeof parsed.borderOutline === 'boolean' ? parsed.borderOutline : undefined,
+            updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
+            elements,
+        };
+    } catch (err) {
+        console.warn('[ApoloCanvas] Failed to parse embedded box record from SVG:', err);
+        return null;
+    }
 }
 
 /**
@@ -902,3 +1114,11 @@ function escapeXml(value: string): string {
     return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character] ?? character);
 }
 
+function unescapeXml(value: string): string {
+    return value
+        .replace(/&apos;|&#39;/g, "'")
+        .replace(/&quot;|&#34;/g, '"')
+        .replace(/&gt;/g, '>')
+        .replace(/&lt;/g, '<')
+        .replace(/&amp;/g, '&');
+}
