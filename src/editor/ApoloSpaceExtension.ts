@@ -1,8 +1,9 @@
-import { type Extension, Prec, RangeSetBuilder, StateEffect, StateField, type EditorState } from '@codemirror/state';
+import { EditorSelection, EditorState, type Extension, Prec, RangeSetBuilder, StateEffect, StateField, type Transaction } from '@codemirror/state';
 import {
     Decoration,
     type DecorationSet,
     EditorView,
+    keymap,
     ViewPlugin,
     type ViewUpdate,
     WidgetType,
@@ -604,8 +605,187 @@ export const apoloSpaceField = StateField.define<DecorationSet>({
         }
         return decorations.map(tr.changes);
     },
-    provide: (field) => EditorView.decorations.from(field),
+    provide: (field) => [
+        EditorView.decorations.from(field),
+        EditorView.atomicRanges.of((view) => view.state.field(field, false) ?? Decoration.none),
+    ],
 });
+
+export function collectSpaceRanges(state: EditorState): Array<{ from: number; to: number }> {
+    const decos = state.field(apoloSpaceField, false);
+    if (!decos) return [];
+    const ranges: Array<{ from: number; to: number }> = [];
+    const iter = decos.iter();
+    while (iter.value) {
+        ranges.push({ from: iter.from, to: iter.to });
+        iter.next();
+    }
+    return ranges;
+}
+
+function isInsideAnySpaceRange(
+    pos: number,
+    ranges: ReadonlyArray<{ from: number; to: number }>,
+): { from: number; to: number } | null {
+    for (const r of ranges) {
+        if (pos >= r.from && pos <= r.to) return r;
+    }
+    return null;
+}
+
+function findLineAboveSpace(
+    state: EditorState,
+    from: number,
+    ranges: ReadonlyArray<{ from: number; to: number }>,
+) {
+    const doc = state.doc;
+    let lineNum = doc.lineAt(from).number - 1;
+    while (lineNum >= 1) {
+        const line = doc.line(lineNum);
+        const hit = isInsideAnySpaceRange(line.from, ranges);
+        if (!hit) return line;
+        lineNum = doc.lineAt(hit.from).number - 1;
+    }
+    return null;
+}
+
+function findLineBelowSpace(
+    state: EditorState,
+    to: number,
+    ranges: ReadonlyArray<{ from: number; to: number }>,
+) {
+    const doc = state.doc;
+    let lineNum = doc.lineAt(to).number + 1;
+    while (lineNum <= doc.lines) {
+        const line = doc.line(lineNum);
+        const hit = isInsideAnySpaceRange(line.from, ranges);
+        if (!hit) return line;
+        lineNum = doc.lineAt(hit.to).number + 1;
+    }
+    return null;
+}
+
+export const apoloSpaceGuardFilter = EditorState.transactionFilter.of((tr: Transaction) => {
+    if (!tr.selection || !isLivePreviewState(tr.state)) return tr;
+    const sel = tr.selection.main;
+    if (!sel.empty) return tr;
+
+    const ranges = collectSpaceRanges(tr.state);
+    if (ranges.length === 0) return tr;
+
+    const hit = isInsideAnySpaceRange(sel.head, ranges);
+    if (!hit) return tr;
+
+    const above = findLineAboveSpace(tr.state, hit.from, ranges);
+    const below = findLineBelowSpace(tr.state, hit.to, ranges);
+    if (!above && !below) return tr;
+
+    const prevHead = tr.startState.selection.main.head;
+    let targetPos: number;
+    if (prevHead < hit.from && below) {
+        targetPos = below.from;
+    } else if (prevHead > hit.to && above) {
+        targetPos = above.to;
+    } else if (above && below) {
+        targetPos = (sel.head - hit.from) <= (hit.to - sel.head) ? above.to : below.from;
+    } else {
+        targetPos = above ? above.to : below!.from;
+    }
+
+    return [tr, { selection: EditorSelection.cursor(targetPos), scrollIntoView: true }];
+});
+
+function handleArrowJump(
+    view: EditorView,
+    direction: 'up' | 'down' | 'left' | 'right',
+): boolean {
+    if (!isLivePreviewState(view.state) || !view.state.selection.main.empty) return false;
+    const head = view.state.selection.main.head;
+    const doc = view.state.doc;
+    const ranges = collectSpaceRanges(view.state);
+    if (ranges.length === 0) return false;
+
+    const curLine = doc.lineAt(head);
+    const forward = direction === 'down' || direction === 'right';
+    const hit = isInsideAnySpaceRange(head, ranges)
+        ?? (direction === 'down'
+            ? ranges.find((r) => doc.lineAt(r.from).number === curLine.number + 1) ?? null
+            : direction === 'up'
+                ? ranges.find((r) => doc.lineAt(r.to).number === curLine.number - 1) ?? null
+                : direction === 'right' && head === curLine.to
+                    ? ranges.find((r) => doc.lineAt(r.from).number === curLine.number + 1) ?? null
+                    : direction === 'left' && head === curLine.from
+                        ? ranges.find((r) => doc.lineAt(r.to).number === curLine.number - 1) ?? null
+                        : null);
+    if (!hit) return false;
+
+    if (forward) {
+        const below = findLineBelowSpace(view.state, hit.to, ranges);
+        if (!below) return false;
+        const target = direction === 'down'
+            ? Math.min(below.from + (head - curLine.from), below.to)
+            : below.from;
+        view.dispatch({ selection: EditorSelection.cursor(target), scrollIntoView: true });
+        return true;
+    }
+
+    const above = findLineAboveSpace(view.state, hit.from, ranges);
+    if (!above) return false;
+    const target = direction === 'up'
+        ? Math.min(above.from + (head - curLine.from), above.to)
+        : above.to;
+    view.dispatch({ selection: EditorSelection.cursor(target), scrollIntoView: true });
+    return true;
+}
+
+export const apoloSpaceNavigationKeymap = Prec.high(keymap.of([
+    { key: 'ArrowDown', run: (view) => handleArrowJump(view, 'down') },
+    { key: 'ArrowUp', run: (view) => handleArrowJump(view, 'up') },
+    { key: 'ArrowRight', run: (view) => handleArrowJump(view, 'right') },
+    { key: 'ArrowLeft', run: (view) => handleArrowJump(view, 'left') },
+    {
+        key: 'Backspace',
+        run: (view) => {
+            if (!isLivePreviewState(view.state) || !view.state.selection.main.empty) return false;
+            const head = view.state.selection.main.head;
+            const doc = view.state.doc;
+            const ranges = collectSpaceRanges(view.state);
+            if (ranges.length === 0) return false;
+            const curLine = doc.lineAt(head);
+            const hit = isInsideAnySpaceRange(head, ranges)
+                ?? (head === curLine.from
+                    ? ranges.find((r) => doc.lineAt(r.to).number === curLine.number - 1) ?? null
+                    : null);
+            if (!hit) return false;
+            const above = findLineAboveSpace(view.state, hit.from, ranges);
+            if (above) {
+                view.dispatch({ selection: EditorSelection.cursor(above.to), scrollIntoView: true });
+            }
+            return true;
+        },
+    },
+    {
+        key: 'Delete',
+        run: (view) => {
+            if (!isLivePreviewState(view.state) || !view.state.selection.main.empty) return false;
+            const head = view.state.selection.main.head;
+            const doc = view.state.doc;
+            const ranges = collectSpaceRanges(view.state);
+            if (ranges.length === 0) return false;
+            const curLine = doc.lineAt(head);
+            const hit = isInsideAnySpaceRange(head, ranges)
+                ?? (head === curLine.to
+                    ? ranges.find((r) => doc.lineAt(r.from).number === curLine.number + 1) ?? null
+                    : null);
+            if (!hit) return false;
+            const below = findLineBelowSpace(view.state, hit.to, ranges);
+            if (below) {
+                view.dispatch({ selection: EditorSelection.cursor(below.from), scrollIntoView: true });
+            }
+            return true;
+        },
+    },
+]));
 
 export class ApoloSpaceSyncController {
     private view: EditorView;
@@ -722,7 +902,12 @@ export class ApoloSpaceSyncController {
 
 export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(ApoloSpaceSyncController);
 
-export const apoloSpaceExtension: Extension = [Prec.highest(apoloSpaceField), apoloSpaceSyncPlugin];
+export const apoloSpaceExtension: Extension = [
+    Prec.highest(apoloSpaceField),
+    apoloSpaceGuardFilter,
+    apoloSpaceNavigationKeymap,
+    apoloSpaceSyncPlugin,
+];
 
 export function createApoloSpaceExtension(livePreviewField?: StateField<boolean> | null): Extension {
     if (livePreviewField !== undefined) {

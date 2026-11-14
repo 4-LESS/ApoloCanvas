@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
-import { EditorState, StateField } from '@codemirror/state';
+import { EditorSelection, EditorState, StateField } from '@codemirror/state';
+import { keymap } from '@codemirror/view';
 import {
     APOLO_APNOTE_ITEM_CLASS,
     APOLO_BREADCRUMB_HIDDEN_CLASS,
@@ -1201,5 +1202,79 @@ describe('.apnote Satellite Bundle Architecture', () => {
         } finally {
             clearKnownApnotes();
         }
+    });
+
+    test('apoloSpaceGuardFilter and apoloSpaceNavigationKeymap skip canvas blocks on click, arrows, and Backspace/Delete', () => {
+        const mockLiveField = StateField.define<boolean>({
+            create: () => true,
+            update: (v) => v,
+        });
+        const extensions = createApoloSpaceExtension(mockLiveField);
+        const docText = [
+            'Arriba',
+            '<div data-apolo-space="c_jq6635" data-h="530"></div>',
+            '![[Test.c_jq6635.svg]]',
+            'Abajo',
+        ].join('\n');
+
+        let state = EditorState.create({
+            doc: docText,
+            extensions: [mockLiveField, extensions],
+        });
+
+        const line1 = state.doc.line(1);
+        const line2 = state.doc.line(2);
+        const line4 = state.doc.line(4);
+
+        // 1. Clicking / placing cursor inside <div data-apolo-space> snaps out to text
+        state = state.update({ selection: EditorSelection.cursor(line2.from + 12) }).state;
+        assert.strictEqual(
+            state.selection.main.head === line1.to || state.selection.main.head === line4.from,
+            true,
+            `Expected cursor to snap out of canvas div, got ${state.selection.main.head}`,
+        );
+
+        // Helper to invoke keymap binding on our state
+        const runKey = (keyName: string): boolean => {
+            const bindings = state.facet(keymap).flat();
+            const binding = bindings.find((b) => b.key === keyName && b.run);
+            assert.ok(binding?.run, `Missing keymap binding for ${keyName}`);
+            const mockView = {
+                get state() { return state; },
+                dispatch(spec: any) {
+                    state = state.update(spec).state;
+                },
+            };
+            return binding.run(mockView as any);
+        };
+
+        // 2. ArrowDown from line 1 jumps straight to line 4
+        state = state.update({ selection: EditorSelection.cursor(line1.from + 2) }).state;
+        assert.strictEqual(runKey('ArrowDown'), true);
+        assert.strictEqual(state.selection.main.head, line4.from + 2);
+
+        // 3. ArrowUp from line 4 jumps straight back to line 1
+        assert.strictEqual(runKey('ArrowUp'), true);
+        assert.strictEqual(state.selection.main.head, line1.from + 2);
+
+        // 4. ArrowRight from end of line 1 jumps to start of line 4
+        state = state.update({ selection: EditorSelection.cursor(line1.to) }).state;
+        assert.strictEqual(runKey('ArrowRight'), true);
+        assert.strictEqual(state.selection.main.head, line4.from);
+
+        // 5. ArrowLeft from start of line 4 jumps to end of line 1
+        assert.strictEqual(runKey('ArrowLeft'), true);
+        assert.strictEqual(state.selection.main.head, line1.to);
+
+        // 6. Backspace from start of line 4 jumps to end of line 1 without touching <div ...>
+        state = state.update({ selection: EditorSelection.cursor(line4.from) }).state;
+        assert.strictEqual(runKey('Backspace'), true);
+        assert.strictEqual(state.selection.main.head, line1.to);
+        assert.strictEqual(state.doc.toString(), docText);
+
+        // 7. Delete from end of line 1 jumps to start of line 4 without touching <div ...>
+        assert.strictEqual(runKey('Delete'), true);
+        assert.strictEqual(state.selection.main.head, line4.from);
+        assert.strictEqual(state.doc.toString(), docText);
     });
 });
