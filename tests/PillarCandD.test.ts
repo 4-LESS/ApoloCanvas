@@ -124,16 +124,16 @@ describe('Pilar D: Ciclo de vida, Zero Data Loss y Undo/Redo', () => {
         const path1 = 'My Folder/Daily Note.md';
         assert.strictEqual(getApnoteTriggerPath(path1), 'My Folder/Daily Note.apnote');
         assert.strictEqual(getGlobalInkPath(path1), 'My Folder/.Daily Note.global.json');
-        assert.strictEqual(getBoxSvgPath(path1, 'box1'), 'My Folder/.Daily Note.box1.svg');
+        assert.strictEqual(getBoxSvgPath(path1, 'box1'), 'My Folder/Daily Note.box1.svg');
 
         const path2 = 'RootNote.md';
         assert.strictEqual(getApnoteTriggerPath(path2), 'RootNote.apnote');
         assert.strictEqual(getGlobalInkPath(path2), '.RootNote.global.json');
-        assert.strictEqual(getBoxSvgPath(path2, 'box1'), '.RootNote.box1.svg');
+        assert.strictEqual(getBoxSvgPath(path2, 'box1'), 'RootNote.box1.svg');
 
         const pathSpecial = 'Folder/Note:With*Invalid?Chars.md';
         assert.strictEqual(getGlobalInkPath(pathSpecial), 'Folder/.Note-With-Invalid-Chars.global.json');
-        assert.strictEqual(getBoxSvgPath(pathSpecial, 'box1'), 'Folder/.Note-With-Invalid-Chars.box1.svg');
+        assert.strictEqual(getBoxSvgPath(pathSpecial, 'box1'), 'Folder/Note-With-Invalid-Chars.box1.svg');
     });
 
     test('in-memory document caching guarantees zero data loss on rapid tab switching', () => {

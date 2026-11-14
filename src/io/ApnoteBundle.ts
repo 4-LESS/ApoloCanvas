@@ -211,8 +211,15 @@ export function getGlobalInkPath(mdPath: string): string {
     return `${dir ? `${dir}/` : ''}.${baseName}.global.json`;
 }
 
-/** Resolves `<dir>/.<BaseName>.<safeBoxId>.svg` for a note at `<dir>/<BaseName>.md`. */
+/** Resolves `<dir>/<BaseName>.<safeBoxId>.svg` for a note at `<dir>/<BaseName>.md`. */
 export function getBoxSvgPath(mdPath: string, boxId: string): string {
+    const { dir, baseName } = splitNotePath(mdPath);
+    const safeBoxId = sanitizeBoxId(boxId);
+    return `${dir ? `${dir}/` : ''}${baseName}.${safeBoxId}.svg`;
+}
+
+/** Resolves the legacy dot-prefixed `<dir>/.<BaseName>.<safeBoxId>.svg` path for migration cleanup. */
+export function getLegacyDotBoxSvgPath(mdPath: string, boxId: string): string {
     const { dir, baseName } = splitNotePath(mdPath);
     const safeBoxId = sanitizeBoxId(boxId);
     return `${dir ? `${dir}/` : ''}.${baseName}.${safeBoxId}.svg`;
@@ -271,8 +278,9 @@ export function parseSatelliteFilename(filePath: string): ParsedSatelliteFile | 
         };
     }
 
-    if (fileName.startsWith('.') && lower.endsWith('.svg')) {
-        const stem = fileName.slice(1, -'.svg'.length);
+    if (lower.endsWith('.svg')) {
+        const rawStem = fileName.slice(0, -'.svg'.length);
+        const stem = rawStem.startsWith('.') ? rawStem.slice(1) : rawStem;
         const lastDot = stem.lastIndexOf('.');
         if (lastDot <= 0) return null;
         const baseName = stem.slice(0, lastDot);
@@ -451,17 +459,17 @@ function escapeRegexLiteral(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Rewrites `![[.<OldBaseName>.<boxId>.svg]]` fallback embeds inside markdown when a note is renamed. */
+/** Rewrites `![[.<OldBaseName>.<boxId>.svg]]` or `![[<OldBaseName>.<boxId>.svg]]` fallback embeds inside markdown when a note is renamed. */
 export function rewriteSatelliteEmbedLinks(markdown: string, oldBaseName: string, newBaseName: string): string {
     if (!markdown || !oldBaseName || !newBaseName || oldBaseName === newBaseName) {
         return markdown;
     }
     const escapedOld = escapeRegexLiteral(oldBaseName);
-    const wikiEmbedRegex = new RegExp(`(!\\[\\[\\.)(${escapedOld})(\\.[^\\]|\\r\\n]+\\.svg(?:\\|[^\\]]*)?\\]\\])`, 'g');
+    const wikiEmbedRegex = new RegExp(`(!\\[\\[)\\.?(${escapedOld})(\\.[^\\]|\\r\\n]+\\.svg(?:\\|[^\\]]*)?\\]\\])`, 'g');
     return markdown.replace(wikiEmbedRegex, (_full, prefix, _oldName, suffix) => `${prefix}${newBaseName}${suffix}`);
 }
 
-/** Extracts all box IDs referenced by `<div data-apolo-space>`, ` ```apolo-space `, or `![[.<BaseName>.<boxId>.svg]]`. */
+/** Extracts all box IDs referenced by `<div data-apolo-space>`, ` ```apolo-space `, or `![[<BaseName>.<boxId>.svg]]`. */
 export function extractReferencedBoxIds(markdown: string, baseName?: string): string[] {
     const ids: string[] = [];
     const seen = new Set<string>();
@@ -490,7 +498,7 @@ export function extractReferencedBoxIds(markdown: string, baseName?: string): st
 
     if (baseName) {
         const escapedBase = escapeRegexLiteral(baseName);
-        const embedRegex = new RegExp(`!\\[\\[\\.${escapedBase}\\.([A-Za-z0-9_-]+)\\.svg(?:\\|[^\\]]*)?\\]\\]`, 'g');
+        const embedRegex = new RegExp(`!\\[\\[\\.?${escapedBase}\\.([A-Za-z0-9_-]+)\\.svg(?:\\|[^\\]]*)?\\]\\]`, 'g');
         while ((m = embedRegex.exec(markdown)) !== null) {
             addId(m[1]);
         }
@@ -760,7 +768,7 @@ async function decodeZipEntries(archiveBuffer: ArrayBuffer | Uint8Array): Promis
     return entries;
 }
 
-/** Discovers all existing `.<BaseName>.<boxId>.svg` satellite paths for `mdPath`. */
+/** Discovers all existing `<BaseName>.<boxId>.svg` (and legacy dot-prefixed) satellite paths for `mdPath`. */
 export async function discoverBoxSvgPaths(vault: VaultLike, mdPath: string): Promise<string[]> {
     const split = splitNotePath(mdPath);
     const results = new Set<string>();
@@ -772,9 +780,10 @@ export async function discoverBoxSvgPaths(vault: VaultLike, mdPath: string): Pro
             const manifest = parseApnoteManifest(rawTrigger);
             if (manifest) {
                 for (const boxId of manifest.canvases) {
-                    const candidate = getBoxSvgPath(split.mdPath, boxId);
-                    if (await vault.adapter.exists(candidate)) {
-                        results.add(candidate);
+                    for (const candidate of [getBoxSvgPath(split.mdPath, boxId), getLegacyDotBoxSvgPath(split.mdPath, boxId)]) {
+                        if (await vault.adapter.exists(candidate)) {
+                            results.add(candidate);
+                        }
                     }
                 }
             }
@@ -803,9 +812,10 @@ export async function discoverBoxSvgPaths(vault: VaultLike, mdPath: string): Pro
         try {
             const mdContent = await vault.adapter.read(split.mdPath);
             for (const boxId of extractReferencedBoxIds(mdContent, split.baseName)) {
-                const candidate = getBoxSvgPath(split.mdPath, boxId);
-                if (await vault.adapter.exists(candidate)) {
-                    results.add(candidate);
+                for (const candidate of [getBoxSvgPath(split.mdPath, boxId), getLegacyDotBoxSvgPath(split.mdPath, boxId)]) {
+                    if (await vault.adapter.exists(candidate)) {
+                        results.add(candidate);
+                    }
                 }
             }
         } catch {
@@ -1055,7 +1065,7 @@ export async function syncAtomicRename(
         }
     }
 
-    // 4. Discover and move all .<OldBaseName>.<boxId>.svg satellites
+    // 4. Discover and move all <OldBaseName>.<boxId>.svg (and legacy dot-prefixed) satellites
     const boxIds: string[] = [];
     const oldSvgCandidates = new Set<string>();
 
@@ -1066,6 +1076,7 @@ export async function syncAtomicRename(
             if (manifest) {
                 for (const id of manifest.canvases) {
                     oldSvgCandidates.add(getBoxSvgPath(oldSplit.mdPath, id));
+                    oldSvgCandidates.add(getLegacyDotBoxSvgPath(oldSplit.mdPath, id));
                 }
             }
         } catch {
@@ -1092,6 +1103,7 @@ export async function syncAtomicRename(
             const mdText = await vault.adapter.read(newSplit.mdPath);
             for (const boxId of extractReferencedBoxIds(mdText, oldSplit.baseName)) {
                 oldSvgCandidates.add(getBoxSvgPath(oldSplit.mdPath, boxId));
+                oldSvgCandidates.add(getLegacyDotBoxSvgPath(oldSplit.mdPath, boxId));
             }
         } catch {
             // Ignore read failure
@@ -1101,11 +1113,21 @@ export async function syncAtomicRename(
     for (const oldSvgPath of oldSvgCandidates) {
         const parsedSvg = parseSatelliteFilename(oldSvgPath);
         if (!parsedSvg?.boxId) continue;
-        boxIds.push(parsedSvg.boxId);
+        if (!boxIds.includes(parsedSvg.boxId)) {
+            boxIds.push(parsedSvg.boxId);
+        }
         const newSvgPath = getBoxSvgPath(newSplit.mdPath, parsedSvg.boxId);
         if (await vault.adapter.exists(oldSvgPath)) {
-            if (await moveFileAcrossVault(vault, oldSvgPath, newSvgPath)) {
-                movedPaths.push(newSvgPath);
+            if (!(await vault.adapter.exists(newSvgPath))) {
+                if (await moveFileAcrossVault(vault, oldSvgPath, newSvgPath)) {
+                    movedPaths.push(newSvgPath);
+                }
+            } else if (oldSvgPath !== newSvgPath) {
+                try {
+                    await vault.adapter.remove(oldSvgPath);
+                } catch {
+                    // Best-effort cleanup of superseded legacy dotfile
+                }
             }
         }
     }
@@ -1192,43 +1214,44 @@ export const APOLO_SATELLITE_HIDDEN_CLASS = 'apolo-satellite-hidden';
 export const APOLO_APNOTE_ITEM_CLASS = 'apolo-apnote-item';
 export const APOLO_APNOTE_ICON_CLASS = 'apolo-apnote-icon';
 
-/** Creates the custom Apolo vector icon for `.apnote` items in the Obsidian File Explorer. */
+/** Creates a subtle, minimalist vector icon for `.apnote` items in the Obsidian File Explorer. */
 export function createApnoteExplorerIcon(): SVGSVGElement {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', APOLO_APNOTE_ICON_CLASS);
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('width', '14');
-    svg.setAttribute('height', '14');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '12');
+    svg.setAttribute('height', '12');
     svg.setAttribute('fill', 'none');
     svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-width', '1.5');
     svg.setAttribute('stroke-linecap', 'round');
     svg.setAttribute('stroke-linejoin', 'round');
     svg.setAttribute('aria-hidden', 'true');
 
-    const penPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    penPath.setAttribute('d', 'M12 19l7-7 3 3-7 7-3-3z');
-    const nibPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    nibPath.setAttribute('d', 'M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z');
-    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    dot.setAttribute('cx', '11');
-    dot.setAttribute('cy', '11');
-    dot.setAttribute('r', '2');
+    const frame = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    frame.setAttribute('x', '2');
+    frame.setAttribute('y', '2');
+    frame.setAttribute('width', '12');
+    frame.setAttribute('height', '12');
+    frame.setAttribute('rx', '3');
 
-    svg.appendChild(penPath);
-    svg.appendChild(nibPath);
-    svg.appendChild(dot);
+    const wave = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    wave.setAttribute('d', 'M4.75 9.5c1.5-2.5 2.75-2.5 4.25 0s1.5 0 2.25-1.25');
+
+    svg.appendChild(frame);
+    svg.appendChild(wave);
     return svg;
 }
 
 /**
- * Cloaks `<BaseName>.md` and `.<BaseName>.*` satellite items inside Obsidian's File Explorer
- * whenever a sibling `<BaseName>.apnote` exists in the same folder, leaving only `<BaseName>.apnote`
- * visible with a custom Apolo icon.
+ * Cloaks `<BaseName>.md`, `.<BaseName>.global.json`, and `<BaseName>.<boxId>.svg` satellite items
+ * inside Obsidian's File Explorer whenever a sibling `<BaseName>.apnote` exists in the same folder,
+ * leaving only `<BaseName>.apnote` visible with a minimalist Apolo icon.
  */
 export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): void {
     const items = root.querySelectorAll<HTMLElement>('.nav-file-title[data-path], .tree-item-self[data-path]');
     const apnoteSet = new Set<string>(knownApnotePaths);
+    const activeApnotePaths = new Set<string>();
 
     if (vault?.getFiles) {
         for (const f of vault.getFiles()) {
@@ -1240,10 +1263,16 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): 
     }
 
     for (let i = 0; i < items.length; i++) {
-        const path = items[i].dataset?.path || items[i].getAttribute('data-path') || '';
+        const titleEl = items[i];
+        const path = titleEl.dataset?.path || titleEl.getAttribute('data-path') || '';
         const norm = normalizeVaultNotePath(path);
         if (norm.toLowerCase().endsWith('.apnote')) {
             apnoteSet.add(norm);
+        } else if (titleEl.classList.contains('is-active')) {
+            const parsed = parseSatelliteFilename(norm);
+            if (parsed?.kind === 'md') {
+                activeApnotePaths.add(parsed.apnotePath);
+            }
         }
     }
 
@@ -1260,6 +1289,11 @@ export function applyFileExplorerCloaking(root: ParentNode, vault?: VaultLike): 
             rowEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.remove(APOLO_SATELLITE_HIDDEN_CLASS);
             titleEl.classList.add(APOLO_APNOTE_ITEM_CLASS);
+            if (activeApnotePaths.has(normPath)) {
+                titleEl.classList.add('is-active');
+            } else {
+                titleEl.classList.remove('is-active');
+            }
             if (!titleEl.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`)) {
                 const icon = createApnoteExplorerIcon();
                 if (typeof titleEl.insertBefore === 'function' && titleEl.firstChild) {

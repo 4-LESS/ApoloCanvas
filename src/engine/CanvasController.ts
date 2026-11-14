@@ -5272,7 +5272,7 @@ export class CanvasController {
                                         const safeSvgId = escapeRegExp(sanitizeBoxId(normalizedMutId));
                                         const rawSvgId = escapeRegExp(normalizedMutId);
                                         const fallbackPattern = safeSvgId === rawSvgId ? safeSvgId : `(?:${safeSvgId}|${rawSvgId})`;
-                                        const fallbackRegex = new RegExp(`^\\s*!\\[\\[\\.[^\\]\\r\\n]+\\.${fallbackPattern}\\.svg\\]\\]\\s*$`, 'i');
+                                        const fallbackRegex = new RegExp(`^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.${fallbackPattern}\\.svg\\]\\]\\s*$`, 'i');
                                         if (fallbackRegex.test(nextLine.text)) {
                                             endLineNum = l + 1;
                                         }

@@ -1,4 +1,4 @@
-import { App, editorLivePreviewField, FileView, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf } from 'obsidian';
+import { App, editorLivePreviewField, FileView, Keymap, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf } from 'obsidian';
 import { EngineEventBus } from './core/events.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle, PenFavorite, StrokeFavoriteProfile, ShapeFavoriteProfile, ToolbarSlot, WorkspaceToolState } from './core/types.ts';
 import { DEFAULT_WORKSPACE_TOOL_STATE, DEFAULT_STROKE_FAVORITE_PROFILES, DEFAULT_SHAPE_FAVORITE_PROFILES, cloneWorkspaceToolState, mergeWorkspaceToolState } from './core/types.ts';
@@ -30,6 +30,8 @@ import {
     getApnoteTriggerPath,
     importPortableApnote,
     isZipApnote,
+    normalizeVaultNotePath,
+    parseApnoteManifest,
     parseSatelliteFilename,
     registerKnownApnote,
     removeFileExplorerCloaking,
@@ -134,7 +136,9 @@ class ApoloNoteRedirectView extends FileView {
 
     async onLoadFile(file: TFile): Promise<void> {
         await super.onLoadFile(file);
-        await this.plugin.handleApnoteFileOpen(file, this.leaf);
+        window.setTimeout(() => {
+            void this.plugin.handleApnoteFileOpen(file, this.leaf);
+        }, 0);
     }
 }
 
@@ -221,7 +225,7 @@ export default class ApoloCanvasPlugin extends Plugin {
 
         // Register Reading mode section info post-processor for precise paragraph anchoring
         this.registerMarkdownPostProcessor((el, ctx) => {
-            // Suppress native fallback satellite embeds (`![[.<BaseName>.<boxId>.svg]]`) while plugin is active
+            // Suppress native fallback satellite embeds (`![[<BaseName>.<boxId>.svg]]`) while plugin is active
             const sourceBaseName = ctx?.sourcePath ? splitNotePath(ctx.sourcePath).baseName : '';
             const embedCandidates: HTMLElement[] = [];
             if (el.matches?.('.internal-embed')) {
@@ -234,9 +238,11 @@ export default class ApoloCanvasPlugin extends Plugin {
             for (const embedEl of embedCandidates) {
                 const src = embedEl.getAttribute('src') || '';
                 const filename = src.split(/[\\/]/).pop() || '';
+                const lowerFile = filename.toLowerCase();
+                const lowerBase = sourceBaseName.toLowerCase();
                 const isFallbackSvg = sourceBaseName
-                    ? filename.toLowerCase().startsWith(`.${sourceBaseName.toLowerCase()}.`) && filename.toLowerCase().endsWith('.svg')
-                    : /^\.[^/\\]+\.svg$/i.test(filename);
+                    ? (lowerFile.startsWith(`${lowerBase}.`) || lowerFile.startsWith(`.${lowerBase}.`)) && lowerFile.endsWith('.svg')
+                    : /^\.?[^/\\]+\.[a-z0-9_-]+\.svg$/i.test(filename);
                 if (isFallbackSvg) {
                     embedEl.addClass('apolo-fallback-embed-hidden');
                 }
@@ -440,7 +446,10 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.addSettingTab(new ApoloCanvasSettingsTab(this.app, this));
         this.registerCommands();
 
-        this.registerEvent(this.app.workspace.on('active-leaf-change', () => { void this.mountActiveEditor(); }));
+        this.registerEvent(this.app.workspace.on('active-leaf-change', () => {
+            void this.mountActiveEditor();
+            this.scheduleFileExplorerCloaking();
+        }));
         this.registerEvent(this.app.workspace.on('layout-change', () => {
             void this.mountActiveEditor();
             this.scheduleFileExplorerCloaking();
@@ -571,7 +580,42 @@ export default class ApoloCanvasPlugin extends Plugin {
             this.refreshFileExplorerCloaking();
             void this.mountActiveEditor();
             this.showFirstTimeNoticeIfNeeded();
+
+            // Redirect any .apnote tabs restored from Obsidian's workspace.json directly to their .md note
+            const apnoteLeaves = this.app.workspace.getLeavesOfType(APOLO_NOTE_VIEW_TYPE);
+            for (const leaf of apnoteLeaves) {
+                const viewFile = (leaf.view as FileView | undefined)?.file;
+                const stateFilePath = (leaf.getViewState()?.state as { file?: string } | undefined)?.file;
+                const targetApnote = viewFile instanceof TFile
+                    ? viewFile
+                    : (stateFilePath ? this.app.vault.getAbstractFileByPath(stateFilePath) : null);
+                if (targetApnote instanceof TFile) {
+                    void this.handleApnoteFileOpen(targetApnote, leaf);
+                }
+            }
         });
+
+        // Direct click interception on File Explorer .apnote items so notes open seamlessly in MarkdownView
+        if (typeof document !== 'undefined') {
+            this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
+                if (evt.button !== 0 || evt.defaultPrevented) return;
+                const target = evt.target instanceof Element ? evt.target : null;
+                if (!target) return;
+                const titleEl = target.closest<HTMLElement>('.nav-file-title[data-path], .tree-item-self[data-path]');
+                if (!titleEl || titleEl.classList.contains('is-being-renamed')) return;
+                const rawPath = titleEl.dataset.path || titleEl.getAttribute('data-path') || '';
+                if (!rawPath.toLowerCase().endsWith('.apnote')) return;
+
+                const apnoteFile = this.app.vault.getAbstractFileByPath(rawPath);
+                if (!(apnoteFile instanceof TFile)) return;
+
+                evt.preventDefault();
+                evt.stopPropagation();
+                registerKnownApnote(apnoteFile.path);
+                const leaf = this.app.workspace.getLeaf(Keymap.isModEvent(evt));
+                void this.handleApnoteFileOpen(apnoteFile, leaf);
+            }, true);
+        }
 
         // App closing / tab hiding / lifecycle hooks: ensure immediate flush of all pending ink data
         this.registerDomEvent(window, 'beforeunload', () => {
@@ -660,6 +704,16 @@ export default class ApoloCanvasPlugin extends Plugin {
                 registerKnownApnote(getApnoteTriggerPath(targetMdPath));
                 this.scheduleFileExplorerCloaking();
                 new Notice(`Apolo Canvas: Paquete .apnote importado (${baseName}).`);
+            } else if (typeof TextDecoder !== 'undefined') {
+                const rawText = new TextDecoder().decode(bytes);
+                const manifest = parseApnoteManifest(rawText);
+                if (manifest?.markdown) {
+                    const { dir } = splitNotePath(file.path);
+                    const manifestMd = normalizeVaultNotePath(dir ? `${dir}/${manifest.markdown}` : manifest.markdown);
+                    if (manifestMd.toLowerCase().endsWith('.md')) {
+                        targetMdPath = manifestMd;
+                    }
+                }
             }
 
             let targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
@@ -667,9 +721,26 @@ export default class ApoloCanvasPlugin extends Plugin {
                 await new Promise(resolve => setTimeout(resolve, 60));
                 targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
             }
+            if (!(targetFile instanceof TFile)) {
+                if (await this.app.vault.adapter.exists(targetMdPath)) {
+                    await new Promise(resolve => setTimeout(resolve, 80));
+                    targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
+                } else {
+                    try {
+                        targetFile = await this.app.vault.create(targetMdPath, '');
+                    } catch {
+                        targetFile = this.app.vault.getAbstractFileByPath(targetMdPath);
+                    }
+                }
+            }
+
+            for (let i = 0; i < 30 && (leaf as { working?: boolean }).working; i++) {
+                await new Promise(resolve => setTimeout(resolve, 15));
+            }
 
             if (targetFile instanceof TFile) {
                 await leaf.openFile(targetFile);
+                this.scheduleFileExplorerCloaking();
             } else {
                 new Notice(`Apolo Canvas: No se encontró la nota Markdown asociada (${targetMdPath}).`);
             }

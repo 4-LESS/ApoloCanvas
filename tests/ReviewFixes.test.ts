@@ -1600,7 +1600,7 @@ describe('Code Review Fixes Verification', () => {
             assert.strictEqual(sanitizeBoxId('box-abc_123'), 'box-abc_123');
             assert.strictEqual(getApnoteTriggerPath('Notes/Daily Note.md'), 'Notes/Daily Note.apnote');
             assert.strictEqual(getGlobalInkPath('Notes/Daily Note.md'), 'Notes/.Daily Note.global.json');
-            assert.strictEqual(getBoxSvgPath('Notes/Daily Note.md', 'box-abc'), 'Notes/.Daily Note.box-abc.svg');
+            assert.strictEqual(getBoxSvgPath('Notes/Daily Note.md', 'box-abc'), 'Notes/Daily Note.box-abc.svg');
 
             // 2. Path traversal attempts are sanitized and hashed
             const traversalIds = [
@@ -1618,7 +1618,7 @@ describe('Code Review Fixes Verification', () => {
                 assert.ok(!safeId.includes('..'), 'Sanitized ID must not contain ..');
 
                 const svgPath = getBoxSvgPath('Notes/Daily.md', rawId);
-                assert.ok(svgPath.startsWith('Notes/.Daily.'), `Satellite SVG path "${svgPath}" must stay inside Notes/ as a dotfile`);
+                assert.ok(svgPath.startsWith('Notes/Daily.'), `Satellite SVG path "${svgPath}" must stay inside Notes/`);
                 assert.ok(svgPath.endsWith('.svg'), `Satellite SVG path "${svgPath}" must end with .svg`);
                 assert.strictEqual(svgPath.split('/').length, 2, 'Satellite SVG path must not traverse directories');
             }
@@ -1653,7 +1653,7 @@ describe('Code Review Fixes Verification', () => {
 
             const safeBoxSvg = getBoxSvgPath('../../outside/CON.md', 'box1');
             assert.ok(!safeBoxSvg.includes('..'));
-            assert.strictEqual(safeBoxSvg, 'outside/._CON.box1.svg');
+            assert.strictEqual(safeBoxSvg, 'outside/_CON.box1.svg');
 
             // 6. renderBoxSvg uses sanitized pattern ID
             const svg = renderBoxSvg('box"onload="alert(1)', [], 400, 200, { gridStyle: 'dots' });

@@ -369,7 +369,7 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
             ? [safeId]
             : [escapeRegExp(safeBoxId), safeId];
         const embedRegex = new RegExp(
-            `[\\r\\n]*!\\[\\[\\.[^\\]\\r\\n]+\\.(?:${embedIdVariants.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]`,
+            `[\\r\\n]*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${embedIdVariants.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]`,
             'gi',
         );
         res = res.replace(embedRegex, '');
@@ -439,7 +439,7 @@ function extendToAdjacentFallbackEmbed(doc: EditorState['doc'], endLineNumber: n
     const safeId = sanitizeBoxId(boxId);
     const idCandidates = safeId === boxId ? [escapeRegExp(boxId)] : [escapeRegExp(safeId), escapeRegExp(boxId)];
     const embedLineRegex = new RegExp(
-        `^\\s*!\\[\\[\\.[^\\]\\r\\n]+\\.(?:${idCandidates.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+        `^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${idCandidates.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
         'i',
     );
     if (embedLineRegex.test(nextLine.text)) {

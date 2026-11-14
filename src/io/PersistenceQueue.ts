@@ -29,6 +29,7 @@ import {
     getApnoteTriggerPath,
     getBoxSvgPath,
     getGlobalInkPath,
+    getLegacyDotBoxSvgPath,
     isSatelliteFile,
     normalizeVaultNotePath,
     parseApnoteManifest,
@@ -103,7 +104,7 @@ export function syncMarkdownFallbackEmbeds(
     const lines = markdown.split(/\r?\n/);
     const escapedBase = escapeRegExpLiteral(baseName);
     const anyBoxEmbedRegex = new RegExp(
-        `^\\s*!\\[\\[\\.${escapedBase}\\.([A-Za-z0-9_-]+)\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+        `^\\s*!\\[\\[\\.?${escapedBase}\\.([A-Za-z0-9_-]+)\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
     );
 
     const activeSafeIds = new Set<string>();
@@ -166,7 +167,7 @@ export function syncMarkdownFallbackEmbeds(
             const parsed = parseApoloSpaceBlock(body.join('\n'));
             if (parsed.id) {
                 const safeId = sanitizeBoxId(parsed.id);
-                const expectedEmbed = `![[.${baseName}.${safeId}.svg]]`;
+                const expectedEmbed = `![[${baseName}.${safeId}.svg]]`;
                 out.push(expectedEmbed);
                 emittedEmbeds.add(safeId);
                 if (j + 1 < lines.length) {
@@ -193,7 +194,7 @@ export function syncMarkdownFallbackEmbeds(
             out.push(line);
             if (parsed?.id) {
                 const safeId = sanitizeBoxId(parsed.id);
-                const expectedEmbed = `![[.${baseName}.${safeId}.svg]]`;
+                const expectedEmbed = `![[${baseName}.${safeId}.svg]]`;
                 out.push(expectedEmbed);
                 emittedEmbeds.add(safeId);
                 if (i + 1 < lines.length) {
@@ -385,15 +386,28 @@ export class PersistenceQueue {
             }
         }
 
-        // 4. Load boxes from <dir>/.<BaseName>.<boxId>.svg
+        // 4. Load boxes from <dir>/<BaseName>.<boxId>.svg (migrating legacy dot-prefixed files on read)
         const boxElements: CanvasElement[] = [];
         const boxesMeta: Record<string, BoxMetadata> = {};
 
         for (const boxId of boxIds) {
             const boxSvgFile = getBoxSvgPath(filePath, boxId);
-            if (await adapter.exists(boxSvgFile)) {
+            const legacyDotSvgFile = getLegacyDotBoxSvgPath(filePath, boxId);
+            const hasPrimary = await adapter.exists(boxSvgFile);
+            const sourceSvgFile = hasPrimary
+                ? boxSvgFile
+                : ((await adapter.exists(legacyDotSvgFile)) ? legacyDotSvgFile : null);
+            if (sourceSvgFile) {
                 try {
-                    const rawSvg = await adapter.read(boxSvgFile);
+                    const rawSvg = await adapter.read(sourceSvgFile);
+                    if (!hasPrimary && sourceSvgFile === legacyDotSvgFile) {
+                        try {
+                            await this.writeIndexedFile(boxSvgFile, rawSvg);
+                            await adapter.remove(legacyDotSvgFile);
+                        } catch {
+                            // Best-effort auto-migration of legacy dotfile
+                        }
+                    }
                     const boxData = parseBoxSvg(rawSvg, boxId);
                     if (!boxData) continue;
 
@@ -612,7 +626,7 @@ export class PersistenceQueue {
         };
         await adapter.write(getGlobalInkPath(split.mdPath), JSON.stringify(noteRecord));
 
-        // 5. Render and write each active box as standalone <dir>/.<BaseName>.<boxId>.svg
+        // 5. Render and write each active box as standalone <dir>/<BaseName>.<boxId>.svg
         for (const [boxId, elements] of activeBoxes.entries()) {
             const meta = document.boxes?.[boxId];
             const boxH = meta?.height ?? BoxRegistry.getHeight(boxId) ?? 280;
@@ -630,13 +644,23 @@ export class PersistenceQueue {
             };
             const boxSvgPath = getBoxSvgPath(split.mdPath, boxId);
             const boxSvgContent = renderBoxSvg(boxId, elements, 800, boxH, renderMeta);
-            await adapter.write(boxSvgPath, boxSvgContent);
+            await this.writeIndexedFile(boxSvgPath, boxSvgContent);
+            const legacyDotPath = getLegacyDotBoxSvgPath(split.mdPath, boxId);
+            if (legacyDotPath !== boxSvgPath && (await adapter.exists(legacyDotPath))) {
+                try {
+                    await adapter.remove(legacyDotPath);
+                } catch {
+                    // Best-effort cleanup of superseded legacy dotfile
+                }
+            }
         }
 
-        // 6. Delete stale .<BaseName>.<oldBoxId>.svg files for removed boxes
+        // 6. Delete stale <BaseName>.<oldBoxId>.svg or legacy dot-prefixed files for removed boxes
         for (const oldSvgPath of existingSvgPaths) {
             const parsed = parseSatelliteFilename(oldSvgPath);
-            if (parsed?.boxId && !activeSafeIds.has(parsed.boxId)) {
+            const fileName = oldSvgPath.slice(oldSvgPath.lastIndexOf('/') + 1);
+            const isLegacyDot = fileName.startsWith('.');
+            if (parsed?.boxId && (!activeSafeIds.has(parsed.boxId) || isLegacyDot)) {
                 try {
                     if (await adapter.exists(oldSvgPath)) {
                         await adapter.remove(oldSvgPath);
@@ -649,11 +673,11 @@ export class PersistenceQueue {
 
         // 7. Write/update <dir>/<BaseName>.apnote trigger manifest
         const manifest = createApnoteManifest(split.mdPath, activeBoxes.keys());
-        await adapter.write(split.apnotePath, serializeApnoteManifest(manifest));
+        await this.writeIndexedFile(split.apnotePath, serializeApnoteManifest(manifest));
         registerKnownApnote(split.apnotePath);
 
-        // 8. Sync native plugin-disabled fallback embeds ![[.<BaseName>.<boxId>.svg]] inside <BaseName>.md
-        if (currentMd !== null && markdownBoxIds.size > 0 || (currentMd !== null && existingSvgPaths.length > 0)) {
+        // 8. Sync native plugin-disabled fallback embeds ![[<BaseName>.<boxId>.svg]] inside <BaseName>.md
+        if (currentMd !== null && (markdownBoxIds.size > 0 || existingSvgPaths.length > 0)) {
             const updatedMd = syncMarkdownFallbackEmbeds(
                 currentMd,
                 split.baseName,
@@ -671,6 +695,28 @@ export class PersistenceQueue {
                 }
             }
         }
+    }
+
+    /** Writes a non-dot satellite/trigger file through Vault APIs so Obsidian indexes it immediately. */
+    private async writeIndexedFile(path: string, content: string): Promise<void> {
+        const existing = this.app.vault.getAbstractFileByPath?.(path);
+        if (existing && typeof this.app.vault.modify === 'function') {
+            try {
+                await this.app.vault.modify(existing as TFile, content);
+                return;
+            } catch {
+                // Fall through to adapter.write
+            }
+        }
+        if (!existing && typeof (this.app.vault as { create?: (p: string, d: string) => Promise<unknown> }).create === 'function') {
+            try {
+                await (this.app.vault as { create: (p: string, d: string) => Promise<unknown> }).create(path, content);
+                return;
+            } catch {
+                // Fall through to adapter.write
+            }
+        }
+        await this.app.vault.adapter.write(path, content);
     }
 }
 

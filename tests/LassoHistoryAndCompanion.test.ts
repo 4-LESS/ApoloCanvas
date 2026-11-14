@@ -272,12 +272,12 @@ describe('(d) Exportador SVG companion por caja y (e) Modo lectura integral', ()
     test('getBoxSvgPath resolves note-local satellite SVG paths for individual boxes', () => {
         const path1 = 'Notes/Daily Note.md';
         const boxId = 'box-abc';
-        assert.strictEqual(getBoxSvgPath(path1, boxId), 'Notes/.Daily Note.box-abc.svg');
+        assert.strictEqual(getBoxSvgPath(path1, boxId), 'Notes/Daily Note.box-abc.svg');
         assert.strictEqual(getGlobalInkPath(path1), 'Notes/.Daily Note.global.json');
         assert.strictEqual(getApnoteTriggerPath(path1), 'Notes/Daily Note.apnote');
 
         const pathRoot = 'RootNote.md';
-        assert.strictEqual(getBoxSvgPath(pathRoot, 'b1'), '.RootNote.b1.svg');
+        assert.strictEqual(getBoxSvgPath(pathRoot, 'b1'), 'RootNote.b1.svg');
     });
 
     test('renderBoxSvg generates responsive SVG with grid pattern and strokes', () => {

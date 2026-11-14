@@ -6306,7 +6306,9 @@ button.apolo-profile-cancel-btn,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-right: 6px;
-  color: var(--interactive-accent);
+  flex-shrink: 0;
+  margin-right: 5px;
+  color: var(--text-muted);
+  opacity: 0.8;
   vertical-align: middle;
 }

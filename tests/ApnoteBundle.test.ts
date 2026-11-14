@@ -297,15 +297,16 @@ describe('.apnote Satellite Bundle Architecture', () => {
         const mdPath = 'Courses/Physics/Wave Optics.md';
         assert.strictEqual(getApnoteTriggerPath(mdPath), 'Courses/Physics/Wave Optics.apnote');
         assert.strictEqual(getGlobalInkPath(mdPath), 'Courses/Physics/.Wave Optics.global.json');
-        assert.strictEqual(getBoxSvgPath(mdPath, 'box-1'), 'Courses/Physics/.Wave Optics.box-1.svg');
+        assert.strictEqual(getBoxSvgPath(mdPath, 'box-1'), 'Courses/Physics/Wave Optics.box-1.svg');
         assert.strictEqual(resolveMdFromTrigger('Courses/Physics/Wave Optics.apnote'), mdPath);
 
         assert.strictEqual(getApnoteTriggerPath('Root.md'), 'Root.apnote');
         assert.strictEqual(getGlobalInkPath('Root.md'), '.Root.global.json');
-        assert.strictEqual(getBoxSvgPath('Root.md', 'b1'), '.Root.b1.svg');
+        assert.strictEqual(getBoxSvgPath('Root.md', 'b1'), 'Root.b1.svg');
 
         const siblings = new Set(['Courses/Physics/Wave Optics.apnote']);
         assert.strictEqual(isSatelliteFile('Courses/Physics/.Wave Optics.global.json', siblings), true);
+        assert.strictEqual(isSatelliteFile('Courses/Physics/Wave Optics.box-1.svg', siblings), true);
         assert.strictEqual(isSatelliteFile('Courses/Physics/.Wave Optics.box-1.svg', siblings), true);
         assert.strictEqual(isSatelliteFile('Courses/Physics/Wave Optics.md', siblings), true);
         assert.strictEqual(isSatelliteFile('Courses/Physics/Wave Optics.apnote', siblings), false);
@@ -440,8 +441,8 @@ describe('.apnote Satellite Bundle Architecture', () => {
 
         assert.strictEqual(files.get('Notes/.nomedia'), '');
         assert.ok(files.has('Notes/.Physics.global.json'));
-        assert.ok(files.has('Notes/.Physics.box-1.svg'));
-        assert.ok(files.has('Notes/.Physics.box-2.svg'));
+        assert.ok(files.has('Notes/Physics.box-1.svg'));
+        assert.ok(files.has('Notes/Physics.box-2.svg'));
         assert.ok(files.has('Notes/Physics.apnote'));
 
         const manifest = parseApnoteManifest(String(files.get('Notes/Physics.apnote')));
@@ -454,8 +455,8 @@ describe('.apnote Satellite Bundle Architecture', () => {
         });
 
         const updatedMd = String(files.get(mdPath));
-        assert.ok(updatedMd.includes('![[.Physics.box-1.svg]]'), 'Must insert native fallback embed for box-1');
-        assert.ok(updatedMd.includes('![[.Physics.box-2.svg]]'), 'Must insert native fallback embed for box-2');
+        assert.ok(updatedMd.includes('![[Physics.box-1.svg]]'), 'Must insert native fallback embed for box-1');
+        assert.ok(updatedMd.includes('![[Physics.box-2.svg]]'), 'Must insert native fallback embed for box-2');
 
         // Active Live Preview suppresses the adjacent fallback embed via Decoration.replace range
         const mockLiveField = StateField.define<boolean>({
@@ -478,7 +479,7 @@ describe('.apnote Satellite Bundle Architecture', () => {
             assert.strictEqual(ranges.length, 2, 'Live Preview must replace both apolo-space blocks and hide their fallback embeds');
             const firstReplaced = updatedMd.slice(ranges[0].from, ranges[0].to);
             assert.ok(firstReplaced.includes('data-apolo-space="box-1"'));
-            assert.ok(firstReplaced.includes('![[.Physics.box-1.svg]]'), 'Live Preview decoration span must cover adjacent fallback embed');
+            assert.ok(firstReplaced.includes('![[Physics.box-1.svg]]'), 'Live Preview decoration span must cover adjacent fallback embed');
         } finally {
             configureLivePreviewField(null);
         }
@@ -498,12 +499,12 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.deepStrictEqual(loadedShape.startBinding, { elementId: 'stroke-box-1', portId: 'e' });
         assert.deepStrictEqual(loadedShape.endBinding, { elementId: 'stroke-global-1', portId: 'w' });
 
-        // Remove box-2 and flush again -> stale .Physics.box-2.svg must be removed cleanly
+        // Remove box-2 and flush again -> stale Physics.box-2.svg must be removed cleanly
         const withoutBox2Md = [
             '# Wave Optics',
             '',
             '<div class="apolo-space" data-apolo-space="box-1" data-h="260" style="height:260px;"></div>',
-            '![[.Physics.box-1.svg]]',
+            '![[Physics.box-1.svg]]',
             '',
         ].join('\n');
         files.set(mdPath, withoutBox2Md);
@@ -516,8 +517,8 @@ describe('.apnote Satellite Bundle Architecture', () => {
         queue.enqueue(trimmedDoc, { path: mdPath } as any, mdPath);
         await queue.flushSave();
 
-        assert.strictEqual(files.has('Notes/.Physics.box-1.svg'), true);
-        assert.strictEqual(files.has('Notes/.Physics.box-2.svg'), false, 'Stale removed box SVG must be deleted');
+        assert.strictEqual(files.has('Notes/Physics.box-1.svg'), true);
+        assert.strictEqual(files.has('Notes/Physics.box-2.svg'), false, 'Stale removed box SVG must be deleted');
         const updatedManifest = parseApnoteManifest(String(files.get('Notes/Physics.apnote')));
         assert.deepStrictEqual(updatedManifest?.canvases, ['box-1']);
     });
@@ -582,7 +583,7 @@ describe('.apnote Satellite Bundle Architecture', () => {
 
         queue.enqueue(doc, { path: mdPath } as any, mdPath);
         await queue.flushSave();
-        assert.ok(srcFiles.has('Notes/.Chem.box-c1.svg') === false && srcFiles.has('Notes/.Chem.c1.svg'));
+        assert.ok(srcFiles.has('Notes/.Chem.c1.svg') === false && srcFiles.has('Notes/Chem.c1.svg'));
 
         const archiveBuffer = await exportAsPortableApnote(srcVault, mdPath);
         assert.strictEqual(isZipApnote(archiveBuffer), true, 'Exported archive must carry PK\\x03\\x04 ZIP signature');
@@ -595,8 +596,8 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.ok(dstFiles.has('Shared/Inbox/ChemCopy.md'));
         assert.ok(dstFiles.has('Shared/Inbox/ChemCopy.apnote'));
         assert.ok(dstFiles.has('Shared/Inbox/.ChemCopy.global.json'));
-        assert.ok(dstFiles.has('Shared/Inbox/.ChemCopy.c1.svg'));
-        assert.ok(dstFiles.has('Shared/Inbox/.ChemCopy.c2.svg'));
+        assert.ok(dstFiles.has('Shared/Inbox/ChemCopy.c1.svg'));
+        assert.ok(dstFiles.has('Shared/Inbox/ChemCopy.c2.svg'));
 
         const importedManifestRaw = String(dstFiles.get('Shared/Inbox/ChemCopy.apnote'));
         assert.strictEqual(isJsonApnote(importedManifestRaw), true);
@@ -609,9 +610,9 @@ describe('.apnote Satellite Bundle Architecture', () => {
         });
 
         const importedMd = String(dstFiles.get(importedMdPath));
-        assert.ok(importedMd.includes('![[.ChemCopy.c1.svg]]'));
-        assert.ok(importedMd.includes('![[.ChemCopy.c2.svg]]'));
-        assert.ok(!importedMd.includes('![[.Chem.c1.svg]]'));
+        assert.ok(importedMd.includes('![[ChemCopy.c1.svg]]'));
+        assert.ok(importedMd.includes('![[ChemCopy.c2.svg]]'));
+        assert.ok(!importedMd.includes('![[Chem.c1.svg]]'));
 
         const reloadQueue = new PersistenceQueue({ vault: dstVault } as any);
         const reloaded = await reloadQueue.loadNoteInk(importedMdPath);
@@ -625,7 +626,7 @@ describe('.apnote Satellite Bundle Architecture', () => {
             [oldMdPath]: [
                 '# Draft',
                 '<div class="apolo-space" data-apolo-space="panel-1" style="height:200px;"></div>',
-                '![[.Draft.panel-1.svg]]',
+                '![[Draft.panel-1.svg]]',
             ].join('\n'),
             'Notes/Draft.apnote': serializeApnoteManifest(createApnoteManifest(oldMdPath, ['panel-1'])),
             'Notes/.Draft.global.json': JSON.stringify({
@@ -642,7 +643,7 @@ describe('.apnote Satellite Bundle Architecture', () => {
                     timestamp: 10,
                 }],
             }),
-            'Notes/.Draft.panel-1.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="200" data-apolo-box-record="{&quot;boxId&quot;:&quot;panel-1&quot;,&quot;height&quot;:200,&quot;elements&quot;:[]}"></svg>',
+            'Notes/Draft.panel-1.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="200" data-apolo-box-record="{&quot;boxId&quot;:&quot;panel-1&quot;,&quot;height&quot;:200,&quot;elements&quot;:[]}"></svg>',
         });
 
         // Move/rename via .apnote across folders
@@ -652,16 +653,16 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.strictEqual(files.has('Archive/2026/Final.md'), true);
         assert.strictEqual(files.has('Archive/2026/Final.apnote'), true);
         assert.strictEqual(files.has('Archive/2026/.Final.global.json'), true);
-        assert.strictEqual(files.has('Archive/2026/.Final.panel-1.svg'), true);
+        assert.strictEqual(files.has('Archive/2026/Final.panel-1.svg'), true);
 
         assert.strictEqual(files.has('Notes/Draft.md'), false);
         assert.strictEqual(files.has('Notes/Draft.apnote'), false);
         assert.strictEqual(files.has('Notes/.Draft.global.json'), false);
-        assert.strictEqual(files.has('Notes/.Draft.panel-1.svg'), false);
+        assert.strictEqual(files.has('Notes/Draft.panel-1.svg'), false);
 
         const movedMd = String(files.get('Archive/2026/Final.md'));
-        assert.ok(movedMd.includes('![[.Final.panel-1.svg]]'));
-        assert.ok(!movedMd.includes('![[.Draft.panel-1.svg]]'));
+        assert.ok(movedMd.includes('![[Final.panel-1.svg]]'));
+        assert.ok(!movedMd.includes('![[Draft.panel-1.svg]]'));
 
         // Rename again via PersistenceQueue.onFileRenamed using .md path
         const queue = new PersistenceQueue({ vault } as any);
@@ -670,17 +671,17 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.strictEqual(files.has('Published/Release.md'), true);
         assert.strictEqual(files.has('Published/Release.apnote'), true);
         assert.strictEqual(files.has('Published/.Release.global.json'), true);
-        assert.strictEqual(files.has('Published/.Release.panel-1.svg'), true);
+        assert.strictEqual(files.has('Published/Release.panel-1.svg'), true);
 
         const releaseMd = String(files.get('Published/Release.md'));
-        assert.ok(releaseMd.includes('![[.Release.panel-1.svg]]'));
+        assert.ok(releaseMd.includes('![[Release.panel-1.svg]]'));
 
         const reloaded = await queue.loadNoteInk('Published/Release.md');
         assert.strictEqual(reloaded.elements.length, 1);
         assert.strictEqual(reloaded.elements[0].id, 'g-draft');
     });
 
-    test('applyFileExplorerCloaking hides sibling satellites only when .apnote exists and restores cleanly on unload', () => {
+    test('applyFileExplorerCloaking hides sibling satellites only when .apnote exists, syncs active highlight, and restores cleanly on unload', () => {
         clearKnownApnotes();
         const prevDoc = globalThis.document;
         const container = new MockExplorerNode('div');
@@ -703,8 +704,9 @@ describe('.apnote Satellite Bundle Architecture', () => {
 
         const apnoteRow = addRow('Notes/Quantum.apnote');
         const mdRow = addRow('Notes/Quantum.md');
+        mdRow.title.classList.add('is-active');
         const globalRow = addRow('Notes/.Quantum.global.json');
-        const svgRow = addRow('Notes/.Quantum.box1.svg');
+        const svgRow = addRow('Notes/Quantum.box1.svg');
         const plainMdRow = addRow('Notes/Standalone.md');
 
         try {
@@ -712,7 +714,10 @@ describe('.apnote Satellite Bundle Architecture', () => {
 
             assert.strictEqual(apnoteRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), false);
             assert.strictEqual(apnoteRow.title.classList.contains(APOLO_APNOTE_ITEM_CLASS), true);
-            assert.ok(apnoteRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`), 'Must attach Apolo icon to .apnote entry');
+            assert.strictEqual(apnoteRow.title.classList.contains('is-active'), true, 'Must highlight .apnote row when hidden .md sibling is active');
+            const iconEl = apnoteRow.title.querySelector(`.${APOLO_APNOTE_ICON_CLASS}`);
+            assert.ok(iconEl, 'Must attach minimalist Apolo icon to .apnote entry');
+            assert.strictEqual(iconEl.getAttribute('width'), '12');
 
             assert.strictEqual(mdRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
             assert.strictEqual(globalRow.row.classList.contains(APOLO_SATELLITE_HIDDEN_CLASS), true);
