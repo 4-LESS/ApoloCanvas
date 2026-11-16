@@ -139,8 +139,25 @@ export function syncMarkdownFallbackEmbeds(
 
     const out: string[] = [];
     const emittedEmbeds = new Set<string>();
+    const emittedSpaceIds = new Set<string>();
     let inOtherCodeBlock = false;
     let otherFence = '';
+
+    const skipDuplicateAdjacentEmbed = (blockEndIndex: number, rawId: string): number => {
+        if (!rawId) return blockEndIndex;
+        const safeId = sanitizeBoxId(rawId);
+        let lookahead = blockEndIndex + 1;
+        while (lookahead < lines.length && lines[lookahead].trim() === '') {
+            lookahead++;
+        }
+        if (lookahead < lines.length) {
+            const nextMatch = lines[lookahead].match(anyBoxEmbedRegex);
+            if (nextMatch && nextMatch[1] === safeId) {
+                return lookahead;
+            }
+        }
+        return blockEndIndex;
+    };
 
     const emitFallbackEmbedAfterBlock = (blockEndIndex: number, rawId: string): number => {
         if (!rawId) return blockEndIndex;
@@ -180,17 +197,25 @@ export function syncMarkdownFallbackEmbeds(
 
         if (/^\s*```apolo-space\b/i.test(line)) {
             const body: string[] = [];
-            out.push(line);
+            const blockLines: string[] = [line];
             let j = i + 1;
             while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) {
                 body.push(lines[j]);
-                out.push(lines[j]);
+                blockLines.push(lines[j]);
                 j++;
             }
             if (j < lines.length) {
-                out.push(lines[j]);
+                blockLines.push(lines[j]);
             }
             const parsed = parseApoloSpaceBlock(body.join('\n'));
+            if (parsed.id && emittedSpaceIds.has(parsed.id)) {
+                i = skipDuplicateAdjacentEmbed(j, parsed.id);
+                continue;
+            }
+            if (parsed.id) {
+                emittedSpaceIds.add(parsed.id);
+            }
+            out.push(...blockLines);
             i = parsed.id ? emitFallbackEmbedAfterBlock(j, parsed.id) : j;
             continue;
         }
@@ -205,6 +230,13 @@ export function syncMarkdownFallbackEmbeds(
 
         if (line.includes('data-apolo-space')) {
             const parsed = parseApoloSpaceHtml(line);
+            if (parsed?.id && emittedSpaceIds.has(parsed.id)) {
+                i = skipDuplicateAdjacentEmbed(i, parsed.id);
+                continue;
+            }
+            if (parsed?.id) {
+                emittedSpaceIds.add(parsed.id);
+            }
             out.push(line);
             if (parsed?.id) {
                 i = emitFallbackEmbedAfterBlock(i, parsed.id);

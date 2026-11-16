@@ -3,7 +3,11 @@
  * and safely inserting drawing canvas boxes (<div data-apolo-space="id" data-h="N"></div>).
  */
 
-import { htmlEscapeAttribute, normalizeBoxId } from './ApoloSpaceExtension.ts';
+import {
+    findApoloSpaceBlockLineInMarkdown,
+    htmlEscapeAttribute,
+    normalizeBoxId,
+} from './ApoloSpaceExtension.ts';
 
 export function formatCanvasDivTag(boxId: string, height: number): string {
     const cleanId = htmlEscapeAttribute(normalizeBoxId(boxId));
@@ -154,6 +158,11 @@ export function insertCanvasIntoMarkdown(
     cursorLine?: number,
     options?: InsertCanvasOptions,
 ): { updatedContent: string; insertedLine: number } {
+    const existingLine = findApoloSpaceBlockLineInMarkdown(content, boxId);
+    if (existingLine !== -1) {
+        return { updatedContent: content, insertedLine: existingLine };
+    }
+
     const lines = content.split('\n');
     const minLine = Math.max(0, Math.floor(options?.minLine ?? 0));
     const targetLine = findCanvasInsertionLine(content, cursorLine);

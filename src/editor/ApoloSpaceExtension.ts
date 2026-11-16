@@ -333,6 +333,62 @@ export interface SpaceMutation {
     type?: 'insert' | 'update' | 'delete';
 }
 
+/**
+ * Returns the 0-based line index of the first `apolo-space` block (HTML div or fenced codeblock)
+ * matching `boxId`, or `-1` if not present. Ignores unrelated fenced codeblocks.
+ */
+export function findApoloSpaceBlockLineInMarkdown(content: string, boxId: string): number {
+    const normalizedId = normalizeBoxId(boxId);
+    if (!normalizedId || !content) return -1;
+
+    const lines = content.split(/\r?\n/);
+    let inOtherCodeBlock = false;
+    let otherFence = '';
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (inOtherCodeBlock) {
+            if (new RegExp(`^\\s*${escapeRegExp(otherFence)}\\s*$`).test(line)) {
+                inOtherCodeBlock = false;
+                otherFence = '';
+            }
+            continue;
+        }
+
+        if (/^\s*```apolo-space\b/i.test(line)) {
+            const body: string[] = [];
+            let j = i + 1;
+            while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) {
+                body.push(lines[j]);
+                j++;
+            }
+            const parsed = parseApoloSpaceBlock(body.join('\n'));
+            if (parsed.id === normalizedId) {
+                return i;
+            }
+            i = j;
+            continue;
+        }
+
+        const otherFenceMatch = line.match(/^\s*(```|~~~)/);
+        if (otherFenceMatch) {
+            inOtherCodeBlock = true;
+            otherFence = otherFenceMatch[1];
+            continue;
+        }
+
+        if (line.includes('data-apolo-space')) {
+            const parsed = parseApoloSpaceHtml(line);
+            if (parsed?.id === normalizedId) {
+                return i;
+            }
+        }
+    }
+
+    return -1;
+}
+
 export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMutation): string {
     const isRemove = !!mutation.remove || mutation.type === 'delete';
     const isNew = !!mutation.isNew || mutation.type === 'insert';
@@ -400,6 +456,10 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
         }
         return content;
     } else {
+        // Guardrail: never insert a duplicate div if a block with the same ID already exists
+        if (findApoloSpaceBlockLineInMarkdown(content, normalizedId) !== -1) {
+            return content;
+        }
         // Insert new block as <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
         const divTag = `<div class="apolo-space" data-apolo-space="${escapedId}" style="height:${height}px;"></div>`;
         const lines = content.split('\n');
@@ -914,4 +974,38 @@ export function createApoloSpaceExtension(livePreviewField?: StateField<boolean>
         configureLivePreviewField(livePreviewField);
     }
     return apoloSpaceExtension;
+}
+
+/**
+ * Returns true if `spaceEl` is a duplicate occurrence of `boxId` inside a Reading Mode
+ * preview container (an earlier non-hidden element with the same boxId already precedes it).
+ */
+export function isDuplicatePreviewSpaceElement(spaceEl: HTMLElement, boxId: string): boolean {
+    const normalizedId = normalizeBoxId(boxId);
+    if (!normalizedId || !spaceEl) return false;
+    const previewRoot = spaceEl.closest?.('.markdown-preview-view, .markdown-rendered');
+    if (!previewRoot) return false;
+
+    const candidates = previewRoot.querySelectorAll<HTMLElement>(
+        '.apolo-space-block, .apolo-space, [data-apolo-space], [data-apolo-space-id]',
+    );
+    let foundEarlierMatch = false;
+    for (let i = 0; i < candidates.length; i++) {
+        const other = candidates[i];
+        if (other === spaceEl) {
+            return foundEarlierMatch;
+        }
+        if (other.classList?.contains('apolo-duplicate-space-hidden')) {
+            continue;
+        }
+        const rawOtherId = other.dataset?.apoloSpace
+            || other.dataset?.apoloSpaceId
+            || other.getAttribute?.('data-apolo-space')
+            || other.getAttribute?.('data-apolo-space-id')
+            || '';
+        if (normalizeBoxId(rawOtherId) === normalizedId) {
+            foundEarlierMatch = true;
+        }
+    }
+    return false;
 }

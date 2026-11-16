@@ -27,7 +27,7 @@ import { splitNotePath } from './io/ApnoteBundle.ts';
 import { ApnoteWorkspaceCoordinator } from './io/ApnoteWorkspace.ts';
 import { createDotsIcon, DEFAULT_FAVORITES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
-import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
+import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, isDuplicatePreviewSpaceElement, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
 import { ColorPaletteManager } from './ui/settings/ColorPaletteManager.ts';
 
 export interface ApoloCanvasSettings {
@@ -263,9 +263,18 @@ export default class ApoloCanvasPlugin extends Plugin {
                 spaceCandidates.push(foundDescendants[i]);
             }
 
+            const isPreview = !!el.closest('.markdown-preview-view');
             for (const s of spaceCandidates) {
+                const rawId = s.dataset.apoloSpace || s.dataset.apoloSpaceId;
+                const id = rawId ? normalizeBoxId(rawId) : undefined;
+                if (isPreview && id && isDuplicatePreviewSpaceElement(s, id)) {
+                    s.classList.add('apolo-duplicate-space-hidden');
+                    s.classList.remove('apolo-space-block');
+                    s.style.setProperty('display', 'none', 'important');
+                    s.empty?.();
+                    continue;
+                }
                 s.addClass('apolo-space-block');
-                const id = s.dataset.apoloSpace || s.dataset.apoloSpaceId;
                 if (id) {
                     s.dataset.apoloSpaceId = id;
                     s.dataset.apoloSpace = id;
@@ -336,7 +345,6 @@ export default class ApoloCanvasPlugin extends Plugin {
                 }
 
                 // En modo lectura no se muestran asas ni botones de menú; sólo la caja y sus trazos
-                const isPreview = !!el.closest('.markdown-preview-view');
                 const existingHandle = s.querySelector('.apolo-box-handle');
                 const existingOptions = s.querySelector('.apolo-box-options-btn');
                 if (isPreview) {

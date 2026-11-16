@@ -5137,7 +5137,14 @@ export class CanvasController {
     }
 
     async insertCanvas(heightOverride?: number): Promise<string> {
-        const boxId = 'c_' + Math.random().toString(36).slice(2, 8);
+        let boxId = '';
+        const existingEditorContent = this.editor ? this.editor.getValue() : '';
+        do {
+            boxId = 'c_' + Math.random().toString(36).slice(2, 8);
+        } while (
+            this.document.boxes?.[boxId]
+            || (existingEditorContent && existingEditorContent.includes(boxId))
+        );
         const defHeight = heightOverride ?? this.options.defaultBoxHeight ?? 120;
         const defGridStyle = this.options.defaultBoxGridStyle ?? 'dots';
         const defGridDensity = this.options.defaultBoxGridDensity ?? 32;
