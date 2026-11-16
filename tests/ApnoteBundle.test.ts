@@ -631,6 +631,71 @@ describe('.apnote Satellite Bundle Architecture', () => {
         assert.deepStrictEqual(new Set(reloaded.elements.map(e => e.id)), new Set(['g-1', 'b-c1', 'b-c2']));
     });
 
+    test('importPortableApnote refuses to overwrite an existing bundle by default and cleans stale satellites on replace', async () => {
+        const mdPath = 'Notes/Chem.md';
+        const { vault: srcVault } = createMockVault({
+            [mdPath]: [
+                '# Chem',
+                '<div class="apolo-space" data-apolo-space="c1" style="height:200px;"></div>',
+                '![[Chem.c1.svg]]',
+            ].join('\n'),
+            'Notes/Chem.apnote': serializeApnoteManifest(createApnoteManifest(mdPath, ['c1'])),
+            'Notes/Chem.c1.svg': '<svg data-fresh="1"></svg>',
+        });
+        const archiveBuffer = await exportAsPortableApnote(srcVault, mdPath);
+
+        const { vault: dstVault, files: dstFiles } = createMockVault({
+            'Inbox/Chem.md': '# Existing Chem Note',
+            'Inbox/.Chem.global.json': '{"existing":true}',
+            'Inbox/Chem.stale-box.svg': '<svg data-stale="1"></svg>',
+        });
+
+        await assert.rejects(
+            () => importPortableApnote(dstVault, archiveBuffer, 'Inbox', 'Chem'),
+            /already exists/i,
+        );
+        assert.strictEqual(String(dstFiles.get('Inbox/Chem.md')), '# Existing Chem Note');
+        assert.ok(dstFiles.has('Inbox/Chem.stale-box.svg'));
+
+        const replacedPath = await importPortableApnote(dstVault, archiveBuffer, 'Inbox', 'Chem', {
+            onCollision: 'replace',
+        });
+        assert.strictEqual(replacedPath, 'Inbox/Chem.md');
+        assert.ok(String(dstFiles.get('Inbox/Chem.md')).includes('# Chem'));
+        assert.ok(!dstFiles.has('Inbox/Chem.stale-box.svg'), 'Stale SVG not in archive must be removed on replace');
+        const replacedGlobal = JSON.parse(String(dstFiles.get('Inbox/.Chem.global.json')));
+        assert.strictEqual(replacedGlobal.existing, undefined, 'Stale global ink must be replaced by archive global ink');
+        assert.strictEqual(replacedGlobal.notePath, 'Inbox/Chem.md');
+        assert.ok(dstFiles.has('Inbox/Chem.c1.svg'));
+    });
+
+    test('PersistenceQueue.onFileDeleted retains ink and SVGs when only .apnote trigger is deleted while .md exists', async () => {
+        const mdPath = 'Notes/KeepMe/KeepMe.md';
+        const apnotePath = 'Notes/KeepMe/KeepMe.apnote';
+        const globalPath = 'Notes/KeepMe/.KeepMe.global.json';
+        const svgPath = 'Notes/KeepMe/KeepMe.c1.svg';
+        const { vault, files } = createMockVault({
+            [mdPath]: '# KeepMe\n<div class="apolo-space" data-apolo-space="c1" style="height:200px;"></div>',
+            [apnotePath]: serializeApnoteManifest(createApnoteManifest(mdPath, ['c1'])),
+            [globalPath]: '{"elements":[]}',
+            [svgPath]: '<svg></svg>',
+        });
+        const queue = new PersistenceQueue({ vault } as any);
+
+        // Simulate trigger-only deletion while .md still exists
+        files.delete(apnotePath);
+        await queue.onFileDeleted(apnotePath);
+        assert.ok(files.has(mdPath));
+        assert.ok(files.has(globalPath), 'Global ink must be retained when only .apnote trigger is deleted');
+        assert.ok(files.has(svgPath), 'Box SVG must be retained when only .apnote trigger is deleted');
+
+        // Simulate full Markdown note deletion
+        files.delete(mdPath);
+        await queue.onFileDeleted(mdPath);
+        assert.ok(!files.has(globalPath), 'Global ink must be removed when .md note is deleted');
+        assert.ok(!files.has(svgPath), 'Box SVG must be removed when .md note is deleted');
+    });
+
     test('syncAtomicRename and PersistenceQueue.onFileRenamed move all satellites across folders and rewrite embed links', async () => {
         const oldMdPath = 'Notes/Draft.md';
         const { vault, files } = createMockVault({

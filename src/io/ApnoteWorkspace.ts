@@ -23,6 +23,7 @@ import {
     resolveMdFromTrigger,
     splitNotePath,
     syncMakeMdBundleState,
+    unregisterKnownApnote,
 } from './ApnoteBundle.ts';
 
 export const APOLO_NOTE_VIEW_TYPE = 'apolo-note-view';
@@ -174,6 +175,17 @@ export class ApnoteWorkspaceCoordinator {
             if (!parsed || (parsed.kind !== 'md' && parsed.kind !== 'apnote')) {
                 this.scheduleCloaking();
                 return;
+            }
+
+            if (parsed.kind === 'apnote') {
+                unregisterKnownApnote(parsed.apnotePath);
+                const mdStillExists = !!app.vault.getAbstractFileByPath(parsed.mdPath)
+                    || await app.vault.adapter.exists(parsed.mdPath);
+                if (mdStillExists) {
+                    // Deleting only the .apnote trigger must not destroy the Markdown note's ink/SVGs.
+                    this.scheduleCloaking();
+                    return;
+                }
             }
 
             this.syncingDeletes.add(parsed.mdPath);

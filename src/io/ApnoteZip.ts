@@ -323,6 +323,15 @@ export async function exportAsPortableApnote(vault: VaultLike, mdPath: string): 
     return encodeZipEntries(entries);
 }
 
+export interface ImportPortableApnoteOptions {
+    /**
+     * Collision policy when a note bundle already exists at the target path:
+     * - `'error'` (default): throw an error instead of overwriting an existing note bundle.
+     * - `'replace'`: remove stale existing satellites (`<BaseName>.*.svg`, `.<BaseName>.global.json`) before unpacking.
+     */
+    onCollision?: 'error' | 'replace';
+}
+
 /**
  * Unpacks a portable `.apnote` ZIP archive into `targetDir`, writes `<targetDir>/.nomedia`,
  * unpacks `<BaseName>.md`, `.<BaseName>.global.json`, and all `<BaseName>.*.svg` satellites,
@@ -333,9 +342,9 @@ export async function importPortableApnote(
     archiveBuffer: ArrayBuffer | Uint8Array,
     targetDir: string,
     overrideBaseName?: string,
+    options?: ImportPortableApnoteOptions,
 ): Promise<string> {
     const cleanDir = normalizeVaultNotePath(targetDir);
-    await ensureNoMediaFile(vault, cleanDir);
 
     const decodedEntries = await decodeZipEntries(archiveBuffer);
     const decoder = new TextDecoder();
@@ -383,6 +392,43 @@ export async function importPortableApnote(
     const targetMdPath = `${prefix}${targetBaseName}.md`;
     const targetApnotePath = `${prefix}${targetBaseName}.apnote`;
     const targetGlobalPath = `${prefix}.${targetBaseName}.global.json`;
+
+    const mdExists = await vault.adapter.exists(targetMdPath);
+    const globalExists = await vault.adapter.exists(targetGlobalPath);
+    let apnoteManifestExists = false;
+    if (await vault.adapter.exists(targetApnotePath)) {
+        try {
+            const existingData = vault.adapter.readBinary
+                ? await vault.adapter.readBinary(targetApnotePath)
+                : await vault.adapter.read(targetApnotePath);
+            apnoteManifestExists = !isZipApnote(existingData);
+        } catch {
+            apnoteManifestExists = true;
+        }
+    }
+    const existingSvgPaths = await discoverBoxSvgPaths(vault, targetMdPath);
+    const hasCollision = mdExists || globalExists || apnoteManifestExists || existingSvgPaths.length > 0;
+
+    if (hasCollision) {
+        if (options?.onCollision !== 'replace') {
+            throw new Error(`Cannot import .apnote archive: note bundle already exists at "${targetMdPath}".`);
+        }
+        const stalePaths = [...existingSvgPaths];
+        if (globalExists) {
+            stalePaths.push(targetGlobalPath);
+        }
+        for (const stalePath of stalePaths) {
+            try {
+                if (await vault.adapter.exists(stalePath)) {
+                    await vault.adapter.remove(stalePath);
+                }
+            } catch {
+                // Ignore best-effort cleanup failure
+            }
+        }
+    }
+
+    await ensureNoMediaFile(vault, cleanDir);
 
     let mdContent = decoder.decode(safeEntries.get(sourceMdName)!);
     if (archiveBaseName !== targetBaseName) {

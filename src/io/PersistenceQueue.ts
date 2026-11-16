@@ -42,6 +42,7 @@ import {
     serializeApnoteManifest,
     splitNotePath,
     syncAtomicRename,
+    unregisterKnownApnote,
 } from './ApnoteBundle.ts';
 
 export {
@@ -535,8 +536,19 @@ export class PersistenceQueue {
         await this.flushSave();
     }
 
-    /** Cleans up all note-local satellites when a note or `.apnote` file is deleted. */
+    /** Cleans up all note-local satellites when a `.md` note is deleted (or an orphan `.apnote` trigger whose `.md` is already gone). */
     async onFileDeleted(deletedPath: string): Promise<void> {
+        const parsed = parseSatelliteFilename(deletedPath);
+        if (parsed?.kind === 'apnote') {
+            unregisterKnownApnote(parsed.apnotePath);
+            const mdExists = !!this.app.vault.getAbstractFileByPath?.(parsed.mdPath)
+                || await this.app.vault.adapter.exists(parsed.mdPath);
+            if (mdExists) {
+                // Only the .apnote trigger was deleted; retain the Markdown note's ink and box SVGs.
+                return;
+            }
+        }
+
         const split = splitNotePath(deletedPath);
         this.cacheByPageId.delete(deletedPath);
         this.cacheByPageId.delete(split.mdPath);
