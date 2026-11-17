@@ -23,9 +23,11 @@ import {
 } from './ui/favorites/FavoritesStore.ts';
 import { CanvasController } from './engine/CanvasController.ts';
 import { PersistenceQueue, syncBoxPreviewSvg } from './io/PersistenceQueue.ts';
+import { splitNotePath } from './io/ApnoteBundle.ts';
+import { ApnoteWorkspaceCoordinator } from './io/ApnoteWorkspace.ts';
 import { createDotsIcon, DEFAULT_FAVORITES } from './ui/theme.ts';
 import { openLocalGraph } from './ui/LinkSuggestModal.ts';
-import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
+import { BoxRegistry, boxRegistryUpdateEffect, createApoloSpaceExtension, isDuplicatePreviewSpaceElement, normalizeBoxId } from './editor/ApoloSpaceExtension.ts';
 import { ColorPaletteManager } from './ui/settings/ColorPaletteManager.ts';
 
 export interface ApoloCanvasSettings {
@@ -33,7 +35,6 @@ export interface ApoloCanvasSettings {
     defaultPenWidth: number;
     palmRejectionCooldownMs: number;
     autoSaveDebounceMs: number;
-    companionSvgExport: boolean;
     penInputEnabled: boolean;
     enableMouseDrawing: boolean;
     shapeRecognition: boolean;
@@ -59,7 +60,6 @@ export const DEFAULT_SETTINGS: ApoloCanvasSettings = {
     defaultPenWidth: 3,
     palmRejectionCooldownMs: 400,
     autoSaveDebounceMs: 500,
-    companionSvgExport: true,
     penInputEnabled: true,
     enableMouseDrawing: false,
     shapeRecognition: true,
@@ -110,6 +110,7 @@ export default class ApoloCanvasPlugin extends Plugin {
     private saveStatusBarItem: HTMLElement | null = null;
     private isShuttingDown = false;
     private mountPromise: Promise<void> = Promise.resolve();
+    private apnoteWorkspace: ApnoteWorkspaceCoordinator | null = null;
 
     async onload(): Promise<void> {
         await this.loadSettings();
@@ -118,12 +119,26 @@ export default class ApoloCanvasPlugin extends Plugin {
             this.settings.autoSaveDebounceMs,
             () => new Notice('Apolo Canvas: El guardado falló; revisa la consola para más detalles.'),
         );
-        this.persistence.setCompanionSvgEnabled(this.settings.companionSvgExport);
+        this.persistence.setAutoBundleNoteFolder(true);
+        this.persistence.setOnPersistComplete(() => this.apnoteWorkspace?.scheduleCloaking());
         BoxRegistry.setDefaultBgTheme(this.settings.defaultBoxBgTheme || 'default');
 
-        await ensureFolder(this.app, '.apolocanvas');
-        await ensureFolder(this.app, '.apolocanvas/boxes');
-        await ensureFolder(this.app, '.apolocanvas/notes');
+        this.apnoteWorkspace = new ApnoteWorkspaceCoordinator({
+            plugin: this,
+            app: this.app,
+            isShuttingDown: () => this.isShuttingDown,
+            getPersistence: () => this.persistence,
+            getController: () => this.controller,
+            getMountedFilePath: () => this.mountedFilePath,
+            setMountedFilePath: (path) => { this.mountedFilePath = path; },
+            destroyController: () => this.destroyController(),
+            mountActiveEditor: () => this.mountActiveEditor(),
+            onLayoutReadyMount: () => {
+                void this.mountActiveEditor();
+                this.showFirstTimeNoticeIfNeeded();
+            },
+        });
+        this.apnoteWorkspace.register();
 
         // Register CM6 Live Preview widget extension for apolo-space blocks
         this.registerEditorExtension(createApoloSpaceExtension(editorLivePreviewField));
@@ -171,6 +186,74 @@ export default class ApoloCanvasPlugin extends Plugin {
 
         // Register Reading mode section info post-processor for precise paragraph anchoring
         this.registerMarkdownPostProcessor((el, ctx) => {
+            // Suppress native fallback satellite embeds (`![[<BaseName>.<boxId>.svg]]`) while plugin is active
+            const sourceBaseName = ctx?.sourcePath ? splitNotePath(ctx.sourcePath).baseName : '';
+            const isFallbackSvgFilename = (filename: string): boolean => {
+                const lowerFile = filename.toLowerCase();
+                const lowerBase = sourceBaseName.toLowerCase();
+                return sourceBaseName
+                    ? (lowerFile.startsWith(`${lowerBase}.`) || lowerFile.startsWith(`.${lowerBase}.`)) && lowerFile.endsWith('.svg')
+                    : /^\.?[^/\\]+\.[a-z0-9_-]+\.svg$/i.test(filename);
+            };
+
+            const embedCandidates: HTMLElement[] = [];
+            if (el.matches?.('.internal-embed')) {
+                embedCandidates.push(el);
+            }
+            const foundEmbeds = el.querySelectorAll<HTMLElement>('.internal-embed');
+            for (let i = 0; i < foundEmbeds.length; i++) {
+                embedCandidates.push(foundEmbeds[i]);
+            }
+            for (const embedEl of embedCandidates) {
+                const src = embedEl.getAttribute('src') || '';
+                const filename = src.split(/[\\/]/).pop() || '';
+                if (!isFallbackSvgFilename(filename)) continue;
+
+                embedEl.addClass('apolo-fallback-embed-hidden');
+                const parentEl = embedEl.parentElement;
+                if (parentEl && (parentEl.tagName === 'P' || parentEl.tagName === 'DIV')) {
+                    let hasOtherContent = false;
+                    for (let c = 0; c < parentEl.childNodes.length; c++) {
+                        const child = parentEl.childNodes[c];
+                        if (child === embedEl) continue;
+                        if (child.nodeType === 3 && !(child.nodeValue ?? '').trim()) continue;
+                        if (child instanceof HTMLElement && child.classList.contains('apolo-fallback-embed-hidden')) continue;
+                        hasOtherContent = true;
+                        break;
+                    }
+                    if (!hasOtherContent) {
+                        parentEl.addClass('apolo-fallback-embed-hidden');
+                    }
+                }
+                const cmEmbedBlock = embedEl.closest<HTMLElement>('.cm-embed-block');
+                if (cmEmbedBlock && !cmEmbedBlock.querySelector('.apolo-space-block')) {
+                    cmEmbedBlock.addClass('apolo-fallback-embed-hidden');
+                }
+            }
+
+            // Strip raw fallback embed text when adjacent to an HTML block without a separating blank line
+            const rawFallbackLineRe = /^[ \t]*!\[\[\.?[^\]\r\n]+\.[a-z0-9_-]+\.svg(?:\|[^\]]*)?\]\][ \t]*\r?\n?/gim;
+            const stripFallbackTextNodes = (node: Node): void => {
+                if (node.nodeType === 3) {
+                    const val = node.nodeValue;
+                    if (val && val.includes('![[') && val.toLowerCase().includes('.svg')) {
+                        const cleaned = val.replace(rawFallbackLineRe, (lineText) => {
+                            const innerMatch = lineText.match(/!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/i);
+                            const fname = (innerMatch?.[1] || '').split(/[\\/]/).pop() || '';
+                            return isFallbackSvgFilename(fname) ? '' : lineText;
+                        });
+                        if (cleaned !== val) {
+                            node.nodeValue = cleaned;
+                        }
+                    }
+                    return;
+                }
+                for (let i = 0; i < node.childNodes.length; i++) {
+                    stripFallbackTextNodes(node.childNodes[i]);
+                }
+            };
+            stripFallbackTextNodes(el);
+
             const spaceCandidates: HTMLElement[] = [];
             if (el.matches?.('.apolo-space, [data-apolo-space], [data-apolo-space-id]')) {
                 spaceCandidates.push(el);
@@ -180,9 +263,18 @@ export default class ApoloCanvasPlugin extends Plugin {
                 spaceCandidates.push(foundDescendants[i]);
             }
 
+            const isPreview = !!el.closest('.markdown-preview-view');
             for (const s of spaceCandidates) {
+                const rawId = s.dataset.apoloSpace || s.dataset.apoloSpaceId;
+                const id = rawId ? normalizeBoxId(rawId) : undefined;
+                if (isPreview && id && isDuplicatePreviewSpaceElement(s, id)) {
+                    s.classList.add('apolo-duplicate-space-hidden');
+                    s.classList.remove('apolo-space-block');
+                    s.style.setProperty('display', 'none', 'important');
+                    s.empty?.();
+                    continue;
+                }
                 s.addClass('apolo-space-block');
-                const id = s.dataset.apoloSpace || s.dataset.apoloSpaceId;
                 if (id) {
                     s.dataset.apoloSpaceId = id;
                     s.dataset.apoloSpace = id;
@@ -253,7 +345,6 @@ export default class ApoloCanvasPlugin extends Plugin {
                 }
 
                 // En modo lectura no se muestran asas ni botones de menú; sólo la caja y sus trazos
-                const isPreview = !!el.closest('.markdown-preview-view');
                 const existingHandle = s.querySelector('.apolo-box-handle');
                 const existingOptions = s.querySelector('.apolo-box-options-btn');
                 if (isPreview) {
@@ -369,40 +460,7 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.addSettingTab(new ApoloCanvasSettingsTab(this.app, this));
         this.registerCommands();
 
-        this.registerEvent(this.app.workspace.on('active-leaf-change', () => { void this.mountActiveEditor(); }));
-        this.registerEvent(this.app.workspace.on('layout-change', () => { void this.mountActiveEditor(); }));
         this.registerEvent(this.app.workspace.on('editor-change', () => this.controller?.onEditorChange()));
-        this.registerEvent(this.app.workspace.on('file-open', () => { void this.mountActiveEditor(); }));
-
-        // Vault note renaming: preserve ink document association and rename companion SVG without data loss
-        this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
-            if (!(file instanceof TFile)) return;
-            try {
-                this.controller?.commitActiveStroke();
-                await this.persistence?.flush();
-            } catch (err) {
-                console.error('[ApoloCanvas] Flush failed before rename:', err);
-            }
-            if (this.mountedFilePath === oldPath) {
-                this.mountedFilePath = file.path;
-            }
-            this.controller?.onFileRenamed(file, oldPath);
-            await this.persistence?.onFileRenamed(oldPath, file);
-        }));
-
-        // Vault note deletion: clean up note-level ink storage (boxes kept as orphans)
-        this.registerEvent(this.app.vault.on('delete', async (file) => {
-            if (!(file instanceof TFile)) return;
-            if (this.mountedFilePath === file.path) {
-                await this.destroyController();
-            }
-            await this.persistence?.onFileDeleted(file.path);
-        }));
-
-        this.app.workspace.onLayoutReady(() => {
-            void this.mountActiveEditor();
-            this.showFirstTimeNoticeIfNeeded();
-        });
 
         // App closing / tab hiding / lifecycle hooks: ensure immediate flush of all pending ink data
         this.registerDomEvent(window, 'beforeunload', () => {
@@ -417,10 +475,12 @@ export default class ApoloCanvasPlugin extends Plugin {
         });
 
         this.registerDomEvent(window, 'keydown', this.onKeyDown, true);
-        console.log('[ApoloCanvas] Ready: S-Pen input, editor overlay and sidecar persistence enabled.');
+        console.log('[ApoloCanvas] Ready: S-Pen input, editor overlay and .apnote satellite persistence enabled.');
     }
 
     onunload(): void {
+        this.apnoteWorkspace?.destroy();
+        this.apnoteWorkspace = null;
         void this.flushAndDestroy();
         console.log('[ApoloCanvas] Unloaded.');
     }
@@ -522,7 +582,6 @@ export default class ApoloCanvasPlugin extends Plugin {
     }
 
     setAutoSaveDelay(value: number): void { this.persistence?.setDebounceMs(value); }
-    setCompanionExport(value: boolean): void { this.persistence?.setCompanionSvgEnabled(value); }
     setShapeRecognition(value: boolean): void { this.controller?.setShapeRecognition(value); }
     setStraightenLines(value: boolean): void {
         this.settings.straightenLines = value;
@@ -794,6 +853,14 @@ export default class ApoloCanvasPlugin extends Plugin {
         });
 
         this.addCommand({
+            id: 'apolo-export-portable-apnote',
+            name: 'Export note as portable .apnote package',
+            callback: () => {
+                void this.apnoteWorkspace?.exportNoteAsPortablePackage();
+            },
+        });
+
+        this.addCommand({
             id: 'apolo-open-local-graph',
             name: 'Apolo Canvas: Abrir grafo local',
             callback: () => openLocalGraph(this.app),
@@ -926,9 +993,9 @@ export default class ApoloCanvasPlugin extends Plugin {
             view.addAction('git-fork', 'Apolo Canvas: Grafo local', () => {
                 openLocalGraph(this.app);
             });
-            view.addAction('file-down', 'Apolo Canvas: Exportar SVG companion', () => {
+            view.addAction('file-down', 'Apolo Canvas: Exportar paquete portátil .apnote', () => {
                 void this.persistence.flush().then(() => {
-                    new Notice('Apolo Canvas: SVG companion sincronizado en assets/ink');
+                    new Notice('Apolo Canvas: Manifiesto .apnote y satélites sincronizados.');
                 });
             });
         }
@@ -1047,6 +1114,7 @@ export default class ApoloCanvasPlugin extends Plugin {
         this.mountedScroller = scroller;
         this.mountedFilePath = file.path;
         this.mountedMode = mode;
+        this.apnoteWorkspace?.scheduleCloaking();
 
         if (mode === 'source') {
             this.applyWorkspaceToolStateToController(this.controller);
@@ -1136,28 +1204,6 @@ export default class ApoloCanvasPlugin extends Plugin {
             } else {
                 el.style.removeProperty('background-color');
             }
-        }
-
-        // 4. Update all vault box persistence files (.apolocanvas/boxes/*.json) retroactively
-        try {
-            const adapter = this.app.vault.adapter;
-            if (await adapter.exists('.apolocanvas/boxes')) {
-                const listing = await adapter.list('.apolocanvas/boxes');
-                for (const filePath of listing.files) {
-                    if (filePath.endsWith('.json')) {
-                        try {
-                            const raw = await adapter.read(filePath);
-                            const parsed = JSON.parse(raw);
-                            if (parsed && typeof parsed === 'object') {
-                                parsed.bgTheme = newTheme;
-                                await adapter.write(filePath, JSON.stringify(parsed));
-                            }
-                        } catch { /* skip invalid */ }
-                    }
-                }
-            }
-        } catch (err) {
-            console.error('[ApoloCanvas] Failed to update vault boxes retroactively:', err);
         }
     }
 
@@ -1299,17 +1345,6 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.enableMouseDrawing)
                 .onChange(async value => {
                     this.plugin.setMouseDrawing(value);
-                    await this.plugin.saveSettings();
-                }));
-
-        new Setting(containerEl)
-            .setName('Exportación companion SVG')
-            .setDesc('Mantener copia SVG vectorial nativa en assets/ink sincronizada.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.companionSvgExport)
-                .onChange(async value => {
-                    this.plugin.settings.companionSvgExport = value;
-                    this.plugin.setCompanionExport(value);
                     await this.plugin.saveSettings();
                 }));
 
@@ -1497,9 +1532,4 @@ class ApoloCanvasSettingsTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
     }
-}
-
-async function ensureFolder(app: App, path: string): Promise<void> {
-    const adapter = app.vault.adapter;
-    if (!(await adapter.exists(path))) await adapter.mkdir(path);
 }

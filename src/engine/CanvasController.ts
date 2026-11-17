@@ -80,6 +80,7 @@ import {
     type ShapeStyleConfig,
 } from './shapes/index.ts';
 import { SpatialGrid } from './spatial/SpatialGrid.ts';
+import { sanitizeBoxId } from '../io/ApnoteBundle.ts';
 import { PersistenceQueue, syncBoxPreviewSvg } from '../io/PersistenceQueue.ts';
 import {
     HOLD_TO_SNAP_DWELL_MS,
@@ -1259,6 +1260,17 @@ export class CanvasController {
     }
 
     private deleteBox(boxId: string): void {
+        const normalizedId = normalizeBoxId(boxId);
+        if (this.document.boxes) {
+            delete this.document.boxes[boxId];
+            delete this.document.boxes[normalizedId];
+        }
+        const rawBlockId = `space:${boxId}`;
+        const normalizedBlockId = `space:${normalizedId}`;
+        this.document.elements = this.document.elements.filter(
+            el => el.blockId !== rawBlockId && el.blockId !== normalizedBlockId
+        );
+        this.rebuildIndex();
         this.queueSpaceMutation({ type: 'delete', id: boxId });
         for (const el of this.findSpaceElementsById(boxId)) {
             el.remove();
@@ -5125,7 +5137,14 @@ export class CanvasController {
     }
 
     async insertCanvas(heightOverride?: number): Promise<string> {
-        const boxId = 'c_' + Math.random().toString(36).slice(2, 8);
+        let boxId = '';
+        const existingEditorContent = this.editor ? this.editor.getValue() : '';
+        do {
+            boxId = 'c_' + Math.random().toString(36).slice(2, 8);
+        } while (
+            this.document.boxes?.[boxId]
+            || (existingEditorContent && existingEditorContent.includes(boxId))
+        );
         const defHeight = heightOverride ?? this.options.defaultBoxHeight ?? 120;
         const defGridStyle = this.options.defaultBoxGridStyle ?? 'dots';
         const defGridDensity = this.options.defaultBoxGridDensity ?? 32;
@@ -5254,8 +5273,23 @@ export class CanvasController {
                             const line = doc.line(l);
                             if (line.text.includes('data-apolo-space') && idRegex.test(line.text)) {
                                 if (isDelete) {
+                                    let endLineNum = l;
+                                    let probeLineNum = l + 1;
+                                    while (probeLineNum <= doc.lines && doc.line(probeLineNum).text.trim() === '') {
+                                        probeLineNum++;
+                                    }
+                                    if (probeLineNum <= doc.lines) {
+                                        const candidateLine = doc.line(probeLineNum);
+                                        const safeSvgId = escapeRegExp(sanitizeBoxId(normalizedMutId));
+                                        const rawSvgId = escapeRegExp(normalizedMutId);
+                                        const fallbackPattern = safeSvgId === rawSvgId ? safeSvgId : `(?:${safeSvgId}|${rawSvgId})`;
+                                        const fallbackRegex = new RegExp(`^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.${fallbackPattern}\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`, 'i');
+                                        if (fallbackRegex.test(candidateLine.text)) {
+                                            endLineNum = probeLineNum;
+                                        }
+                                    }
                                     const from = line.from;
-                                    const to = l < doc.lines ? doc.line(l + 1).from : line.to;
+                                    const to = endLineNum < doc.lines ? doc.line(endLineNum + 1).from : doc.line(endLineNum).to;
                                     changes.push({ from, to, insert: '' });
                                 } else {
                                     const match = line.text.match(idRegex);

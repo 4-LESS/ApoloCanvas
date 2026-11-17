@@ -1,8 +1,9 @@
-import { type Extension, RangeSetBuilder, StateEffect, StateField, type EditorState } from '@codemirror/state';
+import { EditorSelection, EditorState, type Extension, Prec, RangeSetBuilder, StateEffect, StateField, type Transaction } from '@codemirror/state';
 import {
     Decoration,
     type DecorationSet,
     EditorView,
+    keymap,
     ViewPlugin,
     type ViewUpdate,
     WidgetType,
@@ -10,6 +11,7 @@ import {
 
 import { BoxRegistry } from '../core/BoxRegistry.ts';
 import type { BoxAccentColor, BoxBgTheme, BoxGridStyle } from '../core/types.ts';
+import { sanitizeBoxId } from '../io/ApnoteBundle.ts';
 import { createDotsIcon } from '../ui/theme.ts';
 export { BoxRegistry };
 
@@ -331,6 +333,62 @@ export interface SpaceMutation {
     type?: 'insert' | 'update' | 'delete';
 }
 
+/**
+ * Returns the 0-based line index of the first `apolo-space` block (HTML div or fenced codeblock)
+ * matching `boxId`, or `-1` if not present. Ignores unrelated fenced codeblocks.
+ */
+export function findApoloSpaceBlockLineInMarkdown(content: string, boxId: string): number {
+    const normalizedId = normalizeBoxId(boxId);
+    if (!normalizedId || !content) return -1;
+
+    const lines = content.split(/\r?\n/);
+    let inOtherCodeBlock = false;
+    let otherFence = '';
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (inOtherCodeBlock) {
+            if (new RegExp(`^\\s*${escapeRegExp(otherFence)}\\s*$`).test(line)) {
+                inOtherCodeBlock = false;
+                otherFence = '';
+            }
+            continue;
+        }
+
+        if (/^\s*```apolo-space\b/i.test(line)) {
+            const body: string[] = [];
+            let j = i + 1;
+            while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) {
+                body.push(lines[j]);
+                j++;
+            }
+            const parsed = parseApoloSpaceBlock(body.join('\n'));
+            if (parsed.id === normalizedId) {
+                return i;
+            }
+            i = j;
+            continue;
+        }
+
+        const otherFenceMatch = line.match(/^\s*(```|~~~)/);
+        if (otherFenceMatch) {
+            inOtherCodeBlock = true;
+            otherFence = otherFenceMatch[1];
+            continue;
+        }
+
+        if (line.includes('data-apolo-space')) {
+            const parsed = parseApoloSpaceHtml(line);
+            if (parsed?.id === normalizedId) {
+                return i;
+            }
+        }
+    }
+
+    return -1;
+}
+
 export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMutation): string {
     const isRemove = !!mutation.remove || mutation.type === 'delete';
     const isNew = !!mutation.isNew || mutation.type === 'insert';
@@ -362,6 +420,16 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
         // Also remove codeblock if present (supporting quoted, escaped, or unquoted ID)
         const codeBlockRegex = new RegExp(`[\\r\\n]*\`\`\`apolo-space[\\s\\S]*?id:\\s*(?:${codeIdPattern})[\\s\\S]*?\`\`\``, 'gi');
         res = res.replace(codeBlockRegex, '');
+        // Also remove adjacent fallback SVG embed ![[.<BaseName>.<boxId>.svg]]
+        const safeBoxId = sanitizeBoxId(normalizedId);
+        const embedIdVariants = safeBoxId === normalizedId
+            ? [safeId]
+            : [escapeRegExp(safeBoxId), safeId];
+        const embedRegex = new RegExp(
+            `[\\r\\n]*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${embedIdVariants.join('|')})\\.svg(?:\\|[^\\]]*)?\\]\\]`,
+            'gi',
+        );
+        res = res.replace(embedRegex, '');
         return res;
     }
 
@@ -388,6 +456,10 @@ export function applySpaceMutationToMarkdown(content: string, mutation: SpaceMut
         }
         return content;
     } else {
+        // Guardrail: never insert a duplicate div if a block with the same ID already exists
+        if (findApoloSpaceBlockLineInMarkdown(content, normalizedId) !== -1) {
+            return content;
+        }
         // Insert new block as <div class="apolo-space" data-apolo-space="..." style="height:...px;"></div>
         const divTag = `<div class="apolo-space" data-apolo-space="${escapedId}" style="height:${height}px;"></div>`;
         const lines = content.split('\n');
@@ -406,6 +478,7 @@ interface SpaceDecorationItem {
     to: number;
     height: number;
     id: string;
+    hidden?: boolean;
 }
 
 export function isLivePreviewState(
@@ -419,6 +492,42 @@ export function isLivePreviewState(
     } catch {
         return true;
     }
+}
+
+function buildBoxIdPattern(boxIds: Iterable<string>): string {
+    const variants: string[] = [];
+    const seen = new Set<string>();
+    for (const rawId of boxIds) {
+        if (!rawId) continue;
+        const safeId = sanitizeBoxId(rawId);
+        for (const candidate of [safeId, rawId]) {
+            if (candidate && !seen.has(candidate)) {
+                seen.add(candidate);
+                variants.push(escapeRegExp(candidate));
+            }
+        }
+    }
+    return variants.join('|');
+}
+
+function extendToAdjacentFallbackEmbed(doc: EditorState['doc'], endLineNumber: number, boxId: string): number {
+    const baseEndLine = doc.line(endLineNumber);
+    let lineNum = endLineNumber + 1;
+    while (lineNum <= doc.lines && doc.line(lineNum).text.trim() === '') {
+        lineNum++;
+    }
+    if (lineNum > doc.lines) return baseEndLine.to;
+    const candidateLine = doc.line(lineNum);
+    const idPattern = buildBoxIdPattern([boxId]);
+    if (!idPattern) return baseEndLine.to;
+    const embedLineRegex = new RegExp(
+        `^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${idPattern})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+        'i',
+    );
+    if (embedLineRegex.test(candidateLine.text)) {
+        return candidateLine.to;
+    }
+    return baseEndLine.to;
 }
 
 function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
@@ -454,14 +563,14 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
             const line = doc.lineAt(match.index);
             items.push({
                 from: line.from,
-                to: line.to,
+                to: extendToAdjacentFallbackEmbed(doc, line.number, parsed.id),
                 height: parsed.height,
                 id: parsed.id,
             });
         }
     }
 
-    // 2. Match ```apolo-space ... ``` codeblocks (backward compatibility)
+    // 2. Match ```apolo-space ... ``` codeblocks
     const codeRegex = /```apolo-space\b([\s\S]*?)```/gi;
     while ((match = codeRegex.exec(text)) !== null) {
         const parsed = parseApoloSpaceBlock(match[1]);
@@ -483,10 +592,34 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
             const endLine = doc.lineAt(match.index + match[0].length);
             items.push({
                 from: startLine.from,
-                to: endLine.to,
+                to: extendToAdjacentFallbackEmbed(doc, endLine.number, parsed.id),
                 height: parsed.height,
                 id: parsed.id,
             });
+        }
+    }
+
+    // 3. Also hide any standalone/non-adjacent fallback SVG embed lines for active boxes
+    if (seenIds.size > 0) {
+        const allIdsPattern = buildBoxIdPattern(seenIds);
+        if (allIdsPattern) {
+            const standaloneEmbedRegex = new RegExp(
+                `^\\s*!\\[\\[\\.?[^\\]\\r\\n]+\\.(?:${allIdsPattern})\\.svg(?:\\|[^\\]]*)?\\]\\]\\s*$`,
+                'i',
+            );
+            for (let lineNum = 1; lineNum <= doc.lines; lineNum++) {
+                const line = doc.line(lineNum);
+                const covered = items.some((it) => line.from >= it.from && line.to <= it.to);
+                if (!covered && standaloneEmbedRegex.test(line.text)) {
+                    items.push({
+                        from: line.from,
+                        to: line.to,
+                        height: 0,
+                        id: '',
+                        hidden: true,
+                    });
+                }
+            }
         }
     }
 
@@ -495,14 +628,24 @@ function buildApoloSpaceDecorations(state: EditorState): DecorationSet {
 
     for (const item of items) {
         if (item.from <= item.to) {
-            builder.add(
-                item.from,
-                item.to,
-                Decoration.replace({
-                    widget: new ApoloSpaceWidget(item.height, item.id),
-                    block: true,
-                }),
-            );
+            if (item.hidden) {
+                builder.add(
+                    item.from,
+                    item.to,
+                    Decoration.replace({
+                        block: true,
+                    }),
+                );
+            } else {
+                builder.add(
+                    item.from,
+                    item.to,
+                    Decoration.replace({
+                        widget: new ApoloSpaceWidget(item.height, item.id),
+                        block: true,
+                    }),
+                );
+            }
         } else {
             console.warn('[ApoloCanvas] Skipping malformed space block range:', item);
         }
@@ -522,8 +665,187 @@ export const apoloSpaceField = StateField.define<DecorationSet>({
         }
         return decorations.map(tr.changes);
     },
-    provide: (field) => EditorView.decorations.from(field),
+    provide: (field) => [
+        EditorView.decorations.from(field),
+        EditorView.atomicRanges.of((view) => view.state.field(field, false) ?? Decoration.none),
+    ],
 });
+
+export function collectSpaceRanges(state: EditorState): Array<{ from: number; to: number }> {
+    const decos = state.field(apoloSpaceField, false);
+    if (!decos) return [];
+    const ranges: Array<{ from: number; to: number }> = [];
+    const iter = decos.iter();
+    while (iter.value) {
+        ranges.push({ from: iter.from, to: iter.to });
+        iter.next();
+    }
+    return ranges;
+}
+
+function isInsideAnySpaceRange(
+    pos: number,
+    ranges: ReadonlyArray<{ from: number; to: number }>,
+): { from: number; to: number } | null {
+    for (const r of ranges) {
+        if (pos >= r.from && pos <= r.to) return r;
+    }
+    return null;
+}
+
+function findLineAboveSpace(
+    state: EditorState,
+    from: number,
+    ranges: ReadonlyArray<{ from: number; to: number }>,
+) {
+    const doc = state.doc;
+    let lineNum = doc.lineAt(from).number - 1;
+    while (lineNum >= 1) {
+        const line = doc.line(lineNum);
+        const hit = isInsideAnySpaceRange(line.from, ranges);
+        if (!hit) return line;
+        lineNum = doc.lineAt(hit.from).number - 1;
+    }
+    return null;
+}
+
+function findLineBelowSpace(
+    state: EditorState,
+    to: number,
+    ranges: ReadonlyArray<{ from: number; to: number }>,
+) {
+    const doc = state.doc;
+    let lineNum = doc.lineAt(to).number + 1;
+    while (lineNum <= doc.lines) {
+        const line = doc.line(lineNum);
+        const hit = isInsideAnySpaceRange(line.from, ranges);
+        if (!hit) return line;
+        lineNum = doc.lineAt(hit.to).number + 1;
+    }
+    return null;
+}
+
+export const apoloSpaceGuardFilter = EditorState.transactionFilter.of((tr: Transaction) => {
+    if (!tr.selection || !isLivePreviewState(tr.state)) return tr;
+    const sel = tr.selection.main;
+    if (!sel.empty) return tr;
+
+    const ranges = collectSpaceRanges(tr.state);
+    if (ranges.length === 0) return tr;
+
+    const hit = isInsideAnySpaceRange(sel.head, ranges);
+    if (!hit) return tr;
+
+    const above = findLineAboveSpace(tr.state, hit.from, ranges);
+    const below = findLineBelowSpace(tr.state, hit.to, ranges);
+    if (!above && !below) return tr;
+
+    const prevHead = tr.startState.selection.main.head;
+    let targetPos: number;
+    if (prevHead < hit.from && below) {
+        targetPos = below.from;
+    } else if (prevHead > hit.to && above) {
+        targetPos = above.to;
+    } else if (above && below) {
+        targetPos = (sel.head - hit.from) <= (hit.to - sel.head) ? above.to : below.from;
+    } else {
+        targetPos = above ? above.to : below!.from;
+    }
+
+    return [tr, { selection: EditorSelection.cursor(targetPos), scrollIntoView: true }];
+});
+
+function handleArrowJump(
+    view: EditorView,
+    direction: 'up' | 'down' | 'left' | 'right',
+): boolean {
+    if (!isLivePreviewState(view.state) || !view.state.selection.main.empty) return false;
+    const head = view.state.selection.main.head;
+    const doc = view.state.doc;
+    const ranges = collectSpaceRanges(view.state);
+    if (ranges.length === 0) return false;
+
+    const curLine = doc.lineAt(head);
+    const forward = direction === 'down' || direction === 'right';
+    const hit = isInsideAnySpaceRange(head, ranges)
+        ?? (direction === 'down'
+            ? ranges.find((r) => doc.lineAt(r.from).number === curLine.number + 1) ?? null
+            : direction === 'up'
+                ? ranges.find((r) => doc.lineAt(r.to).number === curLine.number - 1) ?? null
+                : direction === 'right' && head === curLine.to
+                    ? ranges.find((r) => doc.lineAt(r.from).number === curLine.number + 1) ?? null
+                    : direction === 'left' && head === curLine.from
+                        ? ranges.find((r) => doc.lineAt(r.to).number === curLine.number - 1) ?? null
+                        : null);
+    if (!hit) return false;
+
+    if (forward) {
+        const below = findLineBelowSpace(view.state, hit.to, ranges);
+        if (!below) return false;
+        const target = direction === 'down'
+            ? Math.min(below.from + (head - curLine.from), below.to)
+            : below.from;
+        view.dispatch({ selection: EditorSelection.cursor(target), scrollIntoView: true });
+        return true;
+    }
+
+    const above = findLineAboveSpace(view.state, hit.from, ranges);
+    if (!above) return false;
+    const target = direction === 'up'
+        ? Math.min(above.from + (head - curLine.from), above.to)
+        : above.to;
+    view.dispatch({ selection: EditorSelection.cursor(target), scrollIntoView: true });
+    return true;
+}
+
+export const apoloSpaceNavigationKeymap = Prec.high(keymap.of([
+    { key: 'ArrowDown', run: (view) => handleArrowJump(view, 'down') },
+    { key: 'ArrowUp', run: (view) => handleArrowJump(view, 'up') },
+    { key: 'ArrowRight', run: (view) => handleArrowJump(view, 'right') },
+    { key: 'ArrowLeft', run: (view) => handleArrowJump(view, 'left') },
+    {
+        key: 'Backspace',
+        run: (view) => {
+            if (!isLivePreviewState(view.state) || !view.state.selection.main.empty) return false;
+            const head = view.state.selection.main.head;
+            const doc = view.state.doc;
+            const ranges = collectSpaceRanges(view.state);
+            if (ranges.length === 0) return false;
+            const curLine = doc.lineAt(head);
+            const hit = isInsideAnySpaceRange(head, ranges)
+                ?? (head === curLine.from
+                    ? ranges.find((r) => doc.lineAt(r.to).number === curLine.number - 1) ?? null
+                    : null);
+            if (!hit) return false;
+            const above = findLineAboveSpace(view.state, hit.from, ranges);
+            if (above) {
+                view.dispatch({ selection: EditorSelection.cursor(above.to), scrollIntoView: true });
+            }
+            return true;
+        },
+    },
+    {
+        key: 'Delete',
+        run: (view) => {
+            if (!isLivePreviewState(view.state) || !view.state.selection.main.empty) return false;
+            const head = view.state.selection.main.head;
+            const doc = view.state.doc;
+            const ranges = collectSpaceRanges(view.state);
+            if (ranges.length === 0) return false;
+            const curLine = doc.lineAt(head);
+            const hit = isInsideAnySpaceRange(head, ranges)
+                ?? (head === curLine.to
+                    ? ranges.find((r) => doc.lineAt(r.from).number === curLine.number + 1) ?? null
+                    : null);
+            if (!hit) return false;
+            const below = findLineBelowSpace(view.state, hit.to, ranges);
+            if (below) {
+                view.dispatch({ selection: EditorSelection.cursor(below.from), scrollIntoView: true });
+            }
+            return true;
+        },
+    },
+]));
 
 export class ApoloSpaceSyncController {
     private view: EditorView;
@@ -538,6 +860,7 @@ export class ApoloSpaceSyncController {
         this.unsubscribe = BoxRegistry.onChange(() => {
             this.requestSync();
         });
+        this.hideFallbackEmbedDomNodes();
     }
 
     update(update: ViewUpdate): void {
@@ -547,6 +870,51 @@ export class ApoloSpaceSyncController {
                 this.lastViewportFrom = vp.from;
                 this.lastViewportTo = vp.to;
                 this.requestSync();
+            }
+        }
+        this.hideFallbackEmbedDomNodes();
+    }
+
+    private hideFallbackEmbedDomNodes(): void {
+        const root = this.view?.dom;
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+
+        const docText = this.view.state?.doc?.toString() ?? '';
+        const boxSafeIds = new Set<string>();
+        const attrRegex = /data-apolo-space(?:-id)?=["']([^"']+)["']/gi;
+        let m: RegExpExecArray | null;
+        while ((m = attrRegex.exec(docText)) !== null) {
+            const boxId = normalizeBoxId(m[1]);
+            if (boxId) boxSafeIds.add(sanitizeBoxId(boxId).toLowerCase());
+        }
+        const codeIdRegex = /id:\s*(?:"([^"]+)"|'([^']+)'|([^\s\r\n#"']+))/gi;
+        while ((m = codeIdRegex.exec(docText)) !== null) {
+            const boxId = normalizeBoxId(m[1] ?? m[2] ?? m[3] ?? '');
+            if (boxId) boxSafeIds.add(sanitizeBoxId(boxId).toLowerCase());
+        }
+
+        const embeds = root.querySelectorAll<HTMLElement>('.internal-embed[src$=".svg"], .internal-embed[src$=".SVG"]');
+        for (let i = 0; i < embeds.length; i++) {
+            const embedEl = embeds[i];
+            const src = embedEl.getAttribute('src') || '';
+            const filename = (src.split(/[\\/]/).pop() || '').toLowerCase();
+            if (!filename) continue;
+            let matchesBoxSvg = false;
+            for (const safeId of boxSafeIds) {
+                if (filename.endsWith(`.${safeId}.svg`)) {
+                    matchesBoxSvg = true;
+                    break;
+                }
+            }
+            if (!matchesBoxSvg && /^\.?[^/\\]+\.c_[a-z0-9]{4,}\.svg$/i.test(filename)) {
+                matchesBoxSvg = true;
+            }
+            if (!matchesBoxSvg) continue;
+
+            embedEl.classList.add('apolo-fallback-embed-hidden');
+            const cmEmbedBlock = embedEl.closest?.('.cm-embed-block') as HTMLElement | null;
+            if (cmEmbedBlock && !cmEmbedBlock.querySelector('.apolo-space-block')) {
+                cmEmbedBlock.classList.add('apolo-fallback-embed-hidden');
             }
         }
     }
@@ -594,11 +962,50 @@ export class ApoloSpaceSyncController {
 
 export const apoloSpaceSyncPlugin = ViewPlugin.fromClass(ApoloSpaceSyncController);
 
-export const apoloSpaceExtension: Extension = [apoloSpaceField, apoloSpaceSyncPlugin];
+export const apoloSpaceExtension: Extension = [
+    Prec.highest(apoloSpaceField),
+    apoloSpaceGuardFilter,
+    apoloSpaceNavigationKeymap,
+    apoloSpaceSyncPlugin,
+];
 
 export function createApoloSpaceExtension(livePreviewField?: StateField<boolean> | null): Extension {
     if (livePreviewField !== undefined) {
         configureLivePreviewField(livePreviewField);
     }
     return apoloSpaceExtension;
+}
+
+/**
+ * Returns true if `spaceEl` is a duplicate occurrence of `boxId` inside a Reading Mode
+ * preview container (an earlier non-hidden element with the same boxId already precedes it).
+ */
+export function isDuplicatePreviewSpaceElement(spaceEl: HTMLElement, boxId: string): boolean {
+    const normalizedId = normalizeBoxId(boxId);
+    if (!normalizedId || !spaceEl) return false;
+    const previewRoot = spaceEl.closest?.('.markdown-preview-view, .markdown-rendered');
+    if (!previewRoot) return false;
+
+    const candidates = previewRoot.querySelectorAll<HTMLElement>(
+        '.apolo-space-block, .apolo-space, [data-apolo-space], [data-apolo-space-id]',
+    );
+    let foundEarlierMatch = false;
+    for (let i = 0; i < candidates.length; i++) {
+        const other = candidates[i];
+        if (other === spaceEl) {
+            return foundEarlierMatch;
+        }
+        if (other.classList?.contains('apolo-duplicate-space-hidden')) {
+            continue;
+        }
+        const rawOtherId = other.dataset?.apoloSpace
+            || other.dataset?.apoloSpaceId
+            || other.getAttribute?.('data-apolo-space')
+            || other.getAttribute?.('data-apolo-space-id')
+            || '';
+        if (normalizeBoxId(rawOtherId) === normalizedId) {
+            foundEarlierMatch = true;
+        }
+    }
+    return false;
 }

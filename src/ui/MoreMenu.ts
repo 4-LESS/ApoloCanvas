@@ -176,7 +176,7 @@ export class MoreMenu {
         const actionItems = [
             {
                 title: 'Exportar SVG companion',
-                desc: 'Genera el archivo .ink.svg en assets/ink para visualización nativa',
+                desc: 'Sincroniza el manifiesto .apnote y los archivos SVG satélites locales de la nota',
                 action: () => {
                     this.close();
                     this.options.onExportSvg();
